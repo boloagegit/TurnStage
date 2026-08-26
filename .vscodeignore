@@ -1,0 +1,15 @@
+.gitignore
+.vscode/**
+src/**
+test/**
+dist/test/**
+tsconfig.json
+eslint.config.mjs
+esbuild.mjs
+vitest.config.ts
+node_modules/**
+.vscode-test/**
+.github/**
+docs/performance-results.json
+artifacts/**
+*.vsix

@@ -1,0 +1,473 @@
+{
+  "name": "turnstage",
+  "displayName": "TurnStage",
+  "description": "%extension.description%",
+  "version": "0.1.0",
+  "publisher": "turnstage",
+  "license": "SEE LICENSE IN LICENSE",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Testing",
+    "Other"
+  ],
+  "keywords": [
+    "sse",
+    "chat",
+    "agent",
+    "stream",
+    "testing"
+  ],
+  "main": "dist/extension.js",
+  "l10n": "./l10n",
+  "extensionKind": [
+    "workspace",
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "%workspaceTrust.description%",
+      "restrictedConfigurations": []
+    },
+    "virtualWorkspaces": true
+  },
+  "activationEvents": [
+    "onView:turnstage.profiles",
+    "onCustomEditor:turnstage.profileEditor",
+    "onCommand:turnstage.initializeWorkspace",
+    "onCommand:turnstage.createProfile",
+    "onCommand:turnstage.importProfile",
+    "onCommand:turnstage.duplicateProfile",
+    "onCommand:turnstage.deleteProfile",
+    "onCommand:turnstage.openProfile",
+    "onCommand:turnstage.openProfileSection",
+    "onCommand:turnstage.runProfile",
+    "onCommand:turnstage.startSession",
+    "onCommand:turnstage.abortRequest",
+    "onCommand:turnstage.newConversation",
+    "onCommand:turnstage.clearConversation",
+    "onCommand:turnstage.validateProfile",
+    "onCommand:turnstage.openAsText",
+    "onCommand:turnstage.selectEnvironment",
+    "onCommand:turnstage.setSecret",
+    "onCommand:turnstage.removeSecret",
+    "onCommand:turnstage.listSecretNames",
+    "onCommand:turnstage.replayRun",
+    "onCommand:turnstage.exportRun",
+    "onCommand:turnstage.openOutput",
+    "onCommand:turnstage.migrateProfile",
+    "onCommand:turnstage.refreshProfiles"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "turnstage.initializeWorkspace",
+        "title": "%command.initializeWorkspace%",
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.createProfile",
+        "title": "%command.createProfile%",
+        "category": "%command.category%",
+        "icon": "$(new-file)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.importProfile",
+        "title": "%command.importProfile%",
+        "category": "%command.category%",
+        "icon": "$(cloud-download)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.duplicateProfile",
+        "title": "%command.duplicateProfile%",
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.deleteProfile",
+        "title": "%command.deleteProfile%",
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.openProfile",
+        "title": "%command.openProfile%",
+        "category": "%command.category%",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "turnstage.openProfileSection",
+        "title": "%command.openProfileSection%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.runProfile",
+        "title": "%command.runProfile%",
+        "category": "%command.category%",
+        "icon": "$(play)"
+      },
+      {
+        "command": "turnstage.startSession",
+        "title": "%command.startSession%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.abortRequest",
+        "title": "%command.abortRequest%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.newConversation",
+        "title": "%command.newConversation%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.clearConversation",
+        "title": "%command.clearConversation%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.validateProfile",
+        "title": "%command.validateProfile%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.openAsText",
+        "title": "%command.openAsText%",
+        "category": "%command.category%",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "turnstage.selectEnvironment",
+        "title": "%command.selectEnvironment%",
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.setSecret",
+        "title": "%command.setSecret%",
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.removeSecret",
+        "title": "%command.removeSecret%",
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.listSecretNames",
+        "title": "%command.listSecretNames%",
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.replayRun",
+        "title": "%command.replayRun%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.exportRun",
+        "title": "%command.exportRun%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.openOutput",
+        "title": "%command.openOutput%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.migrateProfile",
+        "title": "%command.migrateProfile%",
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.refreshProfiles",
+        "title": "%command.refreshProfiles%",
+        "category": "%command.category%",
+        "icon": "$(refresh)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "turnstage",
+          "title": "TurnStage",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "turnstage": [
+        {
+          "id": "turnstage.profiles",
+          "name": "%view.profiles%"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "turnstage.profiles",
+        "contents": "%view.profiles.welcome%",
+        "when": "isWorkspaceTrusted"
+      },
+      {
+        "view": "turnstage.profiles",
+        "contents": "%view.profiles.welcomeRestricted%",
+        "when": "!isWorkspaceTrusted"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "turnstage.createProfile",
+          "when": "view == turnstage.profiles && isWorkspaceTrusted",
+          "group": "navigation@1"
+        },
+        {
+          "command": "turnstage.importProfile",
+          "when": "view == turnstage.profiles && isWorkspaceTrusted",
+          "group": "navigation@2"
+        },
+        {
+          "command": "turnstage.refreshProfiles",
+          "when": "view == turnstage.profiles",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "turnstage.runProfile",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
+          "group": "inline@1"
+        },
+        {
+          "command": "turnstage.openProfile",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
+          "group": "inline@2"
+        },
+        {
+          "command": "turnstage.startSession",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
+          "group": "turnstage@1"
+        },
+        {
+          "command": "turnstage.selectEnvironment",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
+          "group": "turnstage@2"
+        },
+        {
+          "command": "turnstage.validateProfile",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
+          "group": "turnstage@3"
+        },
+        {
+          "command": "turnstage.openAsText",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
+          "group": "turnstage@4"
+        },
+        {
+          "command": "turnstage.migrateProfile",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
+          "group": "turnstage@5"
+        },
+        {
+          "command": "turnstage.exportRun",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
+          "group": "turnstage@6"
+        },
+        {
+          "command": "turnstage.duplicateProfile",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
+          "group": "management@1"
+        },
+        {
+          "command": "turnstage.deleteProfile",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
+          "group": "management@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "turnstage.openAsText",
+          "when": "activeCustomEditorId == turnstage.profileEditor",
+          "group": "navigation@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "turnstage.duplicateProfile",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.deleteProfile",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.openProfile",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.openProfileSection",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.startSession",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.abortRequest",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.newConversation",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.clearConversation",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.validateProfile",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.openAsText",
+          "when": "activeCustomEditorId == turnstage.profileEditor"
+        },
+        {
+          "command": "turnstage.selectEnvironment",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.replayRun",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.exportRun",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.migrateProfile",
+          "when": "false"
+        }
+      ]
+    },
+    "customEditors": [
+      {
+        "viewType": "turnstage.profileEditor",
+        "displayName": "%editor.profile%",
+        "selector": [
+          {
+            "filenamePattern": "*.turnstage.jsonc"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "jsonValidation": [
+      {
+        "fileMatch": "*.turnstage.jsonc",
+        "url": "./resources/schemas/turnstage-profile.schema.json"
+      },
+      {
+        "fileMatch": "*.environment.jsonc",
+        "url": "./resources/schemas/turnstage-environment.schema.json"
+      }
+    ],
+    "configuration": {
+      "title": "TurnStage",
+      "properties": {
+        "turnstage.profileGlob": {
+          "type": "string",
+          "default": ".vscode/turnstage/profiles/*.turnstage.jsonc",
+          "description": "%setting.profileGlob%"
+        },
+        "turnstage.maxBufferedEvents": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 100,
+          "description": "%setting.maxBufferedEvents%"
+        },
+        "turnstage.maxBufferedBytes": {
+          "type": "number",
+          "default": 10485760,
+          "minimum": 1048576,
+          "description": "%setting.maxBufferedBytes%"
+        },
+        "turnstage.streamBatchIntervalMs": {
+          "type": "number",
+          "default": 32,
+          "minimum": 16,
+          "maximum": 100,
+          "description": "%setting.streamBatchIntervalMs%"
+        },
+        "turnstage.runRetention": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "%setting.runRetention%"
+        },
+        "turnstage.logLevel": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug"
+          ],
+          "enumDescriptions": [
+            "%setting.logLevel.error%",
+            "%setting.logLevel.warn%",
+            "%setting.logLevel.info%",
+            "%setting.logLevel.debug%"
+          ],
+          "default": "info",
+          "description": "%setting.logLevel%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test examples/mock-server --max-warnings=0",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "test:sse": "vitest run --config vitest.config.ts test/sseTransport.test.ts",
+    "test:integration": "node test/integration/runTest.mjs",
+    "benchmark": "vitest bench --config test/benchmark.vitest.config.ts --run",
+    "mock-server": "node examples/mock-server/server.mjs",
+    "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "@vscode/codicons": "^0.0.36",
+    "jsonc-parser": "^3.3.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.11",
+    "@types/react-dom": "^19.1.7",
+    "@types/vscode": "^1.96.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.9",
+    "eslint": "^9.34.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.41.0",
+    "vitest": "^3.2.4"
+  }
+}

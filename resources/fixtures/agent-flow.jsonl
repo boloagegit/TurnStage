@@ -1,0 +1,12 @@
+{"event":"start","data":{"conversationId":"fixture-agent","assistantMessageId":"fixture-message-agent"},"delayMs":0}
+{"event":"status","data":{"text":"Searching sample sources…"},"delayMs":40}
+{"event":"tool_call","data":{"toolCallId":"tool-1","name":"sample_search","arguments":{"query":"sample"}},"delayMs":80}
+{"event":"tool_result","data":{"toolCallId":"tool-1","result":{"matches":1}},"delayMs":120}
+{"event":"message","data":{"text":"Here is a fixture result."},"delayMs":150}
+{"event":"citation","data":{"id":"citation-1","title":"Example source","kind":"url","uri":"https://example.com"},"delayMs":170}
+{"event":"citation_reference","data":{"citationId":"citation-1"},"delayMs":190}
+{"event":"followup","data":{"id":"followup-1","label":"Show another example","prompt":"Please show another example.","behavior":"send"},"delayMs":210}
+{"event":"diagnostic","data":{"intent":"sample-search","requestId":"example-value"},"delayMs":230}
+{"event":"usage","data":{"inputTokens":24,"outputTokens":18,"source":"backend"},"delayMs":250}
+{"event":"title","data":{"title":"Agent fixture"},"delayMs":270}
+{"event":"done","data":{"ok":true},"delayMs":290}

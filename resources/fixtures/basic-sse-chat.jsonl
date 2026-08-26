@@ -1,0 +1,5 @@
+{"event":"start","data":{"conversationId":"fixture-basic","assistantMessageId":"fixture-message-basic"},"delayMs":0}
+{"event":"status","data":{"text":"Preparing a fixture response…"},"delayMs":50}
+{"event":"message","data":{"text":"This response was replayed from a built-in fixture."},"delayMs":90}
+{"event":"title","data":{"title":"Fixture conversation"},"delayMs":120}
+{"event":"done","data":{"ok":true},"delayMs":140}

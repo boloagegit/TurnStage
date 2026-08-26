@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/turnstage-profile.schema.json",
+  "title": "TurnStage Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "name", "conversation", "stream"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "environment": { "type": "string" },
+    "controls": { "type": "array", "items": { "$ref": "#/$defs/control" } },
+    "opening": { "$ref": "#/$defs/opening" },
+    "conversation": {
+      "type": "object", "required": ["send"], "additionalProperties": false,
+      "properties": { "send": { "$ref": "#/$defs/request" }, "stop": { "$ref": "#/$defs/stop" } }
+    },
+    "stream": { "$ref": "#/$defs/stream" },
+    "ui": { "type": "object", "additionalProperties": true },
+    "history": { "type": "object", "additionalProperties": true },
+    "errorPolicy": { "type": "object", "additionalProperties": { "type": "boolean" } },
+    "security": { "type": "object", "additionalProperties": false, "properties": { "allowedUriSchemes": { "type": "array", "items": { "enum": ["https", "http", "file"] } }, "allowedDomains": { "type": "array", "items": { "type": "string" } }, "allowedCommands": { "type": "array", "items": { "type": "string" } } } },
+    "metrics": { "type": "object", "properties": { "enabled": { "type": "array", "items": { "type": "string" }, "uniqueItems": true } } }
+  },
+  "$defs": {
+    "control": { "type": "object", "required": ["id", "type", "label"], "additionalProperties": true, "properties": { "id": { "type": "string" }, "type": { "enum": ["select", "boolean", "text"] }, "label": { "type": "string" }, "persist": { "enum": ["workspace", "global", "none", "secret"] }, "options": { "type": "array", "items": { "type": "object", "required": ["label", "value"], "properties": { "label": { "type": "string" }, "value": { "type": "string" } } } } } },
+    "opening": { "type": "object", "required": ["mode"], "additionalProperties": true, "properties": { "mode": { "enum": ["static", "request", "disabled"] }, "message": { "type": "string" }, "starters": { "type": "array", "items": { "$ref": "#/$defs/starter" } }, "request": { "$ref": "#/$defs/request" } } },
+    "starter": { "type": "object", "required": ["id", "label", "prompt", "behavior"], "properties": { "id": { "type": "string" }, "label": { "type": "string" }, "prompt": { "type": "string" }, "behavior": { "enum": ["send", "fill", "action"] }, "actionId": { "type": "string" } } },
+    "condition": { "type": "object", "additionalProperties": false, "properties": { "path": { "type": "string" }, "event": { "type": "string" }, "operator": { "enum": ["equals", "notEquals", "exists", "notExists", "oneOf", "contains", "startsWith", "endsWith", "regex"] }, "value": {} } },
+    "request": { "type": "object", "required": ["method", "url"], "additionalProperties": true, "properties": { "method": { "enum": ["POST", "GET", "PUT", "PATCH", "DELETE"] }, "url": { "type": "string" }, "headers": { "type": "object", "additionalProperties": { "type": "string" } }, "body": {}, "timeoutMs": { "type": "integer", "minimum": 1 }, "idleTimeoutMs": { "type": "integer", "minimum": 1 }, "variants": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "body"], "properties": { "id": { "type": "string" }, "when": { "$ref": "#/$defs/condition" }, "body": {}, "headers": { "type": "object", "additionalProperties": { "type": "string" } } } } } } },
+    "stop": { "type": "object", "required": ["strategy"], "additionalProperties": true, "properties": { "strategy": { "enum": ["abortOnly", "abortThenRequest"] }, "request": { "$ref": "#/$defs/request" }, "requiredContext": { "type": "array", "items": { "type": "string" } } } },
+    "stream": { "type": "object", "required": ["transport", "mappings"], "additionalProperties": false, "properties": { "transport": { "enum": ["sse", "ndjson", "json", "text-stream", "fixture"] }, "dataFormat": { "enum": ["json", "text"] }, "mappingMode": { "enum": ["firstMatch", "allMatches"] }, "unexpectedEndPolicy": { "enum": ["fail", "completeWithWarning"] }, "doneValue": { "type": "string" }, "mappings": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "match", "emit"], "properties": { "id": { "type": "string" }, "match": { "$ref": "#/$defs/condition" }, "emit": { "type": "object", "required": ["type"], "properties": { "type": { "type": "string" } }, "additionalProperties": true }, "continue": { "type": "boolean" } } } } } }
+  }
+}

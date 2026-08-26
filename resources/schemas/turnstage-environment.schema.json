@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/turnstage-environment.schema.json",
+  "title": "TurnStage Environment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "name", "variables"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "name": { "type": "string", "minLength": 1 },
+    "variables": { "type": "object", "additionalProperties": true },
+    "secretReferences": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } }
+  }
+}
