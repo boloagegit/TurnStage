@@ -38,6 +38,7 @@
     "onView:turnstage.profiles",
     "onCustomEditor:turnstage.profileEditor",
     "onCommand:turnstage.initializeWorkspace",
+    "onCommand:turnstage.initializeUser",
     "onCommand:turnstage.createProfile",
     "onCommand:turnstage.importProfile",
     "onCommand:turnstage.duplicateProfile",
@@ -52,6 +53,7 @@
     "onCommand:turnstage.validateProfile",
     "onCommand:turnstage.openAsText",
     "onCommand:turnstage.selectEnvironment",
+    "onCommand:turnstage.openEnvironment",
     "onCommand:turnstage.setSecret",
     "onCommand:turnstage.removeSecret",
     "onCommand:turnstage.listSecretNames",
@@ -66,6 +68,12 @@
       {
         "command": "turnstage.initializeWorkspace",
         "title": "%command.initializeWorkspace%",
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.initializeUser",
+        "title": "%command.initializeUser%",
         "category": "%command.category%",
         "enablement": "isWorkspaceTrusted"
       },
@@ -148,6 +156,11 @@
         "title": "%command.selectEnvironment%",
         "category": "%command.category%",
         "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.openEnvironment",
+        "title": "%command.openEnvironment%",
+        "category": "%command.category%"
       },
       {
         "command": "turnstage.setSecret",
@@ -244,6 +257,21 @@
       ],
       "view/item/context": [
         {
+          "command": "turnstage.createProfile",
+          "when": "view == turnstage.profiles && (viewItem == turnstageProfileScope.user || viewItem == turnstageProfileScope.workspace) && isWorkspaceTrusted",
+          "group": "inline@1"
+        },
+        {
+          "command": "turnstage.importProfile",
+          "when": "view == turnstage.profiles && (viewItem == turnstageProfileScope.user || viewItem == turnstageProfileScope.workspace) && isWorkspaceTrusted",
+          "group": "inline@2"
+        },
+        {
+          "command": "turnstage.initializeUser",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfileScope.user && isWorkspaceTrusted",
+          "group": "management@1"
+        },
+        {
           "command": "turnstage.runProfile",
           "when": "view == turnstage.profiles && viewItem == turnstageProfile",
           "group": "inline@1"
@@ -262,6 +290,11 @@
           "command": "turnstage.selectEnvironment",
           "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
           "group": "turnstage@2"
+        },
+        {
+          "command": "turnstage.openEnvironment",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
+          "group": "turnstage@2.5"
         },
         {
           "command": "turnstage.validateProfile",
@@ -347,6 +380,10 @@
           "when": "false"
         },
         {
+          "command": "turnstage.openEnvironment",
+          "when": "false"
+        },
+        {
           "command": "turnstage.replayRun",
           "when": "false"
         },
@@ -387,23 +424,27 @@
       "properties": {
         "turnstage.profileGlob": {
           "type": "string",
+          "scope": "resource",
           "default": ".vscode/turnstage/profiles/*.turnstage.jsonc",
           "description": "%setting.profileGlob%"
         },
         "turnstage.maxBufferedEvents": {
           "type": "number",
+          "scope": "window",
           "default": 5000,
           "minimum": 100,
           "description": "%setting.maxBufferedEvents%"
         },
         "turnstage.maxBufferedBytes": {
           "type": "number",
+          "scope": "window",
           "default": 10485760,
           "minimum": 1048576,
           "description": "%setting.maxBufferedBytes%"
         },
         "turnstage.streamBatchIntervalMs": {
           "type": "number",
+          "scope": "window",
           "default": 32,
           "minimum": 16,
           "maximum": 100,
@@ -411,6 +452,7 @@
         },
         "turnstage.runRetention": {
           "type": "number",
+          "scope": "window",
           "default": 20,
           "minimum": 1,
           "maximum": 100,
@@ -418,6 +460,7 @@
         },
         "turnstage.logLevel": {
           "type": "string",
+          "scope": "window",
           "enum": [
             "error",
             "warn",

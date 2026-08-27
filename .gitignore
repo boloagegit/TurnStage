@@ -7,9 +7,6 @@ dist/
 .vscode-test/
 coverage/
 
-# Local TurnStage workspace profiles, environments, and run history
-.vscode/turnstage/
-
 # Generated review and benchmark artifacts
 artifacts/
 docs/performance-results.json

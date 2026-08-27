@@ -9,10 +9,17 @@ export class ProfileDuplicateDiagnostics implements vscode.Disposable {
   private debounce?: ReturnType<typeof setTimeout>;
 
   constructor(private readonly repository: ProfileRepository, private readonly collection: vscode.DiagnosticCollection) {
-    const watcher = vscode.workspace.createFileSystemWatcher(vscode.workspace.getConfiguration('turnstage').get('profileGlob', '.vscode/turnstage/profiles/*.turnstage.jsonc'));
-    for (const event of [watcher.onDidCreate, watcher.onDidChange, watcher.onDidDelete]) this.disposables.push(event(() => this.scheduleRefresh()));
+    const watchers = (vscode.workspace.workspaceFolders ?? []).map((folder) => {
+      const glob = vscode.workspace.getConfiguration('turnstage', folder.uri).get('profileGlob', '.vscode/turnstage/profiles/*.turnstage.jsonc');
+      return vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, glob));
+    });
+    const userDirectory = repository.userProfileDirectory();
+    if (userDirectory) watchers.push(vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(userDirectory, '*.turnstage.jsonc')));
+    for (const watcher of watchers) {
+      for (const event of [watcher.onDidCreate, watcher.onDidChange, watcher.onDidDelete]) this.disposables.push(event(() => this.scheduleRefresh()));
+      this.disposables.push(watcher);
+    }
     this.disposables.push(
-      watcher,
       vscode.workspace.onDidOpenTextDocument((document) => { if (isProfile(document.uri)) this.scheduleRefresh(); }),
       vscode.workspace.onDidChangeTextDocument((event) => { if (isProfile(event.document.uri)) this.scheduleRefresh(); }),
       vscode.workspace.onDidSaveTextDocument((document) => { if (isProfile(document.uri)) this.scheduleRefresh(); }),

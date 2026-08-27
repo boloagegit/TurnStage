@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ProfileCodec } from './config/profileCodec';
-import { ProfileRepository } from './config/profileRepository';
+import { EnvironmentRepository, ProfileRepository, type ProfileDestination, type ProfileScope } from './config/profileRepository';
 import { ProfileValidator } from './config/profileValidator';
 import { ProfileMigrator } from './config/profileMigration';
 import { ProfileDuplicateDiagnostics } from './config/profileDuplicateDiagnostics';
@@ -9,6 +9,7 @@ import { SecretService } from './security/security';
 import { isWorkspaceSection, type WorkspaceSection } from '../shared/protocol';
 import {
   ProfileSectionTreeItem,
+  ProfileScopeTreeItem,
   ProfileTreeItem,
   ProfileTreeProvider,
 } from './views/profileTreeProvider';
@@ -16,7 +17,7 @@ import { configureL10n } from './l10n';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   configureL10n((message, values) => vscode.l10n.t(message, values ?? {}));
-  const output = vscode.window.createOutputChannel(vscode.l10n.t('TurnStage')); const diagnostics = vscode.languages.createDiagnosticCollection('turnstage'); const repository = new ProfileRepository(); const duplicateDiagnostics = new ProfileDuplicateDiagnostics(repository, diagnostics); const tree = new ProfileTreeProvider(repository, (entries) => duplicateDiagnostics.refresh(entries)); const editor = new TurnStageEditorProvider(context, diagnostics, output); const secrets = new SecretService(context);
+  const output = vscode.window.createOutputChannel(vscode.l10n.t('TurnStage')); const diagnostics = vscode.languages.createDiagnosticCollection('turnstage'); const repository = new ProfileRepository(context.globalStorageUri); const environments = new EnvironmentRepository(context.globalStorageUri); const duplicateDiagnostics = new ProfileDuplicateDiagnostics(repository, diagnostics); const tree = new ProfileTreeProvider(repository, (entries) => duplicateDiagnostics.refresh(entries)); const editor = new TurnStageEditorProvider(context, diagnostics, output, environments); const secrets = new SecretService(context);
   const demoProvider = vscode.workspace.registerTextDocumentContentProvider('turnstage-demo', { provideTextDocumentContent: async (uri) => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(context.extensionUri, 'resources', 'templates', uri.path.split('/').pop()!))) });
   context.subscriptions.push(output, diagnostics, tree, duplicateDiagnostics, demoProvider);
   context.subscriptions.push(vscode.window.registerTreeDataProvider('turnstage.profiles', tree), vscode.window.registerCustomEditorProvider('turnstage.profileEditor', editor, { webviewOptions: { retainContextWhenHidden: false }, supportsMultipleEditorsPerDocument: true }));
@@ -25,20 +26,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const refreshProfileState = async () => { tree.refresh(); await duplicateDiagnostics.refresh(); };
   command('refreshProfiles', refreshProfileState);
   command('initializeWorkspace', async () => { if (!requireWorkspaceTrust()) return; await initializeWorkspace(context); await refreshProfileState(); });
-  command('createProfile', async () => { if (!requireWorkspaceTrust()) return; const uri = await createEmptyProfile(); if (uri) { await refreshProfileState(); await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor'); } });
-  command('importProfile', async () => {
+  command('initializeUser', async () => { if (!requireWorkspaceTrust()) return; await initializeUser(context, repository, environments); await refreshProfileState(); });
+  command('createProfile', async (scopeItem?: ProfileScopeTreeItem) => { if (!requireWorkspaceTrust()) return; const destination = await pickProfileDestination(scopeItem?.scope); if (!destination) return; const uri = await createEmptyProfile(repository, destination); if (uri) { await refreshProfileState(); await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor'); } });
+  command('importProfile', async (scopeItem?: ProfileScopeTreeItem) => {
     if (!requireWorkspaceTrust()) return;
     const selected = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: vscode.l10n.t('Import Profile'), filters: { [vscode.l10n.t('TurnStage Profiles')]: ['jsonc', 'json'] } });
     if (!selected?.[0]) return;
-    const folder = await pickWorkspaceFolder(); if (!folder) return;
-    try { const uri = await repository.import(selected[0], folder); await refreshProfileState(); await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor'); void vscode.window.showInformationMessage(vscode.l10n.t('Imported {path}.', { path: vscode.workspace.asRelativePath(uri) })); }
+    const destination = await pickProfileDestination(scopeItem?.scope); if (!destination) return;
+    try { const uri = await repository.import(selected[0], destination); await refreshProfileState(); await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor'); void vscode.window.showInformationMessage(vscode.l10n.t('Imported {path}.', { path: displayProfilePath(uri, repository) })); }
     catch (error) { void vscode.window.showErrorMessage(vscode.l10n.t('Could not import profile: {error}', { error: error instanceof Error ? error.message : String(error) })); }
   });
   command('duplicateProfile', async (item?: ProfileTreeItem | vscode.Uri) => {
     if (!requireWorkspaceTrust()) return;
     const source = asUri(item); if (!source) return;
     if (!await repository.isDiscoveredProfile(source)) { void vscode.window.showErrorMessage(vscode.l10n.t('TurnStage can only duplicate a discovered profile.')); return; }
-    try { const uri = await repository.duplicate(source); await refreshProfileState(); await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor'); void vscode.window.showInformationMessage(vscode.l10n.t('Created {path}.', { path: vscode.workspace.asRelativePath(uri) })); }
+    try { const uri = await repository.duplicate(source); await refreshProfileState(); await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor'); void vscode.window.showInformationMessage(vscode.l10n.t('Created {path}.', { path: displayProfilePath(uri, repository) })); }
     catch (error) { void vscode.window.showErrorMessage(vscode.l10n.t('Could not duplicate profile: {error}', { error: error instanceof Error ? error.message : String(error) })); }
   });
   command('deleteProfile', async (item?: ProfileTreeItem | vscode.Uri) => {
@@ -67,7 +69,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   command('clearConversation', (item?: ProfileTreeItem | vscode.Uri) => editor.getController(asUri(item))?.clearConversation());
   command('openAsText', async (item?: ProfileTreeItem | vscode.Uri) => { const uri = asUri(item) ?? activeCustomEditorUri(); if (uri) await vscode.commands.executeCommand('vscode.openWith', uri, 'default'); });
   command('validateProfile', async (item?: ProfileTreeItem | vscode.Uri) => { await validateUri(asUri(item), diagnostics); await duplicateDiagnostics.refresh(); });
-  command('selectEnvironment', async (item?: ProfileTreeItem | vscode.Uri) => { if (!requireWorkspaceTrust()) return; const uri = asUri(item); if (!uri) return; await selectEnvironment(uri); });
+  command('selectEnvironment', async (item?: ProfileTreeItem | vscode.Uri) => { if (!requireWorkspaceTrust()) return; const uri = asUri(item); if (!uri) return; await selectEnvironment(uri, environments); });
+  command('openEnvironment', async (item?: ProfileTreeItem | vscode.Uri) => { const uri = asUri(item); if (!uri) return; const entries = await environments.discover(uri); const picked = await vscode.window.showQuickPick(entries.map((entry) => ({ label: entry.environment.name, description: entry.environment.id, detail: entry.scope === 'workspace' ? vscode.l10n.t('Workspace') : vscode.l10n.t('User'), entry })), { title: vscode.l10n.t('Open TurnStage Environment') }); if (picked) await vscode.commands.executeCommand('vscode.openWith', picked.entry.uri, 'default'); });
   command('setSecret', async () => { if (!requireWorkspaceTrust()) return; const name = await vscode.window.showInputBox({ title: vscode.l10n.t('TurnStage: Set Secret'), prompt: vscode.l10n.t('Secret name (values are stored in VS Code SecretStorage)'), ignoreFocusOut: true }); if (!name) return; const value = await vscode.window.showInputBox({ title: vscode.l10n.t('Set {name}', { name }), password: true, prompt: vscode.l10n.t('Secret value'), ignoreFocusOut: true }); if (value !== undefined) { await secrets.set(name, value); void vscode.window.showInformationMessage(vscode.l10n.t('TurnStage secret "{name}" was stored.', { name })); } });
   command('removeSecret', async () => { if (!requireWorkspaceTrust()) return; const name = await vscode.window.showQuickPick(secrets.names(), { title: vscode.l10n.t('TurnStage: Remove Secret') }); const removeLabel = vscode.l10n.t('Remove'); if (name && await vscode.window.showWarningMessage(vscode.l10n.t('Remove TurnStage secret "{name}"?', { name }), { modal: true }, removeLabel) === removeLabel) await secrets.remove(name); });
   command('listSecretNames', () => { if (!requireWorkspaceTrust()) return; return vscode.window.showQuickPick(secrets.names(), { title: vscode.l10n.t('TurnStage Secret Names'), placeHolder: vscode.l10n.t('Secret values are never displayed') }); });
@@ -119,6 +122,16 @@ async function pickWorkspaceFolder(): Promise<vscode.WorkspaceFolder | undefined
   return folders.length === 1 ? folders[0] : vscode.window.showWorkspaceFolderPick({ placeHolder: vscode.l10n.t('Select the workspace folder for the imported profile') });
 }
 
+async function pickProfileDestination(preferredScope?: ProfileScope): Promise<ProfileDestination | undefined> {
+  if (preferredScope === 'user' || !vscode.workspace.workspaceFolders?.length) return 'user';
+  if (preferredScope === 'workspace') return pickWorkspaceFolder();
+  const choice = await vscode.window.showQuickPick([
+    { label: vscode.l10n.t('User Profiles'), description: vscode.l10n.t('Available in every workspace on this Extension Host.'), scope: 'user' as const },
+    { label: vscode.l10n.t('Workspace Profiles'), description: vscode.l10n.t('Stored in .vscode/turnstage for this project.'), scope: 'workspace' as const },
+  ], { title: vscode.l10n.t('Choose Profile Location') });
+  return choice?.scope === 'user' ? 'user' : choice?.scope === 'workspace' ? pickWorkspaceFolder() : undefined;
+}
+
 async function initializeWorkspace(context: vscode.ExtensionContext): Promise<void> {
   const folder = vscode.workspace.workspaceFolders?.[0]; if (!folder) { void vscode.window.showErrorMessage(vscode.l10n.t('Open a workspace folder before initializing TurnStage.')); return; }
   const choice = await vscode.window.showQuickPick([
@@ -135,14 +148,46 @@ async function initializeWorkspace(context: vscode.ExtensionContext): Promise<vo
   void vscode.window.showInformationMessage(vscode.l10n.t('TurnStage workspace initialized. No existing file was overwritten without confirmation.'));
 }
 
+async function initializeUser(context: vscode.ExtensionContext, repository: ProfileRepository, environments: EnvironmentRepository): Promise<void> {
+  const choice = await vscode.window.showQuickPick([
+    { label: vscode.l10n.t('Basic SSE Chat'), files: ['basic-sse-chat.turnstage.jsonc'] },
+    { label: vscode.l10n.t('Agent Flow'), files: ['agent-flow.turnstage.jsonc'] },
+    { label: vscode.l10n.t('Both Starter Profiles'), files: ['basic-sse-chat.turnstage.jsonc', 'agent-flow.turnstage.jsonc'] },
+    { label: vscode.l10n.t('Empty Profile'), files: ['empty.turnstage.jsonc'] },
+  ], { title: vscode.l10n.t('Initialize User Profiles'), placeHolder: vscode.l10n.t('Choose starter content') });
+  if (!choice) return;
+  const profileDirectory = repository.profileDirectory('user');
+  const environmentDirectory = environments.userEnvironmentDirectory();
+  if (!environmentDirectory) throw new Error(vscode.l10n.t('User environment storage is unavailable.'));
+  await vscode.workspace.fs.createDirectory(profileDirectory);
+  await vscode.workspace.fs.createDirectory(environmentDirectory);
+  for (const file of choice.files) {
+    if (file === 'empty.turnstage.jsonc') {
+      await writeSafe(vscode.Uri.joinPath(profileDirectory, file), new TextEncoder().encode(emptyProfile('empty')), true);
+      continue;
+    }
+    const source = vscode.Uri.joinPath(context.extensionUri, 'resources', 'templates', file);
+    await writeSafe(vscode.Uri.joinPath(profileDirectory, file), await vscode.workspace.fs.readFile(source));
+  }
+  const environment = vscode.Uri.joinPath(context.extensionUri, 'resources', 'templates', 'local.environment.jsonc');
+  await writeSafe(vscode.Uri.joinPath(environmentDirectory, 'local.environment.jsonc'), await vscode.workspace.fs.readFile(environment));
+  void vscode.window.showInformationMessage(vscode.l10n.t('TurnStage user profiles initialized. Existing files were not overwritten without confirmation.'));
+}
+
 async function writeSafe(target: vscode.Uri, bytes: Uint8Array, silentNew = false): Promise<void> {
   try { await vscode.workspace.fs.stat(target); const skipLabel = vscode.l10n.t('Skip'); const copyLabel = vscode.l10n.t('Create Copy'); const replaceLabel = vscode.l10n.t('Replace'); const action = await vscode.window.showQuickPick([skipLabel, copyLabel, replaceLabel], { title: vscode.l10n.t('{path} already exists', { path: vscode.workspace.asRelativePath(target) }) }); if (!action || action === skipLabel) return; if (action === copyLabel) target = await duplicateUri(target); else if (await vscode.window.showWarningMessage(vscode.l10n.t('Replace {path}?', { path: vscode.workspace.asRelativePath(target) }), { modal: true }, replaceLabel) !== replaceLabel) return; } catch { /* target is new */ }
   await vscode.workspace.fs.writeFile(target, bytes); if (!silentNew) return;
 }
 async function duplicateUri(uri: vscode.Uri): Promise<vscode.Uri> { const match = uri.path.match(/^(.*?)(\.[^.]+\.[^.]+)$/) ?? uri.path.match(/^(.*?)(\.[^.]+)$/); const base = match?.[1] ?? uri.path; const suffix = match?.[2] ?? ''; for (let index = 2; index < 1000; index++) { const candidate = uri.with({ path: `${base}-${index}${suffix}` }); try { await vscode.workspace.fs.stat(candidate); } catch { return candidate; } } throw new Error(vscode.l10n.t('Could not create a duplicate-safe filename.')); }
-async function createEmptyProfile(): Promise<vscode.Uri | undefined> { const folder = vscode.workspace.workspaceFolders?.[0]; if (!folder) return; const id = await vscode.window.showInputBox({ title: vscode.l10n.t('Create TurnStage Profile'), prompt: vscode.l10n.t('Profile id'), value: 'sample-profile', validateInput: (value) => /^[a-z0-9][a-z0-9-]*$/.test(value) ? undefined : vscode.l10n.t('Use lowercase letters, numbers, and hyphens.') }); if (!id) return; const directory = vscode.Uri.joinPath(folder.uri, '.vscode', 'turnstage', 'profiles'); await vscode.workspace.fs.createDirectory(directory); const uri = await duplicateIfExists(vscode.Uri.joinPath(directory, `${id}.turnstage.jsonc`)); await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(emptyProfile(id))); return uri; }
+async function createEmptyProfile(repository: ProfileRepository, destination: ProfileDestination): Promise<vscode.Uri | undefined> { const id = await vscode.window.showInputBox({ title: vscode.l10n.t('Create TurnStage Profile'), prompt: vscode.l10n.t('Profile id'), value: 'sample-profile', validateInput: (value) => /^[a-z0-9][a-z0-9-]*$/.test(value) ? undefined : vscode.l10n.t('Use lowercase letters, numbers, and hyphens.') }); if (!id) return; const directory = repository.profileDirectory(destination); await vscode.workspace.fs.createDirectory(directory); const uri = await duplicateIfExists(vscode.Uri.joinPath(directory, `${id}.turnstage.jsonc`)); await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(emptyProfile(id))); return uri; }
 async function duplicateIfExists(uri: vscode.Uri): Promise<vscode.Uri> { try { await vscode.workspace.fs.stat(uri); return duplicateUri(uri); } catch { return uri; } }
 function emptyProfile(id: string): string { return JSON.stringify({ version: 1, id, name: id.split('-').map((part) => part[0]?.toUpperCase() + part.slice(1)).join(' '), environment: 'local', opening: { mode: 'static', message: vscode.l10n.t('Hello, I am a test assistant. What would you like to test?'), starters: [] }, conversation: { send: { method: 'POST', url: '${env.baseUrl}/basic/chat/stream', headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' }, variants: [{ id: 'first-turn', when: { path: 'conversation.id', operator: 'notExists' }, body: { message: { $value: 'input.text' } } }, { id: 'continuation', when: { path: 'conversation.id', operator: 'exists' }, body: { message: { $value: 'input.text' }, conversationId: { $value: 'conversation.id' } } }] } }, stream: { transport: 'sse', dataFormat: 'json', mappingMode: 'firstMatch', unexpectedEndPolicy: 'fail', mappings: [{ id: 'message', match: { event: 'message' }, emit: { type: 'content.text.delta', text: { path: '$.text' } } }, { id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] } }, null, 2); }
 
 async function validateUri(uri: vscode.Uri | undefined, collection: vscode.DiagnosticCollection): Promise<void> { if (!uri) return; const document = await vscode.workspace.openTextDocument(uri); const codec = new ProfileCodec(); const parsed = codec.parse(document.getText()); const issues = new ProfileValidator().validate(parsed.profile, parsed.tree); collection.set(uri, issues.map((item) => new vscode.Diagnostic(new vscode.Range(document.positionAt(item.offset), document.positionAt(item.offset + item.length)), item.message, item.severity === 'error' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning))); void vscode.window.showInformationMessage(issues.length === 0 ? vscode.l10n.t('TurnStage profile is valid.') : issues.length === 1 ? vscode.l10n.t('TurnStage found {count} issue.', { count: issues.length }) : vscode.l10n.t('TurnStage found {count} issues.', { count: issues.length })); }
-async function selectEnvironment(uri: vscode.Uri): Promise<void> { const document = await vscode.workspace.openTextDocument(uri); const envUris = await vscode.workspace.findFiles('**/.vscode/turnstage/environments/*.environment.jsonc', '**/{node_modules,.git}/**', 100); const codec = new ProfileCodec(); const entries = await Promise.all(envUris.map(async (envUri) => ({ uri: envUri, profile: codec.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(envUri))).profile }))); const picked = await vscode.window.showQuickPick(entries.filter((item) => item.profile).map((item) => ({ label: item.profile!.name, description: item.profile!.id })), { title: vscode.l10n.t('Select TurnStage Environment') }); if (!picked?.description) return; const edits = (await import('jsonc-parser')).modify(document.getText(), ['environment'], picked.description, { formattingOptions: { insertSpaces: true, tabSize: 2 } }); const workspaceEdit = new vscode.WorkspaceEdit(); for (const item of [...edits].sort((a, b) => b.offset - a.offset)) workspaceEdit.replace(uri, new vscode.Range(document.positionAt(item.offset), document.positionAt(item.offset + item.length)), item.content); await vscode.workspace.applyEdit(workspaceEdit); }
+async function selectEnvironment(uri: vscode.Uri, repository: EnvironmentRepository): Promise<void> { const document = await vscode.workspace.openTextDocument(uri); const entries = await repository.discover(uri); const picked = await vscode.window.showQuickPick(entries.map((item) => ({ label: item.environment.name, description: item.environment.id, detail: item.scope === 'workspace' ? vscode.l10n.t('Workspace') : vscode.l10n.t('User') })), { title: vscode.l10n.t('Select TurnStage Environment') }); if (!picked?.description) return; const edits = (await import('jsonc-parser')).modify(document.getText(), ['environment'], picked.description, { formattingOptions: { insertSpaces: true, tabSize: 2 } }); const workspaceEdit = new vscode.WorkspaceEdit(); for (const item of [...edits].sort((a, b) => b.offset - a.offset)) workspaceEdit.replace(uri, new vscode.Range(document.positionAt(item.offset), document.positionAt(item.offset + item.length)), item.content); await vscode.workspace.applyEdit(workspaceEdit); }
+
+function displayProfilePath(uri: vscode.Uri, repository: ProfileRepository): string {
+  const directory = repository.userProfileDirectory();
+  if (directory && uri.toString().startsWith(`${directory.toString().replace(/\/$/, '')}/`)) return `${vscode.l10n.t('User')} / ${uri.path.slice(uri.path.lastIndexOf('/') + 1)}`;
+  return vscode.workspace.asRelativePath(uri);
+}

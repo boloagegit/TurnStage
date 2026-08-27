@@ -261,7 +261,7 @@ describe('isActive and SessionController.finalizeTurn', () => {
 
     const { SessionController } = await import('../src/extension/runtime/sessionController');
     const stored = new Map<string, string>([['turnstage.control.no-workspace.persistence-test.token', JSON.stringify('stored-token')]]);
-    const state = new Map<string, unknown>();
+    const state = new Map<string, unknown>([['turnstage.control.no-workspace.persistence-test.shared', 'legacy-global']]);
     const context = {
       globalState: { get: (key: string) => state.get(key), update: vi.fn(async (key: string, value: unknown) => { state.set(key, value); }) },
       workspaceState: { get: (key: string) => state.get(key), update: vi.fn(async (key: string, value: unknown) => { state.set(key, value); }) },
@@ -274,6 +274,7 @@ describe('isActive and SessionController.finalizeTurn', () => {
       name: 'Persistence test',
       controls: [
         { id: 'token', type: 'text', label: 'Token', default: '', persist: 'secret' },
+        { id: 'shared', type: 'text', label: 'Shared', default: '', persist: 'global' },
         { id: 'temporary', type: 'text', label: 'Temporary', default: 'default', persist: 'workspace', resetOnNewConversation: true },
       ],
       opening: { mode: 'disabled' },
@@ -285,11 +286,15 @@ describe('isActive and SessionController.finalizeTurn', () => {
 
     await controller.loadRuns();
     expect(controller.snapshot.controls.token).toBe('stored-token');
+    expect(controller.snapshot.controls.shared).toBe('legacy-global');
+    expect(context.globalState.update).toHaveBeenCalledWith('turnstage.control.global.persistence-test.shared', 'legacy-global');
     await controller.setControl('token', 'changed-token');
+    await controller.setControl('shared', 'changed-global');
     await controller.setControl('temporary', 'changed');
     await controller.newConversation();
     expect(controller.snapshot.controls.temporary).toBe('default');
-    expect(context.secrets.store).toHaveBeenCalledWith('turnstage.control.no-workspace.persistence-test.token', JSON.stringify('changed-token'));
+    expect(context.secrets.store).toHaveBeenCalledWith('turnstage.control.secret.persistence-test.token', JSON.stringify('changed-token'));
+    expect(context.globalState.update).toHaveBeenCalledWith('turnstage.control.global.persistence-test.shared', 'changed-global');
 
     controller.snapshot.remoteSessions = [{ conversationId: 'remote-1', title: 'Remote run', createdAt: 1, actorId: 'actor-a', environmentId: 'env' }];
     controller.applyRemoteSession('remote-1');

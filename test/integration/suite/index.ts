@@ -44,6 +44,7 @@ async function assertRegisteredCommands(): Promise<void> {
   const commands = new Set(await vscode.commands.getCommands(true));
   for (const command of [
     'turnstage.initializeWorkspace',
+    'turnstage.initializeUser',
     'turnstage.createProfile',
     'turnstage.importProfile',
     'turnstage.duplicateProfile',
@@ -53,6 +54,7 @@ async function assertRegisteredCommands(): Promise<void> {
     'turnstage.runProfile',
     'turnstage.validateProfile',
     'turnstage.openAsText',
+    'turnstage.openEnvironment',
     'turnstage.setSecret',
     'turnstage.replayRun',
   ]) {

@@ -6,6 +6,10 @@ const mock = vi.hoisted(() => {
     toString(): string { return `file://${this.path}`; }
   }
 
+  class RelativePattern {
+    constructor(readonly base: unknown, readonly pattern: string) {}
+  }
+
   class TreeItem {
     label?: string;
     collapsibleState: number;
@@ -37,12 +41,18 @@ const mock = vi.hoisted(() => {
 
   return {
     Uri,
+    RelativePattern,
     TreeItem,
     ThemeIcon,
     MarkdownString,
     EventEmitter,
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
-    workspace: { workspaceFolders: [] },
+    l10n: { t: (value: string) => value },
+    workspace: {
+      workspaceFolders: [{ uri: new Uri('/workspace') }],
+      getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }),
+      createFileSystemWatcher: () => ({ onDidCreate: vi.fn(), onDidChange: vi.fn(), onDidDelete: vi.fn(), dispose: vi.fn() }),
+    },
   };
 });
 
@@ -51,6 +61,7 @@ vi.mock('vscode', () => mock);
 import {
   PROFILE_SECTIONS,
   ProfileSectionTreeItem,
+  ProfileScopeTreeItem,
   ProfileTreeItem,
   ProfileTreeProvider,
 } from '../src/extension/views/profileTreeProvider';
@@ -60,13 +71,16 @@ describe('ProfileTreeProvider', () => {
     const uri = new mock.Uri('/workspace/.vscode/turnstage/profiles/basic.turnstage.jsonc') as never;
     const entry = {
       uri,
+      scope: 'workspace',
       profile: { id: 'basic', name: 'Basic SSE Chat', environment: 'local', stream: { transport: 'sse' } },
     };
-    const provider = new ProfileTreeProvider({ discover: vi.fn(async () => [entry]) } as never);
+    const provider = new ProfileTreeProvider({ discover: vi.fn(async () => [entry]), userProfileDirectory: () => undefined } as never);
 
     const roots = await provider.getChildren();
-    expect(roots).toHaveLength(1);
-    const profile = roots[0];
+    expect(roots).toHaveLength(2);
+    expect(roots.every((item) => item instanceof ProfileScopeTreeItem)).toBe(true);
+    const profiles = await provider.getChildren(roots[0]);
+    const profile = profiles[0];
     expect(profile).toBeInstanceOf(ProfileTreeItem);
     expect(profile?.collapsibleState).toBe(mock.TreeItemCollapsibleState.Collapsed);
 
@@ -88,5 +102,11 @@ describe('ProfileTreeProvider', () => {
         arguments: [uri, section.id],
       });
     }
+  });
+
+  it('returns an empty root so the native VS Code welcome view remains available', async () => {
+    const provider = new ProfileTreeProvider({ discover: vi.fn(async () => []), userProfileDirectory: () => undefined } as never);
+
+    expect(await provider.getChildren()).toEqual([]);
   });
 });

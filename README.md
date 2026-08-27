@@ -87,9 +87,10 @@ The built-in demo can also be opened without writing to the workspace by
 running **TurnStage: Run Profile** with no selected profile. It uses the
 bundled Basic SSE fixture and does not issue a network request.
 
-## Workspace layout
+## Profile storage layers
 
-Initialization writes this layout under the first workspace folder:
+The Profiles view separates **Workspace** and **User** profiles. Workspace
+initialization writes this layout under the selected workspace folder:
 
 ```text
 .vscode/
@@ -107,6 +108,19 @@ Initialization writes this layout under the first workspace folder:
 The extension ships equivalent templates, schemas, and fixtures under
 `resources/`. Profiles and environment files are ordinary workspace files and
 can be reviewed and committed to Git. Secret values must not be committed.
+
+**TurnStage: Initialize User Profiles** writes reusable profiles and
+environments under the extension's `globalStorageUri/configuration` directory.
+Those files are available to every workspace handled by the same Extension
+Host. A Workspace profile resolves environments from its own workspace first
+and falls back to the user definition when IDs match; a User profile uses User
+environments, which avoids ambiguous overrides in multi-root workspaces.
+Creating or importing a profile asks which layer should receive the file.
+A Workspace profile with the same `id` is treated as the project's full-file
+replacement for the User profile; the User item remains visible and is marked
+**Overridden** so its reusable base can still be edited. Profile files are not
+deep-merged because mapping-array order and security policy must remain
+explicit.
 
 ## Starter profiles
 
@@ -254,6 +268,7 @@ Commands are registered under the `turnstage` namespace:
 | `turnstage.initializeWorkspace` | Create starter workspace files with conflict handling |
 | `turnstage.createProfile` | Create a duplicate-safe empty profile |
 | `turnstage.importProfile` | Import a valid JSONC profile with duplicate-safe naming |
+| `turnstage.initializeUser` | Initialize reusable user profiles and a user environment |
 | `turnstage.duplicateProfile` / `turnstage.deleteProfile` | Copy a discovered profile or move it to Trash after confirmation |
 | `turnstage.openProfile` | Open a profile in the custom editor |
 | `turnstage.runProfile` | Open/run a selected profile or the built-in Basic demo |
@@ -262,7 +277,7 @@ Commands are registered under the `turnstage` namespace:
 | `turnstage.newConversation` / `turnstage.clearConversation` | Reset conversation state |
 | `turnstage.validateProfile` | Publish Problems diagnostics |
 | `turnstage.openAsText` | Open the same document in VS Code's text editor |
-| `turnstage.selectEnvironment` | Select a discovered workspace environment |
+| `turnstage.selectEnvironment` / `turnstage.openEnvironment` | Select or edit an effective workspace or user environment |
 | `turnstage.setSecret` / `turnstage.removeSecret` / `turnstage.listSecretNames` | Manage secret names and values |
 | `turnstage.replayRun` / `turnstage.exportRun` | Open the profile's Replay workflow or export a run |
 | `turnstage.openOutput` | Show the TurnStage Output Channel |
@@ -279,6 +294,11 @@ The contributed settings are:
 | `turnstage.streamBatchIntervalMs` | `32` | Debounce interval for host-to-Webview snapshots (16–100 ms) |
 | `turnstage.runRetention` | `20` | Fallback local-run retention (1–100) |
 | `turnstage.logLevel` | `info` | Declared log-level setting; runtime logging is currently minimal |
+
+`profileGlob` has VS Code `resource` scope. The runtime-limit settings use
+explicit `window` scope, so they can be set once in User Settings and optionally
+overridden by a workspace. Machine-specific reusable endpoint and command data
+belongs in a User environment; credentials remain in SecretStorage.
 
 ## Workspace Trust and secrets
 

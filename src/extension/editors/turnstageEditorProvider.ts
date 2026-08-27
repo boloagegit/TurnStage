@@ -15,14 +15,13 @@ import { localize } from '../l10n';
 export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider {
   private readonly codec = new ProfileCodec();
   private readonly validator = new ProfileValidator();
-  private readonly environments = new EnvironmentRepository();
   private readonly runs: LocalRunRepository;
   private readonly secrets: SecretService;
   private readonly uriPolicy = new UriPolicy();
   private readonly controllers = new Map<string, SessionController>();
   private readonly sectionPosters = new Map<string, Set<(section: WorkspaceSection) => Thenable<boolean>>>();
   private readonly pendingSections = new Map<string, WorkspaceSection>();
-  constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel) { this.runs = new LocalRunRepository(context); this.secrets = new SecretService(context); }
+  constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel, private readonly environments = new EnvironmentRepository(context.globalStorageUri)) { this.runs = new LocalRunRepository(context); this.secrets = new SecretService(context); }
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     const instanceId = crypto.randomUUID(); panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] }; panel.webview.html = this.html(panel.webview, instanceId);
@@ -142,7 +141,7 @@ function textDirection(locale: string): 'ltr' | 'rtl' {
 function isAllowedPatchPath(path: unknown): path is Array<string | number> {
   if (!Array.isArray(path) || !path.length || !path.every((part) => (typeof part === 'string' || (typeof part === 'number' && Number.isInteger(part) && part >= 0)) && part !== '__proto__' && part !== 'prototype' && part !== 'constructor')) return false;
   const key = path.join('.');
-  if (key === 'name' || key === 'description' || key === 'opening.mode' || key === 'opening.message' || key === 'opening.trigger' || key === 'conversation.send.method' || key === 'conversation.send.url' || key === 'conversation.send.variants' || key === 'conversation.stop.strategy' || key === 'conversation.stop.request' || key === 'conversation.stop.requiredContext' || key === 'stream.mappingMode' || key === 'stream.unexpectedEndPolicy' || key === 'stream.mappings') return true;
+  if (key === 'name' || key === 'description' || key === 'environment' || key === 'opening.mode' || key === 'opening.message' || key === 'opening.trigger' || key === 'conversation.send.method' || key === 'conversation.send.url' || key === 'conversation.send.variants' || key === 'conversation.stop.strategy' || key === 'conversation.stop.request' || key === 'conversation.stop.requiredContext' || key === 'stream.mappingMode' || key === 'stream.unexpectedEndPolicy' || key === 'stream.mappings') return true;
   if (/^conversation\.send\.variants\.\d+\.(id|body)$/.test(key)) return true;
   if (/^conversation\.send\.variants\.\d+\.when\.(path|operator|value)$/.test(key)) return true;
   if (/^conversation\.stop\.(preservePartialContent|appendSystemNotice)$/.test(key)) return true;

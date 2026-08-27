@@ -66,7 +66,10 @@ JSON Schema error even where a nested object deliberately permits extensions.
 untyped. `persist` may be `workspace`, `global`, `none`, or `secret` in the
 schema/type. Workspace/global values use VS Code state, `none` remains
 session-local, and `secret` values are JSON-encoded in SecretStorage. Control
-keys include workspace identity, profile ID, and control ID.
+workspace keys include workspace identity, profile ID, and control ID. Global
+and secret keys include profile ID and control ID but omit workspace identity,
+so they can be reused across projects. Existing workspace-qualified global and
+secret keys are migrated when the profile is next loaded.
 
 Controls are disabled while the turn is active. **New conversation** preserves
 configured controls unless their definition explicitly sets

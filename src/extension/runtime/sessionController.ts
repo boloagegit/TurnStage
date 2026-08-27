@@ -49,6 +49,7 @@ export class SessionController implements vscode.Disposable {
   }
 
   async loadRuns(): Promise<LocalRun[]> {
+    await this.migrateGlobalControls();
     await this.loadSecretControls();
     this.runs = await this.runRepository.list(this.profile.id);
     this.snapshot.remoteSessions = this.profile.history?.remoteSessions?.mode === 'referenceOnly' ? this.remoteSessionRepository.list(this.remoteSessionKey()) : [];
@@ -62,10 +63,10 @@ export class SessionController implements vscode.Disposable {
   }
   async setControl(id: string, value: unknown): Promise<void> {
     const definition = this.profile.controls?.find((item) => item.id === id); if (!definition) return;
-    this.controls[id] = value; const key = this.controlKey(id);
+    this.controls[id] = value;
     this.snapshot.controls = { ...this.controls };
-    if (definition.persist === 'global') await this.context.globalState.update(key, value);
-    else if (definition.persist === 'workspace') await this.context.workspaceState.update(key, value);
+    if (definition.persist === 'global') await this.context.globalState.update(this.globalControlKey(id), value);
+    else if (definition.persist === 'workspace') await this.context.workspaceState.update(this.workspaceControlKey(id), value);
     else if (definition.persist === 'secret') {
       if (value === undefined) await this.context.secrets.delete(this.secretControlKey(id));
       else await this.context.secrets.store(this.secretControlKey(id), JSON.stringify(value));
@@ -210,19 +211,35 @@ export class SessionController implements vscode.Disposable {
   }
   private requestBuilder(): RequestBuilder { return new RequestBuilder((name) => this.secrets.get(this.environment.secretReferences?.[name] ?? name)); }
   private useOpeningFallback(selected?: NonNullable<OpeningDefinition['fallbacks']>[number]): void { const fallback = selected ?? this.profile.opening?.fallbacks?.[0]; if (fallback) { this.snapshot.opening = { message: fallback.message, starters: fallback.starters ?? [] }; this.snapshot.sessionState = 'ready'; } else this.snapshot.sessionState = 'failed'; this.changed(); }
-  private controlKey(id: string): string { const workspace = vscode.workspace.getWorkspaceFolder(this.profileUri)?.uri.toString() ?? 'no-workspace'; return `turnstage.control.${workspace}.${this.profile.id}.${id}`; }
-  private secretControlKey(id: string): string { return this.controlKey(id); }
+  private legacyControlKey(id: string): string { const workspace = vscode.workspace.getWorkspaceFolder(this.profileUri)?.uri.toString() ?? 'no-workspace'; return `turnstage.control.${workspace}.${this.profile.id}.${id}`; }
+  private workspaceControlKey(id: string): string { return this.legacyControlKey(id); }
+  private globalControlKey(id: string): string { return `turnstage.control.global.${this.profile.id}.${id}`; }
+  private secretControlKey(id: string): string { return `turnstage.control.secret.${this.profile.id}.${id}`; }
   private remoteSessionKey(): string {
     const workspace = vscode.workspace.getWorkspaceFolder(this.profileUri)?.uri.toString() ?? 'no-workspace'; const scope = this.profile.history?.remoteSessions?.scope ?? ['profile', 'actor', 'environment']; const parts = [workspace, this.profile.id];
     if (scope.includes('actor')) parts.push(typeof this.controls.actor === 'string' ? this.controls.actor : 'no-actor');
     if (scope.includes('environment')) parts.push(this.environment.id);
     return `turnstage.remoteSessions.${parts.map((part) => encodeURIComponent(part)).join('.')}`;
   }
-  private persistedControl(id: string, persist?: string): unknown { const key = this.controlKey(id); return persist === 'global' ? this.context.globalState.get(key) : persist === 'workspace' ? this.context.workspaceState.get(key) : undefined; }
+  private persistedControl(id: string, persist?: string): unknown {
+    if (persist === 'global') return this.context.globalState.get(this.globalControlKey(id)) ?? this.context.globalState.get(this.legacyControlKey(id));
+    return persist === 'workspace' ? this.context.workspaceState.get(this.workspaceControlKey(id)) : undefined;
+  }
+  private async migrateGlobalControls(): Promise<void> {
+    for (const definition of this.profile.controls ?? []) {
+      if (definition.persist !== 'global' || this.context.globalState.get(this.globalControlKey(definition.id)) !== undefined) continue;
+      const legacy = this.context.globalState.get(this.legacyControlKey(definition.id));
+      if (legacy !== undefined) await this.context.globalState.update(this.globalControlKey(definition.id), legacy);
+    }
+  }
   private async loadSecretControls(): Promise<void> {
     for (const definition of this.profile.controls ?? []) {
       if (definition.persist !== 'secret') continue;
-      const stored = await this.context.secrets.get(this.secretControlKey(definition.id));
+      let stored = await this.context.secrets.get(this.secretControlKey(definition.id));
+      if (stored === undefined) {
+        stored = await this.context.secrets.get(this.legacyControlKey(definition.id));
+        if (stored !== undefined) await this.context.secrets.store(this.secretControlKey(definition.id), stored);
+      }
       if (stored === undefined) continue;
       try { this.controls[definition.id] = JSON.parse(stored) as unknown; } catch { this.controls[definition.id] = stored; }
     }

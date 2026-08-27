@@ -49,10 +49,18 @@ UI changes are sent to the host as a patch and applied with `jsonc-parser`
 `modify`/`applyEdits` through `WorkspaceEdit`; only the `name`, `description`,
 and `ui` roots are patchable from the current UI editor.
 
-The Profile Tree View discovers at most 500 files using the configured glob
-(default `.vscode/turnstage/profiles/*.turnstage.jsonc`) and excludes
-`node_modules` and `.git`. Its watcher uses the same profile-shaped path,
-debounces refreshes by 150 ms, and is disposed with the view provider.
+The Profile Tree View discovers at most 500 workspace files using the
+configured glob (default `.vscode/turnstage/profiles/*.turnstage.jsonc`) and
+also reads user files from `globalStorageUri/configuration/profiles`. Workspace
+and user scopes have separate tree groups and file watchers. Refreshes are
+debounced by 150 ms and all watchers are disposed with the view provider.
+Workspace profiles resolve environments from their own workspace before the
+user environment directory. User profiles resolve only user environments so a
+multi-root window cannot select an override from an unrelated folder.
+When a Workspace and User profile share an ID, the Workspace file is the
+project's full-file replacement. The User entry is retained and marked as
+overridden; TurnStage deliberately does not deep-merge profile files because
+stream mapping order and security policy require explicit review.
 
 ## Activation and VS Code integration
 
@@ -268,8 +276,11 @@ state before citation, action, or export work is performed.
 ## Persistence and replay
 
 Control values with `persist: "workspace"`, `"global"`, or `"secret"` use
-`ExtensionContext.workspaceState`, `globalState`, or `secrets`; keys include
-workspace identity, profile ID, and control ID. `none` values are session-local.
+`ExtensionContext.workspaceState`, `globalState`, or `secrets`. Workspace keys
+include workspace identity, profile ID, and control ID. Global and secret
+control keys intentionally omit workspace identity so the same profile ID can
+reuse them across projects. Legacy workspace-qualified global/secret values
+are read and migrated on first load. `none` values are session-local.
 The Webview uses `getState`/`setState` only for transient UI state: the current
 Tree-selected section, draft, inspector tab, split percentage, and linked
 message/event selection.
@@ -289,7 +300,9 @@ an explicit “Previous messages were not loaded” system notice.
 
 ## UI composition
 
-The native Profiles Tree is the top-level navigation. Every profile expands to
+The native Profiles Tree is grouped into Workspace and User scopes. Workspace
+profiles come from the configured workspace glob; user profiles come from
+`globalStorageUri/configuration/profiles`. Every profile expands to
 Test and seven settings sections; selecting a child opens the same Custom
 Editor and the host sends `workspace.section` to select its surface. There is
 no duplicate navigation sidebar inside the Webview. **Test** places a phone-shaped
