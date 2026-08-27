@@ -114,11 +114,25 @@ async function assertProfileDiscovery(profileUri: vscode.Uri): Promise<void> {
 
 async function assertCustomEditorAndTextFallback(profileUri: vscode.Uri): Promise<void> {
   const document = await vscode.workspace.openTextDocument(profileUri);
-  await vscode.commands.executeCommand('vscode.openWith', profileUri, 'turnstage.profileEditor');
+  await vscode.commands.executeCommand('turnstage.runProfile', profileUri);
   const customTab = await waitFor(() => activeTabInput() instanceof vscode.TabInputCustom ? activeTabInput() : undefined, 'the TurnStage custom editor tab');
   assert.equal((customTab as vscode.TabInputCustom).viewType, 'turnstage.profileEditor');
   assert.equal((customTab as vscode.TabInputCustom).uri.toString(), profileUri.toString());
   assert.ok(vscode.workspace.textDocuments.some((item) => item.uri.toString() === profileUri.toString()), 'Custom editor must be backed by the shared TextDocument');
+
+  // Hiding a custom editor disposes its webview DOM because the provider uses
+  // retainContextWhenHidden: false. Revealing the same tab must keep using the
+  // custom editor; the provider rehydrates the new DOM from cached host state.
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  assert.ok(workspaceFolder, 'The tab-switch regression requires an open workspace folder');
+  const switchAwayUri = vscode.Uri.joinPath(workspaceFolder.uri, 'switch-away.txt');
+  await writeText(switchAwayUri, 'TurnStage integration tab switch');
+  await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(switchAwayUri));
+  assert.ok(activeTabInput() instanceof vscode.TabInputText, 'A text editor should temporarily hide the TurnStage custom editor');
+  await vscode.commands.executeCommand('vscode.openWith', profileUri, 'turnstage.profileEditor');
+  const revealedTab = await waitFor(() => activeTabInput() instanceof vscode.TabInputCustom ? activeTabInput() : undefined, 'the revealed TurnStage custom editor tab');
+  assert.equal((revealedTab as vscode.TabInputCustom).viewType, 'turnstage.profileEditor');
+  assert.equal((revealedTab as vscode.TabInputCustom).uri.toString(), profileUri.toString());
 
   // A host-side edit must remain visible while the custom editor is open. It
   // exercises the provider document listener and proves the document model

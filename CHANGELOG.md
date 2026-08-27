@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Fixed profile editors remaining on “Loading profile…” after their Webview was recreated when switching away and back.
+- `Run Profile` continues to open the TurnStage Custom Editor; the `.turnstage.jsonc` tab name only identifies the editable profile backing file.
+- Existing profiles remain compatible and no migration is required.
+
 ## 0.2.1
 
 - Fixed a resize-observer feedback loop that continuously reduced the chat preview pane while the editor was open.

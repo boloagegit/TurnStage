@@ -31,6 +31,8 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     const instanceId = crypto.randomUUID(); panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] }; panel.webview.html = this.html(panel.webview, instanceId);
     let controller: SessionController | undefined; let documentVersion = -1; let sendTimer: ReturnType<typeof setTimeout> | undefined; let loadTimer: ReturnType<typeof setTimeout> | undefined; let disposed = false;
+    let profileSnapshot: Extract<HostPayload, { type: 'profile.snapshot' }> | undefined;
+    let validationSnapshot: Extract<HostPayload, { type: 'profile.validation' }> | undefined;
     const post = (message: HostPayload, requestId: string = crypto.randomUUID()) => panel.webview.postMessage({ ...message, protocolVersion: PROTOCOL_VERSION, editorInstanceId: instanceId, requestId });
     const documentKey = document.uri.toString();
     const postSection = (section: WorkspaceSection) => post({ type: 'workspace.section', section });
@@ -43,13 +45,16 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       if (current) this.trackDisposal(current.disposeAndWait());
       if (current && this.controllers.get(documentKey) === current) this.controllers.delete(documentKey);
     };
-    const sendSession = (immediate = false) => { if (!controller) return; if (sendTimer) clearTimeout(sendTimer); const publish = () => { sendTimer = undefined; void post({ type: 'session.snapshot', snapshot: controller!.snapshot, runs: controller!.getRuns(), requestPreview: controller!.requestPreview }); }; if (immediate) publish(); else sendTimer = setTimeout(publish, vscode.workspace.getConfiguration('turnstage').get('streamBatchIntervalMs', 32)); };
+    const currentSessionSnapshot = (): Extract<HostPayload, { type: 'session.snapshot' }> | undefined => controller ? { type: 'session.snapshot', snapshot: controller.snapshot, runs: controller.getRuns(), requestPreview: controller.requestPreview } : undefined;
+    const sendSession = (immediate = false) => { if (!controller) return; if (sendTimer) clearTimeout(sendTimer); const publish = () => { sendTimer = undefined; const snapshot = currentSessionSnapshot(); if (snapshot) void post(snapshot); }; if (immediate) publish(); else sendTimer = setTimeout(publish, vscode.workspace.getConfiguration('turnstage').get('streamBatchIntervalMs', 32)); };
     const load = async () => {
       if (disposed || (documentVersion === document.version && controller)) return;
       const version = document.version;
       documentVersion = version; const parsed = this.codec.parse(document.getText()); const envEntries = await this.environments.discover(document.uri); if (disposed || document.version !== version) return; const issues = this.validator.validate(parsed.profile, parsed.tree, envEntries.map((item) => item.environment)); this.publishDiagnostics(document, issues);
-      await post({ type: 'profile.snapshot', profile: parsed.profile, parseError: parsed.errors.length ? localize('Invalid JSONC') : undefined, version: document.version, environments: envEntries.map((item) => item.environment.id) });
-      await post({ type: 'profile.validation', diagnostics: issues });
+      profileSnapshot = { type: 'profile.snapshot', profile: parsed.profile, parseError: parsed.errors.length ? localize('Invalid JSONC') : undefined, version: document.version, environments: envEntries.map((item) => item.environment.id) };
+      validationSnapshot = { type: 'profile.validation', diagnostics: issues };
+      await post(profileSnapshot);
+      await post(validationSnapshot);
       if (disposed || document.version !== version) return;
       if (!parsed.profile || issues.some((item) => item.severity === 'error')) { disposeController(); return; }
       if (!controller || controller.profile !== parsed.profile) {
@@ -66,6 +71,14 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         this.controllers.set(document.uri.toString(), controller);
       }
     };
+    const rehydrate = async () => {
+      if (disposed) return;
+      if (documentVersion !== document.version || !profileSnapshot || !validationSnapshot) { await load(); return; }
+      await post(profileSnapshot);
+      await post(validationSnapshot);
+      const sessionSnapshot = currentSessionSnapshot();
+      if (sessionSnapshot) await post(sessionSnapshot);
+    };
     const scheduleLoad = () => { if (loadTimer) clearTimeout(loadTimer); loadTimer = setTimeout(() => { loadTimer = undefined; void load().catch((error) => this.output.appendLine(`[editor] ${error instanceof Error ? error.stack ?? error.message : String(error)}`)); }, DOCUMENT_CHANGE_DEBOUNCE_MS); };
     const documentListener = vscode.workspace.onDidChangeTextDocument((event) => { if (event.document.uri.toString() === document.uri.toString()) scheduleLoad(); });
     const trustListener = vscode.workspace.onDidGrantWorkspaceTrust(() => { if (controller) controller.snapshot.trusted = true; void post({ type: 'workspaceTrust.changed', trusted: true }); sendSession(); });
@@ -79,7 +92,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const messageListener = panel.webview.onDidReceiveMessage(async (raw: unknown) => {
       if (!isWebviewMessage(raw, instanceId)) return; const message = raw as WebviewMessage;
       try {
-        if (message.type === 'webview.ready') { await postHostReady(message.requestId); await postSection(this.pendingSections.get(documentKey) ?? 'test'); await load(); return; }
+        if (message.type === 'webview.ready') { await postHostReady(message.requestId); await postSection(this.pendingSections.get(documentKey) ?? 'test'); await rehydrate(); return; }
         if (message.type === 'profile.openAsText') { await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default'); return; }
         if (message.type === 'profile.validate') { documentVersion = -1; await load(); return; }
         if (message.type === 'profile.patch') { await this.patchDocument(document, message.path, message.value); return; }
