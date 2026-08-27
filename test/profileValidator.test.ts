@@ -120,6 +120,23 @@ describe('ProfileValidator', () => {
     expect(issues[0]).toMatchObject({ severity: 'error', message: 'Profile could not be parsed.' });
   });
 
+  it('validates UI layout values and limits message toolbars to implemented actions', () => {
+    const profile = validProfile();
+    profile.ui = {
+      layout: { preset: 'wide' as 'compact', inspectorPosition: 'left' as 'right', inspectorWidth: 120.5 },
+      messageActions: ['request.send'],
+    };
+
+    const messages = new ProfileValidator().validate(profile).map((entry) => entry.message);
+
+    expect(messages).toEqual(expect.arrayContaining([
+      'Unknown UI layout preset: wide.',
+      'Unknown Inspector position: left.',
+      'Inspector width must be an integer from 240 to 960.',
+      'Unknown action id: request.send.',
+    ]));
+  });
+
   it('diagnoses invalid template, starter action, and duplicate declared action ids', () => {
     const profile = validProfile();
     profile.controls = [{ id: 'actor', type: 'text', label: 'Actor' }];

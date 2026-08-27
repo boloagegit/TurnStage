@@ -133,7 +133,8 @@
       {
         "command": "turnstage.newConversation",
         "title": "%command.newConversation%",
-        "category": "%command.category%"
+        "category": "%command.category%",
+        "icon": "$(add)"
       },
       {
         "command": "turnstage.clearConversation",
@@ -237,6 +238,20 @@
         "when": "!isWorkspaceTrusted"
       }
     ],
+    "submenus": [
+      {
+        "id": "turnstage.profileSession",
+        "label": "%submenu.profileSession%"
+      },
+      {
+        "id": "turnstage.profileTools",
+        "label": "%submenu.profileTools%"
+      },
+      {
+        "id": "turnstage.profileManagement",
+        "label": "%submenu.profileManagement%"
+      }
+    ],
     "menus": {
       "view/title": [
         {
@@ -282,56 +297,75 @@
           "group": "inline@2"
         },
         {
-          "command": "turnstage.startSession",
+          "submenu": "turnstage.profileSession",
           "when": "view == turnstage.profiles && viewItem == turnstageProfile",
           "group": "turnstage@1"
         },
         {
-          "command": "turnstage.selectEnvironment",
-          "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
+          "submenu": "turnstage.profileTools",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
           "group": "turnstage@2"
         },
         {
-          "command": "turnstage.openEnvironment",
-          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
-          "group": "turnstage@2.5"
+          "submenu": "turnstage.profileManagement",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
+          "group": "turnstage@3"
+        }
+      ],
+      "turnstage.profileSession": [
+        {
+          "command": "turnstage.startSession",
+          "group": "navigation@1"
         },
         {
+          "command": "turnstage.selectEnvironment",
+          "when": "isWorkspaceTrusted",
+          "group": "environment@1"
+        },
+        {
+          "command": "turnstage.openEnvironment",
+          "group": "environment@2"
+        }
+      ],
+      "turnstage.profileTools": [
+        {
           "command": "turnstage.validateProfile",
-          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
-          "group": "turnstage@3"
+          "group": "validation@1"
         },
         {
           "command": "turnstage.openAsText",
-          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
-          "group": "turnstage@4"
+          "group": "validation@2"
         },
         {
           "command": "turnstage.migrateProfile",
-          "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
-          "group": "turnstage@5"
+          "when": "isWorkspaceTrusted",
+          "group": "advanced@1"
         },
         {
           "command": "turnstage.exportRun",
-          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
-          "group": "turnstage@6"
-        },
+          "group": "advanced@2"
+        }
+      ],
+      "turnstage.profileManagement": [
         {
           "command": "turnstage.duplicateProfile",
-          "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
           "group": "management@1"
         },
         {
           "command": "turnstage.deleteProfile",
-          "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
           "group": "management@2"
         }
       ],
       "editor/title": [
         {
-          "command": "turnstage.openAsText",
+          "command": "turnstage.newConversation",
           "when": "activeCustomEditorId == turnstage.profileEditor",
           "group": "navigation@1"
+        },
+        {
+          "command": "turnstage.openAsText",
+          "when": "activeCustomEditorId == turnstage.profileEditor",
+          "group": "navigation@2"
         }
       ],
       "commandPalette": [

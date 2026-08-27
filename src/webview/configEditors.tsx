@@ -3,12 +3,19 @@ import type { MappingTestInput, MappingTestResult, WebviewPayload } from '../sha
 import type { MappingRule, RawStreamEvent, RequestVariant, TurnStageProfile } from '../shared/types';
 import { formatNumber, localizeHumanized, t } from './i18n';
 import { IconButton } from './Icon';
+import { DEFAULT_MESSAGE_ACTIONS, type MessageActionId } from './uiConfig';
 
 type Post = (message: WebviewPayload) => void;
 
 const methods = ['POST', 'GET', 'PUT', 'PATCH', 'DELETE'] as const;
 const operators = ['equals', 'notEquals', 'exists', 'notExists', 'oneOf', 'contains', 'startsWith', 'endsWith', 'regex'] as const;
 const componentNames = ['opening', 'starters', 'progress', 'toolCalls', 'citations', 'followups', 'responseActions', 'forms', 'diagnostics', 'metrics'] as const;
+const messageActionOptions: Array<{ id: MessageActionId; label: string }> = [
+  { id: 'message.copy', label: 'Copy' },
+  { id: 'message.retry', label: 'Retry' },
+  { id: 'message.editAndResend', label: 'Edit & resend' },
+  { id: 'message.inspectRaw', label: 'Inspect message' },
+];
 const sampleProtocols = ['sse', 'ndjson', 'json', 'text-stream'] as const;
 
 type VariantKey = 'first-turn' | 'continuation' | 'other';
@@ -235,7 +242,7 @@ function MappingCard({ rule, index, count, post, onMove, onDelete }: { rule: Map
   const patch = (suffix: string[], value: unknown) => post({ type: 'profile.patch', path: [...base, ...suffix], value });
   const applyEmit = () => { try { const parsed = JSON.parse(emitText) as unknown; if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || typeof (parsed as Record<string, unknown>).type !== 'string') throw new Error(t('Emit must be an object with a string “{key}”.', { key: 'type' })); setEmitError(''); patch(['emit'], parsed); } catch (error) { setEmitError(error instanceof Error ? error.message : t('Enter valid JSON.')); } };
   return <article className="mapping-card">
-    <header><div className="mapping-title"><span className="rule-number">{formatNumber(index + 1)}</span><div><strong>{rule.id}</strong><span>{rule.match.event ?? rule.match.path ?? t('Any event')} → {String(rule.emit.type)}</span></div></div><div className="rule-actions"><button aria-label={t('Move {id} up', { id: rule.id })} title={t('Move up')} disabled={index === 0} onClick={() => onMove(index, -1)}>↑</button><button aria-label={t('Move {id} down', { id: rule.id })} title={t('Move down')} disabled={index === count - 1} onClick={() => onMove(index, 1)}>↓</button><button className="danger-subtle" onClick={() => onDelete(index)}>{t('Delete')}</button></div></header>
+    <header><div className="mapping-title"><span className="rule-number">{formatNumber(index + 1)}</span><div><strong>{rule.id}</strong><span>{rule.match.event ?? rule.match.path ?? t('Any event')} → {String(rule.emit.type)}</span></div></div><div className="rule-actions"><IconButton icon="arrow-up" label={t('Move {id} up', { id: rule.id })} disabled={index === 0} onClick={() => onMove(index, -1)} /><IconButton icon="arrow-down" label={t('Move {id} down', { id: rule.id })} disabled={index === count - 1} onClick={() => onMove(index, 1)} /><button className="danger-subtle" onClick={() => onDelete(index)}>{t('Delete')}</button></div></header>
     <div className="form-grid mapping-fields">
       <Field label={t('Rule ID')} error={!rule.id.trim() ? t('A rule ID is required.') : undefined}><PatchText aria-label={t('Rule ID')} value={rule.id} required onCommit={(value) => patch(['id'], value)} /></Field>
       <Field label={t('SSE event')} hint={t('Optional event name, such as {message} or {done}.', { message: 'message', done: 'done' })}><PatchText aria-label={t('SSE event name')} value={rule.match.event ?? ''} onCommit={(value) => patch(['match', 'event'], value || undefined)} /></Field>
@@ -258,17 +265,54 @@ export function UiConfigEditor({ profile, post }: { profile: TurnStageProfile; p
     <section className="config-section"><div className="section-heading"><div><h3>{t('Layout & composer')}</h3><p>{t('Changes are reflected in the Chat view immediately.')}</p></div></div><div className="form-grid">
       <Field label={t('Layout preset')}><select aria-label={t('Layout preset')} value={profile.ui?.layout?.preset ?? 'split-inspector'} onChange={(event) => post({ type: 'profile.patch', path: ['ui', 'layout', 'preset'], value: event.target.value })}><option value="chat-only">{t('Chat only')}</option><option value="split-inspector">{t('Split inspector')}</option><option value="chat-with-metrics">{t('Chat with metrics')}</option><option value="compact">{t('Compact')}</option></select></Field>
       <Field label={t('Inspector position')}><select aria-label={t('Inspector position')} value={profile.ui?.layout?.inspectorPosition ?? 'right'} onChange={(event) => post({ type: 'profile.patch', path: ['ui', 'layout', 'inspectorPosition'], value: event.target.value })}><option value="right">{t('Right')}</option><option value="bottom">{t('Bottom')}</option></select></Field>
+      <Field label={t('Inspector width (px)')} hint={t('Used when the Inspector is positioned on the right.')}><PatchNumber aria-label={t('Inspector width in pixels')} value={profile.ui?.layout?.inspectorWidth} min={240} max={960} onCommit={(value) => post({ type: 'profile.patch', path: ['ui', 'layout', 'inspectorWidth'], value })} /></Field>
       <Field label={t('Composer placeholder')} wide><PatchText aria-label={t('Composer placeholder')} value={profile.ui?.composer?.placeholder ?? ''} onCommit={(value) => post({ type: 'profile.patch', path: ['ui', 'composer', 'placeholder'], value })} /></Field>
       <Field label={t('Composer behavior')}><div className="stacked-checks"><Checkbox label={t('Multiline input')} checked={profile.ui?.composer?.multiline ?? true} onChange={(value) => post({ type: 'profile.patch', path: ['ui', 'composer', 'multiline'], value })} /><Checkbox label={t('Show Stop while streaming')} checked={profile.ui?.composer?.showStopWhileStreaming ?? true} onChange={(value) => post({ type: 'profile.patch', path: ['ui', 'composer', 'showStopWhileStreaming'], value })} /></div></Field>
-      <Field label={t('Enter key')}><select aria-label={t('Enter key behavior')} value={profile.ui?.composer?.enterBehavior ?? 'send'} onChange={(event) => post({ type: 'profile.patch', path: ['ui', 'composer', 'enterBehavior'], value: event.target.value })}><option value="send">{t('Send')}</option><option value="newline">{t('New line')}</option></select></Field>
+      <Field label={t('Enter key')}><select aria-label={t('Enter key behavior')} value={profile.ui?.composer?.enterBehavior ?? 'send'} disabled={profile.ui?.composer?.multiline === false} onChange={(event) => post({ type: 'profile.patch', path: ['ui', 'composer', 'enterBehavior'], value: event.target.value })}><option value="send">{t('Send')}</option><option value="newline">{t('New line')}</option></select></Field>
+      <Field label={t('Shift+Enter key')}><select aria-label={t('Shift+Enter key behavior')} value={profile.ui?.composer?.shiftEnterBehavior ?? 'newline'} disabled={profile.ui?.composer?.multiline === false} onChange={(event) => post({ type: 'profile.patch', path: ['ui', 'composer', 'shiftEnterBehavior'], value: event.target.value })}><option value="send">{t('Send')}</option><option value="newline">{t('New line')}</option></select></Field>
     </div></section>
     <section className="config-section"><div className="section-heading"><div><h3>{t('Components')}</h3><p>{t('Choose which response surfaces appear in Chat. The runtime treats an omitted visibility flag as visible.')}</p></div></div><div className="component-grid">{componentNames.map((name) => <Checkbox key={name} label={localizeHumanized(name)} checked={profile.ui?.components?.[name]?.visible ?? true} onChange={(value) => post({ type: 'profile.patch', path: ['ui', 'components', name, 'visible'], value })} />)}</div></section>
+    <MessageActionsEditor profile={profile} post={post} />
     <section className="config-section"><div className="section-heading"><div><h3>{t('Active-turn locks')}</h3><p>{t('Comma-separated component or control IDs. Stop should normally remain allowed.')}</p></div></div><div className="form-grid">
       <Field label={t('Disable while active')} hint={t('Example: {ids}', { ids: 'composer, model, newConversation' })} wide><input aria-label={t('Components disabled while active')} value={disableText} onChange={(event) => setDisableText(event.target.value)} onBlur={() => post({ type: 'profile.patch', path: ['ui', 'locks', 'whileTurnActive', 'disable'], value: parseList(disableText) })} /></Field>
       <Field label={t('Allow while active')} hint={t('Example: {ids}', { ids: 'stop, message.copy, inspector.open' })} wide><input aria-label={t('Components allowed while active')} value={allowText} onChange={(event) => setAllowText(event.target.value)} onBlur={() => post({ type: 'profile.patch', path: ['ui', 'locks', 'whileTurnActive', 'allow'], value: parseList(allowText) })} /></Field>
     </div></section>
     <p className="muted">{t('All changes use WorkspaceEdit and participate in VS Code Undo/Redo.')}</p>
   </div>;
+}
+
+function MessageActionsEditor({ profile, post }: { profile: TurnStageProfile; post: Post }): React.JSX.Element {
+  const configured = profile.ui?.messageActions ?? DEFAULT_MESSAGE_ACTIONS;
+  const enabled = [...new Set(configured.filter((id): id is MessageActionId => DEFAULT_MESSAGE_ACTIONS.includes(id as MessageActionId)))];
+  const patch = (value: MessageActionId[]) => post({ type: 'profile.patch', path: ['ui', 'messageActions'], value });
+  const toggle = (id: MessageActionId, checked: boolean) => patch(checked ? [...enabled, id] : enabled.filter((item) => item !== id));
+  const move = (id: MessageActionId, delta: -1 | 1) => {
+    const index = enabled.indexOf(id);
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= enabled.length) return;
+    const next = [...enabled];
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    patch(next);
+  };
+  const ordered = [
+    ...enabled.map((id) => messageActionOptions.find((option) => option.id === id)!),
+    ...messageActionOptions.filter((option) => !enabled.includes(option.id)),
+  ];
+  return <section className="config-section"><div className="section-heading"><div><h3>{t('Message actions')}</h3><p>{t('Choose the message toolbar actions and their display order.')}</p></div></div>
+    <div className="message-action-list" role="group" aria-label={t('Message actions')}>
+      {ordered.map(({ id, label }) => {
+        const index = enabled.indexOf(id);
+        const checked = index >= 0;
+        return <div className="message-action-row" key={id}>
+          <Checkbox label={t(label)} checked={checked} onChange={(value) => toggle(id, value)} />
+          <div className="message-action-order">
+            <IconButton type="button" icon="arrow-up" label={t('Move {id} up', { id: t(label) })} disabled={!checked || index === 0} onClick={() => move(id, -1)} />
+            <IconButton type="button" icon="arrow-down" label={t('Move {id} down', { id: t(label) })} disabled={!checked || index === enabled.length - 1} onClick={() => move(id, 1)} />
+          </div>
+        </div>;
+      })}
+    </div>
+  </section>;
 }
 
 export function mappingDraftFromRawEvent(event: RawStreamEvent, profile: TurnStageProfile): MappingRule {
@@ -284,7 +328,15 @@ export function mappingDraftFromRawEvent(event: RawStreamEvent, profile: TurnSta
 
 function Field({ label, hint, error, wide, children }: { label: string; hint?: string; error?: string; wide?: boolean; children: React.ReactNode }): React.JSX.Element {
   const id = useId();
-  return <fieldset className={`field ${wide ? 'field-wide' : ''}`} aria-describedby={hint || error ? `${id}-description` : undefined}><legend>{label}</legend><div>{children}</div>{(error || hint) && <p id={`${id}-description`} className={error ? 'field-error' : 'field-hint'}>{error || hint}</p>}</fieldset>;
+  const descriptionId = hint || error ? `${id}-description` : undefined;
+  let linked = false;
+  const describedChildren = React.Children.map(children, (child) => {
+    if (!descriptionId || linked || !React.isValidElement(child)) return child;
+    linked = true;
+    const existing = (child.props as { 'aria-describedby'?: string })['aria-describedby'];
+    return React.cloneElement(child as React.ReactElement<Record<string, unknown>>, { 'aria-describedby': [existing, descriptionId].filter(Boolean).join(' ') });
+  });
+  return <fieldset className={`field ${wide ? 'field-wide' : ''}`} aria-describedby={descriptionId}><legend>{label}</legend><div>{describedChildren}</div>{descriptionId && <p id={descriptionId} className={error ? 'field-error' : 'field-hint'}>{error || hint}</p>}</fieldset>;
 }
 
 function Checkbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }): React.JSX.Element { return <label className="checkbox-control"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>; }
@@ -293,6 +345,17 @@ function PatchText({ value, onCommit, multiline = false, ...props }: { value: st
   const commit = () => { if (draft !== value) onCommit(draft); };
   const keyboard = (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => { if (event.key === 'Escape') { setDraft(value); event.currentTarget.blur(); } else if (event.key === 'Enter' && (!multiline || event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.blur(); } };
   return multiline ? <textarea {...props} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={keyboard} /> : <input {...props} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={keyboard} />;
+}
+
+function PatchNumber({ value, onCommit, min, max, ...props }: { value?: number; onCommit: (value: number | undefined) => void; min: number; max: number } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'type' | 'min' | 'max' | 'onChange' | 'onBlur'>): React.JSX.Element {
+  const [draft, setDraft] = useState(value === undefined ? '' : String(value));
+  useEffect(() => setDraft(value === undefined ? '' : String(value)), [value]);
+  const commit = () => {
+    if (!draft.trim()) { onCommit(undefined); return; }
+    const parsed = Number(draft);
+    if (Number.isFinite(parsed)) onCommit(Math.min(max, Math.max(min, Math.round(parsed))));
+  };
+  return <input {...props} type="number" min={min} max={max} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value === undefined ? '' : String(value)); event.currentTarget.blur(); } else if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} />;
 }
 function JsonPreview({ value }: { value: unknown }): React.JSX.Element { const text = JSON.stringify(value, null, 2); return <pre className="json sample-json"><code>{text}</code><IconButton icon="copy" label={t('Copy normalized JSON')} onClick={() => navigator.clipboard.writeText(text)} /></pre>; }
 function parseList(value: string): string[] { return [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))]; }

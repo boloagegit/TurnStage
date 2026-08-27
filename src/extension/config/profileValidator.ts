@@ -83,12 +83,19 @@ export class ProfileValidator {
     const stop = profile.conversation.stop;
     if (stop?.strategy === 'abortThenRequest' && !stop.request) out.push(issue(tree, ['conversation', 'stop'], localize('abortThenRequest requires a stop request.')));
     for (const scheme of profile.security?.allowedUriSchemes ?? []) if (!['https', 'http', 'file'].includes(scheme)) out.push(issue(tree, ['security', 'allowedUriSchemes'], localize('URI scheme "{scheme}" is not supported.', { scheme })));
+    const layoutPreset = profile.ui?.layout?.preset as unknown;
+    if (layoutPreset !== undefined && !['chat-only', 'split-inspector', 'chat-with-metrics', 'compact'].includes(String(layoutPreset))) out.push(issue(tree, ['ui', 'layout', 'preset'], localize('Unknown UI layout preset: {value}.', { value: String(layoutPreset) })));
+    const inspectorPosition = profile.ui?.layout?.inspectorPosition as unknown;
+    if (inspectorPosition !== undefined && !['right', 'bottom'].includes(String(inspectorPosition))) out.push(issue(tree, ['ui', 'layout', 'inspectorPosition'], localize('Unknown Inspector position: {value}.', { value: String(inspectorPosition) })));
+    const inspectorWidth = profile.ui?.layout?.inspectorWidth as unknown;
+    if (inspectorWidth !== undefined && (typeof inspectorWidth !== 'number' || !Number.isInteger(inspectorWidth) || inspectorWidth < 240 || inspectorWidth > 960)) out.push(issue(tree, ['ui', 'layout', 'inspectorWidth'], localize('Inspector width must be an integer from 240 to 960.')));
     const secretNames = new Set<string>();
     const source = JSON.stringify(profile);
     for (const match of source.matchAll(/\$\{secret\.([A-Za-z0-9_-]+)\}/g)) if (match[1]) secretNames.add(match[1]);
     for (const name of secretNames) if (selectedEnvironment && !selectedEnvironment.secretReferences?.[name]) out.push(issue(tree, [], localize('Secret reference "{name}" is not declared by environment "{environment}".', { name, environment: selectedEnvironment.id })));
-    const actionIds = new Set(['message.copy', 'message.retry', 'message.editAndResend', 'message.inspectRaw', 'request.send', 'request.abort', 'request.resend', 'conversation.new', 'conversation.clear', 'input.fill', 'followup.send', 'citation.open', 'uri.open', 'event.inspect', 'run.export', 'form.open', 'form.submit', 'form.cancel', 'vscodeCommand.invoke']);
-    for (const actionId of profile.ui?.messageActions ?? []) if (!actionIds.has(actionId)) out.push(issue(tree, ['ui', 'messageActions'], localize('Unknown action id: {id}.', { id: actionId })));
+    const messageActionIds = new Set(['message.copy', 'message.retry', 'message.editAndResend', 'message.inspectRaw']);
+    const actionIds = new Set([...messageActionIds, 'request.send', 'request.abort', 'request.resend', 'conversation.new', 'conversation.clear', 'input.fill', 'followup.send', 'citation.open', 'uri.open', 'event.inspect', 'run.export', 'form.open', 'form.submit', 'form.cancel', 'vscodeCommand.invoke']);
+    for (const actionId of profile.ui?.messageActions ?? []) if (!messageActionIds.has(actionId)) out.push(issue(tree, ['ui', 'messageActions'], localize('Unknown action id: {id}.', { id: actionId })));
     const declaredActionIds = profile.stream.mappings.flatMap((mapping) => { const action = mapping.emit.action; return action && typeof action === 'object' && typeof (action as Record<string, unknown>).id === 'string' ? [(action as Record<string, unknown>).id as string] : []; });
     for (const duplicate of duplicates(declaredActionIds)) out.push(issue(tree, ['stream', 'mappings'], localize('Duplicate action id: {id}.', { id: duplicate })));
     profile.stream.mappings.forEach((mapping, index) => {

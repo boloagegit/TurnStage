@@ -1,29 +1,10 @@
 import * as vscode from 'vscode';
 import { ProfileRepository, type ProfileEntry, type ProfileScope } from '../config/profileRepository';
-import type { WorkspaceSection } from '../../shared/protocol';
-
-/**
- * The sections exposed by a profile in the native VS Code tree. Keep these
- * identifiers aligned with SettingsWorkspace so a tree selection can be
- * forwarded to the editor without another translation layer.
- */
-export const PROFILE_SECTIONS = [
-  { id: 'test', label: 'Test', icon: 'beaker' },
-  { id: 'general', label: 'General', icon: 'settings' },
-  { id: 'opening-flow', label: 'Opening & Flow', icon: 'play-circle' },
-  { id: 'request', label: 'Request', icon: 'send' },
-  { id: 'stream-mapping', label: 'Stream & Mapping', icon: 'radio-tower' },
-  { id: 'chat-ui', label: 'Chat UI', icon: 'comment-discussion' },
-  { id: 'history-errors', label: 'History & Errors', icon: 'history' },
-  { id: 'security', label: 'Security', icon: 'shield' },
-] as const;
-
-export type ProfileSectionId = WorkspaceSection;
 
 export class ProfileTreeItem extends vscode.TreeItem {
   override readonly contextValue = 'turnstageProfile';
   constructor(readonly entry: ProfileEntry) {
-    super(entry.profile?.name ?? vscode.workspace.asRelativePath(entry.uri), vscode.TreeItemCollapsibleState.Collapsed);
+    super(entry.profile?.name ?? vscode.workspace.asRelativePath(entry.uri), vscode.TreeItemCollapsibleState.None);
     this.id = entry.uri.toString();
     this.description = entry.overridden ? vscode.l10n.t('Overridden') : entry.profile?.environment ?? 'Invalid';
     this.resourceUri = entry.uri;
@@ -47,23 +28,7 @@ export class ProfileScopeTreeItem extends vscode.TreeItem {
   }
 }
 
-export class ProfileSectionTreeItem extends vscode.TreeItem {
-  override readonly contextValue = 'turnstageProfileSection';
-
-  constructor(readonly profileUri: vscode.Uri, readonly section: typeof PROFILE_SECTIONS[number]) {
-    super(section.label, vscode.TreeItemCollapsibleState.None);
-    this.id = `${profileUri.toString()}#${section.id}`;
-    this.iconPath = new vscode.ThemeIcon(section.icon);
-    this.tooltip = `${section.label} settings`;
-    this.command = {
-      command: 'turnstage.openProfileSection',
-      title: `Open ${section.label}`,
-      arguments: [profileUri, section.id],
-    };
-  }
-}
-
-export type ProfileTreeNode = ProfileScopeTreeItem | ProfileTreeItem | ProfileSectionTreeItem;
+export type ProfileTreeNode = ProfileScopeTreeItem | ProfileTreeItem;
 
 export class ProfileTreeProvider implements vscode.TreeDataProvider<ProfileTreeNode>, vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<ProfileTreeNode | undefined>();
@@ -81,7 +46,6 @@ export class ProfileTreeProvider implements vscode.TreeDataProvider<ProfileTreeN
   }
   getTreeItem(element: ProfileTreeNode): vscode.TreeItem { return element; }
   async getChildren(element?: ProfileTreeNode): Promise<ProfileTreeNode[]> {
-    if (element instanceof ProfileTreeItem) return PROFILE_SECTIONS.map((section) => new ProfileSectionTreeItem(element.entry.uri, section));
     if (element instanceof ProfileScopeTreeItem) return this.entries.filter((entry) => entry.scope === element.scope).map((entry) => new ProfileTreeItem(entry));
     if (element) return [];
     this.entries = await this.repository.discover();

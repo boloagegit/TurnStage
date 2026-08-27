@@ -13,22 +13,22 @@
   line-height: 1.45;
 }
 .settings-header { display: flex; align-items: center; justify-content: space-between; gap: var(--ts-space-3); min-height: calc(var(--ts-control-height) + var(--ts-space-1)); padding: var(--ts-space-1) var(--ts-space-2) var(--ts-space-1) var(--ts-space-4); border-bottom: 1px solid var(--vscode-editorGroup-border); background: var(--vscode-editor-background); }
-.settings-title-block { min-width: 0; }
-.settings-breadcrumb, .settings-subtitle { display: flex; align-items: center; gap: var(--ts-space-1); margin: 0; }
-.settings-breadcrumb { font-size: .923em; }.settings-breadcrumb span { color: var(--vscode-descriptionForeground); }
+.settings-title-block { display: grid; gap: 1px; min-width: 0; }
+.settings-surface-title { margin: 0; color: var(--vscode-editor-foreground); font-size: .923em; font-weight: 600; line-height: 1.35; }
+.settings-subtitle { display: flex; align-items: center; gap: var(--ts-space-1); min-width: 0; margin: 0; }
 .settings-subtitle { margin-top: 1px; overflow: hidden; color: var(--vscode-descriptionForeground); font-size: .769em; white-space: nowrap; }
 .settings-subtitle code, .settings-section-count code { font-family: var(--vscode-editor-font-family); }
 .settings-header-actions, .settings-actions { display: flex; align-items: center; gap: var(--ts-space-1); }.settings-header-actions button { min-height: var(--ts-control-height); }
 .settings-main { min-height: 0; overflow: auto; }
 .settings-panel { width: min(100%, 75em); min-height: 100%; padding: var(--ts-space-5) calc(var(--ts-space-5) + var(--ts-space-3)) calc(var(--ts-space-5) + var(--ts-space-5)); outline: 0; }
 .settings-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--ts-space-5); padding-bottom: var(--ts-space-4); border-bottom: 1px solid var(--vscode-settings-headerBorder, var(--vscode-editorGroup-border)); }
-.settings-panel-title { display: flex; align-items: center; gap: var(--ts-space-2); }.settings-panel-heading h1 { margin: 0; font-size: 1.538em; font-weight: 400; line-height: 1.35; }
-.settings-help { display: inline-grid; place-items: center; color: var(--vscode-descriptionForeground); cursor: help; }.settings-help .product-icon { width: 1em; height: 1em; }
+.settings-panel-title { display: grid; gap: 2px; min-width: 0; }.settings-panel-heading h1 { margin: 0; font-size: 1.538em; font-weight: 400; line-height: 1.35; }
+.settings-section-description, .settings-card-description { margin: 0; color: var(--vscode-descriptionForeground); font-size: .846em; line-height: 1.4; }
 .settings-section-count { flex: 0 0 auto; padding: 2px calc(var(--ts-space-1) + 2px); border: 1px solid var(--vscode-badge-background); border-radius: 2px; color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); font-size: .769em; }
 .settings-section-stack { display: grid; gap: 0; }
 .settings-card, .settings-editor-frame { padding: calc(var(--ts-space-4) + 2px) 0; border: 0; border-bottom: 1px solid var(--vscode-settings-rowHoverBackground, var(--vscode-editorGroup-border)); background: var(--vscode-editor-background); }
-.settings-card-heading { display: flex; align-items: center; gap: var(--ts-space-1); margin-bottom: var(--ts-space-3); }.settings-card-heading h3 { margin: 0; font-size: 1em; font-weight: 600; }
-.settings-editor-note span { margin: 2px 0 0; color: var(--vscode-descriptionForeground); }.settings-editor-note { display: grid; gap: 2px; margin-bottom: var(--ts-space-3); }
+.settings-card-heading { display: flex; align-items: flex-start; gap: var(--ts-space-1); margin-bottom: var(--ts-space-3); }.settings-card-heading > div { min-width: 0; }.settings-card-heading h3 { margin: 0; font-size: 1em; font-weight: 600; }
+.settings-editor-note { display: grid; gap: 2px; margin-bottom: var(--ts-space-3); }
 .settings-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ts-space-4) calc(var(--ts-space-5) + var(--ts-space-1)); }
 .settings-field { display: grid; align-content: start; gap: var(--ts-space-1); min-width: 0; }.settings-field-wide { grid-column: 1 / -1; }
 .settings-field > label, .settings-checkbox-group legend { font-weight: 600; }.settings-field input, .settings-field select, .settings-field textarea { max-width: 640px; }.settings-field-wide input, .settings-field-wide select, .settings-field-wide textarea { max-width: none; }

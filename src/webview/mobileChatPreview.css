@@ -10,6 +10,7 @@
   --mcp-button-background: var(--vscode-button-background);
   --mcp-button-foreground: var(--vscode-button-foreground);
   --mcp-button-hover: var(--vscode-button-hoverBackground);
+  --mcp-disabled-foreground: var(--vscode-disabledForeground, var(--vscode-icon-foreground, var(--mcp-muted)));
   --mcp-danger-background: var(--vscode-inputValidation-errorBackground);
   --mcp-danger-border: var(--vscode-inputValidation-errorBorder);
   --mcp-danger-foreground: var(--vscode-errorForeground);
@@ -34,7 +35,6 @@
   overflow: hidden;
   color: var(--mcp-foreground);
   background: var(--mcp-background);
-  color-scheme: light dark;
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size, 13px);
   font-weight: var(--vscode-font-weight, normal);
@@ -235,6 +235,13 @@
 
 .mobile-chat-preview__state--failed {
   color: var(--mcp-danger-foreground);
+}
+
+.mobile-chat-preview__state .product-icon {
+  width: .75em;
+  height: .75em;
+  flex-basis: .75em;
+  font-size: .75em;
 }
 
 .mobile-chat-preview__content {
@@ -476,10 +483,20 @@
 .mobile-chat-preview__message--user .mobile-chat-preview__message-body { grid-column: 1; }
 
 .mobile-chat-preview__message-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   color: var(--mcp-muted);
   font-size: .769em;
   font-weight: 400;
   white-space: nowrap;
+}
+
+.mobile-chat-preview__message-status .product-icon {
+  width: .7em;
+  height: .7em;
+  flex-basis: .7em;
+  font-size: .7em;
 }
 
 .mobile-chat-preview__message-status--failed,
@@ -704,43 +721,68 @@
 }
 
 .mobile-chat-preview__composer {
-  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--mcp-space-1);
-  align-items: end;
   margin: 0 var(--mcp-space-3) max(var(--mcp-space-3), env(safe-area-inset-bottom));
-  padding: var(--mcp-space-1);
+}
+
+.mobile-chat-preview__composer-control {
+  position: relative;
   border: 1px solid var(--vscode-input-border, var(--mcp-border));
-  border-radius: 8px;
+  border-radius: 9px;
   background: var(--vscode-input-background, var(--mcp-background));
 }
 
-.mobile-chat-preview__composer textarea {
+.mobile-chat-preview__composer textarea,
+.mobile-chat-preview__composer input[type='text'] {
   min-height: calc(var(--mcp-control-height) + var(--mcp-space-1));
   max-height: 10.75em;
-  padding: var(--mcp-space-2);
+  padding-block: var(--mcp-space-2);
+  padding-inline: var(--mcp-space-2) calc(var(--mcp-control-height) + var(--mcp-space-4));
   border: 0;
   background: transparent;
   line-height: 1.4;
+  resize: none;
 }
 
-.mobile-chat-preview__composer:focus-within { border-color: var(--mcp-focus); }
+.mobile-chat-preview__composer-control--without-action textarea,
+.mobile-chat-preview__composer-control--without-action input[type='text'] {
+  padding-inline-end: var(--mcp-space-2);
+}
 
-.mobile-chat-preview__composer textarea:focus-visible { outline: 0; }
+.mobile-chat-preview__composer-control:focus-within { border-color: var(--mcp-focus); }
+
+.mobile-chat-preview__composer textarea:focus-visible,
+.mobile-chat-preview__composer input[type='text']:focus-visible { outline: 0; }
 
 .mobile-chat-preview__send {
+  position: absolute;
+  z-index: 1;
+  inset-inline-end: var(--mcp-space-1);
+  bottom: var(--mcp-space-1);
   display: grid;
   place-items: center;
-  width: calc(var(--mcp-control-height) + var(--mcp-space-2));
-  min-width: calc(var(--mcp-control-height) + var(--mcp-space-2));
-  height: calc(var(--mcp-control-height) + var(--mcp-space-2));
+  width: var(--mcp-control-height);
+  min-width: var(--mcp-control-height);
+  min-height: var(--mcp-control-height);
+  height: var(--mcp-control-height);
   padding: 0;
-  border-radius: 5px;
+  border-radius: 50%;
+}
+
+.mobile-chat-preview__send .product-icon {
+  color: currentColor;
+  font-size: var(--vscode-codiconFontSize, 16px);
+}
+
+.mobile-chat-preview__composer .mobile-chat-preview__send:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: var(--mcp-disabled-foreground);
+  opacity: 1;
 }
 
 .mobile-chat-preview__composer-hint {
-  grid-column: 1 / -1;
   color: var(--mcp-muted);
   font-size: .769em;
   line-height: 1.35;

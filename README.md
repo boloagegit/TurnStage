@@ -372,6 +372,8 @@ scenarios. Observed results and their environment are recorded in
 - Raw-event mapping and normalized events: `docs/event-mapping.md`
 - Security, trust, secrets, and redaction: `docs/security.md`
 - Performance budgets and measurement plan: `docs/performance.md`
+- Required VS Code UI review standard: `docs/vscode-extension-ui-guidelines.md`
+- Current VS Code UI audit: `docs/vscode-ui-audit-2026-08-27.md`
 
 ## Scope boundaries
 

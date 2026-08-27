@@ -14,6 +14,7 @@ import type {
 } from '../shared/types';
 import { formatNumber, t } from './i18n';
 import { IconButton, ProductIcon } from './Icon';
+import { resolveComposer, resolveMessageActions } from './uiConfig';
 import './mobileChatPreview.css';
 
 /** The viewport presets used by the preview device. */
@@ -168,7 +169,7 @@ function MobileAppHeader({ profile, snapshot, active }: { profile: TurnStageProf
       <strong>{profile.name}</strong>
       <span>{profile.environment ?? t('No environment')} · {humanize(state)}</span>
     </div>
-    <span className={`mobile-chat-preview__state mobile-chat-preview__state--${state}`} aria-label={t('Conversation status: {status}', { status: humanize(state) })}><span aria-hidden="true">●</span></span>
+    <span className={`mobile-chat-preview__state mobile-chat-preview__state--${state}`} aria-label={t('Conversation status: {status}', { status: humanize(state) })}><ProductIcon name="circle-filled" /></span>
   </header>;
 }
 
@@ -234,28 +235,35 @@ function StarterButton({ starter, active, setDraft, send, post }: { starter: Sta
 function MobileComposer({ profile, active, stopping, continuationBlocked, draft, setDraft, send, post }: { profile: TurnStageProfile; active: boolean; stopping: boolean; continuationBlocked: boolean; draft: string; setDraft: SetDraft; send: SendMessage; post: PostMessage }): React.JSX.Element {
   const composing = useRef(false);
   const inputId = useId();
-  const placeholder = profile.ui?.composer?.placeholder ?? t('Message TurnStage…');
+  const composer = resolveComposer(profile.ui);
+  const placeholder = composer.placeholder || t('Message TurnStage…');
   const composerLocked = interactionLocked(profile, 'composer', active);
   const canSend = !active && !continuationBlocked && !composerLocked;
+  const showAction = !active || composer.showStopWhileStreaming;
   const submit = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
     if (active) {
-      if (!stopping) post({ type: 'request.abort' });
+      if (composer.showStopWhileStreaming && !stopping) post({ type: 'request.abort' });
     } else if (canSend && draft.trim()) send();
   };
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.nativeEvent.isComposing || composing.current) return;
-    const behavior = event.shiftKey ? profile.ui?.composer?.shiftEnterBehavior ?? 'newline' : profile.ui?.composer?.enterBehavior ?? 'send';
-    if (behavior === 'send' && (active || canSend) && (active || draft.trim())) {
+    const behavior = composer.multiline ? (event.shiftKey ? composer.shiftEnterBehavior : composer.enterBehavior) : 'send';
+    const canSubmit = active ? composer.showStopWhileStreaming && !stopping : canSend && Boolean(draft.trim());
+    if (behavior === 'send' && canSubmit) {
       event.preventDefault();
       submit();
     }
   };
   const inputDisabled = continuationBlocked || (active && composerLocked);
   return <form className="mobile-chat-preview__composer" onSubmit={submit}>
-    <label className="mobile-chat-preview__sr-only" htmlFor={inputId}>{t('Message')}</label>
-    <textarea id={inputId} rows={1} value={draft} placeholder={placeholder} disabled={inputDisabled} aria-describedby={continuationBlocked ? `${inputId}-blocked` : undefined} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={onKeyDown} />
-    <button className={`mobile-chat-preview__send mobile-chat-preview__button ${active ? 'mobile-chat-preview__button--danger' : 'mobile-chat-preview__button--primary'}`} type="submit" disabled={active ? stopping : !draft.trim() || !canSend} aria-label={active ? (stopping ? t('Stopping…') : t('Stop response')) : t('Send message')} title={active ? (stopping ? t('Stopping…') : t('Stop response')) : t('Send message')}><ProductIcon name={active ? 'stop' : 'send'} /></button>
+    <div className={`mobile-chat-preview__composer-control ${showAction ? '' : 'mobile-chat-preview__composer-control--without-action'}`.trim()}>
+      <label className="mobile-chat-preview__sr-only" htmlFor={inputId}>{t('Message')}</label>
+      {composer.multiline
+        ? <textarea id={inputId} rows={1} value={draft} placeholder={placeholder} disabled={inputDisabled} aria-describedby={continuationBlocked ? `${inputId}-blocked` : undefined} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={onKeyDown} />
+        : <input id={inputId} type="text" value={draft} placeholder={placeholder} disabled={inputDisabled} aria-describedby={continuationBlocked ? `${inputId}-blocked` : undefined} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={onKeyDown} />}
+      {showAction && <button className={`mobile-chat-preview__send mobile-chat-preview__button ${active ? 'mobile-chat-preview__button--danger' : 'mobile-chat-preview__button--primary'}`} type="submit" disabled={active ? stopping : !draft.trim() || !canSend} aria-label={active ? (stopping ? t('Stopping…') : t('Stop response')) : t('Send message')} title={active ? (stopping ? t('Stopping…') : t('Stop response')) : t('Send message')}><ProductIcon name={active ? 'stop' : 'send'} /></button>}
+    </div>
     {continuationBlocked && <span id={`${inputId}-blocked`} className="mobile-chat-preview__composer-hint">{t('Start a new conversation to continue.')}</span>}
   </form>;
 }
@@ -269,18 +277,14 @@ function MobileMessage({ profile, message, post, send, setDraft, selected, onSel
   const roleLabel = humanizeRole(message.role);
   const statusLabel = humanize(message.status);
   const messageLabelValues = { role: roleLabel, status: statusLabel };
+  const messageActions = resolveMessageActions(profile, message.role, Boolean(onSelectMessage));
   const onMessageClick = (event: React.MouseEvent<HTMLElement>) => {
     if (!onSelectMessage) return;
     const target = event.target;
     if (target instanceof HTMLElement && target.closest('button, a, input, select, textarea, summary, form')) return;
     onSelectMessage(message.id);
   };
-  const onMessageKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (!onSelectMessage || event.target !== event.currentTarget || !['Enter', ' '].includes(event.key)) return;
-    event.preventDefault();
-    onSelectMessage(message.id);
-  };
-  return <article className={`mobile-chat-preview__message mobile-chat-preview__message--${message.role} ${selected ? 'mobile-chat-preview__message--selected' : ''}`} data-message-id={message.id} data-status={message.status} data-selected={selected ? 'true' : 'false'} aria-label={t('{role} message, {status}', messageLabelValues)} tabIndex={onSelectMessage ? 0 : undefined} onClick={onMessageClick} onKeyDown={onMessageKeyDown}>
+  return <article className={`mobile-chat-preview__message mobile-chat-preview__message--${message.role} ${selected ? 'mobile-chat-preview__message--selected' : ''}`} data-message-id={message.id} data-status={message.status} data-selected={selected ? 'true' : 'false'} aria-label={t('{role} message, {status}', messageLabelValues)} onClick={onMessageClick}>
     {message.role !== 'user' && <span className="mobile-chat-preview__message-avatar" aria-hidden="true">{profile.name.trim().charAt(0).toUpperCase() || 'T'}</span>}
     <span className="mobile-chat-preview__message-heading"><strong>{roleLabel}</strong><MessageStatus state={message.status} /></span>
     <div className="mobile-chat-preview__message-body">
@@ -288,10 +292,15 @@ function MobileMessage({ profile, message, post, send, setDraft, selected, onSel
       {componentVisible(profile, 'citations') && citations.length > 0 && <CitationList profile={profile} citations={citations} post={post} />}
       {componentVisible(profile, 'responseActions') && message.status === 'completed' && actions.length > 0 && <div className="mobile-chat-preview__action-row" aria-label={t('Response actions')}>{actions.map((action) => <button className={`mobile-chat-preview__button ${action.appearance === 'primary' ? 'mobile-chat-preview__button--primary' : ''}`} type="button" title={action.tooltip} key={action.id} onClick={() => post({ type: 'action.invoke', actionId: action.actionId, sourceMessageId: message.id })}>{action.label}</button>)}</div>}
       {componentVisible(profile, 'followups') && message.status === 'completed' && followups.length > 0 && <div className="mobile-chat-preview__followups" aria-label={t('Follow-up questions')}>{followups.slice(0, 3).map((followup) => <button className="mobile-chat-preview__chip" type="button" title={followup.tooltip} key={followup.id} onClick={() => invokeFollowup(followup, message.id, setDraft, send, post)}>{followup.label}</button>)}</div>}
-      <footer className="mobile-chat-preview__message-toolbar">
-        <IconButton icon="copy" label={t('Copy')} type="button" onClick={() => post({ type: 'action.invoke', actionId: 'message.copy', sourceMessageId: message.id })} />
-        {message.role === 'assistant' && <><IconButton icon="refresh" label={t('Retry')} type="button" onClick={() => post({ type: 'action.invoke', actionId: 'message.retry', sourceMessageId: message.id })} /><IconButton icon="edit" label={t('Edit & resend')} type="button" onClick={() => setDraft(text)} /></>}
-      </footer>
+      {messageActions.length > 0 && <footer className="mobile-chat-preview__message-toolbar">
+        {messageActions.map((actionId) => actionId === 'message.inspectRaw'
+          ? <IconButton key={actionId} icon="target" label={t('Inspect message')} type="button" aria-pressed={selected} onClick={() => onSelectMessage?.(message.id)} />
+          : actionId === 'message.copy'
+            ? <IconButton key={actionId} icon="copy" label={t('Copy')} type="button" onClick={() => post({ type: 'action.invoke', actionId, sourceMessageId: message.id })} />
+            : actionId === 'message.retry'
+              ? <IconButton key={actionId} icon="refresh" label={t('Retry')} type="button" onClick={() => post({ type: 'action.invoke', actionId, sourceMessageId: message.id })} />
+              : <IconButton key={actionId} icon="edit" label={t('Edit & resend')} type="button" onClick={() => setDraft(text)} />)}
+      </footer>}
     </div>
   </article>;
 }
@@ -397,7 +406,7 @@ function invokeFollowup(followup: NonNullable<ChatMessage['followups']>[number],
 }
 
 function MessageStatus({ state }: { state: string }): React.JSX.Element {
-  return <span className={`mobile-chat-preview__message-status mobile-chat-preview__message-status--${state}`}><span aria-hidden="true">●</span> {humanize(state)}</span>;
+  return <span className={`mobile-chat-preview__message-status mobile-chat-preview__message-status--${state}`}><ProductIcon name="circle-filled" /> {humanize(state)}</span>;
 }
 
 function componentVisible(profile: TurnStageProfile, name: string): boolean {

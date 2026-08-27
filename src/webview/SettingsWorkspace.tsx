@@ -50,13 +50,15 @@ export function SettingsWorkspace({
   const patch = (path: PatchPath, value: unknown) => post({ type: 'profile.patch', path, value });
 
   const active = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0];
-  return <main className="settings-workspace" aria-labelledby="settings-workspace-title">
-    <header className="settings-header" aria-label={t('Settings toolbar')}>
+  const sectionTitleId = `profile-configuration-section-title-${active.id}`;
+  const sectionDescriptionId = `profile-configuration-section-description-${active.id}`;
+  return <div className="settings-workspace">
+    <header className="settings-header" aria-label={t('Profile configuration toolbar')}>
       <div className="settings-title-block">
-        <p className="settings-breadcrumb"><span>{t('Settings')}</span><span aria-hidden="true">›</span><strong>{t(active.label)}</strong></p>
+        <p id="profile-configuration-title" className="settings-surface-title">{t('Profile Configuration')}</p>
         <p className="settings-subtitle"><span>{profile.name || t('Untitled profile')}</span><span aria-hidden="true">·</span><code>{profile.id}</code><span aria-hidden="true">·</span><span>{profile.environment || t('No environment selected')}</span></p>
       </div>
-      <div className="settings-header-actions" aria-label={t('Profile actions')}>
+      <div className="settings-header-actions" aria-label={t('Profile configuration actions')}>
         <IconButton icon="file-code" label={t('Open JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
         <IconButton icon="check" label={t('Validate')} type="button" className="settings-primary-action" onClick={() => post({ type: 'profile.validate' })} />
       </div>
@@ -66,14 +68,16 @@ export function SettingsWorkspace({
       <section
         id={`settings-panel-${active.id}`}
         className="settings-panel"
-        aria-labelledby="settings-workspace-title"
+        aria-labelledby={sectionTitleId}
+        aria-describedby={sectionDescriptionId}
         tabIndex={-1}
       >
         <div className="settings-panel-heading">
-          <div>
-            <div className="settings-panel-title"><h1 id="settings-workspace-title">{t(active.label)}</h1><span className="settings-help" title={t(active.description)} aria-label={t(active.description)}><ProductIcon name="info" /></span></div>
+          <div className="settings-panel-title">
+            <h1 id={sectionTitleId}>{t(active.label)}</h1>
+            <p id={sectionDescriptionId} className="settings-section-description">{t(active.description)}</p>
           </div>
-          <span className="settings-section-count" title={profile.id}>{t('Profile')} <code>{profile.id}</code></span>
+          <span className="settings-section-count">{t('Profile')} <code>{profile.id}</code></span>
         </div>
         {active.id === 'general' && <GeneralSection profile={profile} snapshot={snapshot} post={post} patch={patch} />}
         {active.id === 'opening-flow' && <OpeningFlowSection profile={profile} post={post} />}
@@ -84,7 +88,7 @@ export function SettingsWorkspace({
         {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} />}
       </section>
     </div>
-  </main>;
+  </div>;
 }
 
 function GeneralSection({ profile, snapshot, post, patch }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; post: SettingsWorkspacePost; patch: (path: PatchPath, value: unknown) => void }): React.JSX.Element {
@@ -93,7 +97,7 @@ function GeneralSection({ profile, snapshot, post, patch }: { profile: TurnStage
     <section className="settings-card" aria-labelledby="general-profile-heading">
       <SectionHeading id="general-profile-heading" title={t('Profile details')} description={t('These values identify the profile in the tree view and in request context.')} />
       <div className="settings-form-grid">
-        <SettingField label={t('Display name')} id="settings-profile-name" hint={t('Shown at the top of this settings page.')}>
+        <SettingField label={t('Display name')} id="settings-profile-name" hint={t('Shown at the top of this profile configuration.')}>
           <PatchInput id="settings-profile-name" value={profile.name} onCommit={(value) => patch(['name'], value)} required autoComplete="off" />
         </SettingField>
         <SettingField label={t('Profile ID')} id="settings-profile-id" hint={t('The ID is stable and is used for local run storage.')}>
@@ -131,7 +135,7 @@ function GeneralSection({ profile, snapshot, post, patch }: { profile: TurnStage
 
 function OpeningFlowSection({ profile, post }: { profile: TurnStageProfile; post: SettingsWorkspacePost }): React.JSX.Element {
   return <div className="settings-editor-frame">
-    <div className="settings-editor-note"><strong>{t('Flow editor')}</strong><span>{t('Opening, request variants, stop behavior, recovery, and local retention stay in sync with the profile document.')}</span></div>
+    <div className="settings-editor-note"><strong>{t('Flow editor')}</strong></div>
     <FlowEditor profile={profile} post={post} />
   </div>;
 }
@@ -206,7 +210,7 @@ function StreamMappingSection({ profile, snapshot, mappingTestResult, post, patc
       </div>
     </section>
     <section className="settings-editor-frame" aria-labelledby="mapping-editor-heading">
-      <div className="settings-editor-note"><strong id="mapping-editor-heading">{t('Mapping rules')}</strong><span>{t('Rules run from top to bottom. Test a sample event before sending a live request.')}</span></div>
+      <div className="settings-editor-note"><strong id="mapping-editor-heading">{t('Mapping rules')}</strong></div>
       <EventsEditor profile={profile} post={post} mappingTestResult={mappingTestResult} />
     </section>
   </div>;
@@ -214,7 +218,7 @@ function StreamMappingSection({ profile, snapshot, mappingTestResult, post, patc
 
 function ChatUiSection({ profile, post }: { profile: TurnStageProfile; post: SettingsWorkspacePost }): React.JSX.Element {
   return <div className="settings-editor-frame">
-    <div className="settings-editor-note"><strong>{t('Chat UI editor')}</strong><span>{t('Layout, composer behavior, visible response surfaces, and active-turn locks are stored in the profile.')}</span></div>
+    <div className="settings-editor-note"><strong>{t('Chat UI editor')}</strong></div>
     <UiConfigEditor profile={profile} post={post} />
   </div>;
 }
@@ -261,7 +265,7 @@ function SecuritySection({ profile, snapshot, remoteName, patch }: { profile: Tu
     <section className="settings-card" aria-labelledby="security-trust-heading">
       <SectionHeading id="security-trust-heading" title={t('Workspace trust')} description={t('Network requests and privileged actions are owned and checked by the Extension Host.')} />
       <div className={`settings-trust-card ${snapshot?.trusted === false ? 'is-restricted' : ''}`} role="status">
-        <span className="settings-trust-icon" aria-hidden="true">{snapshot?.trusted === false ? '!' : '✓'}</span>
+        <ProductIcon name={snapshot?.trusted === false ? 'warning' : 'check'} className="settings-trust-icon" />
         <div><strong>{t(snapshot?.trusted === false ? 'Restricted workspace' : 'Workspace trust is available')}</strong><p>{snapshot?.trusted === false ? t('Request-backed openings and conversation requests are disabled until this workspace is trusted.') : t('Host: {host}. URI and command policies still apply.', { host: remoteName || t('Local Extension Host') })}</p></div>
       </div>
     </section>
@@ -279,7 +283,7 @@ function SecuritySection({ profile, snapshot, remoteName, patch }: { profile: Tu
 }
 
 function SectionHeading({ id, title, description }: { id: string; title: string; description: string }): React.JSX.Element {
-  return <div className="settings-card-heading"><h3 id={id}>{title}</h3><span className="settings-help" title={description} aria-label={description}><ProductIcon name="info" /></span></div>;
+  return <div className="settings-card-heading"><div><h3 id={id}>{title}</h3><p className="settings-card-description">{description}</p></div></div>;
 }
 
 function SettingField({ label, id, hint, error, wide, children }: { label: string; id: string; hint?: string; error?: string; wide?: boolean; children: React.ReactNode }): React.JSX.Element {

@@ -8,7 +8,6 @@ import { TurnStageEditorProvider } from './editors/turnstageEditorProvider';
 import { SecretService } from './security/security';
 import { isWorkspaceSection, type WorkspaceSection } from '../shared/protocol';
 import {
-  ProfileSectionTreeItem,
   ProfileScopeTreeItem,
   ProfileTreeItem,
   ProfileTreeProvider,
@@ -56,16 +55,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await refreshProfileState();
   });
   command('openProfile', async (item?: ProfileTreeItem | vscode.Uri) => openProfile(asUri(item)));
-  command('openProfileSection', async (value?: ProfileTreeItem | ProfileSectionTreeItem | vscode.Uri, section?: unknown) => {
+  command('openProfileSection', async (value?: ProfileTreeItem | vscode.Uri, section?: unknown) => {
     const uri = asUri(value);
-    const sectionId = isProfileSectionId(section) ? section : value instanceof ProfileSectionTreeItem ? value.section.id : undefined;
+    const sectionId = isProfileSectionId(section) ? section : undefined;
     if (!uri || !sectionId) return;
     await openProfileSection(editor, uri, sectionId);
   });
   command('runProfile', async (item?: ProfileTreeItem | vscode.Uri) => { let uri = asUri(item); if (!uri) uri = vscode.Uri.parse('turnstage-demo:/basic-sse-chat.turnstage.jsonc'); await openProfile(uri); setTimeout(() => void vscode.commands.executeCommand('turnstage.startSession', uri), 250); });
   command('startSession', async (item?: ProfileTreeItem | vscode.Uri) => { const controller = editor.getController(asUri(item) ?? vscode.window.activeTextEditor?.document.uri); if (!controller || !canStartNetwork(controller.profile.opening?.mode)) return; await controller.startSession(); });
   command('abortRequest', async (item?: ProfileTreeItem | vscode.Uri) => editor.getController(asUri(item))?.abort());
-  command('newConversation', async (item?: ProfileTreeItem | vscode.Uri) => { const controller = editor.getController(asUri(item)); if (!controller || !canStartNetwork(controller.profile.opening?.mode)) return; await controller.newConversation(); });
+  command('newConversation', async (item?: ProfileTreeItem | vscode.Uri) => { const controller = editor.getController(asUri(item) ?? activeCustomEditorUri()); if (!controller || !canStartNetwork(controller.profile.opening?.mode)) return; await controller.newConversation(); });
   command('clearConversation', (item?: ProfileTreeItem | vscode.Uri) => editor.getController(asUri(item))?.clearConversation());
   command('openAsText', async (item?: ProfileTreeItem | vscode.Uri) => { const uri = asUri(item) ?? activeCustomEditorUri(); if (uri) await vscode.commands.executeCommand('vscode.openWith', uri, 'default'); });
   command('validateProfile', async (item?: ProfileTreeItem | vscode.Uri) => { await validateUri(asUri(item), diagnostics); await duplicateDiagnostics.refresh(); });
@@ -94,9 +93,8 @@ function canStartNetwork(openingMode: string | undefined): boolean {
   return requireWorkspaceTrust();
 }
 
-function asUri(value?: ProfileTreeItem | ProfileSectionTreeItem | vscode.Uri): vscode.Uri | undefined {
+function asUri(value?: ProfileTreeItem | vscode.Uri): vscode.Uri | undefined {
   if (value instanceof vscode.Uri) return value;
-  if (value instanceof ProfileSectionTreeItem) return value.profileUri;
   return value?.entry.uri;
 }
 

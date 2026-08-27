@@ -59,15 +59,13 @@ const mock = vi.hoisted(() => {
 vi.mock('vscode', () => mock);
 
 import {
-  PROFILE_SECTIONS,
-  ProfileSectionTreeItem,
   ProfileScopeTreeItem,
   ProfileTreeItem,
   ProfileTreeProvider,
 } from '../src/extension/views/profileTreeProvider';
 
 describe('ProfileTreeProvider', () => {
-  it('exposes the profile sections as native tree children', async () => {
+  it('keeps profiles as leaf resources instead of command-only section rows', async () => {
     const uri = new mock.Uri('/workspace/.vscode/turnstage/profiles/basic.turnstage.jsonc') as never;
     const entry = {
       uri,
@@ -82,26 +80,10 @@ describe('ProfileTreeProvider', () => {
     const profiles = await provider.getChildren(roots[0]);
     const profile = profiles[0];
     expect(profile).toBeInstanceOf(ProfileTreeItem);
-    expect(profile?.collapsibleState).toBe(mock.TreeItemCollapsibleState.Collapsed);
+    expect(profile?.collapsibleState).toBe(mock.TreeItemCollapsibleState.None);
 
     const children = await provider.getChildren(profile);
-    expect(children.map((item) => item.label)).toEqual(PROFILE_SECTIONS.map((section) => section.label));
-    expect(children.every((item) => item instanceof ProfileSectionTreeItem)).toBe(true);
-  });
-
-  it('opens each child with its profile URI and section id', () => {
-    const uri = new mock.Uri('/workspace/.vscode/turnstage/profiles/basic.turnstage.jsonc') as never;
-
-    for (const section of PROFILE_SECTIONS) {
-      const child = new ProfileSectionTreeItem(uri, section);
-      expect(child.contextValue).toBe('turnstageProfileSection');
-      expect(child.iconPath).toMatchObject({ id: section.icon });
-      expect(child.command).toEqual({
-        command: 'turnstage.openProfileSection',
-        title: `Open ${section.label}`,
-        arguments: [uri, section.id],
-      });
-    }
+    expect(children).toEqual([]);
   });
 
   it('returns an empty root so the native VS Code welcome view remains available', async () => {
