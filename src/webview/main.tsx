@@ -20,6 +20,7 @@ const vscode: VsCodeApi = typeof acquireVsCodeApi === 'function'
   ? acquireVsCodeApi<WebviewState>()
   : { postMessage: () => undefined, getState: () => undefined, setState: () => undefined };
 const savedState = vscode.getState();
+const savedSplitCustomized = savedState?.splitCustomized === true;
 const inspectorTabs = ['Request', 'Raw Events', 'Normalized', 'Metrics', 'Errors', 'Runs'] as const; type InspectorTab = typeof inspectorTabs[number];
 export const DEFAULT_SPLIT_PERCENT = 64;
 export const ACCESSIBLE_EVENT_WINDOW_SIZE = 200;
@@ -27,7 +28,7 @@ export const ACCESSIBLE_EVENT_WINDOW_SIZE = 200;
 function post(message: WebviewPayload): void { vscode.postMessage({ ...message, protocolVersion: PROTOCOL_VERSION, editorInstanceId: instanceId, requestId: crypto.randomUUID() }); }
 
 function App(): React.JSX.Element {
-  const [section, setSection] = useState<WorkspaceSection>(isWorkspaceSection(savedState?.section) ? savedState.section : 'test'); const [inspectorTab, setInspectorTab] = useState<InspectorTab>(savedState?.inspectorTab ?? 'Raw Events'); const [draft, setDraft] = useState(savedState?.draft ?? ''); const [splitPercent, setSplitPercent] = useState(clampSplit(savedState?.splitPercent ?? DEFAULT_SPLIT_PERCENT)); const [splitCustomized, setSplitCustomized] = useState(savedState?.splitCustomized ?? false); const [selectedMessageId, setSelectedMessageId] = useState(savedState?.selectedMessageId); const [selectedRawSequence, setSelectedRawSequence] = useState(savedState?.selectedRawSequence);
+  const [section, setSection] = useState<WorkspaceSection>(isWorkspaceSection(savedState?.section) ? savedState.section : 'test'); const [inspectorTab, setInspectorTab] = useState<InspectorTab>(savedState?.inspectorTab ?? 'Raw Events'); const [draft, setDraft] = useState(savedState?.draft ?? ''); const [splitPercent, setSplitPercent] = useState(initialSplitPercent(savedState?.splitPercent, savedSplitCustomized)); const [splitCustomized, setSplitCustomized] = useState(savedSplitCustomized); const [selectedMessageId, setSelectedMessageId] = useState(savedState?.selectedMessageId); const [selectedRawSequence, setSelectedRawSequence] = useState(savedState?.selectedRawSequence);
   const [profile, setProfile] = useState<TurnStageProfile>(); const [snapshot, setSnapshot] = useState<SessionSnapshot>(); const [runs, setRuns] = useState<LocalRun[]>([]); const [requestPreview, setRequestPreview] = useState<unknown>(); const [diagnostics, setDiagnostics] = useState<Array<{ severity: string; message: string }>>([]); const [notice, setNotice] = useState(''); const [mappingTestResult, setMappingTestResult] = useState<MappingTestResult>(); const [remoteName, setRemoteName] = useState<string>(); const [, setLocaleVersion] = useState(0);
   useEffect(() => { const listener = (event: MessageEvent<HostMessage>) => { if (!isHostMessage(event.data, instanceId)) return; const message = event.data; if (message.type === 'host.ready') { setLocale(message.locale, message.direction); setLocaleVersion((current) => current + 1); setRemoteName(message.remoteName); } else if (message.type === 'workspace.section') { setSection(message.section); requestAnimationFrame(() => document.getElementById('main-panel')?.focus()); } else if (message.type === 'profile.snapshot') setProfile(message.profile); else if (message.type === 'profile.validation') setDiagnostics(message.diagnostics); else if (message.type === 'session.snapshot') { setSnapshot(message.snapshot); setRuns(message.runs); setRequestPreview(message.requestPreview); } else if (message.type === 'mapping.test.result') setMappingTestResult(message.result); else if (message.type === 'request.error') setNotice(message.error.message); else if (message.type === 'run.exported') setNotice(t('Run exported to {path}', { path: message.path })); else if (message.type === 'workspaceTrust.changed') setSnapshot((current) => current ? { ...current, trusted: message.trusted } : current); }; window.addEventListener('message', listener); post({ type: 'webview.ready' }); return () => window.removeEventListener('message', listener); }, []);
   useEffect(() => { vscode.setState({ section, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence }); }, [section, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence]);
@@ -90,7 +91,7 @@ function TestWorkspace({ profile, snapshot, runs, active, continuationBlocked, d
   const previewRef = useRef<HTMLElement>(null);
   const layout = resolveUiLayout(profile.ui);
   const layoutSignature = `${layout.preset}:${layout.inspectorPosition}:${layout.inspectorWidth ?? 'auto'}`;
-  const hasConfiguredRightWidth = layout.inspectorPosition === 'right' && Boolean(layout.inspectorWidth);
+  const hasConfiguredRightWidth = layout.inspectorPosition === 'right' && layout.inspectorWidth !== undefined;
   const previousLayoutSignature = useRef(layoutSignature);
   useEffect(() => {
     if (previousLayoutSignature.current === layoutSignature) return;
@@ -100,13 +101,13 @@ function TestWorkspace({ profile, snapshot, runs, active, continuationBlocked, d
   useEffect(() => {
     const workspace = workspaceRef.current;
     const preview = previewRef.current;
-    if (!layout.showInspector || !workspace || !preview) return;
+    if (!layout.showInspector || !hasConfiguredRightWidth || splitCustomized || !workspace || !preview) return;
     const update = () => {
       const workspaceRect = workspace.getBoundingClientRect();
       const previewRect = preview.getBoundingClientRect();
-      const available = layout.inspectorPosition === 'right' ? workspaceRect.width : workspaceRect.height;
-      const occupied = layout.inspectorPosition === 'right' ? previewRect.width : previewRect.height;
-      if (layout.inspectorPosition === 'right' && previewRect.width >= workspaceRect.width - 1) return;
+      const available = workspaceRect.width;
+      const occupied = previewRect.width;
+      if (previewRect.width >= workspaceRect.width - 1) return;
       if (available) setSplitPercent(clampSplit((occupied / available) * 100));
     };
     update();
@@ -114,7 +115,7 @@ function TestWorkspace({ profile, snapshot, runs, active, continuationBlocked, d
     observer.observe(workspace);
     observer.observe(preview);
     return () => observer.disconnect();
-  }, [layout.inspectorPosition, layout.showInspector, layoutSignature, setSplitPercent]);
+  }, [hasConfiguredRightWidth, layout.showInspector, layoutSignature, setSplitPercent, splitCustomized]);
   const resizeFromPointer = (clientX: number, clientY: number) => {
     const rect = workspaceRef.current?.getBoundingClientRect();
     const available = layout.inspectorPosition === 'right' ? rect?.width : rect?.height;
@@ -137,11 +138,11 @@ function TestWorkspace({ profile, snapshot, runs, active, continuationBlocked, d
     window.addEventListener('pointercancel', stop, { once: true });
     window.addEventListener('blur', stop, { once: true });
   };
-  const inspectorSize = hasConfiguredRightWidth && !splitCustomized ? `${layout.inspectorWidth}px` : `${100 - splitPercent}%`;
+  const trackSizes = splitTrackSizes(splitPercent, hasConfiguredRightWidth ? layout.inspectorWidth : undefined, splitCustomized);
   const workspaceClassName = ['test-workspace', `test-workspace--${layout.preset}`, `test-workspace--inspector-${layout.inspectorPosition}`, layout.compact ? 'test-workspace--compact' : ''].filter(Boolean).join(' ');
   const decrementKey = layout.inspectorPosition === 'right' ? 'ArrowLeft' : 'ArrowUp';
   const incrementKey = layout.inspectorPosition === 'right' ? 'ArrowRight' : 'ArrowDown';
-  return <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-percent': `${splitPercent}%`, '--inspector-size': inspectorSize } as React.CSSProperties}>
+  return <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
     <section ref={previewRef} className="preview-pane" aria-label={t('Mobile chat preview')}>
       <MobileChatPreview profile={profile} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} selectedMessageId={selectedMessageId} onSelectMessage={onSelectMessage} />
     </section>
@@ -364,6 +365,16 @@ function isInteractionLocked(profile: TurnStageProfile, id: string, active: bool
 function componentVisible(profile: TurnStageProfile, name: string): boolean { return profile.ui?.components?.[name]?.visible !== false; }
 
 export function clampSplit(value: number): number { return Math.min(90, Math.max(10, Number.isFinite(value) ? value : DEFAULT_SPLIT_PERCENT)); }
+
+export function initialSplitPercent(savedPercent: number | undefined, splitCustomized: boolean): number {
+  return splitCustomized ? clampSplit(savedPercent ?? DEFAULT_SPLIT_PERCENT) : DEFAULT_SPLIT_PERCENT;
+}
+
+export function splitTrackSizes(splitPercent: number, inspectorWidth?: number, splitCustomized = false): { preview: string; inspector: string } {
+  const clamped = clampSplit(splitPercent);
+  if (!splitCustomized && Number.isFinite(inspectorWidth)) return { preview: '1fr', inspector: `${Math.round(inspectorWidth!)}px` };
+  return { preview: `${clamped}fr`, inspector: `${100 - clamped}fr` };
+}
 export function rawSequencesForMessage(message?: ChatMessage): number[] {
   return Array.isArray(message?.metadata?.rawSequences)
     ? message.metadata.rawSequences.filter((value): value is number => typeof value === 'number')

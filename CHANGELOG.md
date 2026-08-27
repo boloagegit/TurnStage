@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed a resize-observer feedback loop that continuously reduced the chat preview pane while the editor was open.
+- Automatically resets legacy auto-shrunk split state to the 64/36 default while preserving split ratios explicitly chosen by the user.
+
 ## 0.2.0
 
 - Added an application-wide TurnStage editor language setting with Auto, Traditional Chinese, and English options, plus a Command Palette language switcher.

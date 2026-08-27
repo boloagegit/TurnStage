@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnStageProfile } from '../src/shared/types';
-import { clampSplit, DEFAULT_SPLIT_PERCENT } from '../src/webview/main';
+import { clampSplit, DEFAULT_SPLIT_PERCENT, initialSplitPercent, splitTrackSizes } from '../src/webview/main';
 import { DEFAULT_MESSAGE_ACTIONS, resolveComposer, resolveMessageActions, resolveUiLayout } from '../src/webview/uiConfig';
 
 function profile(messageActions?: string[]): TurnStageProfile {
@@ -20,6 +20,16 @@ describe('profile-driven UI behavior', () => {
     expect(clampSplit(Number.NaN)).toBe(DEFAULT_SPLIT_PERCENT);
     expect(clampSplit(-100)).toBe(10);
     expect(clampSplit(1_000)).toBe(90);
+  });
+  it('keeps the split ratio as the layout source of truth without percentage feedback', () => {
+    expect(splitTrackSizes(64)).toEqual({ preview: '64fr', inspector: '36fr' });
+    expect(splitTrackSizes(64, 360)).toEqual({ preview: '1fr', inspector: '360px' });
+    expect(splitTrackSizes(64, 360, true)).toEqual({ preview: '64fr', inspector: '36fr' });
+  });
+  it('discards legacy auto-shrunk state while preserving an explicit user resize', () => {
+    expect(initialSplitPercent(28, false)).toBe(DEFAULT_SPLIT_PERCENT);
+    expect(initialSplitPercent(72, true)).toBe(72);
+    expect(initialSplitPercent(undefined, true)).toBe(DEFAULT_SPLIT_PERCENT);
   });
   it('resolves every layout preset into an observable workspace behavior', () => {
     expect(resolveUiLayout({ layout: { preset: 'chat-only' } })).toMatchObject({ showInspector: false, compact: false });
