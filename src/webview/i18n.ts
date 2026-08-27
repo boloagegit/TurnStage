@@ -7,6 +7,8 @@ const zhTw: Record<string, string> = {
   'Open as Text': '以文字開啟',
   'Skip to content': '跳至內容',
   'Test': '測試',
+  'TurnStage Profile': 'TurnStage 設定檔',
+  'TurnStage profile identity': 'TurnStage 設定檔識別資訊',
   'No environment': '未設定環境',
   'New conversation': '新對話',
   'Open configuration as text': '以文字開啟設定',

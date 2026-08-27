@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 import { MobileChatPreview } from '../src/webview/MobileChatPreview';
-import { ACCESSIBLE_EVENT_WINDOW_SIZE, JsonBlock, VirtualEvents } from '../src/webview/main';
+import { ACCESSIBLE_EVENT_WINDOW_SIZE, JsonBlock, ProfileIdentityBar, VirtualEvents } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
 import { SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
 
@@ -24,6 +24,16 @@ beforeAll(() => {
 afterEach(() => { cleanup(); document.body.classList.remove('vscode-using-screen-reader'); setLocale('en', 'ltr'); });
 
 describe('Webview DOM behavior', () => {
+  it('identifies the profile workspace without presenting it as a JSONC editor', () => {
+    render(<ProfileIdentityBar profile={{ ...profile, environment: 'local' }} />);
+    const identity = screen.getByRole('banner', { name: 'TurnStage profile identity' });
+    expect(identity.textContent).toContain('DOM Test');
+    expect(identity.textContent).toContain('TurnStage Profile');
+    expect(identity.textContent).toContain('dom-test');
+    expect(identity.textContent).toContain('local');
+    expect(identity.textContent).not.toContain('.jsonc');
+  });
+
   it('selects a message with the keyboard and keeps every message action focusable', async () => {
     const user = userEvent.setup();
     const onSelectMessage = vi.fn();

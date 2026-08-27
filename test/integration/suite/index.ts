@@ -118,6 +118,7 @@ async function assertCustomEditorAndTextFallback(profileUri: vscode.Uri): Promis
   const customTab = await waitFor(() => activeTabInput() instanceof vscode.TabInputCustom ? activeTabInput() : undefined, 'the TurnStage custom editor tab');
   assert.equal((customTab as vscode.TabInputCustom).viewType, 'turnstage.profileEditor');
   assert.equal((customTab as vscode.TabInputCustom).uri.toString(), profileUri.toString());
+  assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.label, 'Integration Profile · TurnStage', 'Run Profile should identify the custom editor instead of looking like a JSONC text tab');
   assert.ok(vscode.workspace.textDocuments.some((item) => item.uri.toString() === profileUri.toString()), 'Custom editor must be backed by the shared TextDocument');
 
   // Hiding a custom editor disposes its webview DOM because the provider uses
@@ -144,6 +145,7 @@ async function assertCustomEditorAndTextFallback(profileUri: vscode.Uri): Promis
   edit.replace(profileUri, new vscode.Range(document.positionAt(markerOffset), document.positionAt(markerOffset + marker.length)), 'Integration Profile Synced');
   assert.equal(await vscode.workspace.applyEdit(edit), true);
   await waitFor(() => document.getText().includes('Integration Profile Synced') ? true : undefined, 'the custom editor document edit');
+  await waitFor(() => vscode.window.tabGroups.activeTabGroup.activeTab?.label === 'Integration Profile Synced · TurnStage' ? true : undefined, 'the profile name to update the custom editor tab');
   await document.save();
   assert.ok(activeTabInput() instanceof vscode.TabInputCustom, 'The custom editor should survive a TextDocument change');
 

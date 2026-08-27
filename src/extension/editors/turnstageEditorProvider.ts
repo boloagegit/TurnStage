@@ -13,6 +13,7 @@ import { MappingEngine } from '../mapping/mappingEngine';
 import { localize } from '../l10n';
 import { validateFormSubmission } from './formSubmission';
 import { resolveDisplayLanguage, textDirection } from '../displayLanguage';
+import { profileEditorTitle } from './profileEditorTitle';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -29,6 +30,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel, private readonly environments = new EnvironmentRepository(context.globalStorageUri)) { this.runs = new LocalRunRepository(context); this.secrets = new SecretService(context); }
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
+    const resourceTitle = panel.title;
     const instanceId = crypto.randomUUID(); panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] }; panel.webview.html = this.html(panel.webview, instanceId);
     let controller: SessionController | undefined; let documentVersion = -1; let sendTimer: ReturnType<typeof setTimeout> | undefined; let loadTimer: ReturnType<typeof setTimeout> | undefined; let disposed = false;
     let profileSnapshot: Extract<HostPayload, { type: 'profile.snapshot' }> | undefined;
@@ -51,6 +53,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       if (disposed || (documentVersion === document.version && controller)) return;
       const version = document.version;
       documentVersion = version; const parsed = this.codec.parse(document.getText()); const envEntries = await this.environments.discover(document.uri); if (disposed || document.version !== version) return; const issues = this.validator.validate(parsed.profile, parsed.tree, envEntries.map((item) => item.environment)); this.publishDiagnostics(document, issues);
+      panel.title = profileEditorTitle(parsed.profile?.name, resourceTitle);
       profileSnapshot = { type: 'profile.snapshot', profile: parsed.profile, parseError: parsed.errors.length ? localize('Invalid JSONC') : undefined, version: document.version, environments: envEntries.map((item) => item.environment.id) };
       validationSnapshot = { type: 'profile.validation', diagnostics: issues };
       await post(profileSnapshot);

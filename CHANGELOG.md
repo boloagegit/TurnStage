@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3
+
+- Profile editor tabs now use the profile display name with a TurnStage suffix instead of looking like ordinary JSONC text tabs.
+- Added a compact, theme-aware profile identity bar to the Test workspace without changing the mobile chat surface.
+- Added repeatable Playwright visual regression coverage for Webview rehydration, responsive layouts, themes, high contrast, zoom-equivalent sizing, and keyboard focus.
+- Existing profiles remain compatible and no migration is required.
+
 ## 0.2.2
 
 - Fixed profile editors remaining on “Loading profile…” after their Webview was recreated when switching away and back.

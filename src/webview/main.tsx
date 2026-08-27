@@ -5,6 +5,7 @@ import { isHostMessage, isWorkspaceSection, PROTOCOL_VERSION } from '../shared/p
 import type { ChatMessage, LocalRun, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { mappingDraftFromRawEvent } from './configEditors';
 import { ClipboardButton } from './ClipboardButton';
+import { ProductIcon } from './Icon';
 import { MobileChatPreview } from './MobileChatPreview';
 import { SettingsWorkspace } from './SettingsWorkspace';
 import { dateTimeAttribute, formatDateTime, formatDuration, formatNumber, localizeHumanized, setLocale, t } from './i18n';
@@ -142,7 +143,9 @@ function TestWorkspace({ profile, snapshot, runs, active, continuationBlocked, d
   const workspaceClassName = ['test-workspace', `test-workspace--${layout.preset}`, `test-workspace--inspector-${layout.inspectorPosition}`, layout.compact ? 'test-workspace--compact' : ''].filter(Boolean).join(' ');
   const decrementKey = layout.inspectorPosition === 'right' ? 'ArrowLeft' : 'ArrowUp';
   const incrementKey = layout.inspectorPosition === 'right' ? 'ArrowRight' : 'ArrowDown';
-  return <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
+  return <div className="test-surface">
+    <ProfileIdentityBar profile={profile} />
+    <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
     <section ref={previewRef} className="preview-pane" aria-label={t('Mobile chat preview')}>
       <MobileChatPreview profile={profile} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} selectedMessageId={selectedMessageId} onSelectMessage={onSelectMessage} />
     </section>
@@ -157,7 +160,23 @@ function TestWorkspace({ profile, snapshot, runs, active, continuationBlocked, d
         <Inspector profile={profile} snapshot={snapshot} runs={runs} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} onCreateMapping={onCreateMapping} selectedSequence={selectedRawSequence} onSelectEvent={onSelectEvent} />
       </aside>
     </>}
+    </div>
   </div>;
+}
+
+export function ProfileIdentityBar({ profile }: { profile: TurnStageProfile }): React.JSX.Element {
+  return <header className="profile-identity" aria-label={t('TurnStage profile identity')}>
+    <div className="profile-identity__primary">
+      <ProductIcon name="target" />
+      <strong title={profile.name}>{profile.name || t('Untitled profile')}</strong>
+      <span>{t('TurnStage Profile')}</span>
+    </div>
+    <div className="profile-identity__meta">
+      <code>{profile.id}</code>
+      <span aria-hidden="true">·</span>
+      <span>{profile.environment || t('No environment')}</span>
+    </div>
+  </header>;
 }
 
 export function JsonBlock({ value }: { value: unknown }): React.JSX.Element {

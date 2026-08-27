@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TurnStage chat/debug visual harness</title>
+  <style>
+    :root {
+      --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --vscode-font-size: 13px;
+      --vscode-font-weight: 400;
+      --vscode-editor-background: #1e1e1e;
+      --vscode-editor-foreground: #cccccc;
+      --vscode-editorGroup-border: #444444;
+      --vscode-editorGroup-emptyBackground: #181818;
+      --vscode-editorWidget-background: #252526;
+      --vscode-editorWidget-border: #454545;
+      --vscode-sideBar-background: #181818;
+      --vscode-descriptionForeground: #9d9d9d;
+      --vscode-focusBorder: #007fd4;
+      --vscode-input-background: #313131;
+      --vscode-input-foreground: #cccccc;
+      --vscode-input-border: #5a5a5a;
+      --vscode-input-placeholderForeground: #989898;
+      --vscode-button-background: #0e639c;
+      --vscode-button-foreground: #ffffff;
+      --vscode-button-hoverBackground: #1177bb;
+      --vscode-button-secondaryBackground: #313131;
+      --vscode-button-secondaryForeground: #cccccc;
+      --vscode-button-secondaryHoverBackground: #3c3c3c;
+      --vscode-icon-foreground: #c5c5c5;
+      --vscode-toolbar-hoverBackground: #2a2d2e;
+      --vscode-list-hoverBackground: #2a2d2e;
+      --vscode-list-hoverForeground: #ffffff;
+      --vscode-list-activeSelectionBackground: #04395e;
+      --vscode-list-activeSelectionForeground: #ffffff;
+      --vscode-list-inactiveSelectionBackground: #37373d;
+      --vscode-scrollbarSlider-background: #79797966;
+      --vscode-scrollbarSlider-hoverBackground: #646464b3;
+      --vscode-scrollbarSlider-activeBackground: #bfbfbf66;
+      --vscode-chat-requestBubbleBackground: #2b2b2b;
+      --vscode-chat-requestBubbleHoverBackground: #303030;
+      --vscode-chat-requestBorder: #444444;
+      --vscode-chat-avatarBackground: #3c3c3c;
+      --vscode-chat-avatarForeground: #ffffff;
+      --vscode-textCodeBlock-background: #181818;
+      --vscode-badge-background: #4d4d4d;
+      --vscode-badge-foreground: #ffffff;
+      --vscode-widget-shadow: #0000005c;
+      --vscode-spacing-size4: 4px;
+      --vscode-spacing-size8: 8px;
+      --vscode-spacing-size12: 12px;
+      --vscode-spacing-size16: 16px;
+      --vscode-spacing-size20: 20px;
+    }
+  </style>
+  <link rel="stylesheet" href="../../dist/webview.css">
+</head>
+<body>
+  <div id="root" data-instance-id="visual-harness"></div>
+  <script>
+    const query = new URLSearchParams(location.search);
+    const preset = query.get('preset') ?? 'split-inspector';
+    const inspectorPosition = query.get('position') ?? 'right';
+    const inspectorWidth = Number(query.get('width')) || undefined;
+    const multiline = query.get('multiline') !== 'false';
+    const showStopWhileStreaming = query.get('stop') !== 'false';
+    const messageActions = query.has('actions') ? query.get('actions').split(',').filter(Boolean) : undefined;
+    const active = query.get('active') === 'true';
+    const envelope = { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-harness' };
+    const profile = {
+      version: 1,
+      id: 'slow-sse-proof',
+      name: 'Slow SSE Visual Proof',
+      environment: 'local',
+      conversation: { send: { method: 'POST', url: 'http://localhost/chat' } },
+      stream: { transport: 'sse', mappings: [] },
+      opening: { mode: 'static', message: 'Send a message to watch six SSE events arrive over about 3.6 seconds.', starters: [] },
+      ui: {
+        layout: { preset, inspectorPosition, ...(inspectorWidth ? { inspectorWidth } : {}) },
+        composer: { placeholder: 'Type a message for the slow SSE stream…', multiline, enterBehavior: 'send', showStopWhileStreaming },
+        ...(messageActions ? { messageActions } : {}),
+        components: { opening: { visible: true }, progress: { visible: true }, metrics: { visible: true } }
+      },
+      errorPolicy: { allowContinuation: true }
+    };
+    const rawEvents = ['start', 'status', 'message', 'message', 'title', 'done'].map((type, index) => ({ sequence: index + 1, receivedAt: 1000 + index * 600, elapsedMs: 606 + index * 601, protocol: 'sse', sse: { event: type }, raw: `event: ${type}`, data: { type, text: index === 2 ? 'Here is ' : index === 3 ? 'the sample result.' : undefined } }));
+    const snapshot = {
+      sessionId: 'visual', sessionState: 'ready', turnState: active ? 'streaming' : 'completed', conversationId: 'conversation-1', title: 'Slow SSE Visual Proof', trusted: true, controls: {}, droppedEventCount: 0, errors: [], rawEvents,
+      normalizedEvents: rawEvents.map((item) => ({ version: 1, type: item.sse.event, sequence: item.sequence, rawSequence: item.sequence, receivedAt: item.receivedAt })),
+      messages: [
+        { id: 'user-1', role: 'user', status: 'completed', createdAt: 1000, parts: [{ type: 'text', text: 'Verify themed streaming layout' }], citations: [], actions: [], followups: [], metadata: { rawSequences: [] } },
+        { id: 'assistant-1', role: 'assistant', status: active ? 'streaming' : 'completed', createdAt: 1600, completedAt: active ? undefined : 4600, parts: [{ type: 'progress', text: 'Preparing the streamed response', status: active ? 'running' : 'completed' }, { type: 'text', text: 'Here is the sample result.' }], citations: [], actions: [], followups: [], metadata: { rawSequences: [1, 2, 3, 4, 5, 6] } }
+      ],
+      metrics: { eventCount: 6, byteCount: 420, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0, totalDuration: 3612 }
+    };
+    const dispatch = (message) => window.dispatchEvent(new MessageEvent('message', { data: { ...envelope, ...message } }));
+    window.acquireVsCodeApi = () => ({
+      getState: () => ({ section: query.get('section') ?? 'test', inspectorTab: query.get('tab') ?? 'Raw Events', splitPercent: 50, draft: query.get('draft') ?? '' }),
+      setState: () => {},
+      postMessage: (message) => {
+        if (message.type !== 'webview.ready') return;
+        setTimeout(() => {
+          dispatch({ type: 'host.ready', trusted: true, locale: 'en', direction: 'ltr' });
+          dispatch({ type: 'profile.snapshot', profile, version: 1, environments: ['local'] });
+          dispatch({ type: 'profile.validation', diagnostics: [] });
+          dispatch({ type: 'session.snapshot', snapshot: JSON.parse(JSON.stringify(snapshot)), runs: [], requestPreview: { method: 'POST', url: 'http://localhost/chat' } });
+        }, 0);
+      }
+    });
+  </script>
+  <script src="../../dist/webview.js"></script>
+</body>
+</html>
