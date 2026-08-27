@@ -3,6 +3,7 @@ import type { MappingTestResult, WebviewPayload } from '../shared/protocol';
 import type { SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
+import { ClipboardButton } from './ClipboardButton';
 import { formatNumber, localizeHumanized, t } from './i18n';
 import './settingsWorkspace.css';
 
@@ -33,6 +34,7 @@ export interface SettingsWorkspaceProps {
   remoteName?: string;
   /** The section selected by the host tree/editor. */
   section: SettingsSectionId;
+  onSectionChange: (section: SettingsSectionId) => void;
 }
 
 type PatchPath = Array<string | number>;
@@ -45,7 +47,8 @@ export function SettingsWorkspace({
   snapshot,
   requestPreview,
   remoteName,
-  section
+  section,
+  onSectionChange
 }: SettingsWorkspaceProps): React.JSX.Element {
   const patch = (path: PatchPath, value: unknown) => post({ type: 'profile.patch', path, value });
 
@@ -65,28 +68,35 @@ export function SettingsWorkspace({
     </header>
 
     <div className="settings-main" id="settings-content">
-      <section
-        id={`settings-panel-${active.id}`}
-        className="settings-panel"
-        aria-labelledby={sectionTitleId}
-        aria-describedby={sectionDescriptionId}
-        tabIndex={-1}
-      >
-        <div className="settings-panel-heading">
-          <div className="settings-panel-title">
-            <h1 id={sectionTitleId}>{t(active.label)}</h1>
-            <p id={sectionDescriptionId} className="settings-section-description">{t(active.description)}</p>
+      <div className="settings-content-layout">
+        <nav className="settings-section-nav" aria-label={t('Profile configuration sections')}>
+          <div className="settings-section-nav-list">
+            {SETTINGS_SECTIONS.map((item) => <button key={item.id} type="button" className={active.id === item.id ? 'is-active' : ''} aria-current={active.id === item.id ? 'page' : undefined} onClick={() => onSectionChange(item.id)}>{t(item.label)}</button>)}
           </div>
-          <span className="settings-section-count">{t('Profile')} <code>{profile.id}</code></span>
-        </div>
-        {active.id === 'general' && <GeneralSection profile={profile} snapshot={snapshot} post={post} patch={patch} />}
-        {active.id === 'opening-flow' && <OpeningFlowSection profile={profile} post={post} />}
-        {active.id === 'request' && <RequestSection profile={profile} requestPreview={requestPreview} remoteName={remoteName} patch={patch} />}
-        {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
-        {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
-        {active.id === 'history-errors' && <HistoryErrorsSection profile={profile} snapshot={snapshot} patch={patch} />}
-        {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} />}
-      </section>
+        </nav>
+        <section
+          id={`settings-panel-${active.id}`}
+          className="settings-panel"
+          aria-labelledby={sectionTitleId}
+          aria-describedby={sectionDescriptionId}
+          tabIndex={-1}
+        >
+          <div className="settings-panel-heading">
+            <div className="settings-panel-title">
+              <h1 id={sectionTitleId}>{t(active.label)}</h1>
+              <p id={sectionDescriptionId} className="settings-section-description">{t(active.description)}</p>
+            </div>
+            <span className="settings-section-count">{t('Profile')} <code>{profile.id}</code></span>
+          </div>
+          {active.id === 'general' && <GeneralSection profile={profile} snapshot={snapshot} post={post} patch={patch} />}
+          {active.id === 'opening-flow' && <OpeningFlowSection profile={profile} post={post} />}
+          {active.id === 'request' && <RequestSection profile={profile} requestPreview={requestPreview} remoteName={remoteName} patch={patch} />}
+          {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
+          {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
+          {active.id === 'history-errors' && <HistoryErrorsSection profile={profile} snapshot={snapshot} patch={patch} />}
+          {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} />}
+        </section>
+      </div>
     </div>
   </div>;
 }
@@ -159,6 +169,24 @@ function RequestSection({ profile, requestPreview, remoteName, patch }: { profil
         </SettingField>
         <NumberSettingField label={t('Request timeout')} id="settings-request-timeout" value={request.timeoutMs} placeholder="120000" min={1} max={900000} hint={t('Milliseconds before the request is aborted.')} onCommit={(value) => patch(['conversation', 'send', 'timeoutMs'], value)} />
         <NumberSettingField label={t('Idle timeout')} id="settings-request-idle-timeout" value={request.idleTimeoutMs} placeholder="30000" min={1} max={900000} hint={t('Milliseconds without a stream event.')} onCommit={(value) => patch(['conversation', 'send', 'idleTimeoutMs'], value)} />
+      </div>
+    </section>
+
+    <section className="settings-card" aria-labelledby="request-resilience-heading">
+      <SectionHeading id="request-resilience-heading" title={t('Network resilience')} description={t('Bound retries and redirects without replaying partial streamed output.')} />
+      <div className="settings-form-grid">
+        <NumberSettingField label={t('Reconnect attempts')} id="settings-reconnect-attempts" value={request.reconnect?.maxAttempts} placeholder="0" min={0} max={5} hint={t('Retries only before the first stream event.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxAttempts'], value)} />
+        <NumberSettingField label={t('Reconnect base delay')} id="settings-reconnect-base-delay" value={request.reconnect?.baseDelayMs} placeholder="500" min={0} max={30000} hint={t('Initial backoff in milliseconds.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'baseDelayMs'], value)} />
+        <NumberSettingField label={t('Reconnect maximum delay')} id="settings-reconnect-max-delay" value={request.reconnect?.maxDelayMs} placeholder="10000" min={0} max={120000} hint={t('Maximum backoff in milliseconds.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxDelayMs'], value)} />
+        <SettingField label={t('Retry HTTP statuses')} id="settings-reconnect-statuses" hint={t('Comma-separated 4xx or 5xx status codes.')}>
+          <PatchInput id="settings-reconnect-statuses" value={(request.reconnect?.retryOnStatuses ?? []).join(', ')} placeholder="429, 502, 503, 504" inputMode="numeric" onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'retryOnStatuses'], parseStatusList(value))} />
+        </SettingField>
+        <SettingField label={t('Redirect policy')} id="settings-redirect-policy">
+          <select id="settings-redirect-policy" value={request.redirectPolicy ?? 'same-origin'} onChange={(event) => patch(['conversation', 'send', 'redirectPolicy'], event.target.value)}>
+            <option value="same-origin">{t('Same origin only')}</option><option value="follow">{t('Follow redirects')}</option><option value="error">{t('Reject redirects')}</option>
+          </select>
+        </SettingField>
+        <NumberSettingField label={t('Maximum redirects')} id="settings-max-redirects" value={request.maxRedirects} placeholder="5" min={0} max={10} onCommit={(value) => patch(['conversation', 'send', 'maxRedirects'], value)} />
       </div>
     </section>
 
@@ -283,7 +311,7 @@ function SecuritySection({ profile, snapshot, remoteName, patch }: { profile: Tu
 }
 
 function SectionHeading({ id, title, description }: { id: string; title: string; description: string }): React.JSX.Element {
-  return <div className="settings-card-heading"><div><h3 id={id}>{title}</h3><p className="settings-card-description">{description}</p></div></div>;
+  return <div className="settings-card-heading"><div><h2 id={id}>{title}</h2><p className="settings-card-description">{description}</p></div></div>;
 }
 
 function SettingField({ label, id, hint, error, wide, children }: { label: string; id: string; hint?: string; error?: string; wide?: boolean; children: React.ReactNode }): React.JSX.Element {
@@ -312,7 +340,7 @@ function SettingCheckbox({ id, label, checked, onChange }: { id: string; label: 
   return <label className="settings-checkbox" htmlFor={id}><input id={id} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>;
 }
 
-function PatchInput({ id, value, onCommit, multiline = false, rows = 3, ...props }: { id: string; value: string; onCommit: (value: string) => void; multiline?: boolean; rows?: number; disabled?: boolean; placeholder?: string; required?: boolean; spellCheck?: boolean; autoComplete?: string; type?: React.HTMLInputTypeAttribute }): React.JSX.Element {
+function PatchInput({ id, value, onCommit, multiline = false, rows = 3, ...props }: { id: string; value: string; onCommit: (value: string) => void; multiline?: boolean; rows?: number; disabled?: boolean; placeholder?: string; required?: boolean; spellCheck?: boolean; autoComplete?: string; type?: React.HTMLInputTypeAttribute; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'] }): React.JSX.Element {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const commit = () => { if (draft !== value) onCommit(draft); };
@@ -357,11 +385,7 @@ function ListPatchInput({ id, value, placeholder, onCommit }: { id: string; valu
 
 function JsonPreview({ value, label }: { value: unknown; label: string }): React.JSX.Element {
   const text = stringifyJson(value);
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch { setCopied(false); }
-  };
-  return <div className="settings-preview"><div className="settings-preview-heading"><span>{label}</span><IconButton icon={copied ? 'check' : 'copy'} label={t(copied ? 'Copied' : 'Copy')} type="button" onClick={() => void copy()} /></div><pre><code>{text}</code></pre></div>;
+  return <div className="settings-preview"><div className="settings-preview-heading"><span>{label}</span><ClipboardButton text={text} label={t('Copy')} /></div><pre><code>{text}</code></pre></div>;
 }
 
 function StatusItem({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'warning' }): React.JSX.Element {
@@ -375,6 +399,10 @@ function stringifyJson(value: unknown): string {
 
 function parseList(value: string): string[] {
   return [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
+}
+
+function parseStatusList(value: string): number[] {
+  return [...new Set(value.split(',').map((item) => Number.parseInt(item.trim(), 10)).filter((status) => Number.isInteger(status) && status >= 400 && status <= 599))].slice(0, 20);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

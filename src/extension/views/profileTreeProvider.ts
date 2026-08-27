@@ -6,11 +6,17 @@ export class ProfileTreeItem extends vscode.TreeItem {
   constructor(readonly entry: ProfileEntry) {
     super(entry.profile?.name ?? vscode.workspace.asRelativePath(entry.uri), vscode.TreeItemCollapsibleState.None);
     this.id = entry.uri.toString();
-    this.description = entry.overridden ? vscode.l10n.t('Overridden') : entry.profile?.environment ?? 'Invalid';
+    this.description = entry.overridden ? vscode.l10n.t('Overridden') : entry.profile?.environment ?? vscode.l10n.t('Invalid');
     this.resourceUri = entry.uri;
     this.iconPath = new vscode.ThemeIcon(entry.error ? 'error' : 'comment-discussion');
-    this.tooltip = new vscode.MarkdownString(`**${this.label}**\n\n${entry.uri.toString()}\n\nTransport: ${entry.profile?.stream?.transport ?? 'unknown'}\n\nValidation: ${entry.error ? 'Invalid' : 'Ready'}${entry.overridden ? `\n\n${vscode.l10n.t('A Workspace profile with the same id is the effective project override.')}` : ''}`);
-    this.command = { command: 'vscode.openWith', title: 'Open', arguments: [entry.uri, 'turnstage.profileEditor'] };
+    this.tooltip = [
+      vscode.l10n.t('Profile: {name}', { name: String(this.label) }),
+      entry.uri.toString(),
+      vscode.l10n.t('Transport: {transport}', { transport: entry.profile?.stream?.transport ?? vscode.l10n.t('Unknown') }),
+      vscode.l10n.t('Validation: {status}', { status: entry.error ? vscode.l10n.t('Invalid') : vscode.l10n.t('Ready') }),
+      entry.overridden ? vscode.l10n.t('A Workspace profile with the same id is the effective project override.') : undefined,
+    ].filter((line): line is string => Boolean(line)).join('\n\n');
+    this.command = { command: 'vscode.openWith', title: vscode.l10n.t('Open'), arguments: [entry.uri, 'turnstage.profileEditor'] };
   }
 }
 

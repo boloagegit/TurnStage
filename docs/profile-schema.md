@@ -164,7 +164,15 @@ the JSON Schema request definition makes `variants` optional in general.
         }
       ],
       "timeoutMs": 120000,
-      "idleTimeoutMs": 30000
+      "idleTimeoutMs": 30000,
+      "reconnect": {
+        "maxAttempts": 2,
+        "baseDelayMs": 500,
+        "maxDelayMs": 10000,
+        "retryOnStatuses": [429, 502, 503, 504]
+      },
+      "redirectPolicy": "same-origin",
+      "maxRedirects": 5
     }
   }
 }
@@ -175,6 +183,14 @@ string-valued; body is untyped JSON. A variant may override headers and body,
 and is selected by the first matching `when` in declaration order. A variant
 without `when` matches unconditionally. Request URLs must resolve to `http:`
 or `https:`.
+
+`reconnect.maxAttempts` is limited to 0–5. Delays are bounded by
+`baseDelayMs` (0–30000) and `maxDelayMs` (0–120000); retry status values must
+be HTTP 4xx/5xx codes. Reconnect occurs only before the first stream event.
+`redirectPolicy` is `same-origin` (default), `follow`, or `error`, with
+`maxRedirects` limited to 0–10. Cross-origin `follow` never forwards standard
+credential headers or header values containing a secret resolved for the
+current request.
 
 The request context contains these top-level objects:
 

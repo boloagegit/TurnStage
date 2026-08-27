@@ -25,6 +25,7 @@ const zhTw: Record<string, string> = {
   '{count} raw events': '{count} 個原始事件',
   'Inspector views': '檢查器檢視',
   '{count} old events were dropped due to buffer limits.': '因緩衝區限制，已捨棄 {count} 個較舊事件。',
+  'Showing events {start}–{end} of {total} for screen reader performance.': '為了螢幕閱讀器效能，目前顯示第 {start}–{end} 個事件，共 {total} 個。',
   'Build a request to see its redacted preview.': '建立請求後即可查看已遮蔽敏感資訊的預覽。',
   'Search events': '搜尋事件',
   'Text, ID, payload…': '文字、ID、payload…',
@@ -60,6 +61,7 @@ const zhTw: Record<string, string> = {
   'Completed, failed, and aborted turns appear here.': '已完成、失敗與中止的回合會顯示在這裡。',
   'Copy JSON': '複製 JSON',
   'Copy': '複製',
+  'Copy failed. Try again.': '複製失敗，請再試一次。',
   'Response completed': '回應已完成',
   'Response failed': '回應失敗',
   'Response stopped': '回應已停止',
@@ -97,6 +99,7 @@ const zhTw: Record<string, string> = {
   'Trust, URI schemes, domains, and commands.': '信任、URI scheme、網域與命令。',
   'Profile Configuration': '設定檔設定',
   'Profile configuration toolbar': '設定檔設定工具列',
+  'Profile configuration sections': '設定檔設定區段',
   'Profile configuration actions': '設定檔設定動作',
   '{section} profile configuration': '{section} 設定檔設定',
   'Inspect message': '檢查訊息',
@@ -148,6 +151,21 @@ const zhTw: Record<string, string> = {
   'Milliseconds before the request is aborted.': '中止請求前的毫秒數。',
   'Idle timeout': '閒置逾時',
   'Milliseconds without a stream event.': '未收到串流事件的毫秒數。',
+  'Network resilience': '網路韌性',
+  'Bound retries and redirects without replaying partial streamed output.': '限制重試與重新導向，且不重播部分串流輸出。',
+  'Reconnect attempts': '重新連線次數',
+  'Retries only before the first stream event.': '只會在收到第一個串流事件前重試。',
+  'Reconnect base delay': '重新連線基本延遲',
+  'Initial backoff in milliseconds.': '初始退避毫秒數。',
+  'Reconnect maximum delay': '重新連線最大延遲',
+  'Maximum backoff in milliseconds.': '最大退避毫秒數。',
+  'Retry HTTP statuses': '重試 HTTP 狀態碼',
+  'Comma-separated 4xx or 5xx status codes.': '以逗號分隔的 4xx 或 5xx 狀態碼。',
+  'Redirect policy': '重新導向政策',
+  'Same origin only': '僅限同源',
+  'Follow redirects': '跟隨重新導向',
+  'Reject redirects': '拒絕重新導向',
+  'Maximum redirects': '重新導向上限',
   'Headers and payload': '標頭與 payload',
   'Keep structured values as JSON. Nothing in this editor executes as JavaScript.': '結構化值請維持 JSON 格式；此編輯器不會執行 JavaScript。',
   'Headers (JSON)': '標頭 (JSON)',
@@ -228,6 +246,7 @@ const zhTw: Record<string, string> = {
   'Safe area and status bar': '安全區域與狀態列',
   'Status bar time': '狀態列時間',
   'Conversation messages': '對話訊息',
+  'Jump to latest': '跳至最新',
   'Loading conversation…': '正在載入對話…',
   'No messages yet. Send a message to begin.': '尚無訊息。傳送訊息以開始。',
   'Continuation is disabled after this error. Start a new conversation to send another message.': '發生此錯誤後已停用繼續操作。請開始新對話以傳送其他訊息。',
@@ -274,6 +293,7 @@ const zhTw: Record<string, string> = {
   'Stopping response': '正在停止回應',
   'Response streaming': '回應串流中',
   'Unable to display this value.': '無法顯示此值。',
+  'Unknown date': '日期未知',
   'state.idle': '閒置',
   'state.submitting': '送出中',
   'state.waitingStart': '等待開始',
@@ -484,7 +504,18 @@ export function formatNumber(value: number): string {
 }
 
 export function formatDateTime(value: number | string | Date): string {
-  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(value));
+  const date = toValidDate(value);
+  if (!date) return t('Unknown date');
+  try {
+    return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'medium' }).format(date);
+  } catch {
+    return t('Unknown date');
+  }
+}
+
+/** Return a safe ISO value for a time element, omitting corrupt persisted dates. */
+export function dateTimeAttribute(value: number | string | Date): string | undefined {
+  return toValidDate(value)?.toISOString();
 }
 
 export function formatDuration(value: number): string {
@@ -498,4 +529,16 @@ export function localizeHumanized(value: string): string {
 function isTraditionalChinese(value: string): boolean {
   const normalized = value.toLowerCase();
   return normalized === 'zh-tw' || normalized === 'zh-hant' || normalized.startsWith('zh-hant-');
+}
+
+function toValidDate(value: number | string | Date): Date | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'string' && value.trim() === '') return undefined;
+  if (typeof value === 'number' && !Number.isFinite(value)) return undefined;
+  try {
+    const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  } catch {
+    return undefined;
+  }
 }

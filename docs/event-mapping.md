@@ -41,8 +41,9 @@ SSE metadata. If JSON parsing fails, `data` remains the original text and
 `parseError` is recorded; the raw record is still available to the mapper and
 inspector. The string `[DONE]` is kept as a sentinel without a parse error.
 
-The SSE parser is chunk-safe: it accepts LF/CRLF, comments, multiline `data`,
-blank-line dispatch, arbitrary chunk boundaries, and a final partial event. The
+The SSE parser is chunk-safe: it accepts CR/LF/CRLF, an optional leading BOM,
+comments, multiline `data`, blank-line dispatch, arbitrary chunk boundaries,
+and a final partial event. The
 NDJSON parser buffers a partial line, ignores blank lines, and flushes a final
 line at end of stream. A `text-stream` transport record is emitted for each
 non-empty decoded body chunk and intentionally skips JSON parsing. A raw event

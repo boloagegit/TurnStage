@@ -235,6 +235,84 @@ describe('isActive and SessionController.finalizeTurn', () => {
     expect(controller.snapshot.errors).toEqual([{ type: 'NetworkError', message: 'offline', retrySafe: true }]);
   });
 
+  it('ignores raw events that arrive after the turn has finalized', async () => {
+    vi.mock('vscode', () => ({
+      workspace: {
+        isTrusted: true,
+        getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }),
+        getWorkspaceFolder: () => undefined,
+      },
+    }));
+
+    const { SessionController } = await import('../src/extension/runtime/sessionController');
+    const profile = {
+      version: 1,
+      id: 'terminal-boundary-test',
+      name: 'Terminal boundary test',
+      conversation: { send: { method: 'POST', url: 'https://example.test' } },
+      stream: {
+        transport: 'sse',
+        mappings: [{ id: 'late-delta', match: { event: 'message' }, emit: { type: 'content.text.delta', text: { path: '$.text' } } }],
+      },
+    } as TurnStageProfile;
+    const changed = vi.fn();
+    const controller = new SessionController(
+      profile,
+      {} as never,
+      { version: 1, id: 'env', name: 'Environment', variables: {} },
+      {} as never,
+      { get: vi.fn() } as never,
+      { save: vi.fn() } as never,
+      changed,
+      { appendLine: vi.fn() } as never,
+    );
+    controller.snapshot.turnState = 'completed';
+    controller.snapshot.messages.push({ id: 'assistant-1', role: 'assistant', status: 'completed', createdAt: 1, completedAt: 2, parts: [{ type: 'text', text: 'final' }], citations: [], actions: [], followups: [] });
+
+    await (controller as unknown as { acceptRaw: (raw: RawStreamEvent) => Promise<void> }).acceptRaw({
+      sequence: 99,
+      receivedAt: 99,
+      elapsedMs: 99,
+      protocol: 'sse',
+      sse: { event: 'message' },
+      raw: '{"text":"late"}',
+      data: { text: 'late' },
+    });
+
+    expect(controller.snapshot.rawEvents).toEqual([]);
+    expect(controller.snapshot.normalizedEvents).toEqual([]);
+    expect(controller.snapshot.messages[0]?.parts).toEqual([{ type: 'text', text: 'final' }]);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('lets extension deactivation await active-turn finalization and run persistence', async () => {
+    vi.mock('vscode', () => ({ workspace: { isTrusted: true, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), getWorkspaceFolder: () => undefined } }));
+    const { SessionController } = await import('../src/extension/runtime/sessionController');
+    let releaseSave: (() => void) | undefined;
+    const save = vi.fn(() => new Promise<void>((resolve) => { releaseSave = resolve; }));
+    const controller = new SessionController(
+      { version: 1, id: 'dispose-write-test', name: 'Dispose write', conversation: { send: { method: 'POST', url: 'https://example.test' } }, stream: { transport: 'sse', mappings: [] } },
+      {} as never,
+      { version: 1, id: 'env', name: 'Environment', variables: {} },
+      {} as never,
+      { get: vi.fn() } as never,
+      { save } as never,
+      vi.fn(),
+      { appendLine: vi.fn() } as never,
+    );
+    controller.snapshot.turnState = 'streaming';
+    (controller as unknown as { finalized: boolean }).finalized = false;
+    const settled = vi.fn();
+    const disposal = controller.disposeAndWait().then(settled);
+    await Promise.resolve();
+    expect(save).toHaveBeenCalledOnce();
+    expect(settled).not.toHaveBeenCalled();
+    releaseSave?.();
+    await disposal;
+    expect(settled).toHaveBeenCalledOnce();
+    expect(controller.snapshot.turnState).toBe('aborted');
+  });
+
   it('applies failed-turn partial-content and conversation-id policies', async () => {
     vi.mock('vscode', () => ({ workspace: { isTrusted: true, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), getWorkspaceFolder: () => undefined } }));
     const { SessionController } = await import('../src/extension/runtime/sessionController');
@@ -285,16 +363,16 @@ describe('isActive and SessionController.finalizeTurn', () => {
     const controller = new SessionController(profile, {} as never, { version: 1, id: 'env', name: 'Environment', variables: {} }, context as never, { get: vi.fn() } as never, { list: vi.fn(async () => []), save } as never, vi.fn(), { appendLine: vi.fn() } as never);
 
     await controller.loadRuns();
-    expect(controller.snapshot.controls.token).toBe('stored-token');
+    expect(controller.snapshot.controls).not.toHaveProperty('token');
     expect(controller.snapshot.controls.shared).toBe('legacy-global');
-    expect(context.globalState.update).toHaveBeenCalledWith('turnstage.control.global.persistence-test.shared', 'legacy-global');
+    expect(context.globalState.update).toHaveBeenCalledWith('turnstage.control.global.persistence-test.shared', { version: 1, controlType: 'text', value: 'legacy-global' });
     await controller.setControl('token', 'changed-token');
     await controller.setControl('shared', 'changed-global');
     await controller.setControl('temporary', 'changed');
     await controller.newConversation();
     expect(controller.snapshot.controls.temporary).toBe('default');
-    expect(context.secrets.store).toHaveBeenCalledWith('turnstage.control.secret.persistence-test.token', JSON.stringify('changed-token'));
-    expect(context.globalState.update).toHaveBeenCalledWith('turnstage.control.global.persistence-test.shared', 'changed-global');
+    expect(context.secrets.store).toHaveBeenCalledWith('turnstage.control.secret.persistence-test.token', JSON.stringify({ version: 1, controlType: 'text', value: 'changed-token' }));
+    expect(context.globalState.update).toHaveBeenCalledWith('turnstage.control.global.persistence-test.shared', { version: 1, controlType: 'text', value: 'changed-global' });
 
     controller.snapshot.remoteSessions = [{ conversationId: 'remote-1', title: 'Remote run', createdAt: 1, actorId: 'actor-a', environmentId: 'env' }];
     controller.applyRemoteSession('remote-1');
@@ -419,6 +497,50 @@ describe('isActive and SessionController.finalizeTurn', () => {
       expect(controller.snapshot.turnState).toBe('aborted');
       expect(controller.snapshot.errors).toEqual([]);
     } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('bounds a hanging remote stop request with its configured timeout', async () => {
+    vi.useFakeTimers();
+    vi.mock('vscode', () => ({ workspace: { isTrusted: true, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), getWorkspaceFolder: () => undefined } }));
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const { SessionController } = await import('../src/extension/runtime/sessionController');
+      const profile = {
+        version: 1,
+        id: 'remote-stop-timeout-test',
+        name: 'Remote stop timeout test',
+        conversation: {
+          send: { method: 'POST', url: 'https://example.test/stream' },
+          stop: {
+            strategy: 'abortThenRequest',
+            requiredContext: ['conversation.id'],
+            request: { method: 'POST', url: 'https://example.test/stop', timeoutMs: 25, body: { conversationId: { $value: 'conversation.id' } } },
+          },
+        },
+        stream: { transport: 'sse', mappings: [] },
+      } as TurnStageProfile;
+      const controller = new SessionController(profile, {} as never, { version: 1, id: 'env', name: 'Environment', variables: {} }, {} as never, { get: vi.fn() } as never, { list: vi.fn(async () => []), save: vi.fn(async () => undefined) } as never, vi.fn(), { appendLine: vi.fn() } as never);
+      controller.snapshot.conversationId = 'conversation-timeout';
+      controller.snapshot.turnState = 'streaming';
+      (controller as unknown as { finalized: boolean }).finalized = false;
+      (controller as unknown as { abortController: AbortController }).abortController = new AbortController();
+
+      const abortPromise = controller.abort();
+      await vi.advanceTimersByTimeAsync(25);
+      await abortPromise;
+
+      expect(controller.snapshot.turnState).toBe('aborted');
+      expect(controller.snapshot.errors).toEqual([expect.objectContaining({
+        type: 'RemoteStopWarning',
+        message: expect.stringContaining('remote stop failed'),
+      })]);
+    } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });

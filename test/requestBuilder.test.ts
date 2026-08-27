@@ -6,6 +6,14 @@ vi.mock('vscode', () => ({}));
 import { RequestBuilder, interactionContext } from '../src/extension/request/requestBuilder';
 
 describe('RequestBuilder', () => {
+  it('preserves bounded reconnect and redirect policy for the host transport', async () => {
+    const request = await new RequestBuilder(async () => undefined).build({
+      method: 'POST', url: 'https://example.test/stream',
+      reconnect: { maxAttempts: 2, baseDelayMs: 10, maxDelayMs: 100, retryOnStatuses: [429, 503] },
+      redirectPolicy: 'same-origin', maxRedirects: 3,
+    }, {});
+    expect(request).toMatchObject({ reconnect: { maxAttempts: 2, baseDelayMs: 10, maxDelayMs: 100, retryOnStatuses: [429, 503] }, redirectPolicy: 'same-origin', maxRedirects: 3 });
+  });
   it('selects the first matching variant and resolves typed body values', async () => {
     const builder = new RequestBuilder(async (name) => name === 'apiKey' ? 'top-secret' : undefined);
     const definition: RequestDefinition = {
@@ -96,6 +104,33 @@ describe('RequestBuilder', () => {
     await expect(builder.build({ method: 'GET', url: 'file:///tmp/test' }, {})).rejects.toMatchObject({
       type: 'RequestBuildError',
       message: 'Unsupported request scheme: file:',
+    });
+  });
+
+  it('scrubs resolved SecretStorage values from URLs, custom headers, bodies, and build errors', async () => {
+    const secret = 'environment-only-value';
+    const builder = new RequestBuilder(async (name) => name === 'apiToken' ? secret : undefined);
+    const request = await builder.build({
+      method: 'POST',
+      url: 'https://example.test/${secret.apiToken}',
+      headers: { 'X-Custom': '${secret.apiToken}' },
+      body: { arbitrary: '${secret.apiToken}' },
+    }, {});
+
+    expect(request.url).toContain(secret);
+    expect(request.headers['X-Custom']).toBe(secret);
+    expect(request.body).toContain(secret);
+    expect(request.secretValues).toEqual([secret]);
+    expect(JSON.stringify(request.redacted)).not.toContain(secret);
+    expect(request.redacted).toEqual({
+      method: 'POST',
+      url: 'https://example.test/••••••••',
+      headers: { 'X-Custom': '••••••••' },
+      body: { arbitrary: '••••••••' },
+    });
+
+    await expect(builder.build({ method: 'GET', url: 'not-a-url/${secret.apiToken}' }, {})).rejects.toMatchObject({
+      message: 'Invalid request URL: not-a-url/••••••••',
     });
   });
 });

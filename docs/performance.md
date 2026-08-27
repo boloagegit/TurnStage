@@ -116,9 +116,10 @@ opening/session actions (static openings are local).
 | `abortReason` | Reason supplied when an aborted run is finalized |
 
 TTFT is therefore a first displayable text/markdown normalized event, not the
-first arbitrary backend event. A run does not produce reconnect count or
-percentile metrics. Percentiles must be calculated externally from multiple
-runs, never invented for a single run. Token usage is shown only when supplied
+first arbitrary backend event. A run does not yet expose reconnect count or
+percentile metrics, even when bounded pre-data reconnect is configured.
+Percentiles must be calculated externally from multiple runs, never invented
+for a single run. Token usage is shown only when supplied
 by a backend `usage.updated` event; character counts must not be labeled as
 tokens.
 
@@ -179,6 +180,7 @@ microbenchmarks and do not substitute for a VS Code UI trace.
   windowed list, and fixed event rows can expand.
 - Replay timing is scheduler-based and is not validated by a full UI trace
   under Extension Host load.
-- There is no reconnect path, so no reconnect performance metric exists.
+- Bounded pre-data reconnect exists, but reconnect count and delay are not yet
+  recorded as run metrics.
 - A benchmark runner exists; CI performance gates and automated memory-budget
   assertions are not yet defined.

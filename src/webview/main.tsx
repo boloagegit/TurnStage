@@ -1,18 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { HostMessage, MappingTestResult, WebviewPayload, WorkspaceSection } from '../shared/protocol';
-import { isWorkspaceSection, PROTOCOL_VERSION } from '../shared/protocol';
+import { isHostMessage, isWorkspaceSection, PROTOCOL_VERSION } from '../shared/protocol';
 import type { ChatMessage, LocalRun, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { mappingDraftFromRawEvent } from './configEditors';
-import { IconButton } from './Icon';
+import { ClipboardButton } from './ClipboardButton';
 import { MobileChatPreview } from './MobileChatPreview';
 import { SettingsWorkspace } from './SettingsWorkspace';
-import { formatDateTime, formatDuration, formatNumber, localizeHumanized, setLocale, t } from './i18n';
+import { dateTimeAttribute, formatDateTime, formatDuration, formatNumber, localizeHumanized, setLocale, t } from './i18n';
 import { resolveUiLayout } from './uiConfig';
 import './styles.css';
 
 declare function acquireVsCodeApi<T = unknown>(): { postMessage(message: unknown): void; getState(): T | undefined; setState(state: T): void };
-interface WebviewState { section?: WorkspaceSection; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; selectedMessageId?: string; selectedRawSequence?: number }
+interface WebviewState { section?: WorkspaceSection; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number }
 type VsCodeApi = { postMessage(message: unknown): void; getState(): WebviewState | undefined; setState(state: WebviewState): void };
 const rootElement = typeof document === 'undefined' ? undefined : document.getElementById('root');
 const instanceId = rootElement?.dataset.instanceId ?? 'test-instance';
@@ -21,14 +21,16 @@ const vscode: VsCodeApi = typeof acquireVsCodeApi === 'function'
   : { postMessage: () => undefined, getState: () => undefined, setState: () => undefined };
 const savedState = vscode.getState();
 const inspectorTabs = ['Request', 'Raw Events', 'Normalized', 'Metrics', 'Errors', 'Runs'] as const; type InspectorTab = typeof inspectorTabs[number];
+export const DEFAULT_SPLIT_PERCENT = 64;
+export const ACCESSIBLE_EVENT_WINDOW_SIZE = 200;
 
 function post(message: WebviewPayload): void { vscode.postMessage({ ...message, protocolVersion: PROTOCOL_VERSION, editorInstanceId: instanceId, requestId: crypto.randomUUID() }); }
 
 function App(): React.JSX.Element {
-  const [section, setSection] = useState<WorkspaceSection>(isWorkspaceSection(savedState?.section) ? savedState.section : 'test'); const [inspectorTab, setInspectorTab] = useState<InspectorTab>(savedState?.inspectorTab ?? 'Raw Events'); const [draft, setDraft] = useState(savedState?.draft ?? ''); const [splitPercent, setSplitPercent] = useState(clampSplit(savedState?.splitPercent ?? 50)); const [selectedMessageId, setSelectedMessageId] = useState(savedState?.selectedMessageId); const [selectedRawSequence, setSelectedRawSequence] = useState(savedState?.selectedRawSequence);
+  const [section, setSection] = useState<WorkspaceSection>(isWorkspaceSection(savedState?.section) ? savedState.section : 'test'); const [inspectorTab, setInspectorTab] = useState<InspectorTab>(savedState?.inspectorTab ?? 'Raw Events'); const [draft, setDraft] = useState(savedState?.draft ?? ''); const [splitPercent, setSplitPercent] = useState(clampSplit(savedState?.splitPercent ?? DEFAULT_SPLIT_PERCENT)); const [splitCustomized, setSplitCustomized] = useState(savedState?.splitCustomized ?? false); const [selectedMessageId, setSelectedMessageId] = useState(savedState?.selectedMessageId); const [selectedRawSequence, setSelectedRawSequence] = useState(savedState?.selectedRawSequence);
   const [profile, setProfile] = useState<TurnStageProfile>(); const [snapshot, setSnapshot] = useState<SessionSnapshot>(); const [runs, setRuns] = useState<LocalRun[]>([]); const [requestPreview, setRequestPreview] = useState<unknown>(); const [diagnostics, setDiagnostics] = useState<Array<{ severity: string; message: string }>>([]); const [notice, setNotice] = useState(''); const [mappingTestResult, setMappingTestResult] = useState<MappingTestResult>(); const [remoteName, setRemoteName] = useState<string>(); const [, setLocaleVersion] = useState(0);
-  useEffect(() => { const listener = (event: MessageEvent<HostMessage>) => { const message = event.data; if (message.protocolVersion !== 1 || message.editorInstanceId !== instanceId) return; if (message.type === 'host.ready') { setLocale(message.locale, message.direction); setLocaleVersion((current) => current + 1); setRemoteName(message.remoteName); } else if (message.type === 'workspace.section') { setSection(message.section); requestAnimationFrame(() => document.getElementById('main-panel')?.focus()); } else if (message.type === 'profile.snapshot') setProfile(message.profile); else if (message.type === 'profile.validation') setDiagnostics(message.diagnostics); else if (message.type === 'session.snapshot') { setSnapshot(message.snapshot); setRuns(message.runs); setRequestPreview(message.requestPreview); } else if (message.type === 'mapping.test.result') setMappingTestResult(message.result); else if (message.type === 'request.error') setNotice(message.error.message); else if (message.type === 'run.exported') setNotice(t('Run exported to {path}', { path: message.path })); else if (message.type === 'workspaceTrust.changed') setSnapshot((current) => current ? { ...current, trusted: message.trusted } : current); }; window.addEventListener('message', listener); post({ type: 'webview.ready' }); return () => window.removeEventListener('message', listener); }, []);
-  useEffect(() => { vscode.setState({ section, draft, inspectorTab, splitPercent, selectedMessageId, selectedRawSequence }); }, [section, draft, inspectorTab, splitPercent, selectedMessageId, selectedRawSequence]);
+  useEffect(() => { const listener = (event: MessageEvent<HostMessage>) => { if (!isHostMessage(event.data, instanceId)) return; const message = event.data; if (message.type === 'host.ready') { setLocale(message.locale, message.direction); setLocaleVersion((current) => current + 1); setRemoteName(message.remoteName); } else if (message.type === 'workspace.section') { setSection(message.section); requestAnimationFrame(() => document.getElementById('main-panel')?.focus()); } else if (message.type === 'profile.snapshot') setProfile(message.profile); else if (message.type === 'profile.validation') setDiagnostics(message.diagnostics); else if (message.type === 'session.snapshot') { setSnapshot(message.snapshot); setRuns(message.runs); setRequestPreview(message.requestPreview); } else if (message.type === 'mapping.test.result') setMappingTestResult(message.result); else if (message.type === 'request.error') setNotice(message.error.message); else if (message.type === 'run.exported') setNotice(t('Run exported to {path}', { path: message.path })); else if (message.type === 'workspaceTrust.changed') setSnapshot((current) => current ? { ...current, trusted: message.trusted } : current); }; window.addEventListener('message', listener); post({ type: 'webview.ready' }); return () => window.removeEventListener('message', listener); }, []);
+  useEffect(() => { vscode.setState({ section, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence }); }, [section, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence]);
   useEffect(() => {
     if (!profile) return;
     const preferredTab = resolveUiLayout(profile.ui).initialInspectorTab;
@@ -36,7 +38,7 @@ function App(): React.JSX.Element {
   }, [profile?.ui?.layout?.preset, profile?.ui?.components?.metrics?.visible]);
   const active = snapshot ? ['submitting', 'waitingStart', 'streaming', 'stopping'].includes(snapshot.turnState) : false;
   const continuationBlocked = snapshot?.turnState === 'failed' && profile?.errorPolicy?.allowContinuation === false;
-  const send = (text = draft, interaction: any = { kind: 'manual' }) => { if (!text.trim() || active) return; post({ type: 'request.send', text, interaction }); setDraft(''); };
+  const send = (text = draft, interaction: any = { kind: 'manual' }) => { if (!text.trim() || active || snapshot?.trusted !== true) return; post({ type: 'request.send', text, interaction }); setDraft(''); };
   const selectMessage = (messageId: string) => {
     setSelectedMessageId(messageId);
     const message = snapshot?.messages.find((item) => item.id === messageId);
@@ -55,14 +57,14 @@ function App(): React.JSX.Element {
     {snapshot?.trusted === false && <div className="trust-banner" role="status"><strong>{t('Restricted mode.')}</strong> {t('This workspace is not trusted. Network requests are disabled; fixture replay remains available.')}</div>}
     {diagnostics.length > 0 && <div className="validation-banner" role="alert"><strong>{t(diagnostics.length === 1 ? '{count} configuration issue.' : '{count} configuration issues.', { count: formatNumber(diagnostics.length) })}</strong> {t('Requests are blocked until errors are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as Text')}</button></div>}
     <section id="main-panel" tabIndex={-1} className="panel" aria-label={section === 'test' ? t('Test') : t('{section} profile configuration', { section: localizeHumanized(section) })}>
-      {section === 'test' && <TestWorkspace profile={profile} snapshot={snapshot} runs={runs} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} inspectorTab={inspectorTab} setInspectorTab={setInspectorTab} requestPreview={requestPreview} splitPercent={splitPercent} setSplitPercent={setSplitPercent} selectedMessageId={selectedMessageId} selectedRawSequence={selectedRawSequence} onSelectMessage={selectMessage} onSelectEvent={selectEvent} onCreateMapping={(event) => { post({ type: 'profile.patch', path: ['stream', 'mappings'], value: [...profile.stream.mappings, mappingDraftFromRawEvent(event, profile)] }); setNotice(t('Created mapping draft from raw event #{sequence}.', { sequence: formatNumber(event.sequence) })); }} />}
-      {section !== 'test' && <SettingsWorkspace section={section} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} post={post} />}
+      {section === 'test' && <TestWorkspace profile={profile} snapshot={snapshot} runs={runs} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} inspectorTab={inspectorTab} setInspectorTab={setInspectorTab} requestPreview={requestPreview} splitPercent={splitPercent} setSplitPercent={setSplitPercent} splitCustomized={splitCustomized} setSplitCustomized={setSplitCustomized} selectedMessageId={selectedMessageId} selectedRawSequence={selectedRawSequence} onSelectMessage={selectMessage} onSelectEvent={selectEvent} onCreateMapping={(event) => { post({ type: 'profile.patch', path: ['stream', 'mappings'], value: [...profile.stream.mappings, mappingDraftFromRawEvent(event, profile)] }); setNotice(t('Created mapping draft from raw event #{sequence}.', { sequence: formatNumber(event.sequence) })); }} />}
+      {section !== 'test' && <SettingsWorkspace section={section} onSectionChange={setSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} post={post} />}
     </section>
     <div className="sr-status" role="status" aria-live="polite">{notice || terminalAnnouncement(snapshot?.turnState)}</div>
   </main>;
 }
 
-function TestWorkspace({ profile, snapshot, runs, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, selectedMessageId, selectedRawSequence, onSelectMessage, onSelectEvent, onCreateMapping }: {
+function TestWorkspace({ profile, snapshot, runs, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, selectedMessageId, selectedRawSequence, onSelectMessage, onSelectEvent, onCreateMapping }: {
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
   runs: LocalRun[];
@@ -76,6 +78,8 @@ function TestWorkspace({ profile, snapshot, runs, active, continuationBlocked, d
   requestPreview: unknown;
   splitPercent: number;
   setSplitPercent: (value: number) => void;
+  splitCustomized: boolean;
+  setSplitCustomized: (value: boolean) => void;
   selectedMessageId?: string;
   selectedRawSequence?: number;
   onSelectMessage: (messageId: string) => void;
@@ -83,50 +87,69 @@ function TestWorkspace({ profile, snapshot, runs, active, continuationBlocked, d
   onCreateMapping: (event: RawStreamEvent) => void;
 }): React.JSX.Element {
   const workspaceRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLElement>(null);
   const layout = resolveUiLayout(profile.ui);
-  const [manualResize, setManualResize] = useState(false);
-  useEffect(() => setManualResize(false), [layout.preset, layout.inspectorPosition, layout.inspectorWidth]);
+  const layoutSignature = `${layout.preset}:${layout.inspectorPosition}:${layout.inspectorWidth ?? 'auto'}`;
+  const hasConfiguredRightWidth = layout.inspectorPosition === 'right' && Boolean(layout.inspectorWidth);
+  const previousLayoutSignature = useRef(layoutSignature);
   useEffect(() => {
-    if (!layout.showInspector || layout.inspectorPosition !== 'right' || !layout.inspectorWidth || manualResize) return;
+    if (previousLayoutSignature.current === layoutSignature) return;
+    previousLayoutSignature.current = layoutSignature;
+    setSplitCustomized(false);
+  }, [layoutSignature, setSplitCustomized]);
+  useEffect(() => {
     const workspace = workspaceRef.current;
-    if (!workspace) return;
+    const preview = previewRef.current;
+    if (!layout.showInspector || !workspace || !preview) return;
     const update = () => {
-      const width = workspace.getBoundingClientRect().width;
-      if (width) setSplitPercent(clampSplit(100 - (layout.inspectorWidth! / width) * 100));
+      const workspaceRect = workspace.getBoundingClientRect();
+      const previewRect = preview.getBoundingClientRect();
+      const available = layout.inspectorPosition === 'right' ? workspaceRect.width : workspaceRect.height;
+      const occupied = layout.inspectorPosition === 'right' ? previewRect.width : previewRect.height;
+      if (layout.inspectorPosition === 'right' && previewRect.width >= workspaceRect.width - 1) return;
+      if (available) setSplitPercent(clampSplit((occupied / available) * 100));
     };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(workspace);
+    observer.observe(preview);
     return () => observer.disconnect();
-  }, [layout.showInspector, layout.inspectorPosition, layout.inspectorWidth, manualResize, setSplitPercent]);
+  }, [layout.inspectorPosition, layout.showInspector, layoutSignature, setSplitPercent]);
   const resizeFromPointer = (clientX: number, clientY: number) => {
     const rect = workspaceRef.current?.getBoundingClientRect();
     const available = layout.inspectorPosition === 'right' ? rect?.width : rect?.height;
     if (!rect || !available) return;
     const offset = layout.inspectorPosition === 'right' ? clientX - rect.left : clientY - rect.top;
-    setManualResize(true);
+    setSplitCustomized(true);
     setSplitPercent(clampSplit((offset / available) * 100));
   };
   const beginResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     const move = (moveEvent: PointerEvent) => resizeFromPointer(moveEvent.clientX, moveEvent.clientY);
-    const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); };
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      window.removeEventListener('blur', stop);
+    };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', stop, { once: true });
+    window.addEventListener('pointercancel', stop, { once: true });
+    window.addEventListener('blur', stop, { once: true });
   };
-  const inspectorSize = layout.inspectorPosition === 'right' && layout.inspectorWidth && !manualResize ? `${layout.inspectorWidth}px` : `${100 - splitPercent}%`;
+  const inspectorSize = hasConfiguredRightWidth && !splitCustomized ? `${layout.inspectorWidth}px` : `${100 - splitPercent}%`;
   const workspaceClassName = ['test-workspace', `test-workspace--${layout.preset}`, `test-workspace--inspector-${layout.inspectorPosition}`, layout.compact ? 'test-workspace--compact' : ''].filter(Boolean).join(' ');
   const decrementKey = layout.inspectorPosition === 'right' ? 'ArrowLeft' : 'ArrowUp';
   const incrementKey = layout.inspectorPosition === 'right' ? 'ArrowRight' : 'ArrowDown';
   return <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-percent': `${splitPercent}%`, '--inspector-size': inspectorSize } as React.CSSProperties}>
-    <section className="preview-pane" aria-label={t('Mobile chat preview')}>
+    <section ref={previewRef} className="preview-pane" aria-label={t('Mobile chat preview')}>
       <MobileChatPreview profile={profile} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} selectedMessageId={selectedMessageId} onSelectMessage={onSelectMessage} />
     </section>
     {layout.showInspector && <>
-      <div className={`splitter splitter--${layout.inspectorPosition}`} role="separator" aria-label={t('Resize chat preview and debug panels')} aria-orientation={layout.inspectorPosition === 'right' ? 'vertical' : 'horizontal'} aria-valuemin={35} aria-valuemax={65} aria-valuenow={Math.round(splitPercent)} tabIndex={0} onPointerDown={beginResize} onKeyDown={(event) => {
-        if (event.key === decrementKey || event.key === incrementKey) { event.preventDefault(); setManualResize(true); setSplitPercent(clampSplit(splitPercent + (event.key === decrementKey ? -2 : 2))); }
-        else if (event.key === 'Home') { event.preventDefault(); setManualResize(true); setSplitPercent(35); }
-        else if (event.key === 'End') { event.preventDefault(); setManualResize(true); setSplitPercent(65); }
+      <div className={`splitter splitter--${layout.inspectorPosition}`} role="separator" aria-label={t('Resize chat preview and debug panels')} aria-orientation={layout.inspectorPosition === 'right' ? 'vertical' : 'horizontal'} aria-valuemin={10} aria-valuemax={90} aria-valuenow={Math.round(splitPercent)} tabIndex={0} onPointerDown={beginResize} onKeyDown={(event) => {
+        if (event.key === decrementKey || event.key === incrementKey) { event.preventDefault(); setSplitCustomized(true); setSplitPercent(clampSplit(splitPercent + (event.key === decrementKey ? -2 : 2))); }
+        else if (event.key === 'Home') { event.preventDefault(); setSplitCustomized(true); setSplitPercent(10); }
+        else if (event.key === 'End') { event.preventDefault(); setSplitCustomized(true); setSplitPercent(90); }
       }}><span aria-hidden="true" /></div>
       <aside className="debug-pane" aria-label={t('Debug and stream information')}>
         <header className="debug-heading"><strong>{t('Debug').toLocaleUpperCase()}</strong><span>{t('{count} raw events', { count: formatNumber(snapshot?.rawEvents.length ?? 0) })}</span></header>
@@ -136,7 +159,19 @@ function TestWorkspace({ profile, snapshot, runs, active, continuationBlocked, d
   </div>;
 }
 
-function JsonBlock({ value }: { value: unknown }): React.JSX.Element { return <pre className="json"><code>{JSON.stringify(value, null, 2)}</code><IconButton icon="copy" label={t('Copy JSON')} onClick={() => navigator.clipboard.writeText(JSON.stringify(value, null, 2))} /></pre>; }
+export function JsonBlock({ value }: { value: unknown }): React.JSX.Element {
+  const text = safeJson(value);
+  return <pre className="json"><code>{text}</code><ClipboardButton text={text} label={t('Copy JSON')} /></pre>;
+}
+
+function safeJson(value: unknown): string {
+  try {
+    const result = JSON.stringify(value, null, 2);
+    return result === undefined ? '' : result;
+  } catch {
+    return t('Unable to display this value.');
+  }
+}
 
 function Inspector({ profile, snapshot, runs = [], active = false, tab, setTab, requestPreview, full = false, interactive = true, onCreateMapping, selectedSequence, onSelectEvent }: { profile?: TurnStageProfile; snapshot?: SessionSnapshot; runs?: LocalRun[]; active?: boolean; tab: InspectorTab; setTab: (tab: InspectorTab) => void; requestPreview: unknown; full?: boolean; interactive?: boolean; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; onSelectEvent?: (event: Record<string, unknown>) => void }): React.JSX.Element {
   const availableTabs: InspectorTab[] = profile && !componentVisible(profile, 'metrics') ? inspectorTabs.filter((item): item is InspectorTab => item !== 'Metrics') : [...inspectorTabs];
@@ -160,7 +195,7 @@ function Inspector({ profile, snapshot, runs = [], active = false, tab, setTab, 
         ? <MetricGrid metrics={snapshot?.metrics} />
         : effectiveTab === 'Errors'
           ? <div className="error-list">{snapshot?.errors.length ? snapshot.errors.map((error, index) => <details key={`${error.type}-${index}`}><summary>{error.type}</summary><p>{error.message}</p><JsonBlock value={error} /></details>) : <p className="muted">{t('No runtime errors.')}</p>}</div>
-          : <Replay runs={runs} replay={snapshot?.replay} remoteSessions={snapshot?.remoteSessions} active={active} />;
+          : <Replay runs={runs} replay={snapshot?.replay} remoteSessions={snapshot?.remoteSessions} active={active} trusted={snapshot?.trusted === true} />;
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, currentTab: InspectorTab) => {
     const currentIndex = availableTabs.indexOf(currentTab);
     const nextIndex = getRovingIndex(currentIndex, event.key, availableTabs.length, 'horizontal');
@@ -178,7 +213,7 @@ function Inspector({ profile, snapshot, runs = [], active = false, tab, setTab, 
   </div>;
 }
 
-function VirtualEvents({ items, label, onCreateMapping, selectedSequence, onSelectEvent }: { items: Array<Record<string, any>>; label: string; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; onSelectEvent?: (event: Record<string, unknown>) => void }): React.JSX.Element {
+export function VirtualEvents({ items, label, onCreateMapping, selectedSequence, onSelectEvent }: { items: Array<Record<string, any>>; label: string; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; onSelectEvent?: (event: Record<string, unknown>) => void }): React.JSX.Element {
   const rowHeight = 30;
   const listRef = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0);
@@ -188,10 +223,15 @@ function VirtualEvents({ items, label, onCreateMapping, selectedSequence, onSele
   const effectiveSelectedSequence = selectedSequence ?? uncontrolledSelectedSequence;
   const selectedIndex = effectiveSelectedSequence === undefined ? -1 : items.findIndex((item) => eventSequence(item) === effectiveSelectedSequence);
   const selectedItem = selectedIndex >= 0 ? items[selectedIndex] : undefined;
-  const screenReader = typeof document !== 'undefined' && document.body.classList.contains('vscode-using-screen-reader');
+  const screenReader = typeof document !== 'undefined' && document.body?.classList.contains('vscode-using-screen-reader');
   const start = Math.max(0, Math.floor(top / rowHeight) - 4);
-  const visible = screenReader ? items : items.slice(start, start + Math.ceil(height / rowHeight) + 8);
-  const visibleStart = screenReader ? 0 : start;
+  const viewportStart = Math.floor(top / rowHeight);
+  const viewportEnd = viewportStart + Math.ceil(height / rowHeight);
+  const selectedInViewport = selectedIndex >= 0 && selectedIndex >= Math.max(0, viewportStart - 2) && selectedIndex <= viewportEnd + 2;
+  const accessibleAnchor = selectedInViewport ? selectedIndex : Math.max(activeIndex, viewportStart);
+  const visibleStart = screenReader ? accessibleEventWindowStart(accessibleAnchor, items.length, ACCESSIBLE_EVENT_WINDOW_SIZE) : start;
+  const visibleCount = screenReader ? ACCESSIBLE_EVENT_WINDOW_SIZE : Math.ceil(height / rowHeight) + 8;
+  const visible = items.slice(visibleStart, visibleStart + visibleCount);
   const rovingIndex = selectedIndex >= 0 ? selectedIndex : items.length ? Math.min(Math.max(activeIndex, 0), items.length - 1) : -1;
 
   useEffect(() => {
@@ -236,9 +276,12 @@ function VirtualEvents({ items, label, onCreateMapping, selectedSequence, onSele
     selectEventAt(nextIndex);
   };
 
-  return <div className={`event-browser ${selectedItem ? 'event-browser--detail' : ''}`}>
+  const accessibleEnd = Math.min(items.length, visibleStart + ACCESSIBLE_EVENT_WINDOW_SIZE);
+  const accessibleWindow = screenReader && items.length > ACCESSIBLE_EVENT_WINDOW_SIZE;
+  return <div className={`event-browser ${selectedItem ? 'event-browser--detail' : ''} ${accessibleWindow ? 'event-browser--accessible-window' : ''}`.trim()}>
+    {screenReader && items.length > ACCESSIBLE_EVENT_WINDOW_SIZE && <p className="event-accessibility-notice" role="status" aria-live="polite">{t('Showing events {start}–{end} of {total} for screen reader performance.', { start: formatNumber(visibleStart + 1), end: formatNumber(accessibleEnd), total: formatNumber(items.length) })}</p>}
     <div ref={listRef} className="virtual-list" role="listbox" aria-label={label} onScroll={(event) => setTop(event.currentTarget.scrollTop)}>
-      {!items.length ? <div className="empty-state compact"><strong>{t('No matching events')}</strong></div> : <div className="virtual-space" style={{ height: screenReader ? 'auto' : items.length * rowHeight }}><div style={{ transform: screenReader ? undefined : `translateY(${visibleStart * rowHeight}px)` }}>{visible.map((item, index) => {
+      {!items.length ? <div className="empty-state compact"><strong>{t('No matching events')}</strong></div> : <div className="virtual-space" style={{ height: items.length * rowHeight }}><div style={{ transform: `translateY(${visibleStart * rowHeight}px)` }}>{visible.map((item, index) => {
         const itemSequence = eventSequence(item);
         const selected = itemSequence === effectiveSelectedSequence;
         const itemIndex = visibleStart + index;
@@ -255,11 +298,11 @@ function VirtualEvents({ items, label, onCreateMapping, selectedSequence, onSele
 }
 function MetricGrid({ metrics }: { metrics?: SessionSnapshot['metrics'] }): React.JSX.Element { if (!metrics) return <p className="muted">{t('No metrics yet.')}</p>; return <dl className="metrics">{Object.entries(metrics).filter(([, value]) => value !== undefined).map(([key, value]) => <div key={key}><dt>{localizeHumanized(key)}</dt><dd>{typeof value === 'number' ? (/latency|duration|gap/i.test(key) ? formatDuration(value) : formatNumber(value)) : String(value)}</dd></div>)}</dl>; }
 
-function Replay({ runs, replay, remoteSessions, active }: { runs: LocalRun[]; replay?: ReplaySnapshot; remoteSessions?: RemoteSessionReference[]; active: boolean }): React.JSX.Element {
+function Replay({ runs, replay, remoteSessions, active, trusted }: { runs: LocalRun[]; replay?: ReplaySnapshot; remoteSessions?: RemoteSessionReference[]; active: boolean; trusted: boolean }): React.JSX.Element {
   const [speed, setSpeed] = useState<ReplaySnapshot['speed']>(replay?.speed ?? 1); useEffect(() => { if (replay) setSpeed(replay.speed); }, [replay?.speed]);
   const playing = replay?.status === 'playing'; const paused = replay?.status === 'paused'; const loaded = Boolean(replay?.runId) && (playing || paused || replay?.status === 'stopped'); const progress = replay?.total ? Math.round((replay.index / replay.total) * 100) : 0;
   const changeSpeed = (value: ReplaySnapshot['speed']) => { setSpeed(value); if (replay?.runId) post({ type: 'run.replay.speed', speed: value }); };
-  return <div className="content-page replay-page"><header className="page-heading"><div><h2>{t('Recorded runs')}</h2><p>{t('Replay raw events through the same mapping and reducer pipeline.')}</p></div></header>{remoteSessions && remoteSessions.length > 0 && <section className="remote-sessions" aria-labelledby="remote-sessions-heading"><div className="section-heading"><div><h3 id="remote-sessions-heading">{t('Remote session references')}</h3><p>{t('Reference-only history keeps metadata locally; applying one does not fetch or expose remote messages.')}</p></div></div><ul>{remoteSessions.map((session) => <li key={session.conversationId}><div><strong>{session.title}</strong><span><code>{session.conversationId}</code> · {session.actorId ?? t('No actor')} · {session.environmentId ?? t('No environment')} · <time dateTime={new Date(session.createdAt).toISOString()}>{formatDateTime(session.createdAt)}</time></span></div><button disabled={active} onClick={() => post({ type: 'history.remote.apply', conversationId: session.conversationId })}>{t('Apply')}</button></li>)}</ul></section>}<section className="replay-deck" aria-label={t('Replay controls')}><div className="transport-controls"><button disabled={!playing} onClick={() => post({ type: 'run.replay.pause' })}>{t('Pause')}</button><button className="primary" disabled={!paused} onClick={() => post({ type: 'run.replay.resume' })}>{t('Resume')}</button><button disabled={!loaded} onClick={() => post({ type: 'run.replay.stop' })}>{t('Stop')}</button><button disabled={!paused} onClick={() => post({ type: 'run.replay.step' })}>{t('Step')}</button></div><label>{t('Playback speed')}<select value={speed} onChange={(event) => changeSpeed(Number(event.target.value) as ReplaySnapshot['speed'])}>{[0.25, 0.5, 1, 2, 4].map((value) => <option key={value} value={value}>{formatNumber(value)}×</option>)}</select></label><div className="replay-progress"><div><strong>{replay ? localizeHumanized(replay.status) : t('Ready')}</strong><span>{replay ? t('{current} / {total} events', { current: formatNumber(replay.index), total: formatNumber(replay.total) }) : t('Select a run to begin')}</span></div><progress value={progress} max={100} aria-label={t('Replay progress')}>{progress}%</progress></div></section>{runs.length ? <ul className="run-list">{runs.map((run) => <li className={replay?.runId === run.id ? 'active-run' : ''} key={run.id}><div><strong>{formatDateTime(run.createdAt)}</strong><span>{localizeHumanized(run.result.type)} · {t('{count} events', { count: formatNumber(run.metrics.eventCount) })} · {formatDuration(run.metrics.totalDuration ?? 0)}</span></div><div className="actions"><button className="primary" disabled={playing && replay?.runId === run.id} onClick={() => post({ type: 'run.replay.play', runId: run.id, speed })}>{t(replay?.runId === run.id && playing ? 'Playing' : 'Play')}</button><button onClick={() => post({ type: 'run.export', runId: run.id })}>{t('Export')}</button></div></li>)}</ul> : <div className="empty-state"><strong>{t('No recorded runs')}</strong><p>{t('Completed, failed, and aborted turns appear here.')}</p></div>}</div>;
+  return <div className="content-page replay-page"><header className="page-heading"><div><h2>{t('Recorded runs')}</h2><p>{t('Replay raw events through the same mapping and reducer pipeline.')}</p></div></header>{remoteSessions && remoteSessions.length > 0 && <section className="remote-sessions" aria-labelledby="remote-sessions-heading"><div className="section-heading"><div><h3 id="remote-sessions-heading">{t('Remote session references')}</h3><p>{t('Reference-only history keeps metadata locally; applying one does not fetch or expose remote messages.')}</p></div></div><ul>{remoteSessions.map((session) => <li key={session.conversationId}><div><strong>{session.title}</strong><span><code>{session.conversationId}</code> · {session.actorId ?? t('No actor')} · {session.environmentId ?? t('No environment')} · <time dateTime={dateTimeAttribute(session.createdAt)}>{formatDateTime(session.createdAt)}</time></span></div><button disabled={active} onClick={() => post({ type: 'history.remote.apply', conversationId: session.conversationId })}>{t('Apply')}</button></li>)}</ul></section>}<section className="replay-deck" aria-label={t('Replay controls')}><div className="transport-controls"><button disabled={!playing} onClick={() => post({ type: 'run.replay.pause' })}>{t('Pause')}</button><button className="primary" disabled={!paused} onClick={() => post({ type: 'run.replay.resume' })}>{t('Resume')}</button><button disabled={!loaded} onClick={() => post({ type: 'run.replay.stop' })}>{t('Stop')}</button><button disabled={!paused} onClick={() => post({ type: 'run.replay.step' })}>{t('Step')}</button></div><label>{t('Playback speed')}<select value={speed} onChange={(event) => changeSpeed(Number(event.target.value) as ReplaySnapshot['speed'])}>{[0.25, 0.5, 1, 2, 4].map((value) => <option key={value} value={value}>{formatNumber(value)}×</option>)}</select></label><div className="replay-progress"><div><strong>{replay ? localizeHumanized(replay.status) : t('Ready')}</strong><span>{replay ? t('{current} / {total} events', { current: formatNumber(replay.index), total: formatNumber(replay.total) }) : t('Select a run to begin')}</span></div><progress value={progress} max={100} aria-label={t('Replay progress')}>{progress}%</progress></div></section>{runs.length ? <ul className="run-list">{runs.map((run) => <li className={replay?.runId === run.id ? 'active-run' : ''} key={run.id}><div><strong>{formatDateTime(run.createdAt)}</strong><span>{localizeHumanized(run.result.type)} · {t('{count} events', { count: formatNumber(run.metrics.eventCount) })} · {formatDuration(run.metrics.totalDuration ?? 0)}</span></div><div className="actions"><button className="primary" disabled={playing && replay?.runId === run.id} onClick={() => post({ type: 'run.replay.play', runId: run.id, speed })}>{t(replay?.runId === run.id && playing ? 'Playing' : 'Play')}</button><button disabled={!trusted} onClick={() => post({ type: 'run.export', runId: run.id })}>{t('Export')}</button></div></li>)}</ul> : <div className="empty-state"><strong>{t('No recorded runs')}</strong><p>{t('Completed, failed, and aborted turns appear here.')}</p></div>}</div>;
 }
 
 export type RovingOrientation = 'horizontal' | 'vertical';
@@ -289,6 +332,14 @@ function eventRowId(item: Record<string, any>, fallbackIndex: number): string {
   return `inspector-event-${sequence === undefined ? `item-${fallbackIndex}` : String(sequence)}`;
 }
 
+/** Keep assistive technology DOM bounded while preserving the full list position metadata. */
+export function accessibleEventWindowStart(anchorIndex: number, itemCount: number, windowSize = ACCESSIBLE_EVENT_WINDOW_SIZE): number {
+  if (itemCount <= windowSize) return 0;
+  const safeWindowSize = Math.max(1, Math.floor(windowSize));
+  const safeAnchor = Number.isInteger(anchorIndex) ? Math.max(0, Math.min(anchorIndex, itemCount - 1)) : 0;
+  return Math.max(0, Math.min(itemCount - safeWindowSize, safeAnchor - Math.floor(safeWindowSize / 2)));
+}
+
 function focusAfterRender(callback: () => void): void {
   if (typeof document === 'undefined') return;
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(callback);
@@ -312,7 +363,7 @@ function isInteractionLocked(profile: TurnStageProfile, id: string, active: bool
 
 function componentVisible(profile: TurnStageProfile, name: string): boolean { return profile.ui?.components?.[name]?.visible !== false; }
 
-export function clampSplit(value: number): number { return Math.min(65, Math.max(35, Number.isFinite(value) ? value : 50)); }
+export function clampSplit(value: number): number { return Math.min(90, Math.max(10, Number.isFinite(value) ? value : DEFAULT_SPLIT_PERCENT)); }
 export function rawSequencesForMessage(message?: ChatMessage): number[] {
   return Array.isArray(message?.metadata?.rawSequences)
     ? message.metadata.rawSequences.filter((value): value is number => typeof value === 'number')

@@ -218,10 +218,14 @@ the method, URL, redacted headers/body, and selected variant ID.
 header latency and chunk bytes, checks HTTP status, validates
 `text/event-stream` for SSE and `ndjson`/`jsonl` for NDJSON, then feeds decoded
 chunks to a parser. Configured total and idle timeouts abort the local request.
+Opt-in reconnect uses bounded exponential backoff and `Retry-After`, but only
+before the first raw event. Redirects are manual and bounded; same-origin is the
+default, while explicit cross-origin follow strips request credentials.
 
-`SseParser` supports arbitrary chunk boundaries, LF/CRLF line endings, blank
-line dispatch, comment lines, `event`, `data` (including multiline data), `id`,
-`retry`, and a partial event flushed by `finish()`. `toRawEvent()` retains raw
+`SseParser` supports arbitrary chunk boundaries, CR/LF/CRLF line endings, an
+optional leading BOM, blank-line dispatch, comment lines, `event`, `data`
+(including multiline data), `id`, `retry`, and a partial event flushed by
+`finish()`. `toRawEvent()` retains raw
 text, parsed JSON (or the original text plus `parseError`), sequence, protocol,
 timestamps, and SSE metadata. `[DONE]` remains a string sentinel.
 
@@ -346,7 +350,7 @@ These are current implementation facts, not benchmark conclusions:
   inspector supports text search and event-type filtering.
 - Disabling raw-event recording makes that run unavailable for replay; metrics,
   request metadata, and the terminal result remain available.
-- The runtime has no reconnect support and no reconnect metric. `json` still
+- Reconnect attempts are not currently included in run metrics. `json` still
   uses the line-oriented parser; `text-stream` has a decoded-chunk path but no
   record framing beyond transport chunks.
 

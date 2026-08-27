@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ProfileRepository, type ProfileEntry } from './profileRepository';
+import { localize } from '../l10n';
 
 const duplicateCode = 'duplicate-profile-id';
 
@@ -65,12 +66,12 @@ export class ProfileDuplicateDiagnostics implements vscode.Disposable {
       const offset = entry.idOffset ?? 0;
       const range = new vscode.Range(document.positionAt(offset), document.positionAt(offset + (entry.idLength ?? 1)));
       const others = conflicts.filter((item) => item.uri.toString() !== entry.uri.toString());
-      const diagnostic = new vscode.Diagnostic(range, `Profile id "${id}" is also used by ${others.map((item) => vscode.workspace.asRelativePath(item.uri)).join(', ')}.`, vscode.DiagnosticSeverity.Error);
+      const diagnostic = new vscode.Diagnostic(range, localize('Profile id "{id}" is also used by {profiles}.', { id, profiles: others.map((item) => vscode.workspace.asRelativePath(item.uri)).join(', ') }), vscode.DiagnosticSeverity.Error);
       diagnostic.source = 'TurnStage';
       diagnostic.code = duplicateCode;
       diagnostic.relatedInformation = others.map((item) => new vscode.DiagnosticRelatedInformation(
         new vscode.Location(item.uri, new vscode.Position(0, 0)),
-        `Conflicting TurnStage profile id "${id}".`,
+        localize('Conflicting TurnStage profile id "{id}".', { id }),
       ));
       return diagnostic;
     } catch {

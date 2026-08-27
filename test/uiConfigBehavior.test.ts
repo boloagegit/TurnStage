@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnStageProfile } from '../src/shared/types';
+import { clampSplit, DEFAULT_SPLIT_PERCENT } from '../src/webview/main';
 import { DEFAULT_MESSAGE_ACTIONS, resolveComposer, resolveMessageActions, resolveUiLayout } from '../src/webview/uiConfig';
 
 function profile(messageActions?: string[]): TurnStageProfile {
@@ -14,6 +15,12 @@ function profile(messageActions?: string[]): TurnStageProfile {
 }
 
 describe('profile-driven UI behavior', () => {
+  it('gives the primary chat workspace more room than the supporting inspector', () => {
+    expect(DEFAULT_SPLIT_PERCENT).toBe(64);
+    expect(clampSplit(Number.NaN)).toBe(DEFAULT_SPLIT_PERCENT);
+    expect(clampSplit(-100)).toBe(10);
+    expect(clampSplit(1_000)).toBe(90);
+  });
   it('resolves every layout preset into an observable workspace behavior', () => {
     expect(resolveUiLayout({ layout: { preset: 'chat-only' } })).toMatchObject({ showInspector: false, compact: false });
     expect(resolveUiLayout({ layout: { preset: 'split-inspector', inspectorPosition: 'bottom' } })).toMatchObject({ showInspector: true, inspectorPosition: 'bottom' });

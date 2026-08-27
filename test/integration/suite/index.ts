@@ -51,12 +51,16 @@ async function assertRegisteredCommands(): Promise<void> {
     'turnstage.deleteProfile',
     'turnstage.openProfile',
     'turnstage.openProfileSection',
+    'turnstage.openGuide',
+    'turnstage.configureProfile',
     'turnstage.runProfile',
+    'turnstage.startSession',
     'turnstage.validateProfile',
     'turnstage.openAsText',
     'turnstage.openEnvironment',
     'turnstage.setSecret',
     'turnstage.replayRun',
+    'turnstage.exportRun',
   ]) {
     assert.ok(commands.has(command), `${command} should be registered`);
   }

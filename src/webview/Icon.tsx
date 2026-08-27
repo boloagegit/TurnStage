@@ -37,12 +37,6 @@ const codicons: Record<ProductIconName, string> = {
 };
 
 export function ProductIcon({ name, className = '' }: { name: ProductIconName; className?: string }): React.JSX.Element {
-  if (name === 'send') {
-    return <svg className={`product-icon product-icon--svg ${className}`.trim()} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false"><path d="M1 1.91 1.78 1.5 15 7.449v.951L1.78 14.33 1 13.91 2.583 8 1 1.91Zm2.612 6.59L2.33 13.13 13.5 7.9 2.33 2.839l1.282 4.6L9 7.5v1H3.612Z" /></svg>;
-  }
-  if (name === 'stop') {
-    return <svg className={`product-icon product-icon--svg ${className}`.trim()} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false"><path fillRule="evenodd" clipRule="evenodd" d="m13 2 1 1v10l-1 1H3l-1-1V3l1-1h10Zm-.254 1.251H3.255v9.499h9.491V3.251Z" /></svg>;
-  }
   return <span className={`codicon codicon-${codicons[name]} product-icon ${className}`.trim()} aria-hidden="true" />;
 }
 

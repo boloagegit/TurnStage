@@ -58,15 +58,23 @@ structured JSONC edits.
 Network calls are made only by the Extension Host through `fetch`. Request URLs
 are resolved from a profile/environment and must be `http:` or `https:`. The
 SSE/NDJSON transport checks the expected content type for the selected parser,
-limits an HTTP error body shown in the error message to 4096 characters, and
-supports AbortController cancellation and configured timeouts.
+limits an HTTP error body shown in the error message to 4096 bytes, limits a
+single SSE/NDJSON record to 1 MiB by default, and supports AbortController
+cancellation and configured timeouts. Redirects are handled manually with a
+bounded hop count. The default is same-origin only; explicit cross-origin
+following strips common credential headers and any header whose value contains
+a secret resolved for that request.
 
 When `vscode.workspace.isTrusted` is false:
 
 - profile discovery, editing, validation, and built-in fixture replay remain
   available;
+- persisted local runs are not loaded, because legacy run payloads may predate
+  current value-based redaction and SecretStorage is intentionally unavailable;
 - request-backed openings and conversation requests are blocked with
   `WorkspaceTrustError`;
+- secret-persist controls are not read from SecretStorage and `control.set`
+  cannot change or write them;
 - citation opening is blocked;
 - the Webview shows a restricted-mode banner.
 
@@ -105,7 +113,12 @@ contain only references:
 When a template contains `${secret.apiToken}`, the host resolves `apiToken`
 through that reference (or uses the placeholder name if no reference exists).
 Missing values fail request construction with `MissingSecretError`. No secret
-value is intentionally sent to the Webview.
+value is intentionally sent to the Webview. A `secret`-persist control is a
+host-only request input: its value is omitted from `SessionSnapshot.controls`,
+fixture snapshots, local-run snapshots, and the runs list sent to the Webview.
+Trusted workspaces may still set that control through the host message path and
+the host may resolve it in request/template context. Restricted workspaces do
+not hydrate or persist the control, even when a Webview sends `control.set`.
 
 Do not put credentials in profile/environment files, fixtures, source code, or
 mock-server values. Use example-only values such as `example-value` and the
@@ -114,7 +127,8 @@ local loopback endpoint.
 ## Redaction
 
 Request previews and the redacted request stored in a local run apply two
-layers:
+structural layers, plus value-based masking of resolved environment secrets and
+the current profile's known secret-control values:
 
 1. Headers named `Authorization`, `Cookie`, `Set-Cookie`, `X-API-Key`, or
    `Proxy-Authorization` are replaced with a masked value while preserving a
@@ -123,15 +137,20 @@ layers:
    header or `/secret|token|password/i` are replaced with mask text.
 
 The resolved request itself remains host-side. The preview contains method,
-URL, redacted headers/body, and selected variant ID. The semantic validator
-also warns when profile text resembles a long `sk-`, `token-`, or `bearer-`
-value; it does not move or delete the value automatically.
+URL, redacted headers/body, and selected variant ID. Values resolved from
+SecretStorage and known secret controls are masked wherever they appear in the
+URL, arbitrary headers/body fields, errors, opening content, or recorded raw
+and normalized event data. This also prevents a backend echo of a current
+request secret from reaching the Webview or a newly recorded run. The semantic
+validator also warns when profile text
+resembles a long `sk-`, `token-`, or `bearer-` value; it does not move or delete
+the value automatically.
 
 Redaction boundaries to account for when designing profiles:
 
-- a secret interpolated into a URL is not masked by `redactHeaders`;
-- arbitrary response/raw event data is not recursively scrubbed before being
-  shown or recorded, so backends must not stream credentials;
+- arbitrary response/raw event data is not a general credential sanitizer;
+  profiles should still ensure backends do not stream credentials unrelated to
+  secrets resolved for the current editor session;
 - the output channel currently logs opening/editor errors, not a structured
   secret-aware audit stream. Avoid putting sensitive values in error messages.
 
@@ -212,13 +231,12 @@ potentially sensitive and store them accordingly.
 
 ## Current security limitations
 
-- Full runtime validation of all Webview union payloads is not implemented.
 - Profile validation does not resolve every template path, secret reference,
   action ID, or component name before runtime.
-- URL secret interpolation and raw-event/run content redaction need stronger
-  policy if profiles handle real credentials.
-- The host message check validates the envelope/discriminant rather than every
-  nested payload; allowlists and IDs should still be reviewed as privileged
-  inputs.
+- value-based redaction covers secrets resolved for the current editor session,
+  but cannot identify unrelated credentials emitted by a backend.
+- Host/Webview messages are checked by discriminant and bounded nested shape,
+  but allowlists, IDs, patch paths, URIs, and commands remain privileged and are
+  revalidated at their host-owned action boundary.
 - There is no telemetry, account system, cloud sync, or automatic external URL
   trust mechanism.

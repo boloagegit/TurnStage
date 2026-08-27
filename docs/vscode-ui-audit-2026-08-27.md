@@ -2,16 +2,18 @@
 
 This audit applies `docs/vscode-extension-ui-guidelines.md` to the current
 manifest, extension source, Webview source, and the rebuilt standalone Webview
-renders in `artifacts/turnstage-vscode-guidelines-desktop.png` and
-`artifacts/turnstage-vscode-guidelines-narrow.png`. These images are not
-Extension Development Host screenshots, so native workbench placement was
-verified from `package.json` and the extension source rather than inferred from
-the images.
+renders in `artifacts/turnstage-vscode-guidelines-desktop.png`,
+`artifacts/turnstage-profile-configuration.png`, and
+`artifacts/turnstage-vscode-guidelines-narrow.png`. These ignored review
+artifacts are not Extension Development Host screenshots, so native workbench
+placement is verified from `package.json`, extension source, and trusted plus
+Restricted Mode Extension Host tests rather than inferred from the images.
 
-**Current status:** all nine findings below are resolved in the current working
-tree. The desktop and 600-pixel standalone Webview renders were rebuilt after
-the changes; automated Extension Host checks passed in both trusted and
-Restricted Mode runs.
+**Current status:** all findings from the initial audit and the final hardening
+re-audit are resolved in the current working tree. The final gate reports 31
+test files and 186 tests passed, including React DOM keyboard behavior, axe,
+real local SSE transport, and session-flow tests. Typecheck, lint, package,
+trusted Extension Host, and Restricted Mode Extension Host checks also pass.
 
 ## Resolved findings
 
@@ -132,6 +134,45 @@ built-in demo as its single available action.
 - The chat/debug splitter has separator semantics and keyboard resizing.
 - Forced-colors and reduced-motion rules are present, and the current inspector
   event rows are compact 30-pixel rows rather than oversized cards.
+
+## Final hardening re-audit
+
+The second pass found issues not covered by the initial source-level tests. All
+were fixed before the final score was assigned:
+
+- Secret-persist control values now remain host-only, are excluded from every
+  Webview/run/fixture snapshot, and are neither read nor written in Restricted
+  Mode. Resolved environment secrets and known secret-control values are
+  redacted from URLs, custom headers, bodies, opening content, errors, events,
+  and persisted runs, including backend echoes.
+- Restricted Mode disables trust-sensitive native and Webview actions before
+  invocation while preserving profile inspection and fixture replay. Persisted
+  legacy runs stay unloaded because SecretStorage cannot be consulted safely.
+- Profile Configuration is reachable from the native **Configure Profile**
+  action and contains compact navigation for all seven sections. Profiles
+  remain resource leaf rows rather than command-only Tree hierarchies.
+- Message selection and actions are keyboard operable. The actions use an ARIA
+  group rather than claiming an incomplete composite toolbar pattern.
+- The splitter reports its measured visual position and uses that same state
+  for pointer and keyboard resizing, including its Home/End bounds.
+- The Profiles View has an icon; the native editor title has only one primary
+  icon action; send and stop use Codicons instead of inline SVG copies.
+- Profile Tree descriptions, tooltips, command labels, manifest titles, and new
+  runtime messages have English and Traditional Chinese catalog coverage. The
+  test gate recursively scans every Extension Host TypeScript source file.
+- Start, Run, Replay, and Export wait for the Custom Editor controller and no
+  longer silently no-op or expose placeholder-only actions.
+- The extension no longer claims unsupported multiple editors per document;
+  document reload work is debounced and stale asynchronous loads are discarded.
+- Every non-modal extension notification offers a localized **Do not show
+  again** action backed by a User-scope preference.
+- Reduced-motion behavior uses explicit static states rather than a global
+  near-zero animation-duration override.
+- React DOM and axe tests exposed and fixed two further semantic errors: ARIA
+  labels on role-less spans and skipped heading levels.
+- The final Impeccable detector pass reports zero findings.
+- Export notifications render non-file URIs without assuming a local `fsPath`,
+  preserving Virtual Workspace support.
 
 ## Audit boundary
 

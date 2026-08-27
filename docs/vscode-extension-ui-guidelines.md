@@ -16,6 +16,10 @@ authoritative and this document must be updated.
 - TurnStage must use one Activity Bar View Container for its related views. A
   View Container opens native Sidebar views; it must not act as a shortcut that
   opens an editor or runs a command.
+- The Activity Bar container icon must be a 24-by-24 monochrome SVG that uses
+  `currentColor`, follows the VS Code product-icon visual weight, and does not
+  duplicate an existing product icon. Every contributed View must also declare
+  an icon so it remains identifiable if the user moves it to another container.
 - Profiles and other navigable resources must use native Tree Views. Tree items
   must represent data or resources, not exist only as command buttons.
 - The Sidebar should contain only related TurnStage views, normally one view
@@ -66,12 +70,34 @@ authoritative and this document must be updated.
   `WorkspaceEdit` so undo, redo, dirty state, save, revert, and hot exit retain
   normal editor behavior.
 - Multiple editors for the same document must remain synchronized.
+- Every edit must be the smallest practical `WorkspaceEdit`, preserve comments
+  and existing JSONC formatting outside the edited value, and avoid host-to-
+  Webview-to-host update loops.
 - Invalid documents must show a recoverable error state and preserve access to
   the underlying text. Change-driven parsing or rendering must be debounced
   when the work could affect editor responsiveness.
 - Commands that apply to the active profile should use native editor-title
   actions when appropriate instead of recreating VS Code editor chrome inside
   the Webview.
+- The primary `editor/title` navigation group must contain at most one icon
+  action. Secondary actions belong in the overflow menu.
+
+## Webview security, state, and lifecycle
+
+- Webviews must use a restrictive Content Security Policy with
+  `default-src 'none'`, nonce-authorized local scripts, and no network access
+  unless the feature explicitly requires and documents it.
+- `localResourceRoots` and enabled capabilities must be limited to the minimum
+  resources required by the surface. Workspace, profile, stream, and user input
+  must be validated or safely rendered; untrusted content must never become
+  executable HTML, script, a command URI, or an unrestricted external URI.
+- Secret values must remain in the Extension Host. A Webview may submit a new
+  secret value to the host, but snapshots, history, fixtures, diagnostics, and
+  host-to-Webview messages must contain only non-secret values or an explicit
+  boolean configured-state.
+- Webview UI state should use `getState` and `setState`. Do not enable
+  `retainContextWhenHidden` unless a measured requirement justifies its memory
+  cost.
 
 ## Theme, typography, spacing, and icons
 
@@ -118,6 +144,24 @@ authoritative and this document must be updated.
 - Long-running work must show contextual progress and provide cancellation when
   the operation can be cancelled. Errors must explain the next useful action
   without repeating the same notification.
+- Every non-modal notification must offer a localized **Do not show again**
+  action backed by a user-level preference. User-initiated operations should
+  prefer inline confirmation, the relevant View, or the Output Channel when no
+  immediate attention is required.
+
+## Localization and Workspace Trust
+
+- Manifest strings must use `%key%` references. Extension Host UI must use
+  `vscode.l10n.t`; Webview copy must use the project localization layer. New
+  user-facing strings require English and Traditional Chinese entries plus a
+  parity test.
+- Trust-sensitive commands must be hidden or disabled with contribution-point
+  context keys and guarded again at runtime because commands may be invoked
+  programmatically.
+- In Restricted Mode, network, command execution, file mutation, and secret
+  access must fail closed. Fixture replay and other explicitly safe read-only
+  behavior may remain available. `restrictedConfigurations` must list any
+  preference whose untrusted value could broaden capability.
 
 ## Pull request acceptance checklist
 
@@ -136,11 +180,20 @@ authoritative and this document must be updated.
   large-event states have been checked where the change affects them.
 - A screenshot or recording used as review evidence is identified as either a
   real Extension Development Host capture or a standalone Webview render.
+- Webview CSP, resource roots, state persistence, input handling, secret
+  boundaries, localization parity, and runtime Workspace Trust guards have been
+  checked.
+
+Items such as one-Tab-stop composite widgets, exact splitter bounds, fixture
+retention, and screenshot provenance are deliberate TurnStage-specific
+hardening rules. They extend the official guidance and are not presented as
+verbatim VS Code requirements.
 
 ## Official sources
 
 - [UX Guidelines overview](https://code.visualstudio.com/api/ux-guidelines/overview)
-- [Activity Bar and Sidebars](https://code.visualstudio.com/api/ux-guidelines/sidebars)
+- [Activity Bar](https://code.visualstudio.com/api/ux-guidelines/activity-bar)
+- [Sidebars](https://code.visualstudio.com/api/ux-guidelines/sidebars)
 - [Views and View Containers](https://code.visualstudio.com/api/ux-guidelines/views)
 - [Webviews UX Guidelines](https://code.visualstudio.com/api/ux-guidelines/webviews)
 - [Webview API guide](https://code.visualstudio.com/api/extension-guides/webview)
@@ -149,6 +202,7 @@ authoritative and this document must be updated.
 - [Command Palette and commands](https://code.visualstudio.com/api/ux-guidelines/command-palette)
 - [Commands API guide](https://code.visualstudio.com/api/extension-guides/command)
 - [Context menus](https://code.visualstudio.com/api/ux-guidelines/context-menus)
+- [Editor actions](https://code.visualstudio.com/api/ux-guidelines/editor-actions)
 - [Quick Picks](https://code.visualstudio.com/api/ux-guidelines/quick-picks)
 - [Notifications](https://code.visualstudio.com/api/ux-guidelines/notifications)
 - [Panel](https://code.visualstudio.com/api/ux-guidelines/panel)
@@ -156,3 +210,5 @@ authoritative and this document must be updated.
 - [Theme color reference](https://code.visualstudio.com/api/references/theme-color)
 - [Codicons in labels](https://code.visualstudio.com/api/references/icons-in-labels)
 - [VS Code accessibility](https://code.visualstudio.com/docs/configure/accessibility/accessibility)
+- [VS Code localization API](https://code.visualstudio.com/api/references/vscode-api#l10n)
+- [Workspace Trust](https://code.visualstudio.com/api/extension-guides/workspace-trust)

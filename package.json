@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -45,6 +45,9 @@
     "onCommand:turnstage.deleteProfile",
     "onCommand:turnstage.openProfile",
     "onCommand:turnstage.openProfileSection",
+    "onCommand:turnstage.openGuide",
+    "onCommand:turnstage.changeDisplayLanguage",
+    "onCommand:turnstage.configureProfile",
     "onCommand:turnstage.runProfile",
     "onCommand:turnstage.startSession",
     "onCommand:turnstage.abortRequest",
@@ -115,6 +118,23 @@
         "category": "%command.category%"
       },
       {
+        "command": "turnstage.openGuide",
+        "title": "%command.openGuide%",
+        "category": "%command.category%",
+        "icon": "$(book)"
+      },
+      {
+        "command": "turnstage.changeDisplayLanguage",
+        "title": "%command.changeDisplayLanguage%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.configureProfile",
+        "title": "%command.configureProfile%",
+        "category": "%command.category%",
+        "icon": "$(settings)"
+      },
+      {
         "command": "turnstage.runProfile",
         "title": "%command.runProfile%",
         "category": "%command.category%",
@@ -123,7 +143,8 @@
       {
         "command": "turnstage.startSession",
         "title": "%command.startSession%",
-        "category": "%command.category%"
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
       },
       {
         "command": "turnstage.abortRequest",
@@ -134,7 +155,8 @@
         "command": "turnstage.newConversation",
         "title": "%command.newConversation%",
         "category": "%command.category%",
-        "icon": "$(add)"
+        "icon": "$(add)",
+        "enablement": "isWorkspaceTrusted"
       },
       {
         "command": "turnstage.clearConversation",
@@ -189,7 +211,8 @@
       {
         "command": "turnstage.exportRun",
         "title": "%command.exportRun%",
-        "category": "%command.category%"
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
       },
       {
         "command": "turnstage.openOutput",
@@ -213,7 +236,7 @@
       "activitybar": [
         {
           "id": "turnstage",
-          "title": "TurnStage",
+          "title": "%view.container%",
           "icon": "media/activity.svg"
         }
       ]
@@ -222,7 +245,8 @@
       "turnstage": [
         {
           "id": "turnstage.profiles",
-          "name": "%view.profiles%"
+          "name": "%view.profiles%",
+          "icon": "media/activity.svg"
         }
       ]
     },
@@ -236,6 +260,65 @@
         "view": "turnstage.profiles",
         "contents": "%view.profiles.welcomeRestricted%",
         "when": "!isWorkspaceTrusted"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "gettingStarted",
+        "title": "%walkthrough.title%",
+        "description": "%walkthrough.description%",
+        "steps": [
+          {
+            "id": "tryDemo",
+            "title": "%walkthrough.step.demo.title%",
+            "description": "%walkthrough.step.demo.description%",
+            "media": {
+              "markdown": "%walkthrough.step.demo.media%"
+            },
+            "completionEvents": [
+              "onCommand:turnstage.runProfile"
+            ]
+          },
+          {
+            "id": "createProfile",
+            "title": "%walkthrough.step.profile.title%",
+            "description": "%walkthrough.step.profile.description%",
+            "media": {
+              "markdown": "%walkthrough.step.profile.media%"
+            },
+            "completionEvents": [
+              "onCommand:turnstage.createProfile",
+              "onCommand:turnstage.importProfile",
+              "onCommand:turnstage.initializeWorkspace",
+              "onCommand:turnstage.initializeUser"
+            ]
+          },
+          {
+            "id": "configureFlow",
+            "title": "%walkthrough.step.configure.title%",
+            "description": "%walkthrough.step.configure.description%",
+            "media": {
+              "markdown": "%walkthrough.step.configure.media%"
+            },
+            "completionEvents": [
+              "onCommand:turnstage.configureProfile",
+              "onCommand:turnstage.openAsText"
+            ]
+          },
+          {
+            "id": "inspectRun",
+            "title": "%walkthrough.step.inspect.title%",
+            "description": "%walkthrough.step.inspect.description%",
+            "media": {
+              "markdown": "%walkthrough.step.inspect.media%"
+            },
+            "completionEvents": [
+              "onCommand:turnstage.runProfile",
+              "onCommand:turnstage.replayRun",
+              "onCommand:turnstage.openOutput"
+            ]
+          }
+        ]
       }
     ],
     "submenus": [
@@ -267,6 +350,11 @@
         {
           "command": "turnstage.refreshProfiles",
           "when": "view == turnstage.profiles",
+          "group": "navigation@4"
+        },
+        {
+          "command": "turnstage.openGuide",
+          "when": "view == turnstage.profiles",
           "group": "navigation@3"
         }
       ],
@@ -288,13 +376,18 @@
         },
         {
           "command": "turnstage.runProfile",
-          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
           "group": "inline@1"
         },
         {
           "command": "turnstage.openProfile",
           "when": "view == turnstage.profiles && viewItem == turnstageProfile",
           "group": "inline@2"
+        },
+        {
+          "command": "turnstage.configureProfile",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile",
+          "group": "inline@3"
         },
         {
           "submenu": "turnstage.profileSession",
@@ -315,6 +408,7 @@
       "turnstage.profileSession": [
         {
           "command": "turnstage.startSession",
+          "when": "isWorkspaceTrusted",
           "group": "navigation@1"
         },
         {
@@ -342,8 +436,13 @@
           "group": "advanced@1"
         },
         {
-          "command": "turnstage.exportRun",
+          "command": "turnstage.replayRun",
           "group": "advanced@2"
+        },
+        {
+          "command": "turnstage.exportRun",
+          "when": "isWorkspaceTrusted",
+          "group": "advanced@3"
         }
       ],
       "turnstage.profileManagement": [
@@ -359,13 +458,13 @@
       "editor/title": [
         {
           "command": "turnstage.newConversation",
-          "when": "activeCustomEditorId == turnstage.profileEditor",
+          "when": "activeCustomEditorId == turnstage.profileEditor && isWorkspaceTrusted",
           "group": "navigation@1"
         },
         {
           "command": "turnstage.openAsText",
           "when": "activeCustomEditorId == turnstage.profileEditor",
-          "group": "navigation@2"
+          "group": "1_modification@1"
         }
       ],
       "commandPalette": [
@@ -383,6 +482,10 @@
         },
         {
           "command": "turnstage.openProfileSection",
+          "when": "false"
+        },
+        {
+          "command": "turnstage.configureProfile",
           "when": "false"
         },
         {
@@ -454,8 +557,24 @@
       }
     ],
     "configuration": {
-      "title": "TurnStage",
+      "title": "%configuration.title%",
       "properties": {
+        "turnstage.displayLanguage": {
+          "type": "string",
+          "scope": "application",
+          "enum": [
+            "auto",
+            "zh-tw",
+            "en"
+          ],
+          "enumDescriptions": [
+            "%setting.displayLanguage.auto%",
+            "%setting.displayLanguage.zhTw%",
+            "%setting.displayLanguage.en%"
+          ],
+          "default": "auto",
+          "description": "%setting.displayLanguage%"
+        },
         "turnstage.profileGlob": {
           "type": "string",
           "scope": "resource",
@@ -509,6 +628,12 @@
           ],
           "default": "info",
           "description": "%setting.logLevel%"
+        },
+        "turnstage.notifications.enabled": {
+          "type": "boolean",
+          "scope": "window",
+          "default": true,
+          "description": "%setting.notifications.enabled%"
         }
       }
     }
@@ -535,14 +660,18 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.6",
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.11",
     "@types/react-dom": "^19.1.7",
     "@types/vscode": "^1.96.0",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.6.0",
+    "axe-core": "^4.13.0",
     "esbuild": "^0.25.9",
     "eslint": "^9.34.0",
+    "jsdom": "^30.0.1",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.41.0",
     "vitest": "^3.2.4"

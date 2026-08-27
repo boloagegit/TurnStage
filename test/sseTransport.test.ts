@@ -62,6 +62,102 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
     await expect(collect('idle-timeout', { idleTimeoutMs: 100 })).rejects.toMatchObject({ type: 'IdleTimeoutError' });
   });
 
+  it('retries bounded pre-data 429 responses while honoring the configured status policy', async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      if (calls === 1) return new Response('rate limited', { status: 429, headers: { 'Content-Type': 'text/plain', 'Retry-After': '0' } });
+      return new Response('event: done\ndata: {}\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }) as typeof fetch;
+    const events: RawStreamEvent[] = [];
+    try {
+      await expect(new HttpStreamTransport().start({ ...request('normal'), reconnect: { maxAttempts: 2, baseDelayMs: 0, retryOnStatuses: [429] } }, 'sse', {
+        onHeaders: () => undefined,
+        onChunk: () => undefined,
+        onEvent: (event) => { events.push(event); return false; },
+      }, new AbortController().signal)).resolves.toEqual({ sawData: true, aborted: false });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(calls).toBe(2);
+    expect(events.map(eventName)).toEqual(['done']);
+  });
+
+  it('does not reconnect after partial data because a replay could duplicate side effects', async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      let reads = 0;
+      return {
+        ok: true, status: 200, statusText: 'OK', headers: new Headers({ 'Content-Type': 'text/event-stream' }),
+        body: { getReader: () => ({
+          read: async () => {
+            reads += 1;
+            if (reads === 1) return { value: new TextEncoder().encode('event: start\ndata: {}\n\n'), done: false };
+            throw new Error('connection lost');
+          },
+          cancel: async () => undefined,
+          releaseLock: () => undefined,
+        }) },
+      } as unknown as Response;
+    }) as typeof fetch;
+    const events: RawStreamEvent[] = [];
+    try {
+      await expect(new HttpStreamTransport().start({ ...request('normal'), reconnect: { maxAttempts: 2, baseDelayMs: 0 } }, 'sse', {
+        onHeaders: () => undefined,
+        onChunk: () => undefined,
+        onEvent: (event) => { events.push(event); },
+      }, new AbortController().signal)).rejects.toMatchObject({ type: 'NetworkError', details: { sawData: true } });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(calls).toBe(1);
+    expect(events.map(eventName)).toEqual(['start']);
+  });
+
+  it('bounds non-success error-body reads before constructing the HTTP error', async () => {
+    const originalFetch = globalThis.fetch;
+    let reads = 0;
+    let canceled = false;
+    let textCalled = false;
+    const response = {
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: new Headers({ 'content-type': 'text/plain' }),
+      body: {
+        getReader: () => ({
+          read: async () => {
+            reads += 1;
+            return { value: new TextEncoder().encode('0123456789abcdefghijklmnopqrstuvwxyz'), done: false };
+          },
+          cancel: async () => { canceled = true; },
+          releaseLock: () => undefined,
+        }),
+      },
+      text: async () => { textCalled = true; return 'this should not be called'; },
+    } as unknown as Response;
+    globalThis.fetch = (async () => response) as typeof fetch;
+    try {
+      await expect(new HttpStreamTransport({ maxErrorBodyBytes: 8 }).start(request('normal'), 'sse', {
+        onHeaders: () => undefined,
+        onChunk: () => undefined,
+        onEvent: () => undefined,
+      }, new AbortController().signal)).rejects.toMatchObject({
+        type: 'HttpStatusError',
+        message: 'HTTP 503: 01234567',
+        details: { status: 503 },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(reads).toBe(1);
+    expect(canceled).toBe(true);
+    expect(textCalled).toBe(false);
+  });
+
   it('delivers partial stream errors and reports abrupt disconnects after partial data', async () => {
     const partial = await collect('partial-error');
     expect(partial.events.map(eventName)).toEqual(['start', 'status', 'message', 'message', 'title', 'error']);
@@ -112,6 +208,77 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
     expect(result).toEqual({ sawData: true, aborted: true });
     expect(events.map(eventName)).toEqual(['start', 'status']);
   }, 5_000);
+
+  it('cancels the reader when the sink returns false after a terminal event', async () => {
+    const originalFetch = globalThis.fetch;
+    let reads = 0;
+    let canceled = false;
+    const response = {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: {
+        getReader: () => ({
+          read: async () => {
+            reads += 1;
+            return {
+              value: new TextEncoder().encode('event: start\ndata: {}\n\nevent: next\ndata: {}\n\n'),
+              done: false,
+            };
+          },
+          cancel: async () => { canceled = true; },
+          releaseLock: () => undefined,
+        }),
+      },
+    } as unknown as Response;
+    globalThis.fetch = (async () => response) as typeof fetch;
+    const events: RawStreamEvent[] = [];
+    try {
+      await expect(new HttpStreamTransport().start(request('normal'), 'sse', {
+        onHeaders: () => undefined,
+        onChunk: () => undefined,
+        onEvent: async (event) => { events.push(event); return false; },
+      }, new AbortController().signal)).resolves.toEqual({ sawData: true, aborted: false });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(reads).toBe(1);
+    expect(canceled).toBe(true);
+    expect(events.map(eventName)).toEqual(['start']);
+  });
+
+  it('enforces the configured maximum event size through the HTTP transport', async () => {
+    const originalFetch = globalThis.fetch;
+    let canceled = false;
+    const response = {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: {
+        getReader: () => ({
+          read: async () => ({ value: new TextEncoder().encode('data: oversized\n\n'), done: false }),
+          cancel: async () => { canceled = true; },
+          releaseLock: () => undefined,
+        }),
+      },
+    } as unknown as Response;
+    globalThis.fetch = (async () => response) as typeof fetch;
+    try {
+      await expect(new HttpStreamTransport({ maxEventBytes: 8 }).start(request('normal'), 'sse', {
+        onHeaders: () => undefined,
+        onChunk: () => undefined,
+        onEvent: () => undefined,
+      }, new AbortController().signal)).rejects.toMatchObject({
+        type: 'StreamRecordTooLargeError',
+        details: { protocol: 'sse', maxBytes: 8 },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(canceled).toBe(true);
+  });
 
   it('streams NDJSON over real HTTP and flushes a final line without a newline', async () => {
     const evidence = await collectProtocol('ndjson', '/transport/ndjson');

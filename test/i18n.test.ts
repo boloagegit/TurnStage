@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { formatNumber, setLocale, t } from '../src/webview/i18n';
+import { dateTimeAttribute, formatDateTime, formatNumber, setLocale, t } from '../src/webview/i18n';
 
 const root = resolve(import.meta.dirname, '..');
 
@@ -18,6 +18,16 @@ describe('localization catalogs', () => {
     const english = json('l10n/bundle.l10n.json');
     const traditionalChinese = json('l10n/bundle.l10n.zh-tw.json');
     expect(Object.keys(traditionalChinese).sort()).toEqual(Object.keys(english).sort());
+  });
+
+  it('covers Extension Host localization literals in both bundles', () => {
+    const hostSources = sourceFiles(resolve(root, 'src/extension')).map((path) => readFileSync(path, 'utf8')).join('\n');
+    const english = json('l10n/bundle.l10n.json');
+    const traditionalChinese = json('l10n/bundle.l10n.zh-tw.json');
+    const messages = new Set<string>();
+    const literalCall = /(?:vscode\.l10n\.t|localize)\(\s*(['"])([\s\S]*?)\1/g;
+    for (const match of hostSources.matchAll(literalCall)) messages.add((match[2] ?? '').replace(/\\n/g, '\n'));
+    expect([...messages].filter((message) => !(message in english) || !(message in traditionalChinese)).sort()).toEqual([]);
   });
 
   it('covers every literal Webview message with Traditional Chinese', () => {
@@ -45,8 +55,23 @@ describe('localization catalogs', () => {
     setLocale('fr');
     expect(t('Restricted mode.')).toBe('Restricted mode.');
   });
+
+  it('formats corrupt persisted dates without throwing or emitting invalid time attributes', () => {
+    expect(() => formatDateTime('not-a-date')).not.toThrow();
+    expect(formatDateTime('not-a-date')).toBe('Unknown date');
+    expect(formatDateTime(Number.NaN)).toBe('Unknown date');
+    expect(dateTimeAttribute('not-a-date')).toBeUndefined();
+    expect(dateTimeAttribute(0)).toBe('1970-01-01T00:00:00.000Z');
+  });
 });
 
 function json(path: string): Record<string, string> {
   return JSON.parse(readFileSync(resolve(root, path), 'utf8')) as Record<string, string>;
+}
+
+function sourceFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = resolve(directory, entry.name);
+    return entry.isDirectory() ? sourceFiles(path) : entry.isFile() && entry.name.endsWith('.ts') ? [path] : [];
+  });
 }

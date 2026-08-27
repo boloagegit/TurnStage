@@ -25,10 +25,32 @@ describe('Profile Configuration surface', () => {
     expect(workspaceStyles).not.toContain('.settings-help');
   });
 
+  it('provides compact local navigation for every profile section', () => {
+    for (const section of ['general', 'opening-flow', 'request', 'stream-mapping', 'chat-ui', 'history-errors', 'security']) {
+      expect(workspaceSource).toContain(`id: '${section}'`);
+    }
+    expect(workspaceSource).toContain('onSectionChange: (section: SettingsSectionId) => void');
+    expect(workspaceSource).toContain('settings-section-nav');
+    expect(workspaceSource).toContain('SETTINGS_SECTIONS.map');
+    expect(workspaceSource).toContain('onSectionChange(item.id)');
+    expect(workspaceSource).toContain("aria-current={active.id === item.id ? 'page' : undefined}");
+    expect(workspaceStyles).toContain('.settings-content-layout');
+    expect(workspaceStyles).toContain('.settings-section-nav button.is-active');
+    expect(workspaceStyles).toContain('grid-template-columns: 1fr');
+  });
+
   it('keeps JSONC patching and security/error guidance intact', () => {
     expect(workspaceSource).toContain("type: 'profile.patch'");
     expect(workspaceSource).toContain('A request URL is required.');
     expect(workspaceSource).toContain('Never place credentials in a profile.');
     expect(workspaceSource).toContain("<ProductIcon name={snapshot?.trusted === false ? 'warning' : 'check'}");
+  });
+
+  it('exposes bounded reconnect and redirect controls in the native settings surface', () => {
+    expect(workspaceSource).toContain('settings-reconnect-attempts');
+    expect(workspaceSource).toContain("['conversation', 'send', 'reconnect', 'retryOnStatuses']");
+    expect(workspaceSource).toContain('settings-redirect-policy');
+    expect(workspaceSource).toContain("['conversation', 'send', 'maxRedirects']");
+    expect(workspaceSource).toContain('Retries only before the first stream event.');
   });
 });

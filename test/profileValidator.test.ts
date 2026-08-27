@@ -156,4 +156,36 @@ describe('ProfileValidator', () => {
       'Duplicate action id: same-action.',
     ]));
   });
+
+  it('enforces critical runtime shape, identifier, request, and retention constraints', () => {
+    const profile = validProfile();
+    profile.id = '../Unsafe ID';
+    profile.conversation.send.method = 'CONNECT' as 'POST';
+    profile.conversation.send.timeoutMs = 0;
+    profile.conversation.send.idleTimeoutMs = 900_001;
+    profile.stream.transport = 'websocket' as 'sse';
+    profile.history = { localRuns: { maxRuns: 101 } };
+
+    const messages = new ProfileValidator().validate(profile).map((entry) => entry.message);
+    expect(messages).toEqual(expect.arrayContaining([
+      'Profile id must use lowercase letters, numbers, and hyphens.',
+      'Unsupported HTTP method: CONNECT.',
+      'timeoutMs must be an integer from 1 to 900000.',
+      'idleTimeoutMs must be an integer from 1 to 900000.',
+      'Unsupported stream transport: websocket.',
+      'Local run retention must be an integer from 1 to 100.',
+    ]));
+  });
+
+  it('returns structural diagnostics instead of throwing on wrong JSON value types', () => {
+    const profile = { version: 1, id: 42, name: [], controls: {}, conversation: null, stream: { mappings: {} } } as unknown as TurnStageProfile;
+    expect(() => new ProfileValidator().validate(profile)).not.toThrow();
+    expect(new ProfileValidator().validate(profile).map((entry) => entry.message)).toEqual(expect.arrayContaining([
+      'Profile id must be a string.',
+      'Profile name must be a string.',
+      'Conversation send request is required.',
+      'Stream mappings must be an array.',
+      'Controls must be an array.',
+    ]));
+  });
 });

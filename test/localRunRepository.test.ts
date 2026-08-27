@@ -64,6 +64,8 @@ describe('LocalRunRepository', () => {
     expect(await repository.list('missing')).toEqual([]);
     mock.files.set('/global-storage/runs/broken.json', new TextEncoder().encode('{ not valid json'));
     expect(await repository.list('broken')).toEqual([]);
+    mock.files.set('/global-storage/runs/object.json', new TextEncoder().encode(JSON.stringify({ id: 'not-an-array' })));
+    expect(await repository.list('object')).toEqual([]);
   });
 
   it('saves and lists runs in profile-scoped global storage', async () => {
@@ -89,6 +91,30 @@ describe('LocalRunRepository', () => {
       expect.objectContaining({ id: 'run-2', createdAt: 20 }),
       expect.objectContaining({ id: 'run-3', createdAt: 3 }),
     ]);
+  });
+
+  it('filters malformed entries while retaining valid persisted runs', async () => {
+    const valid = run('valid');
+    const malformed = [
+      { ...valid, id: 42 },
+      { ...valid, id: 'wrong-profile', profileId: 'profile-b' },
+      { ...valid, id: 'invalid-date', createdAt: 'not-a-date' },
+      { ...valid, id: 'invalid-metrics', metrics: { ...valid.metrics, eventCount: '0' } },
+      { ...valid, id: 'invalid-events', rawEvents: { sequence: 1 } },
+      { ...valid, id: 'invalid-result', result: { type: 'failed', error: 'not-an-error' } },
+    ];
+    mock.files.set('/global-storage/runs/profile-a.json', new TextEncoder().encode(JSON.stringify([malformed[0], valid, ...malformed.slice(1)])));
+
+    expect(await makeRepository().list('profile-a')).toEqual([valid]);
+  });
+
+  it('serializes concurrent saves so every run id is retained', async () => {
+    const repository = makeRepository();
+    await Promise.all(Array.from({ length: 12 }, (_, index) => repository.save(run(`concurrent-${index}`, 'profile-a', { createdAt: index }), 20)));
+
+    const ids = (await repository.list('profile-a')).map((item) => item.id);
+    expect(ids).toHaveLength(12);
+    expect(new Set(ids)).toEqual(new Set(Array.from({ length: 12 }, (_, index) => `concurrent-${index}`)));
   });
 
   it('exports the selected run as readable JSON and suggests a stable filename', async () => {

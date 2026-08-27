@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NdjsonParser, SseParser, toRawEvent, type ParsedSse } from '../src/extension/transport/streamParser';
+import { DEFAULT_MAX_EVENT_BYTES, NdjsonParser, SseParser, STREAM_RECORD_TOO_LARGE_ERROR, toRawEvent, type ParsedSse } from '../src/extension/transport/streamParser';
 
 describe('SseParser', () => {
   it('keeps an event across arbitrary chunk boundaries', () => {
@@ -70,6 +70,41 @@ describe('SseParser', () => {
     expect(event.id).toBeUndefined();
     expect(event.retry).toBeUndefined();
   });
+
+  it('accepts CR-only line endings and an optional initial UTF-8 BOM', () => {
+    const parser = new SseParser();
+
+    expect(parser.feed('\uFEFFevent: message\rdata: {"text":"hello"}\r\r')).toEqual([
+      {
+        event: 'message',
+        data: '{"text":"hello"}',
+        raw: 'event: message\ndata: {"text":"hello"}',
+      },
+    ]);
+  });
+
+  it('handles a CRLF terminator split between chunks without creating an empty event', () => {
+    const parser = new SseParser();
+
+    expect(parser.feed('event: message\ndata: value\r')).toEqual([]);
+    expect(parser.feed('\n\r')).toEqual([]);
+    expect(parser.feed('\n')).toEqual([
+      { event: 'message', data: 'value', raw: 'event: message\ndata: value' },
+    ]);
+  });
+
+  it('fails with a stable TurnStageError when one event exceeds its byte limit', () => {
+    const parser = new SseParser({ maxEventBytes: 12 });
+
+    expect(() => parser.feed('data: 1234567')).toThrowError(/maximum size of 12 bytes/);
+    try { parser.feed('data: 1234567'); } catch (error) {
+      expect(error).toMatchObject({
+        name: STREAM_RECORD_TOO_LARGE_ERROR,
+        type: STREAM_RECORD_TOO_LARGE_ERROR,
+        details: { protocol: 'sse', maxBytes: 12 },
+      });
+    }
+  });
 });
 
 describe('NdjsonParser', () => {
@@ -86,6 +121,24 @@ describe('NdjsonParser', () => {
 
     expect(parser.feed(' {"ok":true} ')).toEqual([]);
     expect(parser.finish()).toEqual(['{"ok":true}']);
+  });
+
+  it('fails with a stable TurnStageError when one record exceeds its byte limit', () => {
+    const parser = new NdjsonParser({ maxRecordBytes: 10 });
+
+    expect(() => parser.feed('{"long":true}')).toThrowError(/maximum size of 10 bytes/);
+    try { parser.feed('{"long":true}'); } catch (error) {
+      expect(error).toMatchObject({
+        name: STREAM_RECORD_TOO_LARGE_ERROR,
+        type: STREAM_RECORD_TOO_LARGE_ERROR,
+        details: { protocol: 'ndjson', maxBytes: 10 },
+      });
+    }
+  });
+
+  it('uses a finite safe default when no record limit is supplied', () => {
+    expect(DEFAULT_MAX_EVENT_BYTES).toBe(1_048_576);
+    expect(() => new NdjsonParser().feed(`{"value":"${'x'.repeat(DEFAULT_MAX_EVENT_BYTES)}"}`)).toThrowError(/maximum size of 1048576 bytes/);
   });
 });
 

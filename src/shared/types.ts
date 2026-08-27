@@ -72,6 +72,9 @@ export interface RequestDefinition {
   variants?: RequestVariant[];
   timeoutMs?: number;
   idleTimeoutMs?: number;
+  reconnect?: { maxAttempts?: number; baseDelayMs?: number; maxDelayMs?: number; retryOnStatuses?: number[] };
+  redirectPolicy?: 'same-origin' | 'follow' | 'error';
+  maxRedirects?: number;
 }
 
 export interface StopDefinition {
@@ -239,7 +242,7 @@ export interface RemoteSessionReference {
 export interface RuntimeErrorData { type: string; message: string; suggestion?: string; status?: number; ruleId?: string; rawSequence?: number; retrySafe?: boolean }
 export type TurnResult = { type: 'completed' } | { type: 'failed'; error: RuntimeErrorData } | { type: 'aborted'; reason: string };
 
-export interface PreparedRequest { method: string; url: string; headers: Record<string, string>; body?: string; timeoutMs?: number; idleTimeoutMs?: number; redacted: { method: string; url: string; headers: Record<string, string>; body?: unknown; variantId?: string } }
+export interface PreparedRequest { method: string; url: string; headers: Record<string, string>; body?: string; timeoutMs?: number; idleTimeoutMs?: number; reconnect?: RequestDefinition['reconnect']; redirectPolicy?: RequestDefinition['redirectPolicy']; maxRedirects?: number; /** Host-only values used to scrub previews, events, errors, and persisted runs. */ secretValues?: string[]; redacted: { method: string; url: string; headers: Record<string, string>; body?: unknown; variantId?: string } }
 
 export interface LocalRun {
   id: string;

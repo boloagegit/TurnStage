@@ -43,12 +43,37 @@ export class ProfileValidator {
   validate(profile: TurnStageProfile | undefined, tree?: Node, environments: TurnStageEnvironment[] = []): ValidationIssue[] {
     if (!profile) return [issue(tree, [], localize('Profile could not be parsed.'))];
     const out: ValidationIssue[] = [];
+    const sourceProfile = profile as unknown as Record<string, unknown>;
+    const conversation = sourceProfile.conversation;
+    const stream = sourceProfile.stream;
+    if (typeof profile.id !== 'string') out.push(issue(tree, ['id'], localize('Profile id must be a string.')));
+    if (typeof profile.name !== 'string') out.push(issue(tree, ['name'], localize('Profile name must be a string.')));
+    if (!conversation || typeof conversation !== 'object' || Array.isArray(conversation) || !(conversation as Record<string, unknown>).send || typeof (conversation as Record<string, unknown>).send !== 'object') out.push(issue(tree, ['conversation'], localize('Conversation send request is required.')));
+    if (!stream || typeof stream !== 'object' || Array.isArray(stream) || !Array.isArray((stream as Record<string, unknown>).mappings)) out.push(issue(tree, ['stream'], localize('Stream mappings must be an array.')));
+    if (sourceProfile.controls !== undefined && !Array.isArray(sourceProfile.controls)) out.push(issue(tree, ['controls'], localize('Controls must be an array.')));
+    if (out.length) return out;
     if (profile.version !== 1) out.push(issue(tree, ['version'], localize('Unsupported config version: {version}.', { version: String(profile.version) })));
     if (!profile.id?.trim()) out.push(issue(tree, ['id'], localize('Profile id is required.')));
+    else if (!/^[a-z0-9][a-z0-9-]*$/.test(profile.id)) out.push(issue(tree, ['id'], localize('Profile id must use lowercase letters, numbers, and hyphens.')));
     if (!profile.name?.trim()) out.push(issue(tree, ['name'], localize('Profile name is required.')));
     if (!profile.conversation?.send) out.push(issue(tree, ['conversation'], localize('Conversation send request is required.')));
     if (!profile.conversation?.send?.variants?.length) out.push(issue(tree, ['conversation', 'send'], localize('At least one request variant is required.')));
     if (!profile.stream?.mappings?.length) out.push(issue(tree, ['stream'], localize('At least one stream mapping is required.')));
+    if (!['sse', 'ndjson', 'json', 'text-stream', 'fixture'].includes(profile.stream.transport)) out.push(issue(tree, ['stream', 'transport'], localize('Unsupported stream transport: {transport}.', { transport: String(profile.stream.transport) })));
+    for (const [path, request] of [['conversation.send', profile.conversation.send], ['opening.request', profile.opening?.request], ['conversation.stop.request', profile.conversation.stop?.request]] as const) {
+      if (!request) continue;
+      if (!['POST', 'GET', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) out.push(issue(tree, path.split('.'), localize('Unsupported HTTP method: {method}.', { method: String(request.method) })));
+      if (typeof request.url !== 'string' || !request.url.trim()) out.push(issue(tree, path.split('.'), localize('Request URL is required.')));
+      for (const [key, value] of [['timeoutMs', request.timeoutMs], ['idleTimeoutMs', request.idleTimeoutMs]] as const) if (value !== undefined && (!Number.isInteger(value) || value < 1 || value > 900_000)) out.push(issue(tree, [...path.split('.'), key], localize('{field} must be an integer from 1 to 900000.', { field: key })));
+      const reconnect = request.reconnect;
+      if (reconnect?.maxAttempts !== undefined && (!Number.isInteger(reconnect.maxAttempts) || reconnect.maxAttempts < 0 || reconnect.maxAttempts > 5)) out.push(issue(tree, [...path.split('.'), 'reconnect', 'maxAttempts'], localize('Reconnect attempts must be an integer from 0 to 5.')));
+      if (reconnect?.baseDelayMs !== undefined && (!Number.isInteger(reconnect.baseDelayMs) || reconnect.baseDelayMs < 0 || reconnect.baseDelayMs > 30_000)) out.push(issue(tree, [...path.split('.'), 'reconnect', 'baseDelayMs'], localize('Reconnect base delay must be an integer from 0 to 30000.')));
+      if (reconnect?.maxDelayMs !== undefined && (!Number.isInteger(reconnect.maxDelayMs) || reconnect.maxDelayMs < 0 || reconnect.maxDelayMs > 120_000)) out.push(issue(tree, [...path.split('.'), 'reconnect', 'maxDelayMs'], localize('Reconnect maximum delay must be an integer from 0 to 120000.')));
+      if (request.redirectPolicy !== undefined && !['same-origin', 'follow', 'error'].includes(request.redirectPolicy)) out.push(issue(tree, [...path.split('.'), 'redirectPolicy'], localize('Unsupported redirect policy: {policy}.', { policy: String(request.redirectPolicy) })));
+      if (request.maxRedirects !== undefined && (!Number.isInteger(request.maxRedirects) || request.maxRedirects < 0 || request.maxRedirects > 10)) out.push(issue(tree, [...path.split('.'), 'maxRedirects'], localize('Maximum redirects must be an integer from 0 to 10.')));
+    }
+    const maxRuns = profile.history?.localRuns?.maxRuns;
+    if (maxRuns !== undefined && (!Number.isInteger(maxRuns) || maxRuns < 1 || maxRuns > 100)) out.push(issue(tree, ['history', 'localRuns', 'maxRuns'], localize('Local run retention must be an integer from 1 to 100.')));
     if (profile.environment && environments.length && !environments.some((env) => env.id === profile.environment)) out.push(issue(tree, ['environment'], localize('Environment "{environment}" was not found.', { environment: profile.environment })));
     for (const duplicate of duplicates((profile.controls ?? []).map((control) => control.id))) out.push(issue(tree, ['controls'], localize('Duplicate control id: {id}.', { id: duplicate })));
     for (const duplicate of duplicates((profile.stream?.mappings ?? []).map((mapping) => mapping.id))) out.push(issue(tree, ['stream', 'mappings'], localize('Duplicate mapping id: {id}.', { id: duplicate })));

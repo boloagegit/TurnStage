@@ -22,22 +22,24 @@ renderer and inspector.
 - Static, request-backed, and disabled openings; starter buttons can send or
   fill the composer.
 - POST/HTTP streaming through the Extension Host, including SSE parsing and
-  line-delimited NDJSON parsing, abort, total timeout, idle timeout, and
-  unexpected-end handling.
+  line-delimited NDJSON parsing, abort, total/idle timeouts, bounded pre-data
+  reconnect, controlled redirects, and unexpected-end handling.
 - Configurable request variants, typed `$value` extraction, interpolation,
   transforms, redacted request previews, normalized event mapping, and a
   reducer-backed chat snapshot.
 - A profile-scoped **Test** workspace with a phone-shaped chat preview (three
   viewport presets) beside a resizable Debug inspector. Chat messages and
   their raw/normalized events can be selected in either direction.
-- Native Profile Tree children for **Test**, General, Opening & Flow, Request,
-  Stream & Mapping, Chat UI, History & Errors, and Security. Selecting a child
-  opens that profile in one Custom Editor at the requested surface.
+- Native Profile Tree resource rows with compact **Run**, **Open**, and
+  **Configure Profile** actions. Profile Configuration provides the seven
+  profile-specific sections in the Custom Editor; Test remains the live chat
+  and Debug/Runs surface.
 - A local mock server and two starter profiles that use example-only values.
 
 The implementation is intentionally explicit about limitations in the bundled
 `docs/turnstage-architecture.md`, `docs/profile-schema.md`,
-`docs/event-mapping.md`, `docs/security.md`, and `docs/performance.md`
+`docs/event-mapping.md`, `docs/security.md`, `docs/performance.md`, and
+`docs/edge-case-hardening.md`
 documents.
 
 ## Requirements and installation
@@ -73,10 +75,10 @@ does not declare a `browser` entry and therefore does not claim support for
 1. Open a workspace folder in VS Code.
 2. Open the **TurnStage** Activity Bar view.
 3. Run **TurnStage: Initialize Workspace** and choose a starter option.
-4. Expand a profile in the `Profiles` Tree View.
-5. Select **Test** for the phone chat preview and Debug inspector, or select a
-   settings child to edit only that profile section. Recorded runs are in the
-   Debug panel's **Runs** tab.
+4. Select a profile in the `Profiles` Tree View to open the Custom Editor.
+5. Use **Configure Profile** for the seven profile configuration sections, or
+   use **Run Profile** for the phone chat preview and Debug inspector. Recorded
+   runs are in the Debug panel's **Runs** tab.
 
 Initialization is explicit. Merely installing the extension, opening a
 workspace, or opening the sidebar does not create profile files. Existing
@@ -187,10 +189,17 @@ and retry metadata.
 
 Network work is host-side. SSE uses `fetch`, an `AbortController`, UTF-8
 decoding, chunk-safe parsing, event/id/retry fields, comments, multiline data,
-CRLF/LF, blank-line dispatch, a partial final event, and the `[DONE]` sentinel.
+CR/LF/CRLF, an optional leading BOM, blank-line dispatch, a partial final event,
+and the `[DONE]` sentinel.
 NDJSON uses a chunk-safe line buffer. HTTP status and content-type failures,
 network failures, total timeout, idle timeout, user abort, and panel disposal
 become runtime results.
+
+Reconnect is opt-in and bounded. It is attempted only before the first raw
+event, so a partially received response is never automatically replayed.
+Redirects are processed manually with a bounded hop count; the default policy
+allows same-origin redirects only. Explicit cross-origin following strips
+credential headers and headers containing SecretStorage-resolved values.
 
 `json`, `text-stream`, and `fixture` are accepted profile transport values.
 `text-stream` emits decoded chunks as raw events without JSON parsing; `json`
@@ -271,6 +280,7 @@ Commands are registered under the `turnstage` namespace:
 | `turnstage.initializeUser` | Initialize reusable user profiles and a user environment |
 | `turnstage.duplicateProfile` / `turnstage.deleteProfile` | Copy a discovered profile or move it to Trash after confirmation |
 | `turnstage.openProfile` | Open a profile in the custom editor |
+| `turnstage.configureProfile` | Open Profile Configuration for the selected profile |
 | `turnstage.runProfile` | Open/run a selected profile or the built-in Basic demo |
 | `turnstage.startSession` | Explicitly execute a request-backed opening |
 | `turnstage.abortRequest` | Stop an active turn |
@@ -279,8 +289,9 @@ Commands are registered under the `turnstage` namespace:
 | `turnstage.openAsText` | Open the same document in VS Code's text editor |
 | `turnstage.selectEnvironment` / `turnstage.openEnvironment` | Select or edit an effective workspace or user environment |
 | `turnstage.setSecret` / `turnstage.removeSecret` / `turnstage.listSecretNames` | Manage secret names and values |
-| `turnstage.replayRun` / `turnstage.exportRun` | Open the profile's Replay workflow or export a run |
+| `turnstage.replayRun` / `turnstage.exportRun` | Replay or export the latest local run; open Test when no run exists |
 | `turnstage.openOutput` | Show the TurnStage Output Channel |
+| `turnstage.changeDisplayLanguage` | Choose Auto, Traditional Chinese, or English for TurnStage profile editors |
 | `turnstage.migrateProfile` | Migrate a version-0 profile after confirmation, backup, and diff review |
 | `turnstage.refreshProfiles` | Refresh discovery and cross-file duplicate-ID diagnostics |
 
@@ -288,14 +299,17 @@ The contributed settings are:
 
 | Setting | Default | Effect |
 | --- | ---: | --- |
+| `turnstage.displayLanguage` | `auto` | Application-wide language for TurnStage profile editors: follow VS Code, Traditional Chinese, or English |
 | `turnstage.profileGlob` | `.vscode/turnstage/profiles/*.turnstage.jsonc` | Workspace-relative discovery glob |
 | `turnstage.maxBufferedEvents` | `5000` | Maximum raw events kept in the live buffer |
 | `turnstage.maxBufferedBytes` | `10485760` | Maximum raw-buffer JSON bytes (10 MiB) |
 | `turnstage.streamBatchIntervalMs` | `32` | Debounce interval for host-to-Webview snapshots (16–100 ms) |
 | `turnstage.runRetention` | `20` | Fallback local-run retention (1–100) |
 | `turnstage.logLevel` | `info` | Declared log-level setting; runtime logging is currently minimal |
+| `turnstage.notifications.enabled` | `true` | Show non-modal TurnStage notifications; selecting **Do not show again** sets it false at user scope |
 
-`profileGlob` has VS Code `resource` scope. The runtime-limit settings use
+`displayLanguage` has VS Code `application` scope, so one User setting applies
+across projects. `profileGlob` has VS Code `resource` scope. The runtime-limit settings use
 explicit `window` scope, so they can be set once in User Settings and optionally
 overridden by a workspace. Machine-specific reusable endpoint and command data
 belongs in a User environment; credentials remain in SecretStorage.

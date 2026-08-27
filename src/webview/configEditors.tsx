@@ -3,6 +3,7 @@ import type { MappingTestInput, MappingTestResult, WebviewPayload } from '../sha
 import type { MappingRule, RawStreamEvent, RequestVariant, TurnStageProfile } from '../shared/types';
 import { formatNumber, localizeHumanized, t } from './i18n';
 import { IconButton } from './Icon';
+import { ClipboardButton } from './ClipboardButton';
 import { DEFAULT_MESSAGE_ACTIONS, type MessageActionId } from './uiConfig';
 
 type Post = (message: WebviewPayload) => void;
@@ -357,7 +358,7 @@ function PatchNumber({ value, onCommit, min, max, ...props }: { value?: number; 
   };
   return <input {...props} type="number" min={min} max={max} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value === undefined ? '' : String(value)); event.currentTarget.blur(); } else if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} />;
 }
-function JsonPreview({ value }: { value: unknown }): React.JSX.Element { const text = JSON.stringify(value, null, 2); return <pre className="json sample-json"><code>{text}</code><IconButton icon="copy" label={t('Copy normalized JSON')} onClick={() => navigator.clipboard.writeText(text)} /></pre>; }
+function JsonPreview({ value }: { value: unknown }): React.JSX.Element { const text = JSON.stringify(value, null, 2); return <pre className="json sample-json"><code>{text}</code><ClipboardButton text={text} label={t('Copy normalized JSON')} /></pre>; }
 function parseList(value: string): string[] { return [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))]; }
 function formatValue(value: unknown): string { if (value === undefined) return ''; return typeof value === 'string' ? value : JSON.stringify(value); }
 function parseLooseValue(value: string): unknown { if (!value.trim()) return undefined; try { return JSON.parse(value); } catch { return value; } }
