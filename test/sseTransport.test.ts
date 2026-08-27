@@ -112,6 +112,58 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
     expect(result).toEqual({ sawData: true, aborted: true });
     expect(events.map(eventName)).toEqual(['start', 'status']);
   }, 5_000);
+
+  it('streams NDJSON over real HTTP and flushes a final line without a newline', async () => {
+    const evidence = await collectProtocol('ndjson', '/transport/ndjson');
+
+    expect(evidence.result).toEqual({ sawData: true, aborted: false });
+    expect(evidence.contentType).toContain('application/x-ndjson');
+    expect(evidence.events.map((event) => event.data)).toEqual([
+      { kind: 'first', value: 1 },
+      { kind: 'second', value: 2 },
+    ]);
+    expect(evidence.events.map((event) => event.sequence)).toEqual([1, 2]);
+    expect(evidence.chunkSizes.length).toBeGreaterThan(1);
+  });
+
+  it('delivers a plain text stream incrementally without JSON parse errors', async () => {
+    const evidence = await collectProtocol('text-stream', '/transport/text-stream');
+
+    expect(evidence.result).toEqual({ sawData: true, aborted: false });
+    expect(evidence.contentType).toContain('text/plain');
+    expect(evidence.events.map((event) => event.data).join('')).toBe('first second');
+    expect(evidence.events.every((event) => event.parseError === undefined)).toBe(true);
+    expect(evidence.events.length).toBeGreaterThan(1);
+  });
+
+  it('rejects an incompatible content type before emitting stream events', async () => {
+    await expect(collectProtocol('sse', '/transport/wrong-content-type')).rejects.toMatchObject({
+      type: 'UnexpectedContentTypeError',
+    });
+  });
+
+  it('enforces the total request timeout independently of the idle timeout', async () => {
+    await expect(collect('idle-timeout', { timeoutMs: 100, idleTimeoutMs: undefined })).rejects.toMatchObject({
+      type: 'TimeoutError',
+    });
+  });
+
+  it('serves opening and remote-stop contracts from the real mock server', async () => {
+    const opening = await fetch(`${baseUrl}/agent/opening`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    expect(opening.status).toBe(200);
+    await expect(opening.json()).resolves.toMatchObject({
+      message: expect.any(String),
+      options: expect.arrayContaining([expect.objectContaining({ behavior: 'send' }), expect.objectContaining({ behavior: 'fill' })]),
+    });
+
+    const stop = await fetch(`${baseUrl}/agent/chat/stop`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversationId: 'conversation-1', clientRequestId: 'request-1' }),
+    });
+    expect(stop.status).toBe(200);
+    await expect(stop.json()).resolves.toEqual({ stopped: true, conversationId: 'conversation-1', clientRequestId: 'request-1' });
+  });
 });
 
 async function collect(mode: string, overrides: Partial<PreparedRequest> = {}, path = '/basic/chat/stream') {
@@ -127,6 +179,26 @@ async function collect(mode: string, overrides: Partial<PreparedRequest> = {}, p
   };
   const result = await new HttpStreamTransport().start({ ...request(mode, path), ...overrides }, 'sse', sink, new AbortController().signal);
   return { result, contentType, events, eventTimes, chunkSizes };
+}
+
+async function collectProtocol(protocol: RawStreamEvent['protocol'], path: string) {
+  const events: RawStreamEvent[] = [];
+  const chunkSizes: number[] = [];
+  let contentType = '';
+  const prepared: PreparedRequest = {
+    method: 'POST',
+    url: `${baseUrl}${path}`,
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+    timeoutMs: 2_000,
+    redacted: { method: 'POST', url: `${baseUrl}${path}`, headers: {} },
+  };
+  const result = await new HttpStreamTransport().start(prepared, protocol, {
+    onHeaders: (_latency, value) => { contentType = value; },
+    onChunk: (bytes) => { chunkSizes.push(bytes); },
+    onEvent: (event) => { events.push(event); },
+  }, new AbortController().signal);
+  return { result, contentType, events, chunkSizes };
 }
 
 function request(mode: string, path = '/basic/chat/stream'): PreparedRequest {

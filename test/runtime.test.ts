@@ -311,4 +311,115 @@ describe('isActive and SessionController.finalizeTurn', () => {
     expect(saved.normalizedEvents).toBeUndefined();
     expect(saved.snapshot).toBeUndefined();
   });
+
+  it('loads a request-backed opening and resolves its message and starters', async () => {
+    vi.mock('vscode', () => ({ workspace: { isTrusted: true, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), getWorkspaceFolder: () => undefined } }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      payload: {
+        greeting: 'Opening loaded from the server.',
+        starters: [{ id: 'starter-1', label: 'Begin', prompt: 'Begin', behavior: 'send' }],
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const { SessionController } = await import('../src/extension/runtime/sessionController');
+      const profile = {
+        version: 1,
+        id: 'opening-request-test',
+        name: 'Opening request test',
+        opening: {
+          mode: 'request',
+          request: { method: 'POST', url: 'https://example.test/opening', body: { actor: { $value: 'controls.actor' } } },
+          response: { messagePath: '$.payload.greeting', startersPath: '$.payload.starters' },
+        },
+        controls: [{ id: 'actor', type: 'text', label: 'Actor', default: 'user-a' }],
+        conversation: { send: { method: 'POST', url: 'https://example.test/stream' } },
+        stream: { transport: 'sse', mappings: [] },
+      } as TurnStageProfile;
+      const controller = new SessionController(profile, {} as never, { version: 1, id: 'env', name: 'Environment', variables: {} }, {} as never, { get: vi.fn() } as never, { list: vi.fn(async () => []), save: vi.fn(async () => undefined) } as never, vi.fn(), { appendLine: vi.fn() } as never);
+
+      await controller.startSession();
+
+      expect(controller.snapshot.sessionState).toBe('ready');
+      expect(controller.snapshot.opening).toEqual({
+        message: 'Opening loaded from the server.',
+        starters: [{ id: 'starter-1', label: 'Begin', prompt: 'Begin', behavior: 'send' }],
+      });
+      expect(fetchMock).toHaveBeenCalledWith('https://example.test/opening', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ actor: 'user-a' }),
+      }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('uses the configured opening fallback when the server returns a matching error', async () => {
+    vi.mock('vscode', () => ({ workspace: { isTrusted: true, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), getWorkspaceFolder: () => undefined } }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ code: 'OPENING_NOT_FOUND' }), { status: 404, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const { SessionController } = await import('../src/extension/runtime/sessionController');
+      const profile = {
+        version: 1,
+        id: 'opening-fallback-test',
+        name: 'Opening fallback test',
+        opening: {
+          mode: 'request',
+          request: { method: 'GET', url: 'https://example.test/opening' },
+          fallbacks: [{ match: { path: '$.code', operator: 'equals', value: 'OPENING_NOT_FOUND' }, message: 'Local fallback', starters: [] }],
+        },
+        conversation: { send: { method: 'POST', url: 'https://example.test/stream' } },
+        stream: { transport: 'sse', mappings: [] },
+      } as TurnStageProfile;
+      const controller = new SessionController(profile, {} as never, { version: 1, id: 'env', name: 'Environment', variables: {} }, {} as never, { get: vi.fn() } as never, { list: vi.fn(async () => []) } as never, vi.fn(), { appendLine: vi.fn() } as never);
+
+      await controller.startSession();
+
+      expect(controller.snapshot.sessionState).toBe('ready');
+      expect(controller.snapshot.opening).toEqual({ message: 'Local fallback', starters: [] });
+      expect(controller.snapshot.errors).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('aborts locally and sends the configured remote stop request with conversation context', async () => {
+    vi.mock('vscode', () => ({ workspace: { isTrusted: true, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), getWorkspaceFolder: () => undefined } }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ stopped: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const { SessionController } = await import('../src/extension/runtime/sessionController');
+      const profile = {
+        version: 1,
+        id: 'remote-stop-test',
+        name: 'Remote stop test',
+        conversation: {
+          send: { method: 'POST', url: 'https://example.test/stream' },
+          stop: {
+            strategy: 'abortThenRequest',
+            requiredContext: ['conversation.id'],
+            request: { method: 'POST', url: 'https://example.test/stop', body: { conversationId: { $value: 'conversation.id' } } },
+          },
+        },
+        stream: { transport: 'sse', mappings: [] },
+      } as TurnStageProfile;
+      const controller = new SessionController(profile, {} as never, { version: 1, id: 'env', name: 'Environment', variables: {} }, {} as never, { get: vi.fn() } as never, { list: vi.fn(async () => []), save: vi.fn(async () => undefined) } as never, vi.fn(), { appendLine: vi.fn() } as never);
+      controller.snapshot.conversationId = 'conversation-42';
+      controller.snapshot.turnState = 'streaming';
+      (controller as unknown as { finalized: boolean }).finalized = false;
+      (controller as unknown as { abortController: AbortController }).abortController = new AbortController();
+
+      await controller.abort();
+
+      expect(fetchMock).toHaveBeenCalledWith('https://example.test/stop', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ conversationId: 'conversation-42' }),
+      }));
+      expect(controller.snapshot.turnState).toBe('aborted');
+      expect(controller.snapshot.errors).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

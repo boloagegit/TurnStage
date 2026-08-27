@@ -23,6 +23,21 @@ const server = http.createServer(async (request, response) => {
     return json(response, 200, { message: 'Hello, I am a test assistant. What would you like to explore?', options: [{ id: 'starter-search', label: 'Search sample information', prompt: 'Please search for sample information.', behavior: 'send' }, { id: 'starter-prepare', label: 'Prepare a test request', prompt: 'Please help me prepare a test request.', behavior: 'fill' }] });
   }
   if (request.url === '/basic/chat/stop' || request.url === '/agent/chat/stop') return json(response, 200, { stopped: true, conversationId: body.conversationId ?? null, clientRequestId: body.clientRequestId ?? null });
+  if (request.url === '/transport/ndjson') {
+    response.writeHead(200, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-cache' });
+    response.write('{"kind":"first","value":1}\n{"kind":');
+    await delay(25);
+    response.end('"second","value":2}');
+    return;
+  }
+  if (request.url === '/transport/text-stream') {
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache' });
+    response.write('first ');
+    await delay(25);
+    response.end('second');
+    return;
+  }
+  if (request.url === '/transport/wrong-content-type') return json(response, 200, { value: 'not an event stream' });
   if (!request.url?.endsWith('/stream')) return json(response, 404, { code: 'NOT_FOUND' });
   if (mode === 'http-401') return json(response, 401, { code: 'AUTH_REQUIRED' });
   if (mode === 'http-500') return json(response, 500, { code: 'SAMPLE_FAILURE' });
