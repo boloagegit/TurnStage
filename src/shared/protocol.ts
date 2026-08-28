@@ -61,7 +61,6 @@ export type WebviewMessage = Envelope & (
   | { type: 'run.replay.speed'; speed: 0.25 | 0.5 | 1 | 2 | 4 }
   | { type: 'run.import' }
   | { type: 'run.export'; runId: string }
-  | { type: 'chat.screenshot.save'; dataUrl: string; suggestedName: string }
 );
 
 export type HostMessage = Envelope & (
@@ -76,7 +75,6 @@ export type HostMessage = Envelope & (
   | { type: 'form.accepted'; formId: string; sourceMessageId?: string }
   | { type: 'run.imported'; path: string; runId: string; duplicate: boolean }
   | { type: 'run.exported'; path: string }
-  | { type: 'chat.screenshot.saved'; path: string }
   | { type: 'workspaceTrust.changed'; trusted: boolean }
 );
 export type WebviewPayload = WithoutEnvelope<WebviewMessage>;
@@ -84,7 +82,6 @@ export type HostPayload = WithoutEnvelope<HostMessage>;
 
 const MAX_ID_LENGTH = 1024;
 const MAX_TEXT_LENGTH = 1024 * 1024;
-const MAX_SCREENSHOT_DATA_URL_LENGTH = 34 * 1024 * 1024;
 const MAX_VALUE_DEPTH = 24;
 const MAX_VALUE_NODES = 20_000;
 const interactionKinds = new Set<InteractionContext['kind']>(['manual', 'starter', 'followup', 'responseAction', 'formSubmit', 'retry']);
@@ -145,7 +142,6 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
     case 'run.replay.play': return isBoundedString(message.runId) && typeof message.speed === 'number' && replaySpeeds.has(message.speed);
     case 'run.replay.speed': return typeof message.speed === 'number' && replaySpeeds.has(message.speed);
     case 'run.export': return isBoundedString(message.runId);
-    case 'chat.screenshot.save': return isBoundedString(message.dataUrl, MAX_SCREENSHOT_DATA_URL_LENGTH) && message.dataUrl.startsWith('data:image/png;base64,') && isBoundedString(message.suggestedName, 200) && /^[a-zA-Z0-9._-]+\.png$/i.test(message.suggestedName);
     default: return false;
   }
 }
@@ -166,7 +162,6 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'form.accepted': return isBoundedString(message.formId) && optionalBoundedString(message.sourceMessageId);
     case 'run.imported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedString(message.runId) && typeof message.duplicate === 'boolean';
     case 'run.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH);
-    case 'chat.screenshot.saved': return isBoundedString(message.path, MAX_TEXT_LENGTH);
     case 'workspaceTrust.changed': return typeof message.trusted === 'boolean';
     default: return false;
   }

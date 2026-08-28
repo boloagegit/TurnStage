@@ -25,8 +25,6 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'run.replay.speed', speed: 99 }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'run.import' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'uri.open', uri: 'https://example.test/docs' }, 'editor-1')).toBe(true);
-    expect(isWebviewMessage({ ...envelope, type: 'chat.screenshot.save', dataUrl: 'data:image/png;base64,iVBORw0KGgo=', suggestedName: 'turnstage-demo.png' }, 'editor-1')).toBe(true);
-    expect(isWebviewMessage({ ...envelope, type: 'chat.screenshot.save', dataUrl: 'data:image/jpeg;base64,aaaa', suggestedName: '../demo.png' }, 'editor-1')).toBe(false);
   });
 
   it('bounds cyclic, deep, oversized, and wrong-instance messages', () => {
@@ -48,7 +46,6 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'run.imported', path: 'file:///run.json', runId: 'run-1', duplicate: false }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'run.imported', path: 'file:///run.json', runId: 'run-1', duplicate: 'no' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'form.accepted', formId: 'form-1', sourceMessageId: 'message-1' }, 'editor-1')).toBe(true);
-    expect(isHostMessage({ ...envelope, type: 'chat.screenshot.saved', path: 'file:///workspace/turnstage-demo.png' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'workspaceTrust.changed', trusted: 'yes' }, 'editor-1')).toBe(false);
   });
 });

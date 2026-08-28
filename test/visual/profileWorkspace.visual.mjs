@@ -35,6 +35,17 @@ const browser = await chromium.launch(executablePath ? { headless: true, executa
 
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        write: async (items) => {
+          globalThis.__turnstageClipboardItems = items;
+          await Promise.all(items.flatMap((item) => item.types.map((type) => item.getType(type))));
+        }
+      }
+    });
+  });
   const url = `http://127.0.0.1:${address.port}/test/visual/profileWorkspaceHarness.html`;
   const waitForProfile = async () => {
     await page.locator('.profile-identity').waitFor();
@@ -53,18 +64,24 @@ try {
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Debug');
   await page.screenshot({ path: resolve(artifactDirectory, 'wide-dark.png'), fullPage: true });
-  const screenshotButton = page.getByRole('button', { name: 'Capture chat screenshot' });
+  const screenshotButton = page.getByRole('button', { name: 'Copy chat screenshot' });
   await screenshotButton.focus();
   assert.equal(await screenshotButton.evaluate((element) => element.matches(':focus-visible')), true, 'Screenshot button must expose keyboard focus');
   await screenshotButton.click();
-  await page.waitForFunction(() => globalThis.__turnstageMessages.some((message) => message.type === 'chat.screenshot.save'));
-  const screenshotPayload = await page.evaluate(() => {
-    const message = [...globalThis.__turnstageMessages].reverse().find((candidate) => candidate.type === 'chat.screenshot.save');
-    return { dataUrl: message.dataUrl, suggestedName: message.suggestedName };
+  await page.waitForFunction(() => Array.isArray(globalThis.__turnstageClipboardItems) && globalThis.__turnstageClipboardItems.length === 1);
+  assert.equal(await page.locator('.mobile-chat-preview__status').textContent(), 'Chat screenshot copied to clipboard.', 'Screenshot action must confirm the clipboard write');
+  const screenshotDataUrl = await page.evaluate(async () => {
+    const clipboardItem = globalThis.__turnstageClipboardItems[0];
+    const blob = await clipboardItem.getType('image/png');
+    return new Promise((resolveRead, rejectRead) => {
+      const reader = new globalThis.FileReader();
+      reader.onload = () => resolveRead(reader.result);
+      reader.onerror = rejectRead;
+      reader.readAsDataURL(blob);
+    });
   });
-  assert.match(screenshotPayload.suggestedName, /^turnstage-slow-sse-.*\.png$/, 'Screenshot receives a safe profile-scoped filename');
-  assert.ok(screenshotPayload.dataUrl.startsWith('data:image/png;base64,iVBOR'), 'Screenshot button must generate a PNG payload');
-  const screenshotBytes = Buffer.from(screenshotPayload.dataUrl.slice('data:image/png;base64,'.length), 'base64');
+  assert.ok(screenshotDataUrl.startsWith('data:image/png;base64,iVBOR'), 'Screenshot button must copy a PNG payload');
+  const screenshotBytes = Buffer.from(screenshotDataUrl.slice('data:image/png;base64,'.length), 'base64');
   assert.ok(screenshotBytes.length > 1_000, 'Generated PNG must contain the rendered Chat viewport');
   const screenshotComposerMargins = await page.evaluate(async (dataUrl) => {
     const capturedImage = document.createElement('img');
@@ -91,7 +108,7 @@ try {
       last = x;
     }
     return { left: first, right: last < 0 ? -1 : canvas.width - 1 - last, width: canvas.width };
-  }, screenshotPayload.dataUrl);
+  }, screenshotDataUrl);
   assert.ok(screenshotComposerMargins.left > 0 && screenshotComposerMargins.right > 0, 'Captured composer must be inset from both Chat viewport edges');
   assert.ok(Math.abs(screenshotComposerMargins.left - screenshotComposerMargins.right) <= 2, `Captured composer must remain centered; observed margins ${JSON.stringify(screenshotComposerMargins)}`);
   await writeFile(resolve(artifactDirectory, 'chat-viewport-capture-dark.png'), screenshotBytes);

@@ -17,7 +17,7 @@ import type {
 import { formatDuration, formatNumber, t } from './i18n';
 import { IconButton, ProductIcon } from './Icon';
 import { SafeMarkdown } from './SafeMarkdown';
-import { captureChatScreenshot } from './chatScreenshot';
+import { captureChatScreenshot, copyChatScreenshotToClipboard } from './chatScreenshot';
 import { resolveComposer, resolveMessageActions, resolveMessageActionVisibility, resolveStreaming, type ResolvedStreaming } from './uiConfig';
 import './mobileChatPreview.css';
 
@@ -225,13 +225,13 @@ export function MobileChatPreview({
     const device = deviceRef.current;
     if (!device || capturingScreenshot) return;
     setCapturingScreenshot(true);
-    setScreenshotStatus(t('Capturing chat screenshot…'));
+    setScreenshotStatus(t('Copying chat screenshot…'));
     try {
-      const screenshot = await captureChatScreenshot(device, profile.id);
-      post({ type: 'chat.screenshot.save', ...screenshot });
-      setScreenshotStatus(t('Screenshot ready to save.'));
+      const screenshot = captureChatScreenshot(device);
+      await copyChatScreenshotToClipboard(screenshot.then((result) => result.dataUrl));
+      setScreenshotStatus(t('Chat screenshot copied to clipboard.'));
     } catch {
-      setScreenshotStatus(t('Unable to capture chat screenshot.'));
+      setScreenshotStatus(t('Unable to copy chat screenshot.'));
     } finally {
       setCapturingScreenshot(false);
     }
@@ -266,7 +266,7 @@ export function MobileChatPreview({
         </select>
       </label>
       {!responsive && viewport.zoom === 'fit' && <span className="mobile-chat-preview__fit-scale" aria-label={t('Preview scale')}>{formatNumber(Math.round(previewScale * 100))}%</span>}
-      <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(capturingScreenshot ? 'Capturing chat screenshot…' : 'Capture chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
+      <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
     </header>
     <div ref={stageRef} className="mobile-chat-preview__stage">
       <div className={`mobile-chat-preview__viewport-shell mobile-chat-preview__viewport-shell--${responsive ? 'responsive' : 'fixed'}`} data-viewport-mode={responsive ? 'responsive' : 'fixed'} style={viewportStyle}>

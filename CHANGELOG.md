@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.7.0
+
+- Changed the Chat camera action to copy the rendered PNG directly to the local system clipboard instead of opening a save dialog. The localized accessible label and status now describe copying, and the image is ready to paste immediately after the success announcement.
+- Starts the clipboard write during the user gesture and supplies the asynchronously rendered PNG to that operation. Screenshot bytes stay inside the local Webview, never cross the Extension Host protocol, touch the workspace file system, or make a network request.
+- Preserved the 8-megapixel render cap, 24 MiB decoded PNG limit, signature validation, centered wide-layout composer, mobile insets, and Restricted Mode compatibility. Existing profiles and runs require no migration.
+
 ## 0.6.1
 
 - Fixed exported Chat PNGs positioning the composer against the leading edge in wide Responsive and Web viewports. The composer now shares the same centered content insets as the header and conversation while preserving the existing compact mobile margins.

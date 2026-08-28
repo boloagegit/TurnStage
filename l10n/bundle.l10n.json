@@ -248,10 +248,5 @@
   "Unknown message action visibility: {value}.": "Unknown message action visibility: {value}.",
   "Message metrics require id and value fields.": "Message metrics require id and value fields.",
   "Unknown message metric aggregation: {value}.": "Unknown message metric aggregation: {value}.",
-  "Unknown message metric format: {value}.": "Unknown message metric format: {value}.",
-  "Unable to save the chat screenshot.": "Unable to save the chat screenshot.",
-  "Save chat screenshot": "Save chat screenshot",
-  "PNG image": "PNG image",
-  "Save screenshot": "Save screenshot",
-  "Chat screenshot saved.": "Chat screenshot saved."
+  "Unknown message metric format: {value}.": "Unknown message metric format: {value}."
 }

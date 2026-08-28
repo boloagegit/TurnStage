@@ -32,10 +32,11 @@ and preserve `default-src 'none'` plus the extension-only `connect-src` policy
 when adding features.
 
 Chat screenshots are created from the logical Chat viewport, never the Debug
-pane. The protocol accepts only bounded PNG data URLs and safe `.png` names;
-the host verifies base64 syntax, the PNG signature, and a 24 MiB decoded-size
-limit before showing the native save dialog. Screenshots are written only to
-the URI the user selects and are not retained by TurnStage.
+pane. A direct user gesture writes the generated image to the local system
+clipboard through the Web Clipboard API. The Webview verifies the PNG data URL,
+base64 syntax, PNG signature, and a 24 MiB decoded-size limit before copying.
+The image does not cross the Host/Webview protocol, touch the workspace file
+system, make a network request, or remain retained by TurnStage.
 
 ## Host/Webview messages
 

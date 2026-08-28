@@ -16,7 +16,6 @@ import { resolveDisplayLanguage, textDirection } from '../displayLanguage';
 import { profileEditorTitle } from './profileEditorTitle';
 import { EventBatcher } from '../runtime/eventBatcher';
 import { logAt } from '../logging';
-import { decodeChatScreenshot, normalizeScreenshotFileName } from './chatScreenshot';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -128,11 +127,6 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         }
         if (message.type === 'profile.patch') { await this.patchDocument(document, message.path, message.value); return; }
         if (message.type === 'output.open') { this.output.show(true); return; }
-        if (message.type === 'chat.screenshot.save') {
-          const uri = await this.saveChatScreenshot(message.dataUrl, message.suggestedName, document.uri);
-          if (uri) await post({ type: 'chat.screenshot.saved', path: uri.toString() }, message.requestId);
-          return;
-        }
         if (!controller) return;
         switch (message.type) {
           case 'mapping.test': {
@@ -232,23 +226,6 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private async patchDocument(document: vscode.TextDocument, path: Array<string | number>, value: unknown): Promise<void> {
     if (!isAllowedPatchPath(path)) throw new Error(localize('This profile setting cannot be edited from the configuration surface.'));
     const edits = modify(document.getText(), path, value, { formattingOptions: { insertSpaces: true, tabSize: 2 } }); const workspaceEdit = new vscode.WorkspaceEdit(); for (const edit of [...edits].sort((a, b) => b.offset - a.offset)) workspaceEdit.replace(document.uri, new vscode.Range(document.positionAt(edit.offset), document.positionAt(edit.offset + edit.length)), edit.content); await vscode.workspace.applyEdit(workspaceEdit);
-  }
-  private async saveChatScreenshot(dataUrl: string, suggestedName: string, profileUri: vscode.Uri): Promise<vscode.Uri | undefined> {
-    let bytes: Uint8Array;
-    try { bytes = decodeChatScreenshot(dataUrl); }
-    catch { throw new Error(localize('Unable to save the chat screenshot.')); }
-    const fileName = normalizeScreenshotFileName(suggestedName);
-    const folder = vscode.workspace.getWorkspaceFolder(profileUri) ?? vscode.workspace.workspaceFolders?.[0];
-    const uri = await vscode.window.showSaveDialog({
-      title: localize('Save chat screenshot'),
-      defaultUri: folder ? vscode.Uri.joinPath(folder.uri, fileName) : undefined,
-      filters: { [localize('PNG image')]: ['png'] },
-      saveLabel: localize('Save screenshot')
-    });
-    if (!uri) return undefined;
-    await vscode.workspace.fs.writeFile(uri, bytes);
-    void vscode.window.showInformationMessage(localize('Chat screenshot saved.'));
-    return uri;
   }
   private trackDisposal(promise: Promise<void>): void {
     this.pendingDisposals.add(promise);
