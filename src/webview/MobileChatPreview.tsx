@@ -359,7 +359,7 @@ function OpeningError({ profile, snapshot, post, trusted, headingId }: { profile
 function OpeningCard({ profile, opening, active, trusted, setDraft, send, post, headingId }: { profile: TurnStageProfile; opening: NonNullable<SessionSnapshot['opening']>; active: boolean; trusted: boolean; setDraft: SetDraft; send: SendMessage; post: PostMessage; headingId: string }): React.JSX.Element {
   return <section className="mobile-chat-preview__opening" aria-labelledby={headingId}>
     <span className="mobile-chat-preview__opening-avatar" aria-hidden="true">{profile.name.trim().charAt(0).toUpperCase() || 'T'}</span>
-    <div className="mobile-chat-preview__opening-content"><h3 id={headingId}>{opening.message}</h3>
+    <div className="mobile-chat-preview__opening-content"><h3 className="mobile-chat-preview__opening-label" id={headingId}>{t('Opening')}</h3><p className="mobile-chat-preview__opening-message">{opening.message}</p>
       {componentVisible(profile, 'starters') && opening.starters.length > 0 && <div className="mobile-chat-preview__starter-list" aria-label={t('Starter prompts')}>
         {opening.starters.map((starter) => <StarterButton key={starter.id} starter={starter} active={active} trusted={trusted} setDraft={setDraft} send={send} post={post} />)}
       </div>}

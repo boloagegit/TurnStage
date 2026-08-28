@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.2
+
+- Added an explicit localized `Opening` label above profile opening content in Chat so it cannot be mistaken for a streamed Assistant response. Existing profiles require no migration.
+
 ## 0.5.1
 
 - Changed the Assistant message footer to show only TurnStage-measured TTFT and total duration by default. Backend-reported duration and token metrics remain available in Debug and require an explicit `metrics.messageEnabled` opt-in before appearing in chat; `usage.updated` parts are likewise hidden unless `ui.components.usage.visible` is enabled.

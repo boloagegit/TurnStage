@@ -24,6 +24,16 @@ beforeAll(() => {
 afterEach(() => { cleanup(); document.body.classList.remove('vscode-using-screen-reader'); setLocale('en', 'ltr'); });
 
 describe('Webview DOM behavior', () => {
+  it('labels profile opening content instead of presenting it as an Assistant response', () => {
+    const openingProfile: TurnStageProfile = { ...profile, opening: { mode: 'static', message: 'Welcome to the fixture.', starters: [] } };
+    render(<MobileChatPreview {...mobileProps({ profile: openingProfile, snapshot: undefined })} />);
+
+    const opening = screen.getByRole('region', { name: 'Opening' });
+    expect(within(opening).getByRole('heading', { name: 'Opening' })).toBeTruthy();
+    expect(within(opening).getByText('Welcome to the fixture.')).toBeTruthy();
+    expect(within(opening).queryByText('Assistant')).toBeNull();
+  });
+
   it('identifies the profile workspace without presenting it as a JSONC editor', () => {
     render(<ProfileIdentityBar profile={{ ...profile, environment: 'local' }} />);
     const identity = screen.getByRole('banner', { name: 'TurnStage profile identity' });

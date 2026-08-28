@@ -52,6 +52,7 @@ try {
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Debug');
   await page.screenshot({ path: resolve(artifactDirectory, 'wide-dark.png'), fullPage: true });
+  assert.equal(await page.getByRole('region', { name: 'Opening' }).getByRole('heading', { name: 'Opening' }).count(), 1, 'Opening content must be explicitly labelled');
   const assistantMessage = page.locator('[data-message-id="assistant-1"]');
   assert.equal(await assistantMessage.getByRole('group', { name: 'Message actions' }).evaluate((element) => getComputedStyle(element).opacity), '1', 'Message actions must be visible by default');
   const messageMetricText = await assistantMessage.getByLabel('Message metrics').innerText();

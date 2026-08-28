@@ -387,6 +387,17 @@
 
 .mobile-chat-preview__opening-content { min-width: 0; }
 
+.mobile-chat-preview__opening h3.mobile-chat-preview__opening-label {
+  color: var(--mcp-muted);
+  font-size: .846em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.mobile-chat-preview__opening p.mobile-chat-preview__opening-message {
+  margin-top: 3px;
+}
+
 .mobile-chat-preview__starter-list,
 .mobile-chat-preview__followups,
 .mobile-chat-preview__action-row {
