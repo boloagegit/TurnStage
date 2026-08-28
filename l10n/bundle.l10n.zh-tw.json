@@ -7,6 +7,7 @@
   "Transport: {transport}": "傳輸：{transport}",
   "Validation: {status}": "驗證：{status}",
   "Unknown": "未知",
+  "HTTP {status}.": "HTTP {status}。",
   "Invalid": "無效",
   "Ready": "就緒",
   "Open": "開啟",
@@ -248,5 +249,10 @@
   "Unknown message action visibility: {value}.": "未知的訊息動作顯示方式：{value}。",
   "Message metrics require id and value fields.": "訊息指標需要 id 與 value 欄位。",
   "Unknown message metric aggregation: {value}.": "未知的訊息指標聚合方式：{value}。",
-  "Unknown message metric format: {value}.": "未知的訊息指標格式：{value}。"
+  "Unknown message metric format: {value}.": "未知的訊息指標格式：{value}。",
+  "Restart": "重新開始",
+  "Restart this TurnStage session?": "要重新開始這個 TurnStage 工作階段嗎？",
+  "Current messages, conversation IDs, and event data will be cleared. Recorded runs are kept.": "目前的訊息、對話 ID 與事件資料會被清除；已記錄的執行仍會保留。",
+  "Message copied.": "訊息已複製。",
+  "Request attempt failed and will be retried.": "請求嘗試失敗，即將重試。"
 }

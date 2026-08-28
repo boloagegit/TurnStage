@@ -56,6 +56,7 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 type SendMessage = (text?: string, interaction?: InteractionContext) => void;
 type SetDraft = (value: string) => void;
 type PostMessage = (message: WebviewPayload) => void;
+export interface MessageActionFeedback { actionId: string; sourceMessageId: string; status: 'pending' | 'success' | 'info' | 'error'; message: string }
 
 export interface MobileChatPreviewProps {
   profile: TurnStageProfile;
@@ -73,6 +74,8 @@ export interface MobileChatPreviewProps {
   onViewportChange?: (viewport: ChatViewportState) => void;
   /** Form instances acknowledged by the Extension Host for this editor lifetime. */
   acceptedForms?: ReadonlySet<string>;
+  messageActionFeedback?: MessageActionFeedback;
+  onMessageActionFeedback?: (feedback: MessageActionFeedback | undefined) => void;
   className?: string;
 }
 
@@ -96,6 +99,8 @@ export function MobileChatPreview({
   viewport: controlledViewport,
   onViewportChange,
   acceptedForms,
+  messageActionFeedback,
+  onMessageActionFeedback,
   className
 }: MobileChatPreviewProps): React.JSX.Element {
   const [uncontrolledViewport, setUncontrolledViewport] = useState<ChatViewportState>(controlledViewport ?? DEFAULT_CHAT_VIEWPORT);
@@ -271,7 +276,7 @@ export function MobileChatPreview({
     <div ref={stageRef} className="mobile-chat-preview__stage">
       <div className={`mobile-chat-preview__viewport-shell mobile-chat-preview__viewport-shell--${responsive ? 'responsive' : 'fixed'}`} data-viewport-mode={responsive ? 'responsive' : 'fixed'} style={viewportStyle}>
       <div ref={deviceRef} className="mobile-chat-preview__device" data-layout="responsive" data-viewport-width={logicalWidth}>
-        <MobileAppHeader profile={profile} snapshot={snapshot} active={active} />
+        <MobileAppHeader profile={profile} snapshot={snapshot} active={active} trusted={trusted} post={post} />
 
         <div className="mobile-chat-preview__content">
           {profile.controls && profile.controls.length > 0 && <MobileControls profile={profile} snapshot={snapshot} active={active} trusted={trusted} post={post} />}
@@ -279,7 +284,7 @@ export function MobileChatPreview({
             {snapshot?.sessionState === 'notStarted' && profile.opening?.mode === 'request' && <StartSessionCard post={post} trusted={trusted} headingId={`${previewId}-start-heading`} />}
             {snapshot?.sessionState === 'failed' && profile.opening?.mode === 'request' && <OpeningError profile={profile} snapshot={snapshot} post={post} trusted={trusted} headingId={`${previewId}-opening-error-heading`} />}
             {opening && componentVisible(profile, 'opening') && <OpeningCard profile={profile} opening={opening} active={active} trusted={trusted} setDraft={setDraft} send={send} post={post} headingId={`${previewId}-opening-heading`} />}
-      {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} post={post} send={send} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} />)}
+      {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} post={post} send={send} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback} onActionFeedback={onMessageActionFeedback} />)}
             {!snapshot && <p className="mobile-chat-preview__empty" role="status">{t('Loading conversation…')}</p>}
             {snapshot && snapshotMessages.length === 0 && !opening && snapshot.sessionState !== 'notStarted' && <p className="mobile-chat-preview__empty">{t('No messages yet. Send a message to begin.')}</p>}
             {continuationBlocked && <p className="mobile-chat-preview__continuation" role="status">{t('Continuation is disabled after this error. Start a new conversation to send another message.')}</p>}
@@ -311,7 +316,7 @@ function ViewportDimensionInput({ value, minimum, maximum, label, onCommit }: { 
   return <input type="number" min={minimum} max={maximum} value={draft} aria-label={label} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />;
 }
 
-function MobileAppHeader({ profile, snapshot, active }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; active: boolean }): React.JSX.Element {
+function MobileAppHeader({ profile, snapshot, active, trusted, post }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; active: boolean; trusted: boolean; post: PostMessage }): React.JSX.Element {
   const state = active ? snapshot?.turnState ?? 'streaming' : snapshot?.turnState ?? snapshot?.sessionState ?? 'notStarted';
   return <header className="mobile-chat-preview__app-header">
     <div className="mobile-chat-preview__app-avatar" aria-hidden="true">{profile.name.trim().charAt(0).toUpperCase() || 'T'}</div>
@@ -319,6 +324,7 @@ function MobileAppHeader({ profile, snapshot, active }: { profile: TurnStageProf
       <strong>{profile.name}</strong>
       <span>{profile.environment ?? t('No environment')} · {humanize(state)}</span>
     </div>
+    {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon="refresh" label={t('Restart session')} type="button" disabled={!trusted || active} onClick={() => post({ type: 'conversation.new' })} />}
     <span className={`mobile-chat-preview__state mobile-chat-preview__state--${state}`} role="img" aria-label={t('Conversation status: {status}', { status: humanize(state) })}><ProductIcon name="circle-filled" /></span>
   </header>;
 }
@@ -461,7 +467,7 @@ function stopActionLabel(turnState?: TurnState): string {
   return t('Stop conversation');
 }
 
-function MobileMessage({ profile, message, post, send, setDraft, trusted, selected, onSelectMessage, acceptedForms }: { profile: TurnStageProfile; message: ChatMessage; post: PostMessage; send: SendMessage; setDraft: SetDraft; trusted: boolean; selected: boolean; onSelectMessage?: (messageId: string) => void; acceptedForms?: ReadonlySet<string> }): React.JSX.Element {
+function MobileMessage({ profile, message, post, send, setDraft, trusted, selected, onSelectMessage, acceptedForms, actionFeedback, onActionFeedback }: { profile: TurnStageProfile; message: ChatMessage; post: PostMessage; send: SendMessage; setDraft: SetDraft; trusted: boolean; selected: boolean; onSelectMessage?: (messageId: string) => void; acceptedForms?: ReadonlySet<string>; actionFeedback?: MessageActionFeedback; onActionFeedback?: (feedback: MessageActionFeedback | undefined) => void }): React.JSX.Element {
   const parts = message.parts ?? [];
   const text = parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text ?? '').join('');
   const citations = message.citations ?? [];
@@ -478,6 +484,8 @@ function MobileMessage({ profile, message, post, send, setDraft, trusted, select
   const messageLabelValues = { role: roleLabel, status: statusLabel };
   const messageActions = resolveMessageActions(profile, message.role, Boolean(onSelectMessage));
   const messageActionVisibility = resolveMessageActionVisibility(profile.ui);
+  const feedback = actionFeedback?.sourceMessageId === message.id ? actionFeedback : undefined;
+  const reportFeedback = (actionId: string, status: MessageActionFeedback['status'], feedbackMessage: string) => onActionFeedback?.({ actionId, sourceMessageId: message.id, status, message: feedbackMessage });
   const enabledMessageMetrics = new Set(profile.metrics?.messageEnabled?.length ? profile.metrics.messageEnabled : ['ttft', 'totalDuration']);
   const showTtft = message.role === 'assistant' && message.timing !== undefined && enabledMessageMetrics.has('ttft');
   const showTotalDuration = message.role === 'assistant' && message.timing !== undefined && enabledMessageMetrics.has('totalDuration');
@@ -511,12 +519,13 @@ function MobileMessage({ profile, message, post, send, setDraft, trusted, select
       {componentVisible(profile, 'messageMetrics') && (showTtft || showTotalDuration || messageMetrics.length > 0) && <MessageMetrics message={message} metrics={messageMetrics} showTtft={showTtft} showTotalDuration={showTotalDuration} />}
       {messageActions.length > 0 && <footer className={`mobile-chat-preview__message-toolbar mobile-chat-preview__message-toolbar--${messageActionVisibility}`} role="group" aria-label={t('Message actions')}>
         {messageActions.map((actionId) => actionId === 'message.inspectRaw'
-          ? <IconButton key={actionId} icon="target" label={t('Inspect message')} type="button" aria-pressed={selected} onClick={() => onSelectMessage?.(message.id)} />
+          ? <IconButton key={actionId} icon="target" label={feedback?.actionId === actionId ? feedback.message : t('Inspect message')} type="button" aria-pressed={selected} onClick={() => onSelectMessage?.(message.id)} />
           : actionId === 'message.copy'
-            ? <IconButton key={actionId} icon="copy" label={t('Copy')} type="button" onClick={() => post({ type: 'action.invoke', actionId, sourceMessageId: message.id })} />
+            ? <IconButton key={actionId} icon={feedback?.actionId === actionId ? feedback.status === 'success' ? 'check' : feedback.status === 'error' ? 'warning' : 'copy' : 'copy'} label={feedback?.actionId === actionId ? feedback.message : t('Copy')} type="button" onClick={() => { reportFeedback(actionId, 'pending', t('Copying message…')); post({ type: 'action.invoke', actionId, sourceMessageId: message.id }); }} />
             : actionId === 'message.retry'
-              ? <IconButton key={actionId} icon="refresh" label={t('Retry')} type="button" disabled={!trusted} onClick={() => post({ type: 'action.invoke', actionId, sourceMessageId: message.id })} />
-              : <IconButton key={actionId} icon="edit" label={t('Edit & resend')} type="button" disabled={!trusted} onClick={() => setDraft(text)} />)}
+              ? <IconButton key={actionId} icon="refresh" label={feedback?.actionId === actionId ? feedback.message : t('Retry')} type="button" disabled={!trusted} onClick={() => { reportFeedback(actionId, 'info', t('Retry requested.')); post({ type: 'action.invoke', actionId, sourceMessageId: message.id }); }} />
+              : <IconButton key={actionId} icon={feedback?.actionId === actionId ? 'check' : 'edit'} label={feedback?.actionId === actionId ? feedback.message : t('Edit & resend')} type="button" disabled={!trusted} onClick={() => { setDraft(text); reportFeedback(actionId, 'success', t('Message moved to the composer.')); }} />)}
+        {feedback && <span className={`mobile-chat-preview__message-action-feedback mobile-chat-preview__message-action-feedback--${feedback.status}`} role="status" aria-live="polite" aria-atomic="true">{feedback.message}</span>}
       </footer>}
     </div>
   </article>;

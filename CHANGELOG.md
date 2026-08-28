@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.9.0
+
+- Added a Chrome-style Debug Network inspector with compact Opening, Stream-attempt, retry, and Stop rows plus searchable Headers, Payload, bounded Response, and Timing details. Timeout rows retain the HTTP/header/first-chunk phase and structured failure so an idle timeout after HTTP 200 is distinguishable from DNS, TLS, connection, or total-request failures.
+- Network diagnostics are live-session-only, retain at most 50 entries and 64 KiB of response preview per entry, and reuse request-header, response-header, and known-secret redaction before data reaches the Webview. Existing profiles and recorded runs remain compatible and require no migration.
+
+## 0.8.0
+
+- Added a compact Restart Session action to the Chat header and a modal confirmation before every new-conversation path clears the current messages, conversation IDs, and live event data. Recorded runs remain available.
+- Added persistent, accessible feedback for message actions. Copy, retry, and edit-and-resend now acknowledge the interaction, while Inspect switches the right pane to Debug, opens Raw Events, selects and focuses the last event linked to the message, and explains when no linked event exists.
+- Added correlated Opening, Stream, and Stop diagnostics to the TurnStage Output Channel. The default info level records request phase, method, query-free endpoint, selected variant, timeout configuration, response status/content type, first-chunk latency, terminal counts, and safe network error codes; debug adds attempt, chunk, SSE event, mapping, retry, and timeout metadata.
+- Output diagnostics do not record headers, request bodies, query values, SSE payloads, HTTP error bodies, or known secret values. Existing version-1 profiles, environments, recorded runs, and Restricted Mode behavior remain compatible and require no migration.
+
 ## 0.7.0
 
 - Changed the Chat camera action to copy the rendered PNG directly to the local system clipboard instead of opening a save dialog. The localized accessible label and status now describe copying, and the image is ready to paste immediately after the success announcement.

@@ -67,7 +67,7 @@
   "setting.logLevel.error": "Errors only.",
   "setting.logLevel.warn": "Errors and warnings.",
   "setting.logLevel.info": "Errors, warnings, and normal operational information.",
-  "setting.logLevel.debug": "All information, including debugging details.",
+  "setting.logLevel.debug": "All information, including per-attempt, chunk, SSE event, timeout, retry, and mapping diagnostics. Request and event payloads are not logged.",
   "setting.notifications.enabled": "Show TurnStage notifications. Disable to keep non-modal status messages hidden.",
   "workspaceTrust.description": "Profile editing and fixture replay remain available. Network requests and privileged profile actions are disabled."
 }

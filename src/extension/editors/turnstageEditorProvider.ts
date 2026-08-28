@@ -16,6 +16,7 @@ import { resolveDisplayLanguage, textDirection } from '../displayLanguage';
 import { profileEditorTitle } from './profileEditorTitle';
 import { EventBatcher } from '../runtime/eventBatcher';
 import { logAt } from '../logging';
+import { confirmRestartSession } from '../confirmRestartSession';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -54,7 +55,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       if (current) this.trackDisposal(current.disposeAndWait());
       if (current && this.controllers.get(documentKey) === current) this.controllers.delete(documentKey);
     };
-    const currentSessionSnapshot = (): Extract<HostPayload, { type: 'session.snapshot' }> | undefined => controller ? { type: 'session.snapshot', snapshot: controller.snapshot, runs: controller.getRunSummaries(), requestPreview: controller.requestPreview } : undefined;
+    const currentSessionSnapshot = (): Extract<HostPayload, { type: 'session.snapshot' }> | undefined => controller ? { type: 'session.snapshot', snapshot: controller.snapshot, runs: controller.getRunSummaries(), requestPreview: controller.requestPreview, networkEntries: controller.getNetworkEntries() } : undefined;
     const sessionBatcher = new EventBatcher<void>(() => {
       if (disposed) return;
       const snapshot = currentSessionSnapshot();
@@ -150,12 +151,21 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           case 'opening.useFallback': controller.useConfiguredOpeningFallback(); break;
           case 'request.send': await controller.send(message.text, message.interaction); break;
           case 'request.abort': await controller.abort(); break;
-          case 'conversation.new': await controller.newConversation(); break;
+          case 'conversation.new': if (await confirmRestartSession()) await controller.newConversation(); break;
           case 'conversation.clear': controller.clearConversation(); break;
           case 'history.remote.apply': controller.applyRemoteSession(message.conversationId); break;
           case 'citation.open': { const citation = controller.snapshot.messages.flatMap((item) => item.citations).find((item) => item.id === message.citationId); if (citation) await this.uriPolicy.open(citation, controller.profile, controller.profileUri); break; }
           case 'uri.open': await this.uriPolicy.open({ id: `markdown-link-${message.requestId}`, kind: 'url', uri: message.uri }, controller.profile, controller.profileUri); break;
-          case 'action.invoke': await this.invokeAction(message.actionId, message.sourceMessageId, controller); break;
+          case 'action.invoke': {
+            try {
+              await this.invokeAction(message.actionId, message.sourceMessageId, controller);
+              if (message.sourceMessageId && message.actionId === 'message.copy') await post({ type: 'action.feedback', actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: 'success', message: localize('Message copied.') }, message.requestId);
+            } catch (error) {
+              if (message.sourceMessageId) await post({ type: 'action.feedback', actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: 'error', message: error instanceof Error ? error.message : String(error) }, message.requestId);
+              throw error;
+            }
+            break;
+          }
           case 'form.submit': {
             const submission = validateFormSubmission(controller.snapshot.messages, message.formId, message.sourceMessageId, message.values);
             const previousTurnState = controller.snapshot.turnState;
@@ -237,7 +247,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     if (actionId === 'message.copy' && message) { await vscode.env.clipboard.writeText(message.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text).join('')); return; }
     if (actionId === 'message.retry') { await controller.retry(); return; }
     if (actionId === 'request.abort') { await controller.abort(); return; }
-    if (actionId === 'conversation.new') { await controller.newConversation(); return; }
+    if (actionId === 'conversation.new') { if (await confirmRestartSession()) await controller.newConversation(); return; }
     if (actionId === 'conversation.clear') { controller.clearConversation(); return; }
     const action = message?.actions.find((item) => item.id === actionId || item.actionId === actionId);
     if (!action) throw new Error(localize('The selected response action is no longer available.'));
@@ -256,7 +266,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       return;
     }
     if (action.actionId === 'request.abort') { await controller.abort(); return; }
-    if (action.actionId === 'conversation.new') { await controller.newConversation(); return; }
+    if (action.actionId === 'conversation.new') { if (await confirmRestartSession()) await controller.newConversation(); return; }
     if (action.actionId === 'conversation.clear') { controller.clearConversation(); return; }
     if (action.actionId === 'citation.open') {
       const citationId = typeof payload.citationId === 'string' ? payload.citationId : undefined;

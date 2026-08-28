@@ -16,7 +16,7 @@ The contributed VS Code settings are:
 | `turnstage.streamBatchIntervalMs` | `32` | 16–100 ms; batching interval for host-to-Webview `session.snapshot` messages |
 | `turnstage.runRetention` | `20` | 1–100; fallback local-run retention |
 | `turnstage.profileGlob` | `.vscode/turnstage/profiles/*.turnstage.jsonc` | Discovery scope, not a throughput limit |
-| `turnstage.logLevel` | `info` | Filters error, warning, info, and debug output-channel entries |
+| `turnstage.logLevel` | `info` | Filters Output Channel entries; `debug` adds per-attempt, chunk, event, retry, timeout, and mapping metadata without payloads |
 
 `EventBuffer` stores each raw event with a JSON byte estimate. On overflow it
 removes the oldest entries until both event and byte limits are satisfied and
@@ -27,6 +27,11 @@ Normalized events use the same event-count ceiling, conversation messages use
 `maxConversationMessages`, and runtime errors retain the newest 500 entries.
 The snapshot records each dropped category so the Webview can warn explicitly.
 A single raw event larger than the byte budget can be evicted by the raw buffer.
+
+The live Network inspector retains at most 50 request attempts. Each response
+preview is capped at 64 KiB before it crosses into the Webview; Stop responses
+are also read through that bound. Network entries are ephemeral and are reset
+with the session rather than copied into Recorded Runs.
 
 ## Host-to-Webview update path
 

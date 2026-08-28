@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import type { ChatMessage, ControlDefinition, InteractionContext, LocalRun, LocalRunSummary, MetricsSnapshot, NormalizedEvent, OpeningDefinition, PreparedRequest, RawStreamEvent, RemoteSessionReference, RuntimeErrorData, SessionSnapshot, TurnResult, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
+import type { ChatMessage, ControlDefinition, InteractionContext, LocalRun, LocalRunSummary, MetricsSnapshot, NetworkExchange, NetworkExchangeKind, NormalizedEvent, OpeningDefinition, PreparedRequest, RawStreamEvent, RemoteSessionReference, RuntimeErrorData, SessionSnapshot, TurnResult, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
 import { MappingEngine } from '../mapping/mappingEngine';
 import { RequestBuilder } from '../request/requestBuilder';
 import { getPath } from '../request/templateResolver';
-import { redactKnownSecrets, type SecretService } from '../security/security';
-import { HttpStreamTransport } from '../transport/transport';
+import { redactHeaders, redactKnownSecrets, type SecretService } from '../security/security';
+import { HttpStreamTransport, networkErrorCode } from '../transport/transport';
 import { TurnStageError, errors } from '../errors';
 import { fetchWithRedirectPolicy } from '../transport/fetchPolicy';
 import { LocalRunRepository, type LocalRunImportResult } from '../history/localRunRepository';
@@ -15,7 +15,10 @@ import { createSnapshot, reduceEvent } from './reducer';
 import { ReplayEngine, type ReplaySpeed } from '../replay/replayEngine';
 import { selectOpeningFallback } from '../opening/fallbackResolver';
 import { localize } from '../l10n';
-import { logAt } from '../logging';
+import { diagnosticUrl, diagnosticValue, logAt } from '../logging';
+
+const MAX_NETWORK_ENTRIES = 50;
+const MAX_NETWORK_RESPONSE_PREVIEW_CHARS = 64 * 1024;
 
 export class SessionController implements vscode.Disposable {
   snapshot: SessionSnapshot;
@@ -35,6 +38,7 @@ export class SessionController implements vscode.Disposable {
   private currentTurn?: { clientRequestId: string; startedAt: number };
   private environmentSecretValues: string[] = [];
   private readonly remoteSessionRepository: RemoteSessionRepository;
+  private networkEntries: NetworkExchange[] = [];
 
   constructor(
     readonly profile: TurnStageProfile,
@@ -69,6 +73,7 @@ export class SessionController implements vscode.Disposable {
     return this.runs;
   }
   getRuns(): LocalRun[] { return this.runs; }
+  getNetworkEntries(): NetworkExchange[] { return structuredClone(this.networkEntries); }
   getRunSummaries(): LocalRunSummary[] { return this.runs.map((run) => ({ id: run.id, profileId: run.profileId, createdAt: run.createdAt, metrics: structuredClone(run.metrics), result: structuredClone(run.result), replayable: Boolean(run.rawEvents?.length), hasSnapshot: Boolean(run.snapshot), rawEventCount: run.rawEvents?.length ?? 0, normalizedEventCount: run.normalizedEvents?.length ?? 0, messageCount: run.snapshot?.messages.length ?? 0, errorCount: run.snapshot?.errors.length ?? (run.result.type === 'failed' ? 1 : 0), request: run.request ? { method: run.request.method, url: run.request.url, variantId: run.request.variantId } : undefined })); }
   addBuiltInFixture(rawEvents: RawStreamEvent[]): void {
     const fixtureSnapshot = createSnapshot(vscode.workspace.isTrusted); fixtureSnapshot.controls = this.publicControls();
@@ -111,21 +116,35 @@ export class SessionController implements vscode.Disposable {
     if (!opening || opening.mode === 'disabled') { this.snapshot.opening = undefined; this.snapshot.sessionState = 'ready'; this.changed(); return; }
     if (opening.mode === 'static') { this.snapshot.opening = { message: opening.message ?? '', starters: opening.starters ?? [] }; this.snapshot.sessionState = 'ready'; this.changed(); return; }
     if (forceFallback) { this.useOpeningFallback(); return; }
+    const logId = `opening-${crypto.randomUUID().slice(0, 8)}`;
+    const startedAt = Date.now();
+    let phase = 'building-request';
+    let networkEntry: NetworkExchange | undefined;
     try {
       if (!opening.request) throw errors.request(localize('Opening request is missing.'));
       const request = await this.requestBuilder().build(opening.request as any, this.contextFor('', { kind: 'manual' }));
       this.registerRequestSecrets(request);
       this.requestPreview = this.publicValue(request.redacted);
+      networkEntry = this.beginNetworkExchange('opening', request, startedAt);
+      phase = 'waiting-headers';
+      logAt(this.log, 'info', `[${logId}] start method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} timeout=${formatDuration(request.timeoutMs ?? 30_000)}`);
       const response = await fetchWithTimeout(request);
+      phase = 'reading-response';
+      this.recordNetworkHeaders(networkEntry, response.status, response.headers, Date.now() - startedAt);
+      logAt(this.log, 'info', `[${logId}] headers status=${response.status} latency=${formatDuration(Date.now() - startedAt)} contentType=${quoteDiagnostic(this.publicValue(response.headers.get('content-type') ?? 'none'))}`);
       const responseText = await response.text(); let data: unknown = responseText;
       try { data = responseText ? JSON.parse(responseText) : {}; } catch { /* fallback matching can still inspect status */ }
-      if (!response.ok) { const fallback = selectOpeningFallback(opening, data, { status: response.status }); if (fallback) { this.useOpeningFallback(fallback); return; } throw new TurnStageError('HttpStatusError', localize('Opening request failed with HTTP {status}.', { status: response.status }), { status: response.status, data: this.publicValue(data) }); }
+      this.appendNetworkResponse(networkEntry, responseText);
+      if (!response.ok) { const fallback = selectOpeningFallback(opening, data, { status: response.status }); if (fallback) { this.finishNetworkExchange(networkEntry, 'failed', undefined, { type: 'HttpStatusError', message: localize('Opening request failed with HTTP {status}.', { status: response.status }), status: response.status }); logAt(this.log, 'warn', `[${logId}] fallback status=${response.status} elapsed=${formatDuration(Date.now() - startedAt)}`); this.useOpeningFallback(fallback); return; } throw new TurnStageError('HttpStatusError', localize('Opening request failed with HTTP {status}.', { status: response.status }), { status: response.status, data: this.publicValue(data) }); }
       const message = getPath(data, opening.response?.messagePath ?? '$.message');
       const starters = getPath(data, opening.response?.startersPath ?? '$.options');
-      if (typeof message !== 'string') { const fallback = selectOpeningFallback(opening, data, { status: response.status, missingMessage: true }); if (fallback) { this.useOpeningFallback(fallback); return; } throw new TurnStageError('OpeningError', localize('Opening response did not contain a message.')); }
+      if (typeof message !== 'string') { const fallback = selectOpeningFallback(opening, data, { status: response.status, missingMessage: true }); if (fallback) { this.finishNetworkExchange(networkEntry, 'completed'); logAt(this.log, 'warn', `[${logId}] fallback reason=missing-message elapsed=${formatDuration(Date.now() - startedAt)}`); this.useOpeningFallback(fallback); return; } throw new TurnStageError('OpeningError', localize('Opening response did not contain a message.')); }
       this.snapshot.opening = this.publicValue({ message, starters: Array.isArray(starters) ? starters as any : [] }); this.snapshot.sessionState = 'ready';
+      this.finishNetworkExchange(networkEntry, 'completed');
+      logAt(this.log, 'info', `[${logId}] completed elapsed=${formatDuration(Date.now() - startedAt)} starters=${Array.isArray(starters) ? starters.length : 0}`);
     } catch (error) {
-      logAt(this.log, 'error', `[opening] ${this.publicValue(safeMessage(error))}`);
+      this.finishNetworkExchange(networkEntry, 'failed', error);
+      logAt(this.log, 'error', `[${logId}] failed phase=${phase} type=${errorType(error)}${errorStatus(error)} elapsed=${formatDuration(Date.now() - startedAt)}${safeErrorMessage(error, (value) => this.publicValue(value))}`);
       const type = error instanceof TurnStageError ? error.type : 'NetworkError'; const fallback = selectOpeningFallback(opening, undefined, { errorType: type }) ?? (opening.failurePolicy?.useFallbackOnNetworkError ? opening.fallbacks?.[0] : undefined);
       if (opening.failurePolicy?.useFallbackOnNetworkError && fallback) this.useOpeningFallback(fallback);
       else { this.snapshot.sessionState = 'failed'; this.snapshot.errors.push(this.publicValue(toError(error))); }
@@ -140,6 +159,13 @@ export class SessionController implements vscode.Disposable {
     if (!vscode.workspace.isTrusted) { this.snapshot.errors.push(toError(errors.trust())); this.changed(); return; }
     const clientRequestId = crypto.randomUUID();
     const startedAt = Date.now();
+    const logId = `request-${clientRequestId.slice(0, 8)}`;
+    let phase = 'building-request';
+    let headerCount = 0;
+    let chunkCount = 0;
+    let eventCount = 0;
+    let byteCount = 0;
+    let networkEntry: NetworkExchange | undefined;
     this.currentTurn = { clientRequestId, startedAt };
     this.rawBuffer.clear();
     this.snapshot.rawEvents = [];
@@ -151,15 +177,49 @@ export class SessionController implements vscode.Disposable {
       const request = await this.requestBuilder().build(this.profile.conversation.send, this.contextFor(text, interaction, clientRequestId, startedAt));
       this.registerRequestSecrets(request);
       this.requestPreview = this.publicValue(request.redacted);
+      const protocol = this.profile.stream.transport === 'fixture' ? 'ndjson' : this.profile.stream.transport;
+      logAt(this.log, 'info', `[${logId}] start method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} variant=${quoteDiagnostic(request.redacted.variantId ?? 'default')} protocol=${protocol} timeout=${formatDuration(request.timeoutMs)} idleTimeout=${formatDuration(request.idleTimeoutMs)} reconnectMax=${Math.min(5, Math.max(0, request.reconnect?.maxAttempts ?? 0))}`);
       this.snapshot.messages.push({ id: `user-${clientRequestId}`, role: 'user', status: 'completed', createdAt: Date.now(), completedAt: Date.now(), parts: [{ type: 'text', text }], citations: [], actions: [], followups: [] });
       this.snapshot.messages.push({ id: `assistant-${clientRequestId}`, role: 'assistant', status: 'pending', createdAt: Date.now(), parts: [], citations: [], actions: [], followups: [], timing: {}, metadata: { clientRequestId } });
       this.boundSnapshotCollections();
-      this.snapshot.turnState = 'waitingStart'; this.changed(); this.abortController = new AbortController();
-      const transport = new HttpStreamTransport();
-      const result = await transport.start(request, this.profile.stream.transport === 'fixture' ? 'ndjson' : this.profile.stream.transport as any, {
-        onHeaders: (latency) => { this.metrics.headers(latency); this.changed(); },
-        onChunk: (bytes, latency) => { this.metrics.chunk(bytes, latency); },
-        onEvent: (raw) => this.acceptRaw(raw),
+      this.snapshot.turnState = 'waitingStart'; this.changed(); this.abortController = new AbortController(); phase = 'waiting-headers';
+      const transport = new HttpStreamTransport({
+        onDiagnostic: (event) => {
+          if (event.type === 'attempt.started') {
+            networkEntry = this.beginNetworkExchange('stream', request, Date.now(), protocol as RawStreamEvent['protocol'], event.attempt);
+            logAt(this.log, 'debug', `[${logId}] attempt=${event.attempt} started remainingTimeout=${formatDuration(event.remainingTimeoutMs)}`);
+          } else if (event.type === 'retry.scheduled') {
+            if (networkEntry) networkEntry.timing.retryDelay = event.delayMs;
+            this.finishNetworkExchange(networkEntry, 'failed', new TurnStageError(event.errorType, localize('Request attempt failed and will be retried.'), { ...(event.status === undefined ? {} : { status: event.status }) }));
+            logAt(this.log, 'warn', `[${logId}] retry attempt=${event.attempt}->${event.nextAttempt} delay=${formatDuration(event.delayMs)} reason=${event.errorType}${event.status === undefined ? '' : ` status=${event.status}`}`);
+          } else {
+            if (networkEntry) networkEntry.error = { type: event.kind === 'idle' ? 'IdleTimeoutError' : 'TimeoutError', message: event.kind === 'idle' ? localize('The stream idle timeout elapsed.') : localize('The total request timeout elapsed.') };
+            logAt(this.log, 'warn', `[${logId}] ${event.kind} timeout fired attempt=${event.attempt} elapsed=${formatDuration(event.elapsedMs)} sawData=${event.sawData}`);
+          }
+        },
+      });
+      const result = await transport.start(request, protocol as RawStreamEvent['protocol'], {
+        onHeaders: (latency, contentType, status, headers) => {
+          phase = 'waiting-first-chunk'; headerCount += 1;
+          if (networkEntry) this.recordNetworkHeaders(networkEntry, status, headers, latency);
+          this.metrics.headers(latency); this.changed();
+          logAt(this.log, 'info', `[${logId}] headers attempt=${headerCount} status=${status ?? 'unknown'} latency=${formatDuration(latency)} contentType=${quoteDiagnostic(this.publicValue(contentType || 'none'))}`);
+        },
+        onChunk: (bytes, latency) => {
+          phase = 'streaming'; chunkCount += 1; byteCount += bytes; this.metrics.chunk(bytes, latency);
+          if (networkEntry) { networkEntry.state = 'streaming'; networkEntry.transferredBytes += bytes; if (latency > 0 && networkEntry.timing.firstChunk === undefined) networkEntry.timing.firstChunk = latency; }
+          const detail = `[${logId}] chunk=${chunkCount} bytes=${bytes} totalBytes=${byteCount} elapsed=${formatDuration(Date.now() - startedAt)}`;
+          logAt(this.log, chunkCount === 1 ? 'info' : 'debug', chunkCount === 1 ? detail.replace('chunk=1', 'firstChunk=1') : detail);
+        },
+        onEvent: async (raw) => {
+          eventCount += 1;
+          const keepReading = await this.acceptRaw(raw);
+          if (networkEntry) { networkEntry.eventCount += 1; this.appendNetworkResponse(networkEntry, raw.raw, networkEntry.eventCount > 1 ? '\n\n' : ''); }
+          const eventName = this.publicValue(raw.sse?.event ?? raw.protocol);
+          const mapping = raw.mappingRuleId ? this.publicValue(raw.mappingRuleId) : 'unmatched';
+          logAt(this.log, 'debug', `[${logId}] event=${eventCount} sequence=${raw.sequence} name=${quoteDiagnostic(eventName)} bytes=${Buffer.byteLength(raw.raw)} elapsed=${formatDuration(raw.elapsedMs)} mapping=${quoteDiagnostic(mapping)} parseError=${Boolean(raw.parseError)} mappingError=${Boolean(raw.mappingError)}`);
+          return keepReading;
+        },
       }, this.abortController.signal, this.profile.stream.dataFormat ?? 'json');
       this.metrics.reconnectCount(result.reconnectCount ?? 0);
       if (result.aborted) await this.finalizeTurn({ type: 'aborted', reason: 'user_cancel' });
@@ -167,8 +227,15 @@ export class SessionController implements vscode.Disposable {
         if (this.profile.stream.unexpectedEndPolicy === 'completeWithWarning') { this.snapshot.errors.push({ type: 'UnexpectedStreamEndWarning', message: localize('The stream ended without a terminal event.') }); await this.finalizeTurn({ type: 'completed' }); }
         else await this.finalizeTurn({ type: 'failed', error: toError(errors.unexpectedEnd()) });
       }
+      this.finishNetworkExchange(networkEntry, result.aborted ? 'aborted' : (this.snapshot as SessionSnapshot).turnState === 'failed' ? 'failed' : 'completed');
+      logAt(this.log, 'info', `[${logId}] ended state=${this.snapshot.turnState} elapsed=${formatDuration(Date.now() - startedAt)} headers=${headerCount} chunks=${chunkCount} events=${eventCount} bytes=${byteCount} reconnects=${result.reconnectCount}`);
     } catch (error) {
       if (error instanceof TurnStageError && typeof error.details.reconnectCount === 'number') this.metrics.reconnectCount(error.details.reconnectCount);
+      const failurePhase = headerCount === 0 ? phase : chunkCount === 0 ? 'after-headers' : eventCount === 0 ? 'after-first-chunk' : 'streaming';
+      const level = error instanceof TurnStageError && error.type === 'UserAbortError' ? 'info' : 'error';
+      if (error instanceof TurnStageError && typeof error.details.responseBody === 'string') this.appendNetworkResponse(networkEntry, this.publicValue(error.details.responseBody));
+      this.finishNetworkExchange(networkEntry, error instanceof TurnStageError && error.type === 'UserAbortError' ? 'aborted' : 'failed', error);
+      logAt(this.log, level, `[${logId}] failed phase=${failurePhase} type=${errorType(error)}${errorStatus(error)} elapsed=${formatDuration(Date.now() - startedAt)} headers=${headerCount} chunks=${chunkCount} events=${eventCount} bytes=${byteCount}${errorEvidence(error)}${safeErrorMessage(error, (value) => this.publicValue(value))}`);
       await this.finalizeTurn({ type: error instanceof TurnStageError && error.type === 'UserAbortError' ? 'aborted' : 'failed', ...(error instanceof TurnStageError && error.type === 'UserAbortError' ? { reason: 'user_cancel' } : { error: toError(error) }) } as TurnResult);
     }
   }
@@ -183,9 +250,24 @@ export class SessionController implements vscode.Disposable {
       else try {
         const request = await this.requestBuilder().build(stop.request, stopContext);
         this.registerRequestSecrets(request);
-        await fetchWithTimeout(request);
+        const logId = `stop-${(this.currentTurn?.clientRequestId ?? crypto.randomUUID()).slice(0, 8)}`;
+        const startedAt = Date.now();
+        const networkEntry = this.beginNetworkExchange('stop', request, startedAt);
+        logAt(this.log, 'info', `[${logId}] start method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} timeout=${formatDuration(request.timeoutMs ?? 30_000)}`);
+        try {
+          const response = await fetchWithTimeout(request);
+          this.recordNetworkHeaders(networkEntry, response.status, response.headers, Date.now() - startedAt);
+          const preview = await readBoundedResponseText(response);
+          this.appendNetworkResponse(networkEntry, preview.text);
+          if (preview.truncated) networkEntry.responseBodyTruncated = true;
+          this.finishNetworkExchange(networkEntry, response.ok ? 'completed' : 'failed', response.ok ? undefined : new TurnStageError('HttpStatusError', localize('HTTP {status}.', { status: response.status }), { status: response.status }));
+          logAt(this.log, response.ok ? 'info' : 'warn', `[${logId}] ended status=${response.status} elapsed=${formatDuration(Date.now() - startedAt)}`);
+        } catch (error) {
+          this.finishNetworkExchange(networkEntry, 'failed', error);
+          throw error;
+        }
       }
-      catch (error) { this.snapshot.errors.push({ type: 'RemoteStopWarning', message: localize('Local stream stopped; remote stop failed: {error}', { error: this.publicValue(safeMessage(error)) }) }); }
+      catch (error) { logAt(this.log, 'error', `[stop] failed type=${errorType(error)}${errorStatus(error)}${safeErrorMessage(error, (value) => this.publicValue(value))}`); this.snapshot.errors.push({ type: 'RemoteStopWarning', message: localize('Local stream stopped; remote stop failed: {error}', { error: this.publicValue(safeMessage(error)) }) }); }
     }
     await this.finalizeTurn({ type: 'aborted', reason: 'user_cancel' });
   }
@@ -193,7 +275,7 @@ export class SessionController implements vscode.Disposable {
   async newConversation(): Promise<void> {
     if (isActive(this.snapshot.turnState)) return;
     for (const definition of this.profile.controls ?? []) if (definition.resetOnNewConversation) await this.setControl(definition.id, definition.default);
-    const controls = { ...this.controls }; const remoteSessions = this.publicRemoteSessions(this.remoteSessionRepository.list(this.remoteSessionKey())); this.snapshot = createSnapshot(vscode.workspace.isTrusted); this.controls = controls; this.refreshSnapshotControls(); this.snapshot.remoteSessions = remoteSessions; this.rawBuffer.clear(); this.lastInteraction = undefined; await this.startSession();
+    const controls = { ...this.controls }; const remoteSessions = this.publicRemoteSessions(this.remoteSessionRepository.list(this.remoteSessionKey())); this.snapshot = createSnapshot(vscode.workspace.isTrusted); this.networkEntries = []; this.controls = controls; this.refreshSnapshotControls(); this.snapshot.remoteSessions = remoteSessions; this.rawBuffer.clear(); this.lastInteraction = undefined; await this.startSession();
   }
   clearConversation(): void { if (isActive(this.snapshot.turnState)) return; this.snapshot.messages = []; this.snapshot.conversationId = undefined; this.snapshot.rawEvents = []; this.snapshot.normalizedEvents = []; this.rawBuffer.clear(); this.changed(); }
 
@@ -380,6 +462,59 @@ export class SessionController implements vscode.Disposable {
     this.environmentSecretValues = [...new Set([...this.environmentSecretValues, ...values.filter((value): value is string => Boolean(value))])];
   }
 
+  private beginNetworkExchange(kind: NetworkExchangeKind, request: PreparedRequest, startedAt: number, protocol?: RawStreamEvent['protocol'], attempt = 1): NetworkExchange {
+    const entry: NetworkExchange = {
+      id: `network-${crypto.randomUUID()}`,
+      kind,
+      attempt,
+      method: request.method,
+      url: this.publicValue(request.redacted.url),
+      ...(request.redacted.variantId ? { variantId: this.publicValue(request.redacted.variantId) } : {}),
+      ...(protocol ? { protocol } : {}),
+      state: 'pending',
+      startedAt,
+      requestHeaders: this.publicValue(request.redacted.headers),
+      ...(request.redacted.body === undefined ? {} : { requestBody: this.publicValue(request.redacted.body) }),
+      timing: { timeout: request.timeoutMs, idleTimeout: request.idleTimeoutMs },
+      transferredBytes: 0,
+      eventCount: 0,
+    };
+    this.networkEntries.push(entry);
+    if (this.networkEntries.length > MAX_NETWORK_ENTRIES) this.networkEntries.splice(0, this.networkEntries.length - MAX_NETWORK_ENTRIES);
+    this.changed();
+    return entry;
+  }
+
+  private recordNetworkHeaders(entry: NetworkExchange, status: number | undefined, headers: Headers | Record<string, string> | undefined, latency: number): void {
+    entry.status = status;
+    entry.state = 'streaming';
+    entry.timing.headers = latency;
+    const values = headers instanceof Headers ? Object.fromEntries(headers.entries()) : headers ?? {};
+    entry.responseHeaders = this.publicValue(redactHeaders(values));
+    this.changed();
+  }
+
+  private appendNetworkResponse(entry: NetworkExchange | undefined, value: unknown, separator = ''): void {
+    if (!entry || value === undefined || value === null) return;
+    const safeValue = this.publicValue(typeof value === 'string' ? value : safeJson(value));
+    const current = entry.responseBodyPreview ?? '';
+    const remaining = MAX_NETWORK_RESPONSE_PREVIEW_CHARS - current.length;
+    if (remaining <= 0) { entry.responseBodyTruncated = true; return; }
+    const addition = `${separator}${safeValue}`;
+    entry.responseBodyPreview = current + addition.slice(0, remaining);
+    if (addition.length > remaining) entry.responseBodyTruncated = true;
+  }
+
+  private finishNetworkExchange(entry: NetworkExchange | undefined, state: NetworkExchange['state'], error?: unknown, explicitError?: RuntimeErrorData): void {
+    if (!entry) return;
+    entry.state = state;
+    entry.completedAt = Date.now();
+    entry.timing.total = Math.max(0, entry.completedAt - entry.startedAt);
+    if (explicitError) entry.error = this.publicValue(explicitError);
+    else if (error !== undefined) entry.error = this.publicValue(toError(error));
+    this.changed();
+  }
+
   private refreshSnapshotControls(): void { this.snapshot.controls = this.publicControls(); }
   private syncActiveAssistantTiming(message?: ChatMessage): void {
     const target = message ?? [...this.snapshot.messages].reverse().find((item) => item.role === 'assistant' && ['pending', 'streaming'].includes(item.status));
@@ -477,11 +612,60 @@ function isControlValue(definition: ControlDefinition, value: unknown): boolean 
   return definition.type !== 'select' || !definition.options?.length || definition.options.some((option) => option.value === value);
 }
 function safeMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+function errorType(error: unknown): string { return error instanceof TurnStageError ? diagnosticValue(error.type, 80) : error instanceof Error ? diagnosticValue(error.name || 'Error', 80) : 'UnexpectedError'; }
+function errorStatus(error: unknown): string { return error instanceof TurnStageError && typeof error.details.status === 'number' ? ` status=${error.details.status}` : ''; }
+function errorEvidence(error: unknown): string {
+  if (!(error instanceof TurnStageError)) return '';
+  const values: string[] = [];
+  if (typeof error.details.sawData === 'boolean') values.push(`sawData=${error.details.sawData}`);
+  if (typeof error.details.reconnectCount === 'number') values.push(`reconnects=${error.details.reconnectCount}`);
+  if (typeof error.details.retryAfterMs === 'number') values.push(`retryAfter=${formatDuration(error.details.retryAfterMs)}`);
+  if (typeof error.details.observedBytes === 'number') values.push(`observedBytes=${error.details.observedBytes}`);
+  if (typeof error.details.maxBytes === 'number') values.push(`maxBytes=${error.details.maxBytes}`);
+  if (typeof error.details.networkCode === 'string') values.push(`networkCode=${diagnosticValue(error.details.networkCode, 64)}`);
+  return values.length ? ` ${values.join(' ')}` : '';
+}
+function safeErrorMessage(error: unknown, redact: (value: string) => string): string {
+  // HttpStatusError can contain a response-body prefix. Status and timing are
+  // sufficient for Output diagnostics; the body remains available in the UI.
+  if (error instanceof TurnStageError && error.type === 'HttpStatusError') return '';
+  const withoutQueryValues = redact(safeMessage(error)).replace(/https?:\/\/[^\s"'<>]+/gi, (url) => diagnosticUrl(url));
+  const message = diagnosticValue(withoutQueryValues, 240);
+  return message ? ` message=${JSON.stringify(message)}` : '';
+}
+function formatDuration(value: number | undefined): string { return value === undefined ? 'none' : `${Math.max(0, Math.round(value))}ms`; }
+function quoteDiagnostic(value: unknown): string { return JSON.stringify(diagnosticValue(value)); }
+function safeJson(value: unknown): string { try { return JSON.stringify(value, null, 2) ?? ''; } catch { return String(value); } }
 function toError(error: unknown): RuntimeErrorData { if (error instanceof TurnStageError) return { type: error.type, message: error.message, status: typeof error.details.status === 'number' ? error.details.status : undefined, retrySafe: !['ConfigValidationError', 'MissingSecretError', 'WorkspaceTrustError'].includes(error.type) }; return { type: 'UnexpectedError', message: safeMessage(error), retrySafe: false }; }
 
 async function fetchWithTimeout(request: PreparedRequest): Promise<Response> {
   const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), request.timeoutMs ?? 30_000);
   try { return await fetchWithRedirectPolicy(request, controller.signal); }
-  catch (error) { if (controller.signal.aborted) throw new TurnStageError('TimeoutError', localize('The opening request timeout elapsed.')); throw new TurnStageError('NetworkError', safeMessage(error)); }
+  catch (error) { if (controller.signal.aborted) throw new TurnStageError('TimeoutError', localize('The opening request timeout elapsed.')); const code = networkErrorCode(error); throw new TurnStageError('NetworkError', safeMessage(error), code ? { networkCode: code } : {}); }
   finally { clearTimeout(timeout); }
+}
+
+async function readBoundedResponseText(response: Response, maxBytes = MAX_NETWORK_RESPONSE_PREVIEW_CHARS): Promise<{ text: string; truncated: boolean }> {
+  if (!response.body) return { text: '', truncated: false };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let bytes = 0;
+  let truncated = false;
+  try {
+    while (bytes < maxBytes) {
+      const { value, done } = await reader.read();
+      if (done || !value) break;
+      const remaining = maxBytes - bytes;
+      const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+      text += decoder.decode(chunk, { stream: true });
+      bytes += chunk.byteLength;
+      if (value.byteLength > remaining || bytes >= maxBytes) { truncated = true; break; }
+    }
+    text += decoder.decode();
+    return { text, truncated };
+  } finally {
+    if (truncated) { try { await reader.cancel(); } catch { /* Bounded preview intentionally stops reading. */ } }
+    try { reader.releaseLock(); } catch { /* The response may already be closed. */ }
+  }
 }

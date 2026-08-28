@@ -72,4 +72,9 @@ describe('Extension host editor lifecycle', () => {
     expect(editorSource).toContain('void postHostReady()');
     expect(editorSource).toContain('configurationListener.dispose()');
   });
+
+  it('requires confirmation before a command restarts the current session', () => {
+    expect(activateSource).toContain("!await confirmRestartSession()");
+    expect(editorSource).toContain("case 'conversation.new': if (await confirmRestartSession())");
+  });
 });

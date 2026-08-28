@@ -315,6 +315,15 @@ structured `WorkspaceEdit` to the open `.turnstage.jsonc` document, so the
 profile file remains the source of truth and VS Code Undo/Redo continues to
 work. Open JSONC remains available from the configuration toolbar.
 
+Debug's **Network** tab presents every Opening, Conversation Stream attempt,
+retry, and Stop request as a compact request list. Selecting a row exposes
+Chrome-style **Headers**, **Payload**, **Response**, and **Timing** views,
+including status, first-chunk latency, total/idle timeout settings, transferred
+bytes, event count, and a structured failure such as `IdleTimeoutError`. The
+filter searches request kind, method, URL, status, state, and variant. Network
+entries are live-session diagnostics: restarting the session clears them and
+they are not added to Recorded Runs.
+
 ## Commands and settings
 
 Commands are registered under the `turnstage` namespace:
@@ -355,6 +364,22 @@ The contributed settings are:
 | `turnstage.runRetention` | `20` | Fallback local-run retention (1–100) |
 | `turnstage.logLevel` | `info` | Minimum output-channel level: error, warn, info, or debug |
 | `turnstage.notifications.enabled` | `true` | Show non-modal TurnStage notifications; selecting **Do not show again** sets it false at user scope |
+
+For request failures, run **TurnStage: Open Output**. The default `info` level
+records a correlated request timeline with the request method, URL without its
+query or fragment, selected variant, configured timeouts, response status and
+content type, first-chunk latency, terminal state, byte/event counts, and retry
+count. Safe network-client error codes are retained to distinguish DNS, proxy,
+TLS, connection, and TurnStage timeout failures. Set `turnstage.logLevel` to `debug` to add each transport attempt, chunk,
+SSE event name, mapping result, retry delay, and the exact timeout that fired.
+Headers, request bodies, query values, SSE payloads, and known secrets are not
+written to the Output Channel.
+
+Use **Debug → Network** for the request and response view. For a timeout, first
+check whether a row received an HTTP status, then compare **Headers**, **First
+chunk**, **Total**, and **Idle timeout** under Timing. Output remains the more
+durable correlated timeline; Network deliberately includes bounded, redacted
+request/response previews for the current editor session only.
 
 `displayLanguage` has VS Code `application` scope, so one User setting applies
 across projects. `profileGlob` has VS Code `resource` scope. The runtime-limit settings use

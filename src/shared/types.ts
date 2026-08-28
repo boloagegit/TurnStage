@@ -228,6 +228,38 @@ export interface MetricsSnapshot {
   abortReason?: string;
 }
 
+export type NetworkExchangeKind = 'opening' | 'stream' | 'stop';
+export type NetworkExchangeState = 'pending' | 'streaming' | 'completed' | 'failed' | 'aborted';
+export interface NetworkExchange {
+  id: string;
+  kind: NetworkExchangeKind;
+  attempt: number;
+  method: string;
+  url: string;
+  variantId?: string;
+  protocol?: RawStreamEvent['protocol'];
+  state: NetworkExchangeState;
+  startedAt: number;
+  completedAt?: number;
+  status?: number;
+  requestHeaders: Record<string, string>;
+  requestBody?: unknown;
+  responseHeaders?: Record<string, string>;
+  responseBodyPreview?: string;
+  responseBodyTruncated?: boolean;
+  error?: RuntimeErrorData;
+  timing: {
+    headers?: number;
+    firstChunk?: number;
+    total?: number;
+    timeout?: number;
+    idleTimeout?: number;
+    retryDelay?: number;
+  };
+  transferredBytes: number;
+  eventCount: number;
+}
+
 export interface SessionSnapshot {
   sessionId: string;
   sessionState: SessionState;

@@ -5,9 +5,9 @@ import axe from 'axe-core';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { ChatMessage, LocalRunSummary, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
+import type { ChatMessage, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 import { MobileChatPreview, resizeComposerTextarea } from '../src/webview/MobileChatPreview';
-import { ACCESSIBLE_EVENT_WINDOW_SIZE, DEFAULT_EVENT_FILTERS, eventMatchesFilters, Inspector, JsonBlock, normalizeInspectorEventFilters, ProfileIdentityBar, Replay, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
+import { ACCESSIBLE_EVENT_WINDOW_SIZE, DEFAULT_EVENT_FILTERS, eventMatchesFilters, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, ProfileIdentityBar, Replay, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
 import { SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
 
@@ -93,6 +93,15 @@ describe('Webview DOM behavior', () => {
     }
   });
 
+  it('offers a restart-session action after the session starts', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    render(<MobileChatPreview {...mobileProps({ post })} />);
+
+    await user.click(screen.getByRole('button', { name: 'Restart session' }));
+    expect(post).toHaveBeenCalledWith({ type: 'conversation.new' });
+  });
+
   it('supports interaction-only message actions while keeping them keyboard reachable', () => {
     const configured = { ...profile, ui: { ...profile.ui, messageActionVisibility: 'interaction' as const } };
     render(<MobileChatPreview {...mobileProps({ profile: configured, onSelectMessage: vi.fn() })} />);
@@ -102,6 +111,29 @@ describe('Webview DOM behavior', () => {
     const firstAction = within(actions).getByRole('button', { name: 'Copy' });
     firstAction.focus();
     expect(document.activeElement).toBe(firstAction);
+  });
+
+  it('shows visible feedback for local message actions', async () => {
+    const user = userEvent.setup();
+    const onMessageActionFeedback = vi.fn();
+    const setDraft = vi.fn();
+    const { rerender } = render(<MobileChatPreview {...mobileProps({ setDraft, onMessageActionFeedback })} />);
+
+    await user.click(screen.getByRole('button', { name: 'Edit & resend' }));
+    expect(setDraft).toHaveBeenCalledWith('A completed response.');
+    expect(onMessageActionFeedback).toHaveBeenCalledWith(expect.objectContaining({ actionId: 'message.editAndResend', status: 'success', message: 'Message moved to the composer.' }));
+
+    rerender(<MobileChatPreview {...mobileProps({ setDraft, onMessageActionFeedback, messageActionFeedback: { actionId: 'message.copy', sourceMessageId: 'assistant-1', status: 'success', message: 'Message copied.' } })} />);
+    expect(screen.getByText('Message copied.', { selector: '.mobile-chat-preview__message-action-feedback' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Message copied.' }).querySelector('.codicon-check')).toBeTruthy();
+  });
+
+  it('scrolls and focuses the selected raw event', async () => {
+    const rawEvents = Array.from({ length: 30 }, (_, index): RawStreamEvent => ({ sequence: index + 1, receivedAt: index + 1, elapsedMs: index, protocol: 'sse', raw: '{}', data: { index } }));
+    render(<VirtualEvents items={rawEvents} kind="raw" label="Raw Events" selectedSequence={28} />);
+
+    await vi.waitFor(() => expect(document.activeElement?.id).toBe('inspector-event-28'));
+    expect(screen.getByText('Event payload').closest('.event-detail')?.textContent).toContain('#28');
   });
 
   it('shows profile-filtered metrics on the message and formats measurement units', () => {
@@ -432,6 +464,40 @@ describe('Webview DOM behavior', () => {
     eventList = within(screen.getByRole('listbox', { name: 'Raw Events' }));
     expect(eventList.getAllByRole('option')).toHaveLength(1);
     expect(eventList.getByRole('option', { name: /custom_card/i })).toBeTruthy();
+  });
+
+  it('shows Chrome-like network rows with redacted request and response details', async () => {
+    const user = userEvent.setup();
+    const entries: NetworkExchange[] = [
+      {
+        id: 'opening-1', kind: 'opening', attempt: 1, method: 'POST', url: 'https://api.example.test/v1/chat/opening', state: 'completed', startedAt: 1_000, completedAt: 1_120, status: 200,
+        requestHeaders: { Authorization: 'Bearer ••••••••', Accept: 'application/json' }, requestBody: { actor: 'demo' }, responseHeaders: { 'content-type': 'application/json', 'set-cookie': '••••••••' }, responseBodyPreview: '{"message":"Hello"}', timing: { headers: 40, total: 120, timeout: 30_000 }, transferredBytes: 19, eventCount: 0,
+      },
+      {
+        id: 'stream-1', kind: 'stream', attempt: 1, method: 'POST', url: 'https://api.example.test/v1/chat/stream', variantId: 'first-turn', protocol: 'sse', state: 'failed', startedAt: 2_000, completedAt: 32_000, status: 200,
+        requestHeaders: { Authorization: 'Bearer ••••••••', Accept: 'text/event-stream' }, requestBody: { message: 'Hello' }, responseHeaders: { 'content-type': 'text/event-stream' }, responseBodyPreview: 'event: start\ndata: {}', error: { type: 'IdleTimeoutError', message: 'The stream idle timeout elapsed.' }, timing: { headers: 50, firstChunk: 80, total: 30_000, timeout: 120_000, idleTimeout: 30_000 }, transferredBytes: 24, eventCount: 1,
+      },
+    ];
+    render(<NetworkInspector entries={entries} />);
+
+    const list = screen.getByRole('listbox', { name: 'Network requests' });
+    expect(within(list).getAllByRole('option')).toHaveLength(2);
+    expect(within(list).getByRole('option', { name: /stream/i }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByText(/IdleTimeoutError/)).toBeTruthy();
+
+    await user.click(screen.getByRole('tab', { name: 'Payload' }));
+    expect(screen.getByText(/"message": "Hello"/)).toBeTruthy();
+    await user.click(screen.getByRole('tab', { name: 'Response' }));
+    expect(screen.getByText(/event: start/)).toBeTruthy();
+    await user.click(within(list).getByRole('option', { name: /opening/i }));
+    await user.click(screen.getByRole('tab', { name: 'Headers' }));
+    expect(screen.getByText('Bearer ••••••••')).toBeTruthy();
+    expect(screen.getByText('••••••••')).toBeTruthy();
+
+    await user.type(screen.getByLabelText('Filter network requests'), 'missing');
+    expect(within(list).queryAllByRole('option')).toHaveLength(0);
+    expect(screen.getByText('No matching requests')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Request details' })).toBeNull();
   });
 
   it('switches all Profile Configuration sections and persists selection in the parent state', async () => {

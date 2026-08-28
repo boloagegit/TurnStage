@@ -64,7 +64,24 @@ try {
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Debug');
   await page.screenshot({ path: resolve(artifactDirectory, 'wide-dark.png'), fullPage: true });
+  await page.getByRole('tab', { name: 'Network' }).click();
+  const networkList = page.getByRole('listbox', { name: 'Network requests' });
+  assert.equal(await networkList.getByRole('option').count(), 3, 'Network must list opening and each stream attempt');
+  assert.equal(await networkList.getByRole('option', { name: /stream.*Attempt 2/i }).getAttribute('aria-selected'), 'true', 'Latest request must be selected by default');
+  assert.ok((await page.getByRole('region', { name: 'Request details' }).innerText()).includes('IdleTimeoutError'), 'Failed request details must expose the timeout class');
+  await page.getByRole('tab', { name: 'Payload' }).click();
+  assert.ok((await page.getByRole('tabpanel', { name: 'Payload' }).innerText()).includes('Why did this time out?'), 'Payload view must expose the redacted request payload');
+  await page.getByRole('tab', { name: 'Response' }).click();
+  assert.ok((await page.getByRole('tabpanel', { name: 'Response' }).innerText()).includes('Working'), 'Response view must expose the bounded response preview');
+  await page.getByRole('tab', { name: 'Timing' }).click();
+  assert.ok((await page.getByRole('tabpanel', { name: 'Timing' }).innerText()).includes('5,000 ms'), 'Timing view must expose the configured idle timeout');
+  await page.getByRole('tab', { name: 'Headers' }).click();
+  const networkHeaders = await page.getByRole('tabpanel', { name: 'Headers' }).innerText();
+  assert.ok(networkHeaders.includes('Bearer •••••••') && networkHeaders.includes('••••••••'), 'Header view must redact authorization and cookies');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'network-timeout-dark.png') });
+  await page.getByRole('tab', { name: 'Raw Events' }).click();
   const screenshotButton = page.getByRole('button', { name: 'Copy chat screenshot' });
+  await page.keyboard.press('Tab');
   await screenshotButton.focus();
   assert.equal(await screenshotButton.evaluate((element) => element.matches(':focus-visible')), true, 'Screenshot button must expose keyboard focus');
   await screenshotButton.click();
@@ -120,6 +137,17 @@ try {
   assert.ok(messageMetricText.includes('Total') && messageMetricText.includes('3,612 ms'), 'Per-message total duration must be visible');
   assert.ok(!messageMetricText.includes('E2E') && !messageMetricText.includes('Tokens'), 'Backend-reported and token metrics must not appear unless a profile opts in');
   await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'message-actions-metrics-dark.png') });
+  await page.getByRole('tab', { name: 'Configure' }).click();
+  const inspectMessage = assistantMessage.getByRole('button', { name: 'Inspect message' });
+  await inspectMessage.click();
+  assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Inspect message must switch the right pane from Configure to Debug');
+  assert.equal(await page.getByRole('tab', { name: 'Raw Events' }).getAttribute('aria-selected'), 'true', 'Inspect message must open Raw Events');
+  await page.locator('#inspector-event-6').waitFor();
+  assert.equal(await page.locator('#inspector-event-6').getAttribute('aria-selected'), 'true', 'Inspect message must select the last linked raw event');
+  await page.waitForFunction(() => document.activeElement?.id === 'inspector-event-6');
+  assert.equal(await page.locator('#inspector-event-6').evaluate((element) => element === document.activeElement), true, 'Inspect message must focus the selected raw event');
+  assert.ok((await assistantMessage.getByRole('status').innerText()).includes('Opened raw event #6 in Debug.'), 'Inspect message must show visible action feedback');
+  await page.screenshot({ path: resolve(artifactDirectory, 'inspect-message-debug-dark.png'), fullPage: true });
   await page.getByRole('tab', { name: 'Raw Events' }).click();
   const firstEventRow = page.getByRole('listbox', { name: 'Raw Events' }).getByRole('option').first();
   assert.equal(await firstEventRow.getAttribute('data-disclosure-state'), 'collapsed', 'Event rows must expose their collapsed state');
@@ -327,7 +355,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, rightPaneConfiguration: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: true, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, rightPaneConfiguration: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: true, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

@@ -330,9 +330,15 @@ preview provides Responsive plus Mobile (375×812, 390×844, 430×932), Tablet
 (768×1024, 1024×768), and Web (1280×720, 1440×900) sizes. Mobile and Tablet
 retain device chrome; Web uses a centered readable conversation column. Every
 mode renders controls, opening/starter chips, messages, progress, tools, forms,
-citations, follow-ups, actions, and the composer. Debug provides Request, Raw Events, Normalized,
+citations, follow-ups, actions, and the composer. Debug provides Network, Raw Events, Normalized,
 Metrics, Errors, and Runs views. Reducer-owned raw sequence metadata links
 assistant messages with raw/normalized events in both directions.
+
+Network is a bounded, live-session request inspector. It stores no host fetch
+objects: the host emits a serializable redacted summary for Opening, each Stream
+attempt, and Stop, while the Webview renders the list plus Headers, Payload,
+Response, and Timing panels. The list is cleared on session restart and is not
+part of `LocalRun` persistence.
 
 Each settings child renders only its selected General, Opening & Flow, Request,
 Stream & Mapping, Chat UI, History & Errors, or Security section. Raw and

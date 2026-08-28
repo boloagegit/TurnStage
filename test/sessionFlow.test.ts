@@ -37,6 +37,7 @@ describe('SessionController end-to-end functional flow', () => {
   it('builds a request, streams SSE, maps events, reduces chat state, and records the run', async () => {
     const { SessionController } = await import('../src/extension/runtime/sessionController');
     const savedRuns: LocalRun[] = [];
+    const output = { appendLine: vi.fn() };
     const profile = basicProfile();
     const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: { baseUrl } };
     const controller = new SessionController(
@@ -50,7 +51,7 @@ describe('SessionController end-to-end functional flow', () => {
         save: vi.fn(async (run: LocalRun) => { savedRuns.push(run); }),
       } as never,
       vi.fn(),
-      { appendLine: vi.fn() } as never,
+      output as never,
     );
 
     await controller.send('Verify the complete flow', { kind: 'manual' });
@@ -87,6 +88,24 @@ describe('SessionController end-to-end functional flow', () => {
     expect(assistantTiming?.ttft).toBeGreaterThanOrEqual(0);
     expect(assistantTiming?.totalDuration).toBeGreaterThanOrEqual(assistantTiming?.ttft ?? 0);
     expect(savedRuns[0]?.snapshot?.messages[1]?.timing).toEqual(assistantTiming);
+    const outputText = output.appendLine.mock.calls.flat().join('\n');
+    expect(outputText).toContain('] start method=POST');
+    expect(outputText).toContain('] headers attempt=1 status=200');
+    expect(outputText).toContain('] firstChunk=1');
+    expect(outputText).toContain('] ended state=completed');
+    expect(outputText).not.toContain('test-token');
+    expect(outputText).not.toContain('Verify the complete flow');
+    const networkEntries = controller.getNetworkEntries();
+    expect(networkEntries).toHaveLength(1);
+    expect(networkEntries[0]).toMatchObject({
+      kind: 'stream', attempt: 1, method: 'POST', status: 200, state: 'completed',
+      protocol: 'sse', transferredBytes: expect.any(Number), eventCount: 6,
+      timing: { headers: expect.any(Number), firstChunk: expect.any(Number), total: expect.any(Number) },
+      requestHeaders: { Authorization: 'Bearer ••••••••' },
+    });
+    expect(networkEntries[0]?.responseHeaders).toMatchObject({ 'content-type': expect.stringContaining('text/event-stream') });
+    expect(networkEntries[0]?.responseBodyPreview).toContain('sample result');
+    expect(JSON.stringify(networkEntries)).not.toContain('test-token');
   });
 
   it('serializes reconnect attempts into a failed run when the retry budget is exhausted', async () => {
@@ -121,9 +140,51 @@ describe('SessionController end-to-end functional flow', () => {
       expect(controller.snapshot.turnState).toBe('failed');
       expect(controller.snapshot.metrics.reconnectCount).toBe(2);
       expect(savedRuns[0]?.metrics.reconnectCount).toBe(2);
+      expect(controller.getNetworkEntries().map((entry) => ({ attempt: entry.attempt, state: entry.state, status: entry.status }))).toEqual([
+        { attempt: 1, state: 'failed', status: 429 },
+        { attempt: 2, state: 'failed', status: 429 },
+        { attempt: 3, state: 'failed', status: 429 },
+      ]);
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('keeps an idle timeout visible in the Network timing and error details', async () => {
+    const { SessionController } = await import('../src/extension/runtime/sessionController');
+    const profile = basicProfile();
+    profile.controls!.find((control) => control.id === 'mode')!.default = 'idle-timeout';
+    profile.conversation.send.timeoutMs = 2_000;
+    profile.conversation.send.idleTimeoutMs = 100;
+    const output = { appendLine: vi.fn() };
+    const controller = new SessionController(
+      profile,
+      {} as never,
+      { version: 1, id: 'idle-timeout', name: 'Idle timeout', variables: { baseUrl } },
+      {} as never,
+      { get: vi.fn(async () => 'test-token') } as never,
+      { list: vi.fn(async () => []), save: vi.fn(async () => undefined) } as never,
+      vi.fn(),
+      output as never,
+    );
+
+    await controller.send('Trigger idle timeout', { kind: 'manual' });
+
+    expect(controller.snapshot.turnState).toBe('failed');
+    expect(controller.getNetworkEntries()).toHaveLength(1);
+    expect(controller.getNetworkEntries()[0]).toMatchObject({
+      kind: 'stream',
+      attempt: 1,
+      status: 200,
+      state: 'failed',
+      timing: { headers: expect.any(Number), total: expect.any(Number), idleTimeout: 100, timeout: 2_000 },
+      error: { type: 'IdleTimeoutError' },
+    });
+    const outputText = output.appendLine.mock.calls.flat().join('\n');
+    expect(outputText).toContain('IdleTimeoutError');
+    expect(outputText).toContain('phase=after-headers');
+    expect(outputText).not.toContain('test-token');
+    expect(outputText).not.toContain('Trigger idle timeout');
   });
 
   it('runs the synthetic enterprise first-turn, continuation, and domain-error contract', async () => {
@@ -149,6 +210,7 @@ describe('SessionController end-to-end functional flow', () => {
 
     await controller.startSession();
     expect(controller.snapshot).toMatchObject({ sessionState: 'ready', opening: { message: 'Hello, I am a synthetic test assistant. How can I help?' } });
+    expect(controller.getNetworkEntries()[0]).toMatchObject({ kind: 'opening', status: 200, state: 'completed' });
 
     await controller.send('  第一輪問題  ', { kind: 'manual' });
     const cid = controller.snapshot.conversationId;
@@ -219,6 +281,7 @@ describe('SessionController end-to-end functional flow', () => {
     expect(controller.snapshot.messages.at(-2)?.timing?.totalDuration).toEqual(expect.any(Number));
     expect(controller.snapshot.messages.at(-1)).toMatchObject({ role: 'system', status: 'completed', parts: [{ type: 'text', text: 'Conversation stopped.' }] });
     expect(controller.snapshot.errors.some((error) => error.type === 'RemoteStopWarning')).toBe(false);
+    expect(controller.getNetworkEntries().some((entry) => entry.kind === 'stop' && entry.status === 200 && entry.state === 'completed')).toBe(true);
   });
 });
 

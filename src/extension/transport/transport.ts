@@ -5,9 +5,13 @@ import { localize } from '../l10n';
 import { fetchWithRedirectPolicy } from './fetchPolicy';
 
 export const DEFAULT_MAX_ERROR_BODY_BYTES = 4_096;
-export interface HttpStreamTransportOptions { maxErrorBodyBytes?: number; maxEventBytes?: number }
+export type TransportDiagnostic =
+  | { type: 'attempt.started'; attempt: number; remainingTimeoutMs?: number }
+  | { type: 'retry.scheduled'; attempt: number; nextAttempt: number; delayMs: number; errorType: string; status?: number }
+  | { type: 'timeout.fired'; attempt: number; kind: 'total' | 'idle'; elapsedMs: number; sawData: boolean };
+export interface HttpStreamTransportOptions { maxErrorBodyBytes?: number; maxEventBytes?: number; onDiagnostic?: (event: TransportDiagnostic) => void }
 export type StreamSinkEventResult = void | boolean;
-export interface StreamSink { onHeaders(latencyMs: number, contentType: string): void; onChunk(bytes: number, latencyMs: number): void; onEvent(event: RawStreamEvent): Promise<StreamSinkEventResult> | StreamSinkEventResult }
+export interface StreamSink { onHeaders(latencyMs: number, contentType: string, status?: number, headers?: Record<string, string>): void; onChunk(bytes: number, latencyMs: number): void; onEvent(event: RawStreamEvent): Promise<StreamSinkEventResult> | StreamSinkEventResult }
 /**
  * reconnectCount is the exact number of reconnect attempts made after the
  * initial request. It is zero when the initial request succeeds or when no
@@ -28,9 +32,13 @@ export class HttpStreamTransport {
     for (let attempt = 0; ; attempt++) {
       const elapsed = Date.now() - startedAt;
       const remainingTimeout = request.timeoutMs === undefined ? undefined : request.timeoutMs - elapsed;
-      if (remainingTimeout !== undefined && remainingTimeout <= 0) throw withReconnectCount(new TurnStageError('TimeoutError', localize('The total request timeout elapsed.')), reconnectCount);
+      if (remainingTimeout !== undefined && remainingTimeout <= 0) {
+        this.diagnostic({ type: 'timeout.fired', attempt: attempt + 1, kind: 'total', elapsedMs: elapsed, sawData: false });
+        throw withReconnectCount(new TurnStageError('TimeoutError', localize('The total request timeout elapsed.')), reconnectCount);
+      }
+      this.diagnostic({ type: 'attempt.started', attempt: attempt + 1, ...(remainingTimeout !== undefined ? { remainingTimeoutMs: remainingTimeout } : {}) });
       try {
-        const result = await this.startAttempt({ ...request, timeoutMs: remainingTimeout }, protocol, sink, signal, dataFormat);
+        const result = await this.startAttempt({ ...request, timeoutMs: remainingTimeout }, protocol, sink, signal, dataFormat, attempt + 1);
         return { ...result, reconnectCount };
       } catch (error) {
         if (!(error instanceof TurnStageError)) throw error;
@@ -39,6 +47,7 @@ export class HttpStreamTransport {
         const maxDelay = Math.max(baseDelay, reconnect?.maxDelayMs ?? 10_000);
         const retryAfter = typeof error.details.retryAfterMs === 'number' ? error.details.retryAfterMs : undefined;
         const delayMs = Math.min(maxDelay, retryAfter ?? baseDelay * 2 ** attempt);
+        this.diagnostic({ type: 'retry.scheduled', attempt: attempt + 1, nextAttempt: attempt + 2, delayMs, errorType: error.type, ...(typeof error.details.status === 'number' ? { status: error.details.status } : {}) });
         try { await abortableDelay(delayMs, signal); }
         catch (delayError) { throw delayError instanceof TurnStageError ? withReconnectCount(delayError, reconnectCount) : delayError; }
         reconnectCount++;
@@ -46,18 +55,27 @@ export class HttpStreamTransport {
     }
   }
 
-  private async startAttempt(request: PreparedRequest, protocol: RawStreamEvent['protocol'], sink: StreamSink, signal: AbortSignal, dataFormat: 'json' | 'text'): Promise<AttemptResult> {
+  private async startAttempt(request: PreparedRequest, protocol: RawStreamEvent['protocol'], sink: StreamSink, signal: AbortSignal, dataFormat: 'json' | 'text', attempt: number): Promise<AttemptResult> {
     const startedAt = Date.now(); let totalTimer: ReturnType<typeof setTimeout> | undefined; let idleTimer: ReturnType<typeof setTimeout> | undefined;
     let sawData = false;
     const localAbort = new AbortController();
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     const abort = () => localAbort.abort(signal.reason); signal.addEventListener('abort', abort, { once: true });
-    if (request.timeoutMs) totalTimer = setTimeout(() => localAbort.abort(new TurnStageError('TimeoutError', localize('The total request timeout elapsed.'))), request.timeoutMs);
-    const resetIdle = () => { if (idleTimer) clearTimeout(idleTimer); if (request.idleTimeoutMs) idleTimer = setTimeout(() => localAbort.abort(new TurnStageError('IdleTimeoutError', localize('The stream idle timeout elapsed.'))), request.idleTimeoutMs); };
+    if (request.timeoutMs) totalTimer = setTimeout(() => {
+      this.diagnostic({ type: 'timeout.fired', attempt, kind: 'total', elapsedMs: Date.now() - startedAt, sawData });
+      localAbort.abort(new TurnStageError('TimeoutError', localize('The total request timeout elapsed.')));
+    }, request.timeoutMs);
+    const resetIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      if (request.idleTimeoutMs) idleTimer = setTimeout(() => {
+        this.diagnostic({ type: 'timeout.fired', attempt, kind: 'idle', elapsedMs: Date.now() - startedAt, sawData });
+        localAbort.abort(new TurnStageError('IdleTimeoutError', localize('The stream idle timeout elapsed.')));
+      }, request.idleTimeoutMs);
+    };
     try {
       const response = await fetchWithRedirectPolicy(request, localAbort.signal);
-      const contentType = response.headers.get('content-type') ?? ''; sink.onHeaders(Date.now() - startedAt, contentType);
-      if (!response.ok) { const retryAfterMs = parseRetryAfter(response.headers.get('retry-after')); const body = await readResponseBodyPrefix(response, normalizeByteLimit(this.options.maxErrorBodyBytes, DEFAULT_MAX_ERROR_BODY_BYTES)); throw new TurnStageError('HttpStatusError', localize('HTTP {status}: {detail}', { status: response.status, detail: body || response.statusText }), { status: response.status, retryAfterMs, sawData }); }
+      const contentType = response.headers.get('content-type') ?? ''; sink.onHeaders(Date.now() - startedAt, contentType, response.status, Object.fromEntries(response.headers.entries()));
+      if (!response.ok) { const retryAfterMs = parseRetryAfter(response.headers.get('retry-after')); const body = await readResponseBodyPrefix(response, normalizeByteLimit(this.options.maxErrorBodyBytes, DEFAULT_MAX_ERROR_BODY_BYTES)); throw new TurnStageError('HttpStatusError', localize('HTTP {status}: {detail}', { status: response.status, detail: body || response.statusText }), { status: response.status, retryAfterMs, sawData, responseBody: body }); }
       const expected = protocol === 'sse' ? 'text/event-stream' : protocol === 'ndjson' ? /ndjson|jsonl/ : undefined;
       if (expected && (typeof expected === 'string' ? !contentType.includes(expected) : !expected.test(contentType))) throw new TurnStageError('UnexpectedContentTypeError', localize('Expected {expected}, received {actual}.', { expected: String(expected), actual: contentType || localize('no content type') }));
       if (!response.body) throw new TurnStageError('NetworkError', localize('The response had no readable body.'));
@@ -85,11 +103,16 @@ export class HttpStreamTransport {
         return { sawData, aborted: true };
       }
       if (error instanceof TurnStageError) throw new TurnStageError(error.type, error.message, { ...error.details, sawData });
-      throw new TurnStageError('NetworkError', error instanceof Error ? error.message : String(error), { sawData });
+      const networkCode = networkErrorCode(error);
+      throw new TurnStageError('NetworkError', error instanceof Error ? error.message : String(error), { sawData, ...(networkCode ? { networkCode } : {}) });
     } finally {
       if (reader) { try { reader.releaseLock(); } catch { /* The reader may already be released by fetch. */ } }
       signal.removeEventListener('abort', abort); if (totalTimer) clearTimeout(totalTimer); if (idleTimer) clearTimeout(idleTimer);
     }
+  }
+
+  private diagnostic(event: TransportDiagnostic): void {
+    try { this.options.onDiagnostic?.(event); } catch { /* Diagnostics must never affect a request. */ }
   }
 }
 
@@ -162,4 +185,15 @@ function normalizeByteLimit(value: number | undefined, fallback: number): number
 
 function assertEventBytes(protocol: RawStreamEvent['protocol'], observedBytes: number, maxBytes: number): void {
   if (observedBytes > maxBytes) throw new TurnStageError('StreamRecordTooLargeError', localize('The {protocol} stream record exceeded the maximum size of {maxBytes} bytes.', { protocol, maxBytes }), { protocol, maxBytes, observedBytes });
+}
+
+export function networkErrorCode(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth++) {
+    if (!current || typeof current !== 'object') return undefined;
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(code)) return code;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
 }

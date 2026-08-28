@@ -43,6 +43,10 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'profile.validation', diagnostics: [{ severity: 'fatal', message: 'bad', offset: 0, length: 1 }] }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'profile.validated', valid: true }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'profile.validated', valid: 'yes' }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'action.feedback', actionId: 'message.copy', sourceMessageId: 'message-1', status: 'success', message: 'Message copied.' }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'action.feedback', actionId: 'message.copy', sourceMessageId: 'message-1', status: 'pending', message: 'Copying' }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'session.snapshot', snapshot: {}, runs: [], networkEntries: [{ id: 'network-1', kind: 'stream', state: 'completed' }] }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'session.snapshot', snapshot: {}, runs: [], networkEntries: 'not-an-array' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'run.imported', path: 'file:///run.json', runId: 'run-1', duplicate: false }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'run.imported', path: 'file:///run.json', runId: 'run-1', duplicate: 'no' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'form.accepted', formId: 'form-1', sourceMessageId: 'message-1' }, 'editor-1')).toBe(true);

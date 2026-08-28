@@ -14,6 +14,7 @@ import {
 } from './views/profileTreeProvider';
 import { configureL10n } from './l10n';
 import type { DisplayLanguagePreference } from './displayLanguage';
+import { confirmRestartSession } from './confirmRestartSession';
 
 let activeEditor: TurnStageEditorProvider | undefined;
 export const TURNSTAGE_WALKTHROUGH_ID = 'turnstage.turnstage#gettingStarted';
@@ -84,7 +85,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   command('runProfile', async (item?: ProfileTreeItem | vscode.Uri) => { const uri = asUri(item) ?? vscode.Uri.parse('turnstage-demo:/basic-sse-chat.turnstage.jsonc'); const controller = await openAndWaitForController(editor, uri); if (!controller) { void showNotification('error', vscode.l10n.t('The TurnStage profile editor did not become ready in time.')); return; } if (!canStartNetwork(controller.profile.opening?.mode)) return; await controller.startSession(); });
   command('startSession', async (item?: ProfileTreeItem | vscode.Uri) => { const uri = asUri(item) ?? activeCustomEditorUri(); if (!uri) { void showNotification('error', vscode.l10n.t('Open a profile in the TurnStage editor first.')); return; } const controller = await openAndWaitForController(editor, uri); if (!controller) { void showNotification('error', vscode.l10n.t('The TurnStage profile editor did not become ready in time.')); return; } if (!canStartNetwork(controller.profile.opening?.mode)) return; await controller.startSession(); });
   command('abortRequest', async (item?: ProfileTreeItem | vscode.Uri) => editor.getController(asUri(item))?.abort());
-  command('newConversation', async (item?: ProfileTreeItem | vscode.Uri) => { const controller = editor.getController(asUri(item) ?? activeCustomEditorUri()); if (!controller || !canStartNetwork(controller.profile.opening?.mode)) return; await controller.newConversation(); });
+  command('newConversation', async (item?: ProfileTreeItem | vscode.Uri) => { const controller = editor.getController(asUri(item) ?? activeCustomEditorUri()); if (!controller || !canStartNetwork(controller.profile.opening?.mode) || !await confirmRestartSession()) return; await controller.newConversation(); });
   command('clearConversation', (item?: ProfileTreeItem | vscode.Uri) => editor.getController(asUri(item))?.clearConversation());
   command('openAsText', async (item?: ProfileTreeItem | vscode.Uri) => { const uri = asUri(item) ?? activeCustomEditorUri(); if (uri) await vscode.commands.executeCommand('vscode.openWith', uri, 'default'); });
   command('validateProfile', async (item?: ProfileTreeItem | vscode.Uri) => { await validateUri(asUri(item), diagnostics); await duplicateDiagnostics.refresh(); });

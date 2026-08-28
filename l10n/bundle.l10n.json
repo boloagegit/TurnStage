@@ -7,6 +7,7 @@
   "Transport: {transport}": "Transport: {transport}",
   "Validation: {status}": "Validation: {status}",
   "Unknown": "Unknown",
+  "HTTP {status}.": "HTTP {status}.",
   "Invalid": "Invalid",
   "Ready": "Ready",
   "Open": "Open",
@@ -248,5 +249,10 @@
   "Unknown message action visibility: {value}.": "Unknown message action visibility: {value}.",
   "Message metrics require id and value fields.": "Message metrics require id and value fields.",
   "Unknown message metric aggregation: {value}.": "Unknown message metric aggregation: {value}.",
-  "Unknown message metric format: {value}.": "Unknown message metric format: {value}."
+  "Unknown message metric format: {value}.": "Unknown message metric format: {value}.",
+  "Restart": "Restart",
+  "Restart this TurnStage session?": "Restart this TurnStage session?",
+  "Current messages, conversation IDs, and event data will be cleared. Recorded runs are kept.": "Current messages, conversation IDs, and event data will be cleared. Recorded runs are kept.",
+  "Message copied.": "Message copied.",
+  "Request attempt failed and will be retried.": "Request attempt failed and will be retried."
 }

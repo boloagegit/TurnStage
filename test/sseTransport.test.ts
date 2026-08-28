@@ -84,12 +84,19 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
   it('surfaces HTTP status and idle-timeout failures with stable error types', async () => {
     await expect(collect('http-401')).rejects.toMatchObject({ type: 'HttpStatusError', details: { status: 401 } });
     await expect(collect('http-500')).rejects.toMatchObject({ type: 'HttpStatusError', details: { status: 500 } });
-    await expect(collect('idle-timeout', { idleTimeoutMs: 100 })).rejects.toMatchObject({ type: 'IdleTimeoutError' });
+    const diagnostics: Array<{ type: string; [key: string]: unknown }> = [];
+    await expect(new HttpStreamTransport({ onDiagnostic: (event) => diagnostics.push(event) }).start({ ...request('idle-timeout'), idleTimeoutMs: 100 }, 'sse', {
+      onHeaders: () => undefined,
+      onChunk: () => undefined,
+      onEvent: () => undefined,
+    }, new AbortController().signal)).rejects.toMatchObject({ type: 'IdleTimeoutError' });
+    expect(diagnostics).toContainEqual(expect.objectContaining({ type: 'timeout.fired', kind: 'idle', attempt: 1, sawData: false }));
   });
 
   it('retries bounded pre-data 429 responses while honoring the configured status policy', async () => {
     const originalFetch = globalThis.fetch;
     let calls = 0;
+    const diagnostics: Array<{ type: string; [key: string]: unknown }> = [];
     globalThis.fetch = (async () => {
       calls += 1;
       if (calls === 1) return new Response('rate limited', { status: 429, headers: { 'Content-Type': 'text/plain', 'Retry-After': '0' } });
@@ -97,7 +104,7 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
     }) as typeof fetch;
     const events: RawStreamEvent[] = [];
     try {
-      await expect(new HttpStreamTransport().start({ ...request('normal'), reconnect: { maxAttempts: 2, baseDelayMs: 0, retryOnStatuses: [429] } }, 'sse', {
+      await expect(new HttpStreamTransport({ onDiagnostic: (event) => diagnostics.push(event) }).start({ ...request('normal'), reconnect: { maxAttempts: 2, baseDelayMs: 0, retryOnStatuses: [429] } }, 'sse', {
         onHeaders: () => undefined,
         onChunk: () => undefined,
         onEvent: (event) => { events.push(event); return false; },
@@ -107,6 +114,11 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
     }
     expect(calls).toBe(2);
     expect(events.map(eventName)).toEqual(['done']);
+    expect(diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'attempt.started', attempt: 1 }),
+      expect.objectContaining({ type: 'retry.scheduled', attempt: 1, nextAttempt: 2, errorType: 'HttpStatusError', status: 429 }),
+      expect.objectContaining({ type: 'attempt.started', attempt: 2 }),
+    ]));
   });
 
   it('reports every attempted reconnect when the retry budget is exhausted', async () => {
@@ -162,6 +174,24 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
     }
     expect(calls).toBe(1);
     expect(events.map(eventName)).toEqual(['start']);
+  });
+
+  it('preserves a safe nested network error code for Output diagnostics', async () => {
+    const originalFetch = globalThis.fetch;
+    const cause = Object.assign(new Error('connect timeout'), { code: 'UND_ERR_CONNECT_TIMEOUT', address: 'private.example.test' });
+    globalThis.fetch = (async () => { throw Object.assign(new Error('fetch failed'), { cause }); }) as typeof fetch;
+    try {
+      await expect(new HttpStreamTransport().start(request('normal'), 'sse', {
+        onHeaders: () => undefined,
+        onChunk: () => undefined,
+        onEvent: () => undefined,
+      }, new AbortController().signal)).rejects.toMatchObject({
+        type: 'NetworkError',
+        details: { sawData: false, networkCode: 'UND_ERR_CONNECT_TIMEOUT' },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('bounds non-success error-body reads before constructing the HTTP error', async () => {

@@ -161,8 +161,22 @@ Redaction boundaries to account for when designing profiles:
 - arbitrary response/raw event data is not a general credential sanitizer;
   profiles should still ensure backends do not stream credentials unrelated to
   secrets resolved for the current editor session;
-- the output channel currently logs opening/editor errors, not a structured
-  secret-aware audit stream. Avoid putting sensitive values in error messages.
+- the Output Channel records structured transport metadata for troubleshooting,
+  but deliberately omits headers, bodies, query values, SSE payloads, and HTTP
+  error bodies. Known secret values are redacted from the remaining fields;
+  profiles should still avoid putting unrelated sensitive values in endpoint
+  paths or locally constructed error messages.
+
+The live Debug **Network** inspector receives redacted request headers/body,
+redacted response headers, a response preview capped at 64 KiB per request,
+structured error details, and timing counters. Sensitive request headers and
+`Set-Cookie` are masked, and known current-session secret values are scrubbed
+from the response preview and errors before they reach the Webview. At most 50
+entries are retained; restarting the session clears them. These entries are
+not persisted in Recorded Runs or written to the Output Channel. Response data
+unrelated to a current-session secret is not a general data-loss-prevention
+boundary, so test only against endpoints whose response data is appropriate to
+display locally.
 
 ## URI and citation policy
 

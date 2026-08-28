@@ -105,6 +105,11 @@
       errorPolicy: { allowContinuation: true }
     };
     const rawEvents = ['start', 'status', 'message', 'message', 'title', 'done'].map((type, index) => ({ sequence: index + 1, receivedAt: 1000 + index * 600, elapsedMs: 606 + index * 601, protocol: 'sse', sse: { event: type }, raw: `event: ${type}`, data: { type, text: index === 2 ? 'Here is ' : index === 3 ? 'the sample result.' : undefined } }));
+    const networkEntries = [
+      { id: 'opening-1', kind: 'opening', attempt: 1, method: 'POST', url: 'http://localhost/chat/opening', state: 'completed', startedAt: 800, completedAt: 920, status: 200, requestHeaders: { Accept: 'application/json', Authorization: 'Bearer ••••••••' }, requestBody: { actorId: 'visual-user' }, responseHeaders: { 'content-type': 'application/json', 'set-cookie': '••••••••' }, responseBodyPreview: '{"message":"Welcome"}', timing: { headers: 84, total: 120, timeout: 10000 }, transferredBytes: 21, eventCount: 0 },
+      { id: 'stream-1', kind: 'stream', attempt: 1, method: 'POST', url: 'http://localhost/chat/stream', variantId: 'first-turn', protocol: 'sse', state: 'completed', startedAt: 1000, completedAt: 4612, status: 200, requestHeaders: { Accept: 'text/event-stream', Authorization: 'Bearer •••••••' }, requestBody: { message: 'Verify themed streaming layout' }, responseHeaders: { 'content-type': 'text/event-stream' }, responseBodyPreview: 'event: start\ndata: {"conversationId":"conversation-1"}\n\nevent: done\ndata: {}', timing: { headers: 606, firstChunk: 606, total: 3612, timeout: 30000, idleTimeout: 5000 }, transferredBytes: 420, eventCount: 6 },
+      { id: 'stream-2', kind: 'stream', attempt: 2, method: 'POST', url: 'http://localhost/chat/stream', variantId: 'continuation', protocol: 'sse', state: 'failed', startedAt: 5000, completedAt: 10200, status: 200, requestHeaders: { Accept: 'text/event-stream', Authorization: 'Bearer •••••••' }, requestBody: { message: 'Why did this time out?', cid: 'conversation-1' }, responseHeaders: { 'content-type': 'text/event-stream', 'set-cookie': '••••••••' }, responseBodyPreview: 'event: status\ndata: {"text":"Working"}', error: { type: 'IdleTimeoutError', message: 'No stream data was received within 5000 ms.', phase: 'streaming' }, timing: { headers: 190, firstChunk: 240, total: 5200, timeout: 30000, idleTimeout: 5000, retryDelay: 500 }, transferredBytes: 39, eventCount: 1 }
+    ];
     const snapshot = {
       sessionId: 'visual', sessionState: 'ready', turnState: active ? 'streaming' : 'completed', conversationId: 'conversation-1', title: 'Slow SSE Visual Proof', trusted: true, controls: {}, droppedEventCount: 0, errors: [], rawEvents,
       normalizedEvents: rawEvents.map((item) => ({ version: 1, type: item.sse.event, sequence: item.sequence, rawSequence: item.sequence, receivedAt: item.receivedAt })),
@@ -146,7 +151,7 @@
           dispatch({ type: 'profile.snapshot', profile, version: 1, environments: ['local'] });
           dispatch({ type: 'profile.validation', diagnostics: [] });
           dispatch({ type: 'profile.validated', valid: true });
-          dispatch({ type: 'session.snapshot', snapshot: JSON.parse(JSON.stringify(snapshot)), runs: JSON.parse(JSON.stringify(runs)), requestPreview: { method: 'POST', url: 'http://localhost/chat' } });
+          dispatch({ type: 'session.snapshot', snapshot: JSON.parse(JSON.stringify(snapshot)), runs: JSON.parse(JSON.stringify(runs)), requestPreview: { method: 'POST', url: 'http://localhost/chat' }, networkEntries: JSON.parse(JSON.stringify(networkEntries)) });
         }, 0);
       }
     });

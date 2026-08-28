@@ -71,6 +71,7 @@ const mock = vi.hoisted(() => {
     workspace,
     env: { openExternal, clipboard: { writeText: vi.fn(async () => undefined) } },
     commands: { executeCommand },
+    l10n: { t: (message: string) => message },
     window: {
       showTextDocument: vi.fn(async (document: unknown) => document),
       showWarningMessage: vi.fn(async (_message: string, _options: unknown, action?: string) => action),
@@ -307,6 +308,27 @@ describe('response action dispatch', () => {
     await invoke('cta-details', actionController);
 
     expect(send).toHaveBeenCalledWith('Explain the details', expect.objectContaining({ kind: 'responseAction', actionId: 'cta-details', actionKey: 'sample_details', sourceMessageId: 'message-1' }));
+  });
+
+  it('confirms before restarting a session and respects cancellation', async () => {
+    const newConversation = vi.fn(async () => undefined);
+    const actionController = {
+      profile: profile(), profileUri,
+      snapshot: { messages: [{ id: 'message-1', role: 'assistant', actions: [] }] },
+      newConversation,
+    };
+
+    await invoke('conversation.new', actionController);
+    expect(mock.window.showWarningMessage).toHaveBeenCalledWith(
+      'Restart this TurnStage session?',
+      { modal: true, detail: 'Current messages, conversation IDs, and event data will be cleared. Recorded runs are kept.' },
+      'Restart',
+    );
+    expect(newConversation).toHaveBeenCalledTimes(1);
+
+    mock.window.showWarningMessage.mockResolvedValueOnce(undefined);
+    await invoke('conversation.new', actionController);
+    expect(newConversation).toHaveBeenCalledTimes(1);
   });
 
   it('fails visibly for stale or unsupported action ids', async () => {

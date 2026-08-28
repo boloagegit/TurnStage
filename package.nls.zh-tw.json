@@ -67,7 +67,7 @@
   "setting.logLevel.error": "僅錯誤。",
   "setting.logLevel.warn": "錯誤與警告。",
   "setting.logLevel.info": "錯誤、警告與一般操作資訊。",
-  "setting.logLevel.debug": "所有資訊，包含除錯細節。",
+  "setting.logLevel.debug": "所有資訊，包含每次嘗試、資料區塊、SSE 事件、逾時、重試與 mapping 診斷；不會記錄請求或事件內容。",
   "setting.notifications.enabled": "顯示 TurnStage 通知。停用後會隱藏非模態狀態訊息。",
   "workspaceTrust.description": "仍可編輯設定檔與重播 fixture；網路請求及具權限的設定檔動作會停用。"
 }
