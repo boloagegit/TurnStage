@@ -11,22 +11,31 @@ The custom editor creates a Webview with:
 
 ```text
 default-src 'none'
-connect-src 'none'
-img-src <webview CSP source>
+connect-src <webview CSP source>
+img-src <webview CSP source> data: blob:
 style-src <webview CSP source> 'unsafe-inline'
-font-src <webview CSP source>
+font-src <webview CSP source> data:
 script-src 'nonce-<random nonce>'
 ```
 
 Scripts use a per-panel random nonce. `localResourceRoots` is restricted to the
-extension `dist` directory. The panel does not use `EventSource`, direct
-`fetch`, arbitrary iframes, or remote images. React renders message text and
-code blocks as text; the current renderer does not inject backend HTML.
+extension `dist` directory. The panel does not use `EventSource`, call backend
+URLs, load arbitrary iframes, or render remote images. `connect-src` permits
+only the Webview resource origin so the screenshot renderer can embed the
+already-bundled Codicon font; HTTP and HTTPS backend connections remain
+blocked. React renders message text and code blocks as text; the current
+renderer does not inject backend HTML.
 
 This protects the panel from becoming a direct backend client, but it is not a
 complete content sanitizer for future renderers. Keep remote content as text
-and preserve the `default-src 'none'`/`connect-src 'none'` policy when adding
-features.
+and preserve `default-src 'none'` plus the extension-only `connect-src` policy
+when adding features.
+
+Chat screenshots are created from the logical Chat viewport, never the Debug
+pane. The protocol accepts only bounded PNG data URLs and safe `.png` names;
+the host verifies base64 syntax, the PNG signature, and a 24 MiB decoded-size
+limit before showing the native save dialog. Screenshots are written only to
+the URI the user selects and are not retained by TurnStage.
 
 ## Host/Webview messages
 

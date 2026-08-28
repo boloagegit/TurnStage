@@ -248,5 +248,10 @@
   "Unknown message action visibility: {value}.": "未知的訊息動作顯示方式：{value}。",
   "Message metrics require id and value fields.": "訊息指標需要 id 與 value 欄位。",
   "Unknown message metric aggregation: {value}.": "未知的訊息指標聚合方式：{value}。",
-  "Unknown message metric format: {value}.": "未知的訊息指標格式：{value}。"
+  "Unknown message metric format: {value}.": "未知的訊息指標格式：{value}。",
+  "Unable to save the chat screenshot.": "無法儲存聊天截圖。",
+  "Save chat screenshot": "儲存聊天截圖",
+  "PNG image": "PNG 圖片",
+  "Save screenshot": "儲存截圖",
+  "Chat screenshot saved.": "聊天截圖已儲存。"
 }

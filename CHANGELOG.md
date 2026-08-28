@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.0
+
+- Added a localized, keyboard-accessible camera action to the Chat preview toolbar. It captures only the logical Chat viewport as a PNG—excluding the viewport controls and Debug pane—and uses the native VS Code save dialog.
+- Screenshot generation is user-initiated and bounded to 8 megapixels. The Extension Host validates the PNG data URL, base64 encoding, file signature, safe filename, and a 24 MiB decoded-size limit before writing only to the selected URI; TurnStage does not retain the image.
+- Existing profiles, recorded runs, and Restricted Mode behavior remain compatible and require no migration. Screenshot export remains available in Restricted Mode because it performs no network request.
+
 ## 0.5.2
 
 - Added an explicit localized `Opening` label above profile opening content in Chat so it cannot be mistaken for a streamed Assistant response. Existing profiles require no migration.

@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -670,6 +670,7 @@
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.36",
+    "html-to-image": "1.11.13",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

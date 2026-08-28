@@ -31,6 +31,8 @@ renderer and inspector.
   viewport toolbar beside a resizable Debug inspector. Responsive mode follows
   the Chat pane; device presets, custom width/height, rotation, and Fit/100%/
   75%/50% zoom test the same RWD chat surface without adding fake device chrome.
+  A camera action exports only the logical Chat viewport as a PNG through the
+  native VS Code save dialog.
   Messages and their raw/normalized events can be selected in either direction.
 - Native Profile Tree resource rows with compact **Run**, **Open**, and
   **Configure Profile** actions. Profile Configuration provides the seven

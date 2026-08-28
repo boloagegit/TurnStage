@@ -63,6 +63,8 @@ The current UI includes these performance-conscious choices:
 - stream updates are delivered as snapshots at the configured debounce rate;
 - CSS uses VS Code theme variables and reduced-motion rules rather than a
   separate visual runtime.
+- Chat screenshot rendering is user-triggered, capped at 8 million output
+  pixels, and bounded again by a 24 MiB host-side PNG limit.
 
 The current UI does not virtualize the conversation message list, does not use
 `React.memo`, and does not defer syntax highlighting (code is rendered as text

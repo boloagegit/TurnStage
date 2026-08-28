@@ -99,6 +99,11 @@
   flex: 0 0 var(--mcp-control-height);
 }
 
+.mobile-chat-preview__screenshot {
+  flex: 0 0 var(--mcp-control-height);
+  margin-inline-start: auto;
+}
+
 .mobile-chat-preview__zoom-control select {
   width: auto;
   min-width: 5.2em;

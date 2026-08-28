@@ -18,9 +18,10 @@ Webview (dist/webview.js + styles)
   React chat, tabs, forms, inspector, getState/setState UI state
 ```
 
-The Webview does not open sockets, call `fetch`, read workspace files, or
-execute VS Code commands. `connect-src 'none'` in its Content Security Policy
-also prevents a direct network connection from the panel.
+The Webview does not open sockets, call backend URLs, read workspace files, or
+execute VS Code commands. Its Content Security Policy permits connections only
+to the Webview resource origin for embedding bundled fonts during Chat PNG
+capture; direct HTTP and HTTPS connections from the panel remain blocked.
 
 ## Runtime data flow
 

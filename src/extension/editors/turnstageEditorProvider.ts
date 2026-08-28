@@ -16,6 +16,7 @@ import { resolveDisplayLanguage, textDirection } from '../displayLanguage';
 import { profileEditorTitle } from './profileEditorTitle';
 import { EventBatcher } from '../runtime/eventBatcher';
 import { logAt } from '../logging';
+import { decodeChatScreenshot, normalizeScreenshotFileName } from './chatScreenshot';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -127,6 +128,11 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         }
         if (message.type === 'profile.patch') { await this.patchDocument(document, message.path, message.value); return; }
         if (message.type === 'output.open') { this.output.show(true); return; }
+        if (message.type === 'chat.screenshot.save') {
+          const uri = await this.saveChatScreenshot(message.dataUrl, message.suggestedName, document.uri);
+          if (uri) await post({ type: 'chat.screenshot.saved', path: uri.toString() }, message.requestId);
+          return;
+        }
         if (!controller) return;
         switch (message.type) {
           case 'mapping.test': {
@@ -227,6 +233,23 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     if (!isAllowedPatchPath(path)) throw new Error(localize('This profile setting cannot be edited from the configuration surface.'));
     const edits = modify(document.getText(), path, value, { formattingOptions: { insertSpaces: true, tabSize: 2 } }); const workspaceEdit = new vscode.WorkspaceEdit(); for (const edit of [...edits].sort((a, b) => b.offset - a.offset)) workspaceEdit.replace(document.uri, new vscode.Range(document.positionAt(edit.offset), document.positionAt(edit.offset + edit.length)), edit.content); await vscode.workspace.applyEdit(workspaceEdit);
   }
+  private async saveChatScreenshot(dataUrl: string, suggestedName: string, profileUri: vscode.Uri): Promise<vscode.Uri | undefined> {
+    let bytes: Uint8Array;
+    try { bytes = decodeChatScreenshot(dataUrl); }
+    catch { throw new Error(localize('Unable to save the chat screenshot.')); }
+    const fileName = normalizeScreenshotFileName(suggestedName);
+    const folder = vscode.workspace.getWorkspaceFolder(profileUri) ?? vscode.workspace.workspaceFolders?.[0];
+    const uri = await vscode.window.showSaveDialog({
+      title: localize('Save chat screenshot'),
+      defaultUri: folder ? vscode.Uri.joinPath(folder.uri, fileName) : undefined,
+      filters: { [localize('PNG image')]: ['png'] },
+      saveLabel: localize('Save screenshot')
+    });
+    if (!uri) return undefined;
+    await vscode.workspace.fs.writeFile(uri, bytes);
+    void vscode.window.showInformationMessage(localize('Chat screenshot saved.'));
+    return uri;
+  }
   private trackDisposal(promise: Promise<void>): void {
     this.pendingDisposals.add(promise);
     void promise.finally(() => this.pendingDisposals.delete(promise));
@@ -286,7 +309,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     if (['input.fill', 'event.inspect', 'form.open', 'form.submit', 'form.cancel'].includes(action.actionId)) return;
     throw new Error(localize('This response action is not supported: {action}.', { action: action.actionId }));
   }
-  private html(webview: vscode.Webview, instanceId: string): string { const nonce = crypto.randomUUID().replace(/-/g, ''); const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js')); const style = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css')); const locale = configuredLocale(); const direction = textDirection(locale); return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; img-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}'"><link rel="stylesheet" href="${style}"><title>TurnStage</title></head><body><div id="root" data-instance-id="${instanceId}"></div><script nonce="${nonce}" src="${script}"></script></body></html>`; }
+  private html(webview: vscode.Webview, instanceId: string): string { const nonce = crypto.randomUUID().replace(/-/g, ''); const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js')); const style = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css')); const locale = configuredLocale(); const direction = textDirection(locale); return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ${webview.cspSource}; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource} data:; script-src 'nonce-${nonce}'"><link rel="stylesheet" href="${style}"><title>TurnStage</title></head><body><div id="root" data-instance-id="${instanceId}"></div><script nonce="${nonce}" src="${script}"></script></body></html>`; }
 }
 
 function configuredLocale(): string {

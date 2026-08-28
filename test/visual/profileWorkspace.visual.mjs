@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
 import { chromium } from 'playwright';
@@ -52,6 +53,20 @@ try {
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Debug');
   await page.screenshot({ path: resolve(artifactDirectory, 'wide-dark.png'), fullPage: true });
+  const screenshotButton = page.getByRole('button', { name: 'Capture chat screenshot' });
+  await screenshotButton.focus();
+  assert.equal(await screenshotButton.evaluate((element) => element.matches(':focus-visible')), true, 'Screenshot button must expose keyboard focus');
+  await screenshotButton.click();
+  await page.waitForFunction(() => globalThis.__turnstageMessages.some((message) => message.type === 'chat.screenshot.save'));
+  const screenshotPayload = await page.evaluate(() => {
+    const message = [...globalThis.__turnstageMessages].reverse().find((candidate) => candidate.type === 'chat.screenshot.save');
+    return { dataUrl: message.dataUrl, suggestedName: message.suggestedName };
+  });
+  assert.match(screenshotPayload.suggestedName, /^turnstage-slow-sse-.*\.png$/, 'Screenshot receives a safe profile-scoped filename');
+  assert.ok(screenshotPayload.dataUrl.startsWith('data:image/png;base64,iVBOR'), 'Screenshot button must generate a PNG payload');
+  const screenshotBytes = Buffer.from(screenshotPayload.dataUrl.slice('data:image/png;base64,'.length), 'base64');
+  assert.ok(screenshotBytes.length > 1_000, 'Generated PNG must contain the rendered Chat viewport');
+  await writeFile(resolve(artifactDirectory, 'chat-viewport-capture-dark.png'), screenshotBytes);
   assert.equal(await page.getByRole('region', { name: 'Opening' }).getByRole('heading', { name: 'Opening' }).count(), 1, 'Opening content must be explicitly labelled');
   const assistantMessage = page.locator('[data-message-id="assistant-1"]');
   assert.equal(await assistantMessage.getByRole('group', { name: 'Message actions' }).evaluate((element) => getComputedStyle(element).opacity), '1', 'Message actions must be visible by default');
@@ -267,7 +282,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, rightPaneConfiguration: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: true, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, rightPaneConfiguration: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: true, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

@@ -52,6 +52,7 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByRole('region', { name: 'Responsive chat preview' })).toBeTruthy();
     expect(document.querySelector('[data-viewport-mode="responsive"]')).toBeTruthy();
     expect(document.querySelector('.mobile-chat-preview__safe-area')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Capture chat screenshot' })).toBeTruthy();
 
     const preset = screen.getByRole('combobox', { name: 'Viewport preset' });
     await user.selectOptions(preset, 'mobile-m');
