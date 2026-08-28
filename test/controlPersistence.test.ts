@@ -230,6 +230,31 @@ describe('control persistence scopes', () => {
     }
   });
 
+  it('reports the mapped SecretStorage name when an environment secret is missing', async () => {
+    const selectedProfile = {
+      ...profile,
+      conversation: { send: { method: 'POST' as const, url: 'https://example.test/${secret.apiToken}' } },
+    } as TurnStageProfile;
+    const selectedEnvironment: TurnStageEnvironment = { ...environment, secretReferences: { apiToken: 'machine-token' } };
+    const controllerInstance = new SessionController(
+      selectedProfile,
+      new mock.Uri('/workspace-a/.vscode/turnstage/profiles/shared.turnstage.jsonc') as never,
+      selectedEnvironment,
+      context(new Map()) as never,
+      { get: vi.fn(async () => undefined) } as never,
+      { list: vi.fn(async () => []), save: vi.fn() } as never,
+      vi.fn(),
+      { appendLine: vi.fn() } as never,
+    );
+
+    await controllerInstance.send('hello', { kind: 'manual' });
+
+    expect(controllerInstance.snapshot.errors).toContainEqual(expect.objectContaining({
+      type: 'MissingSecretError',
+      message: 'Secret "machine-token" is not configured.',
+    }));
+  });
+
   it('hydrates declared environment secrets before exposing legacy runs', async () => {
     const environmentSecret = 'legacy-environment-secret';
     const selectedEnvironment: TurnStageEnvironment = { ...environment, secretReferences: { apiToken: 'machine-token' } };

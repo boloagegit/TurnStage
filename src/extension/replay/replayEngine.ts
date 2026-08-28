@@ -12,7 +12,7 @@ export class ReplayEngine {
   constructor(
     private readonly events: RawStreamEvent[],
     speed: ReplaySpeed,
-    private readonly accept: (event: RawStreamEvent) => Promise<void>,
+    private readonly accept: (event: RawStreamEvent) => Promise<void | boolean>,
     private readonly changed: (state: { status: ReplayEngine['status']; speed: ReplaySpeed; index: number; total: number }) => void,
   ) { this.speed = speed; this.emit(); }
 
@@ -24,14 +24,14 @@ export class ReplayEngine {
       const event = this.events[this.index]!;
       if (this.index > 0) { const previous = this.events[this.index - 1]!; const delay = Math.max(0, event.elapsedMs - previous.elapsedMs) / this.speed; if (delay) await this.wait(delay); }
       if (this.currentStatus() !== 'playing') continue;
-      await this.accept({ ...event, receivedAt: Date.now() }); this.index++; this.emit();
+      const keepGoing = await this.accept({ ...event, receivedAt: Date.now() }); this.index++; if (keepGoing === false) this.index = this.events.length; this.emit(); if (keepGoing === false) break;
     }
     if (this.currentStatus() !== 'stopped') { this.status = 'completed'; this.emit(); }
   }
 
   pause(): void { if (this.status === 'playing') { this.status = 'paused'; this.clearTimer(); this.emit(); } }
   resume(): void { if (this.status === 'paused') { this.status = 'playing'; this.wake(); this.emit(); } }
-  async step(): Promise<void> { if (!['idle', 'paused'].includes(this.status) || this.index >= this.events.length) return; this.status = 'paused'; await this.accept({ ...this.events[this.index]!, receivedAt: Date.now() }); this.index++; if (this.index >= this.events.length) { this.status = 'completed'; this.wake(); } this.emit(); }
+  async step(): Promise<void> { if (!['idle', 'paused'].includes(this.status) || this.index >= this.events.length) return; this.status = 'paused'; const keepGoing = await this.accept({ ...this.events[this.index]!, receivedAt: Date.now() }); this.index++; if (keepGoing === false) this.index = this.events.length; if (this.index >= this.events.length) { this.status = 'completed'; this.wake(); } this.emit(); }
   stop(): void { if (this.status === 'completed') return; this.status = 'stopped'; this.clearTimer(); this.wake(); this.emit(); }
   setSpeed(speed: ReplaySpeed): void { this.speed = speed; this.emit(); }
   dispose(): void { this.stop(); }

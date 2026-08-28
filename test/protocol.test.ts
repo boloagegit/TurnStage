@@ -23,6 +23,8 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'form.submit', formId: 'form-1', values: [] }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'profile.patch', path: ['ui', '__proto__'], value: true }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'run.replay.speed', speed: 99 }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'run.import' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'uri.open', uri: 'https://example.test/docs' }, 'editor-1')).toBe(true);
   });
 
   it('bounds cyclic, deep, oversized, and wrong-instance messages', () => {
@@ -39,6 +41,11 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'host.ready', trusted: true, locale: 'zh-tw', direction: 'ltr' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'workspace.section', section: 'legacy' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'profile.validation', diagnostics: [{ severity: 'fatal', message: 'bad', offset: 0, length: 1 }] }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'profile.validated', valid: true }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'profile.validated', valid: 'yes' }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'run.imported', path: 'file:///run.json', runId: 'run-1', duplicate: false }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'run.imported', path: 'file:///run.json', runId: 'run-1', duplicate: 'no' }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'form.accepted', formId: 'form-1', sourceMessageId: 'message-1' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'workspaceTrust.changed', trusted: 'yes' }, 'editor-1')).toBe(false);
   });
 });

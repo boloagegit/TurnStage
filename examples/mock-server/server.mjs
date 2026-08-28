@@ -2,6 +2,8 @@ import http from 'node:http';
 
 const requestedPort = Number(process.env.TURNSTAGE_MOCK_PORT ?? 8787);
 if (!Number.isInteger(requestedPort) || requestedPort < 0 || requestedPort > 65535) throw new Error('TURNSTAGE_MOCK_PORT must be an integer from 0 to 65535.');
+const contractSlowDelayMs = Number(process.env.TURNSTAGE_MOCK_CONTRACT_SLOW_DELAY_MS ?? 450);
+if (!Number.isInteger(contractSlowDelayMs) || contractSlowDelayMs < 1 || contractSlowDelayMs > 30000) throw new Error('TURNSTAGE_MOCK_CONTRACT_SLOW_DELAY_MS must be an integer from 1 to 30000.');
 const json = (response, status, value) => { response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(value)); };
 const readBody = async (request) => {
   const chunks = []; for await (const chunk of request) chunks.push(chunk);
@@ -12,11 +14,87 @@ const readBody = async (request) => {
 };
 const sse = (event, data) => `event: ${event}\ndata: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const contractSessions = new Map();
+const requiredString = (body, key) => typeof body[key] === 'string' && Boolean(body[key].trim());
+const invalidFields = (response, fields) => json(response, 400, { code: 'INVALID_REQUEST', fields });
+
+async function handleContractOpening(response, body, mode) {
+  const missing = ['actorId', 'taskId', 'blockId'].filter((key) => !requiredString(body, key));
+  if (!Array.isArray(body.tags)) missing.push('tags');
+  if (!Array.isArray(body.openingMsgArgs)) missing.push('openingMsgArgs');
+  if (missing.length) return invalidFields(response, missing);
+  if (mode === 'opening-options') {
+    return json(response, 200, {
+      openingMessage: 'Hello, I am a synthetic test assistant. How can I help?',
+      optionsInfo: [
+        { id: 'sample-overview', label: 'Show a sample overview', prompt: 'Show a sample overview', behavior: 'send' },
+        { id: 'required-inputs', label: 'Which inputs are required?', prompt: 'Which inputs are required?', behavior: 'send' },
+      ],
+    });
+  }
+  return json(response, 200, { code: 7021, message: 'No configured opening message' });
+}
+
+async function handleContractStream(request, response, body, mode) {
+  const missing = ['actorId', 'message'].filter((key) => !requiredString(body, key));
+  const continuation = requiredString(body, 'cid');
+  if (!continuation) {
+    if (!requiredString(body.openingMessage ?? {}, 'content')) missing.push('openingMessage.content');
+    if (!body.conversationProfile || typeof body.conversationProfile !== 'object') missing.push('conversationProfile');
+  }
+  if (missing.length) return invalidFields(response, missing);
+  if (body.message !== body.message.trim()) return json(response, 400, { code: 'MESSAGE_NOT_TRIMMED' });
+  if (continuation && ('openingMessage' in body || 'conversationProfile' in body)) return json(response, 400, { code: 'CONTINUATION_CONTAINS_FIRST_TURN_FIELDS' });
+
+  const cid = continuation ? body.cid : `cid-${Date.now()}`;
+  const assistantMessageId = `assistant-${Date.now()}`;
+  contractSessions.set(cid, { assistantMessageId, stopped: false });
+  response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive' });
+  response.flushHeaders();
+  const wait = mode === 'contract-slow' ? contractSlowDelayMs : 35;
+  const write = async (event, data) => {
+    await delay(wait);
+    if (response.destroyed || contractSessions.get(cid)?.stopped) return false;
+    response.write(sse(event, data));
+    return true;
+  };
+  if (!await write('start', { cid, assistantMessageId })) return;
+  if (!await write('status', { text: 'Analyzing the test request…' })) return;
+  if (!await write('message', { text: 'This is a deterministic streamed response from the local mock server.' })) return;
+  if (mode === 'contract-error') {
+    await write('error', { code: 'SAMPLE_SERVICE_UNAVAILABLE', message: 'The synthetic knowledge service is temporarily unavailable.' });
+    response.end();
+    return;
+  }
+  if (mode === 'contract-actions') {
+    if (!await write('followup', { id: 'followup-example', label: 'Show another example', prompt: 'Show another example', behavior: 'send' })) return;
+    if (!await write('action', { id: 'cta-details', label: 'Explain details', actionId: 'request.send', payload: { messageText: 'Explain the sample details', ctaKey: 'sample_details' } })) return;
+    if (!await write('action', { id: 'cta-web', label: 'Open sample documentation', actionId: 'uri.open', payload: { uri: 'https://example.com/sample-guide', ctaKey: 'sample_guide' } })) return;
+    if (!await write('custom_card', { type: 'form', id: 'sample-form', title: 'Synthetic form', fields: [{ id: 'name', type: 'text', label: 'Name', required: true }], submit: { action: 'conversation.send', messageTemplate: 'Submit sample form', interactionKind: 'formSubmit' } })) return;
+    if (!await write('diagnostic', { intent: 'sample-intent', selectedTools: ['sample_search'], guardrails: ['sample-check'], e2e_ms: 180 })) return;
+  }
+  if (!await write('title', { title: 'Sample consultation' })) return;
+  await write('done', { ok: true });
+  response.end();
+}
+
+function handleContractStop(response, body) {
+  const missing = ['cid', 'assistantMessageId', 'reason'].filter((key) => !requiredString(body, key));
+  if (missing.length) return invalidFields(response, missing);
+  if (body.reason !== 'user_cancel') return json(response, 400, { code: 'INVALID_STOP_REASON' });
+  const session = contractSessions.get(body.cid);
+  if (session && session.assistantMessageId !== body.assistantMessageId) return json(response, 409, { code: 'ASSISTANT_MESSAGE_MISMATCH' });
+  if (session) session.stopped = true;
+  return json(response, 200, { stopped: true, cid: body.cid, assistantMessageId: body.assistantMessageId, reason: body.reason });
+}
 
 const server = http.createServer(async (request, response) => {
   if (request.method !== 'POST') return json(response, 405, { code: 'METHOD_NOT_ALLOWED' });
   const body = await readBody(request); if (!body) return json(response, 400, { code: 'INVALID_JSON' });
   const mode = request.headers['x-turnstage-mode'] ?? body.mode ?? 'normal';
+  if (request.url === '/v1/chat/opening') return handleContractOpening(response, body, mode);
+  if (request.url === '/v1/chat/stream') return handleContractStream(request, response, body, mode);
+  if (request.url === '/v1/chat/stop') return handleContractStop(response, body);
   if (request.url === '/agent/opening') {
     if (mode === 'fallback') return json(response, 404, { code: 'OPENING_NOT_FOUND' });
     if (mode === 'network-error') { request.socket.destroy(); return; }

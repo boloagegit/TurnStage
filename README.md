@@ -27,14 +27,18 @@ renderer and inspector.
 - Configurable request variants, typed `$value` extraction, interpolation,
   transforms, redacted request previews, normalized event mapping, and a
   reducer-backed chat snapshot.
-- A profile-scoped **Test** workspace with a phone-shaped chat preview (three
-  viewport presets) beside a resizable Debug inspector. Chat messages and
-  their raw/normalized events can be selected in either direction.
+- A profile-scoped **Test** workspace with a Chrome Device Mode-inspired
+  viewport toolbar beside a resizable Debug inspector. Responsive mode follows
+  the Chat pane; device presets, custom width/height, rotation, and Fit/100%/
+  75%/50% zoom test the same RWD chat surface without adding fake device chrome.
+  Messages and their raw/normalized events can be selected in either direction.
 - Native Profile Tree resource rows with compact **Run**, **Open**, and
   **Configure Profile** actions. Profile Configuration provides the seven
   profile-specific sections in the Custom Editor; Test remains the live chat
   and Debug/Runs surface.
-- A local mock server and two starter profiles that use example-only values.
+- A localhost-only synthetic mock server and three starter profiles, including
+  an enterprise first-turn/multi-turn contract example with no real identity or
+  credentials.
 
 The implementation is intentionally explicit about limitations in the bundled
 `docs/turnstage-architecture.md`, `docs/profile-schema.md`,
@@ -52,7 +56,7 @@ npm install
 npm run compile
 ```
 
-The extension manifest targets VS Code `^1.96.0`. The Extension Host bundle is
+The extension manifest targets VS Code `^1.106.0`. The Extension Host bundle is
 built for Node 20 and the Webview bundle for ES2022; use a Node runtime
 compatible with the local esbuild/VS Code toolchain.
 
@@ -99,12 +103,14 @@ initialization writes this layout under the selected workspace folder:
 └── turnstage/
     ├── profiles/
     │   ├── basic-sse-chat.turnstage.jsonc
-    │   └── agent-flow.turnstage.jsonc
+    │   ├── agent-flow.turnstage.jsonc
+    │   └── enterprise-chat.turnstage.jsonc
     ├── environments/
     │   └── local.environment.jsonc
     └── fixtures/                 # only for the mock-server option
         ├── basic-sse-chat.jsonl
-        └── agent-flow.jsonl
+        ├── agent-flow.jsonl
+        └── enterprise-chat.jsonl
 ```
 
 The extension ships equivalent templates, schemas, and fixtures under
@@ -141,6 +147,18 @@ opening, dynamic starter options, fallback text, actor/model/debug controls,
 first-turn and continuation variants, bearer-secret resolution, stop handling,
 and mappings for progress, markdown, tools, citations, actions, forms,
 follow-ups, diagnostics, usage, title, completion, and failure.
+
+### Enterprise Chat Contract
+
+`resources/templates/enterprise-chat.turnstage.jsonc` is a synthetic contract
+fixture for a common POST + SSE application flow. It covers a request-backed
+opening with a 7021 fallback, optional opening choices, different first-turn and
+continuation bodies, global actor selection, per-turn event counts, remote
+stop, partial-content retention, error finalization, follow-ups, CTA payloads,
+diagnostics, and reference-only remote history. Its unknown `custom_card`
+fixture deliberately remains unmatched and inspectable in Raw Events instead
+of becoming a built-in renderer. All identity and profile values are visibly
+synthetic. See `docs/enterprise-chat-profile-guide.md` for setup and adaptation.
 
 ### Local environment
 
@@ -203,9 +221,10 @@ credential headers and headers containing SecretStorage-resolved values.
 
 `json`, `text-stream`, and `fixture` are accepted profile transport values.
 `text-stream` emits decoded chunks as raw events without JSON parsing; `json`
-uses the line-oriented parser in the current transport, and built-in fixtures
-are replayed through the mapping/reducer pipeline. See the known runtime
-limitations in `docs/turnstage-architecture.md`.
+buffers one bounded complete JSON document instead of treating lines as
+records. `dataFormat: "text"` keeps SSE/NDJSON payloads as text. Fixture
+profiles load `.vscode/turnstage/fixtures/<profile-id>.jsonl` and replay it
+through the same mapping/reducer pipeline without a network request.
 
 ### Mapping and chat content
 
@@ -254,8 +273,13 @@ controls, and runs the opening flow again.
 
 Local runs are stored in VS Code global storage under the profile ID, retained
 according to `history.localRuns.maxRuns` or `turnstage.runRetention`, and can
-be exported as `*.turnstage-run.json`. A replay feeds saved raw events through
-the same Mapping Engine and reducer; it never calls the backend.
+be imported or exported as versioned `*.turnstage-run.json` files. Import also
+accepts the legacy unversioned export, rejects mismatched profile IDs, and
+creates a new run ID instead of overwriting a duplicate. A replay restores the
+recorded conversation through the last user message, then feeds saved raw
+events through the same Mapping Engine and reducer; it never calls the backend.
+Runs recorded without raw events remain inspectable and exportable but are
+clearly marked as unavailable for replay.
 
 Profiles may also enable reference-only remote session history. It stores only
 the conversation ID and metadata scoped by workspace/profile/actor/environment.
@@ -267,6 +291,25 @@ Replay preserves recorded event spacing and supports 0.25×, 0.5×, 1×, 2×, an
 headers latency, first chunk/event latency, TTFT, stream/total duration, event
 and byte counts, event gaps, parse/mapping/unmatched counts, and abort reason.
 No percentile statistics are produced.
+
+Each chat message has VS Code-native icon actions for Copy, Retry,
+Edit-and-resend, and Inspect. They are visible by default for discoverability;
+profiles can opt into interaction-only visibility. Backends can also expose
+arbitrary per-message measurements through `message.metric.updated` mappings,
+including message correlation, display format, and first/last/sum/min/max/count
+aggregation. Assistant messages also expose built-in TTFT and total-turn time,
+measured by the Extension Host from the request start. The compact footer shows
+these built-ins beside mapped measurements; `metrics.messageEnabled` can select
+any of them by ID (`ttft`, `totalDuration`, or a mapped metric ID) without
+removing the underlying run or Debug data.
+
+The test workspace keeps Chat on the left and provides Debug and Configure as
+two modes of the right pane. Configure exposes the same seven profile sections
+as the command-driven configuration flow, including request, stream mapping,
+Chat UI, history, metrics, and security. Every GUI edit is applied as a
+structured `WorkspaceEdit` to the open `.turnstage.jsonc` document, so the
+profile file remains the source of truth and VS Code Undo/Redo continues to
+work. Open JSONC remains available from the configuration toolbar.
 
 ## Commands and settings
 
@@ -289,7 +332,7 @@ Commands are registered under the `turnstage` namespace:
 | `turnstage.openAsText` | Open the same document in VS Code's text editor |
 | `turnstage.selectEnvironment` / `turnstage.openEnvironment` | Select or edit an effective workspace or user environment |
 | `turnstage.setSecret` / `turnstage.removeSecret` / `turnstage.listSecretNames` | Manage secret names and values |
-| `turnstage.replayRun` / `turnstage.exportRun` | Replay or export the latest local run; open Test when no run exists |
+| `turnstage.replayRun` / `turnstage.importRun` / `turnstage.exportRun` | Replay the latest run, or import/export versioned local-run files |
 | `turnstage.openOutput` | Show the TurnStage Output Channel |
 | `turnstage.changeDisplayLanguage` | Choose Auto, Traditional Chinese, or English for TurnStage profile editors |
 | `turnstage.migrateProfile` | Migrate a version-0 profile after confirmation, backup, and diff review |
@@ -301,11 +344,12 @@ The contributed settings are:
 | --- | ---: | --- |
 | `turnstage.displayLanguage` | `auto` | Application-wide language for TurnStage profile editors: follow VS Code, Traditional Chinese, or English |
 | `turnstage.profileGlob` | `.vscode/turnstage/profiles/*.turnstage.jsonc` | Workspace-relative discovery glob |
-| `turnstage.maxBufferedEvents` | `5000` | Maximum raw events kept in the live buffer |
+| `turnstage.maxBufferedEvents` | `5000` | Maximum raw and normalized events kept in the live session |
+| `turnstage.maxConversationMessages` | `500` | Maximum conversation messages kept in memory (50–5000) |
 | `turnstage.maxBufferedBytes` | `10485760` | Maximum raw-buffer JSON bytes (10 MiB) |
-| `turnstage.streamBatchIntervalMs` | `32` | Debounce interval for host-to-Webview snapshots (16–100 ms) |
+| `turnstage.streamBatchIntervalMs` | `32` | Batching interval for host-to-Webview snapshots (16–100 ms) |
 | `turnstage.runRetention` | `20` | Fallback local-run retention (1–100) |
-| `turnstage.logLevel` | `info` | Declared log-level setting; runtime logging is currently minimal |
+| `turnstage.logLevel` | `info` | Minimum output-channel level: error, warn, info, or debug |
 | `turnstage.notifications.enabled` | `true` | Show non-modal TurnStage notifications; selecting **Do not show again** sets it false at user scope |
 
 `displayLanguage` has VS Code `application` scope, so one User setting applies
@@ -343,6 +387,9 @@ POST /basic/chat/stop
 POST /agent/opening
 POST /agent/chat/stream
 POST /agent/chat/stop
+POST /v1/chat/opening
+POST /v1/chat/stream
+POST /v1/chat/stop
 ```
 
 The server emits example SSE events and has deterministic modes selected by
@@ -354,6 +401,12 @@ example endpoint or `example.com` citation as a production service.
 Both starter profiles expose these values as a **Mock Scenario** control in the
 mobile chat preview, so streaming and failure modes can be switched without
 editing request headers or JSON.
+
+The Enterprise Chat Contract profile additionally exposes `contract-slow`,
+`contract-error`, `contract-actions`, and `opening-options`. Its mock API
+validates trimmed input, first-turn versus continuation fields, stop IDs, and
+the `start → status → message → title → done` terminal sequence. This server is
+only a behavioral simulator; it never calls an internal service or an LLM.
 
 ## Development checks
 

@@ -28,7 +28,7 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
   it('delivers normal SSE events incrementally instead of buffering the response', async () => {
     const evidence = await collect('slow');
 
-    expect(evidence.result).toEqual({ sawData: true, aborted: false });
+    expect(evidence.result).toEqual({ sawData: true, aborted: false, reconnectCount: 0 });
     expect(evidence.contentType).toContain('text/event-stream');
     expect(evidence.events.map(eventName)).toEqual(['start', 'status', 'message', 'message', 'title', 'done']);
     expect(evidence.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6]);
@@ -41,7 +41,7 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
   it('reassembles SSE frames split across network chunks', async () => {
     const evidence = await collect('chunk-split');
 
-    expect(evidence.result).toEqual({ sawData: true, aborted: false });
+    expect(evidence.result).toEqual({ sawData: true, aborted: false, reconnectCount: 0 });
     expect(evidence.events.map(eventName)).toEqual(['start', 'status', 'message', 'message', 'title', 'done']);
     expect(evidence.chunkSizes.length).toBeGreaterThan(evidence.events.length);
   });
@@ -54,6 +54,31 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
     expect(eventName(malformed.events.at(-1)!)).toBe('done');
     expect(unknown.events.map(eventName)).toContain('custom_event');
     expect(eventName(unknown.events.at(-1)!)).toBe('done');
+  });
+
+  it('treats json as one complete document and honors text dataFormat for SSE', async () => {
+    const originalFetch = globalThis.fetch;
+    const events: RawStreamEvent[] = [];
+    try {
+      globalThis.fetch = (async () => new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{\n  "message":'));
+          controller.enqueue(new TextEncoder().encode(' "complete"\n}'));
+          controller.close();
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
+      await new HttpStreamTransport().start(request('normal'), 'json', { onHeaders: () => undefined, onChunk: () => undefined, onEvent: (event) => { events.push(event); } }, new AbortController().signal);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.data).toEqual({ message: 'complete' });
+
+      events.length = 0;
+      globalThis.fetch = (async () => new Response('event: message\ndata: plain text\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } })) as typeof fetch;
+      await new HttpStreamTransport().start(request('normal'), 'sse', { onHeaders: () => undefined, onChunk: () => undefined, onEvent: (event) => { events.push(event); } }, new AbortController().signal, 'text');
+      expect(events[0]?.data).toBe('plain text');
+      expect(events[0]?.parseError).toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('surfaces HTTP status and idle-timeout failures with stable error types', async () => {
@@ -76,12 +101,34 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
         onHeaders: () => undefined,
         onChunk: () => undefined,
         onEvent: (event) => { events.push(event); return false; },
-      }, new AbortController().signal)).resolves.toEqual({ sawData: true, aborted: false });
+      }, new AbortController().signal)).resolves.toEqual({ sawData: true, aborted: false, reconnectCount: 1 });
     } finally {
       globalThis.fetch = originalFetch;
     }
     expect(calls).toBe(2);
     expect(events.map(eventName)).toEqual(['done']);
+  });
+
+  it('reports every attempted reconnect when the retry budget is exhausted', async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response('rate limited', { status: 429, headers: { 'Content-Type': 'text/plain', 'Retry-After': '0' } });
+    }) as typeof fetch;
+    try {
+      await expect(new HttpStreamTransport().start({ ...request('normal'), reconnect: { maxAttempts: 2, baseDelayMs: 0, retryOnStatuses: [429] } }, 'sse', {
+        onHeaders: () => undefined,
+        onChunk: () => undefined,
+        onEvent: () => undefined,
+      }, new AbortController().signal)).rejects.toMatchObject({
+        type: 'HttpStatusError',
+        details: { status: 429, reconnectCount: 2 },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(calls).toBe(3);
   });
 
   it('does not reconnect after partial data because a replay could duplicate side effects', async () => {
@@ -205,7 +252,7 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
       },
     }, abortController.signal);
 
-    expect(result).toEqual({ sawData: true, aborted: true });
+    expect(result).toEqual({ sawData: true, aborted: true, reconnectCount: 0 });
     expect(events.map(eventName)).toEqual(['start', 'status']);
   }, 5_000);
 
@@ -239,7 +286,7 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
         onHeaders: () => undefined,
         onChunk: () => undefined,
         onEvent: async (event) => { events.push(event); return false; },
-      }, new AbortController().signal)).resolves.toEqual({ sawData: true, aborted: false });
+      }, new AbortController().signal)).resolves.toEqual({ sawData: true, aborted: false, reconnectCount: 0 });
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -283,7 +330,7 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
   it('streams NDJSON over real HTTP and flushes a final line without a newline', async () => {
     const evidence = await collectProtocol('ndjson', '/transport/ndjson');
 
-    expect(evidence.result).toEqual({ sawData: true, aborted: false });
+    expect(evidence.result).toEqual({ sawData: true, aborted: false, reconnectCount: 0 });
     expect(evidence.contentType).toContain('application/x-ndjson');
     expect(evidence.events.map((event) => event.data)).toEqual([
       { kind: 'first', value: 1 },
@@ -296,7 +343,7 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
   it('delivers a plain text stream incrementally without JSON parse errors', async () => {
     const evidence = await collectProtocol('text-stream', '/transport/text-stream');
 
-    expect(evidence.result).toEqual({ sawData: true, aborted: false });
+    expect(evidence.result).toEqual({ sawData: true, aborted: false, reconnectCount: 0 });
     expect(evidence.contentType).toContain('text/plain');
     expect(evidence.events.map((event) => event.data).join('')).toBe('first second');
     expect(evidence.events.every((event) => event.parseError === undefined)).toBe(true);

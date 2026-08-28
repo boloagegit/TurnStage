@@ -2,12 +2,12 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.2.3",
+  "version": "0.5.0",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
   "engines": {
-    "vscode": "^1.96.0"
+    "vscode": "^1.106.0"
   },
   "categories": [
     "Testing",
@@ -61,6 +61,7 @@
     "onCommand:turnstage.removeSecret",
     "onCommand:turnstage.listSecretNames",
     "onCommand:turnstage.replayRun",
+    "onCommand:turnstage.importRun",
     "onCommand:turnstage.exportRun",
     "onCommand:turnstage.openOutput",
     "onCommand:turnstage.migrateProfile",
@@ -207,6 +208,12 @@
         "command": "turnstage.replayRun",
         "title": "%command.replayRun%",
         "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.importRun",
+        "title": "%command.importRun%",
+        "category": "%command.category%",
+        "enablement": "isWorkspaceTrusted"
       },
       {
         "command": "turnstage.exportRun",
@@ -458,7 +465,7 @@
       "editor/title": [
         {
           "command": "turnstage.newConversation",
-          "when": "activeCustomEditorId == turnstage.profileEditor && isWorkspaceTrusted",
+          "when": "activeCustomEditorId == turnstage.profileEditor && isWorkspaceTrusted && !turnstage.turnActive",
           "group": "navigation@1"
         },
         {
@@ -588,6 +595,14 @@
           "minimum": 100,
           "description": "%setting.maxBufferedEvents%"
         },
+        "turnstage.maxConversationMessages": {
+          "type": "number",
+          "scope": "window",
+          "default": 500,
+          "minimum": 50,
+          "maximum": 5000,
+          "description": "%setting.maxConversationMessages%"
+        },
         "turnstage.maxBufferedBytes": {
           "type": "number",
           "scope": "window",
@@ -666,7 +681,7 @@
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.11",
     "@types/react-dom": "^19.1.7",
-    "@types/vscode": "^1.96.0",
+    "@types/vscode": "1.106.0",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.6.0",
     "axe-core": "^4.13.0",

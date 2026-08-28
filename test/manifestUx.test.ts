@@ -43,7 +43,7 @@ describe('VS Code contribution UX', () => {
   it('uses native custom-editor title actions for document commands', () => {
     const titleActions = manifest.contributes.menus['editor/title'] ?? [];
     expect(titleActions).toEqual([
-      expect.objectContaining({ command: 'turnstage.newConversation', group: 'navigation@1' }),
+      expect.objectContaining({ command: 'turnstage.newConversation', group: 'navigation@1', when: expect.stringContaining('!turnstage.turnActive') }),
       expect.objectContaining({ command: 'turnstage.openAsText', group: '1_modification@1' }),
     ]);
     expect(titleActions.filter((item) => item.group?.startsWith('navigation'))).toHaveLength(1);
@@ -93,6 +93,8 @@ describe('VS Code contribution UX', () => {
     expect(manifest.contributes.commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ command: 'turnstage.startSession', enablement: 'isWorkspaceTrusted' }),
       expect.objectContaining({ command: 'turnstage.newConversation', enablement: 'isWorkspaceTrusted' }),
+      expect.objectContaining({ command: 'turnstage.importRun', enablement: 'isWorkspaceTrusted' }),
+      expect.objectContaining({ command: 'turnstage.exportRun', enablement: 'isWorkspaceTrusted' }),
     ]));
     expect(manifest.contributes.menus['view/item/context']).toContainEqual(expect.objectContaining({
       command: 'turnstage.runProfile',

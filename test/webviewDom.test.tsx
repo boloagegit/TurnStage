@@ -2,12 +2,12 @@
 
 import React, { useState } from 'react';
 import axe from 'axe-core';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { ChatMessage, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
-import { MobileChatPreview } from '../src/webview/MobileChatPreview';
-import { ACCESSIBLE_EVENT_WINDOW_SIZE, JsonBlock, ProfileIdentityBar, VirtualEvents } from '../src/webview/main';
+import type { ChatMessage, LocalRunSummary, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
+import { MobileChatPreview, resizeComposerTextarea } from '../src/webview/MobileChatPreview';
+import { ACCESSIBLE_EVENT_WINDOW_SIZE, DEFAULT_EVENT_FILTERS, eventMatchesFilters, Inspector, JsonBlock, normalizeInspectorEventFilters, ProfileIdentityBar, Replay, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
 import { SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
 
@@ -34,6 +34,34 @@ describe('Webview DOM behavior', () => {
     expect(identity.textContent).not.toContain('.jsonc');
   });
 
+  it('switches viewport presets, accepts custom dimensions, rotates, and changes zoom', async () => {
+    const user = userEvent.setup();
+    const onViewportChange = vi.fn();
+    render(<MobileChatPreview {...mobileProps({ onViewportChange })} />);
+
+    expect(screen.getByRole('region', { name: 'Responsive chat preview' })).toBeTruthy();
+    expect(document.querySelector('[data-viewport-mode="responsive"]')).toBeTruthy();
+    expect(document.querySelector('.mobile-chat-preview__safe-area')).toBeNull();
+
+    const preset = screen.getByRole('combobox', { name: 'Viewport preset' });
+    await user.selectOptions(preset, 'mobile-m');
+    expect(onViewportChange).toHaveBeenLastCalledWith({ preset: 'mobile-m', width: 375, height: 667, zoom: 'fit' });
+    expect(document.querySelector('[data-viewport-mode="fixed"]')).toBeTruthy();
+    expect(document.querySelector('[data-viewport-width="375"]')).toBeTruthy();
+
+    const width = screen.getByRole('spinbutton', { name: 'Viewport width' });
+    await user.clear(width);
+    await user.type(width, '412');
+    await user.tab();
+    expect(onViewportChange).toHaveBeenLastCalledWith({ preset: 'custom', width: 412, height: 667, zoom: 'fit' });
+
+    await user.click(screen.getByRole('button', { name: 'Rotate viewport' }));
+    expect(onViewportChange).toHaveBeenLastCalledWith({ preset: 'custom', width: 667, height: 412, zoom: 'fit' });
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Viewport zoom' }), '75');
+    expect(onViewportChange).toHaveBeenLastCalledWith({ preset: 'custom', width: 667, height: 412, zoom: '75' });
+  });
+
   it('selects a message with the keyboard and keeps every message action focusable', async () => {
     const user = userEvent.setup();
     const onSelectMessage = vi.fn();
@@ -45,12 +73,83 @@ describe('Webview DOM behavior', () => {
     expect(onSelectMessage).toHaveBeenCalledWith('assistant-1');
 
     const actions = screen.getByRole('group', { name: 'Message actions' });
+    expect(actions.classList.contains('mobile-chat-preview__message-toolbar--always')).toBe(true);
     const buttons = Array.from(actions.querySelectorAll('button'));
     expect(buttons).toHaveLength(4);
     for (const button of buttons) {
       button.focus();
       expect(document.activeElement).toBe(button);
     }
+  });
+
+  it('supports interaction-only message actions while keeping them keyboard reachable', () => {
+    const configured = { ...profile, ui: { ...profile.ui, messageActionVisibility: 'interaction' as const } };
+    render(<MobileChatPreview {...mobileProps({ profile: configured, onSelectMessage: vi.fn() })} />);
+
+    const actions = screen.getByRole('group', { name: 'Message actions' });
+    expect(actions.classList.contains('mobile-chat-preview__message-toolbar--interaction')).toBe(true);
+    const firstAction = within(actions).getByRole('button', { name: 'Copy' });
+    firstAction.focus();
+    expect(document.activeElement).toBe(firstAction);
+  });
+
+  it('shows profile-filtered metrics on the message and formats measurement units', () => {
+    const metricSnapshot: SessionSnapshot = {
+      ...snapshot,
+      messages: [{ ...snapshot.messages[0]!, metrics: [
+        { id: 'e2e', label: 'E2E', value: 180, unit: 'ms', format: 'duration', aggregation: 'last', sampleCount: 1 },
+        { id: 'bytes', label: 'Payload', value: 2048, format: 'bytes', aggregation: 'last', sampleCount: 1 },
+        { id: 'hidden', label: 'Hidden', value: 7 },
+      ] }]
+    };
+    render(<MobileChatPreview {...mobileProps({ profile: { ...profile, metrics: { messageEnabled: ['e2e', 'bytes'] } }, snapshot: metricSnapshot })} />);
+
+    const metrics = screen.getByLabelText('Message metrics');
+    expect(metrics.textContent).toContain('E2E');
+    expect(metrics.textContent).toContain('180 ms');
+    expect(metrics.textContent).toContain('2 KiB');
+    expect(metrics.textContent).not.toContain('Hidden');
+  });
+
+  it('shows TurnStage-owned TTFT and total duration on each assistant response', () => {
+    const timedSnapshot: SessionSnapshot = {
+      ...snapshot,
+      messages: [{ ...snapshot.messages[0]!, timing: { ttft: 125, totalDuration: 480 } }],
+    };
+    render(<MobileChatPreview {...mobileProps({ snapshot: timedSnapshot })} />);
+
+    const metrics = screen.getByLabelText('Message metrics');
+    expect(metrics.textContent).toContain('TTFT');
+    expect(metrics.textContent).toContain('125 ms');
+    expect(metrics.textContent).toContain('Total');
+    expect(metrics.textContent).toContain('480 ms');
+  });
+
+  it('does not report a zero TTFT when a terminal response produced no text', () => {
+    const failedSnapshot: SessionSnapshot = {
+      ...snapshot,
+      turnState: 'failed',
+      messages: [{ ...snapshot.messages[0]!, status: 'failed', timing: { totalDuration: 240 } }],
+    };
+    render(<MobileChatPreview {...mobileProps({ snapshot: failedSnapshot })} />);
+
+    const metrics = screen.getByLabelText('Message metrics');
+    expect(metrics.textContent).toContain('Not available');
+    expect(metrics.textContent).not.toContain('TTFT:0 ms');
+    expect(metrics.textContent).toContain('240 ms');
+  });
+
+  it('lets a profile filter built-in timing metrics independently', () => {
+    const timedSnapshot: SessionSnapshot = {
+      ...snapshot,
+      messages: [{ ...snapshot.messages[0]!, timing: { ttft: 125, totalDuration: 480 } }],
+    };
+    render(<MobileChatPreview {...mobileProps({ profile: { ...profile, metrics: { messageEnabled: ['totalDuration'] } }, snapshot: timedSnapshot })} />);
+
+    const metrics = screen.getByLabelText('Message metrics');
+    expect(metrics.textContent).not.toContain('TTFT');
+    expect(metrics.textContent).toContain('Total');
+    expect(metrics.textContent).toContain('480 ms');
   });
 
   it('treats persisted secret controls as write-only password inputs', async () => {
@@ -142,6 +241,78 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByLabelText('Assistant message, Completed').textContent).toContain('🧪🚀🙂');
   });
 
+  it('auto-grows the multiline composer, caps its height, and shrinks after clearing', () => {
+    const textarea = document.createElement('textarea');
+    document.body.append(textarea);
+    textarea.style.minHeight = '32px';
+    textarea.style.maxHeight = '120px';
+    let scrollHeight = 32;
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+
+    resizeComposerTextarea(textarea);
+    expect(textarea.style.height).toBe('32px');
+    expect(textarea.style.overflowY).toBe('hidden');
+
+    scrollHeight = 88;
+    resizeComposerTextarea(textarea);
+    expect(textarea.style.height).toBe('88px');
+    expect(textarea.style.overflowY).toBe('hidden');
+
+    scrollHeight = 180;
+    resizeComposerTextarea(textarea);
+    expect(textarea.style.height).toBe('120px');
+    expect(textarea.style.overflowY).toBe('auto');
+
+    scrollHeight = 32;
+    resizeComposerTextarea(textarea);
+    expect(textarea.style.height).toBe('32px');
+  });
+
+  it('labels the in-composer stop action according to the conversation lifecycle', () => {
+    const { rerender } = render(<MobileChatPreview {...mobileProps({ snapshot: { ...snapshot, turnState: 'waitingStart' }, active: true })} />);
+    expect(screen.getByRole('button', { name: 'Waiting for conversation…' })).toBeTruthy();
+
+    rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...snapshot, turnState: 'streaming' }, active: true })} />);
+    expect(screen.getByRole('button', { name: 'Stop conversation' })).toBeTruthy();
+
+    rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...snapshot, turnState: 'stopping' }, active: true })} />);
+    expect((screen.getByRole('button', { name: 'Stopping…' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it.each(['caret', 'dots', 'shimmer'] as const)('renders the %s effect only for a streaming Assistant response', (effect) => {
+    const streamingMessage: ChatMessage = { ...assistantMessage('streaming', 'Partial response'), status: 'streaming', completedAt: undefined };
+    render(<MobileChatPreview {...mobileProps({ profile: { ...profile, ui: { ...profile.ui, streaming: { effect, speedMs: 1_200, intensityPercent: 80 } } }, snapshot: { ...snapshot, turnState: 'streaming', messages: [streamingMessage] }, active: true })} />);
+
+    const indicator = document.querySelector('.mobile-chat-preview__stream-indicator');
+    expect(indicator?.getAttribute('data-effect')).toBe(effect);
+    const message = screen.getByLabelText('Assistant message, Streaming') as HTMLElement;
+    expect(message.style.getPropertyValue('--mcp-stream-duration')).toBe('1200ms');
+    expect(message.style.getPropertyValue('--mcp-stream-intensity')).toBe('0.8');
+  });
+
+  it('supports no streaming animation and never decorates user messages', () => {
+    const assistant: ChatMessage = { ...assistantMessage('assistant-streaming', 'Partial'), status: 'streaming', completedAt: undefined };
+    const user: ChatMessage = { ...assistantMessage('user-streaming', 'Sending'), role: 'user', status: 'streaming', completedAt: undefined };
+    const { rerender } = render(<MobileChatPreview {...mobileProps({ profile: { ...profile, ui: { ...profile.ui, streaming: { effect: 'none' } } }, snapshot: { ...snapshot, turnState: 'streaming', messages: [assistant] }, active: true })} />);
+    expect(document.querySelector('.mobile-chat-preview__stream-indicator')).toBeNull();
+
+    rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...snapshot, turnState: 'streaming', messages: [user] }, active: true })} />);
+    expect(document.querySelector('.mobile-chat-preview__stream-indicator')).toBeNull();
+  });
+
+  it('clears the composer immediately when Enter sends a trimmed non-empty message', async () => {
+    const send = vi.fn();
+    const setDraft = vi.fn();
+    render(<MobileChatPreview {...mobileProps({ draft: 'Send this', send, setDraft })} />);
+
+    const composer = screen.getByLabelText('Message');
+    composer.focus();
+    await userEvent.setup().keyboard('{Enter}');
+
+    expect(setDraft).toHaveBeenCalledWith('');
+    expect(send).toHaveBeenCalledWith('Send this');
+  });
+
   it('bounds a huge event list for screen readers and announces the rendered window', () => {
     document.body.classList.add('vscode-using-screen-reader');
     const items = Array.from({ length: 1000 }, (_, index) => ({ sequence: index + 1, rawSequence: index + 1, type: 'message', elapsedMs: index }));
@@ -153,6 +324,75 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByRole('status').textContent).toContain('1,000');
   });
 
+  it('makes event payload disclosure visible and operable by pointer and keyboard', async () => {
+    const user = userEvent.setup();
+    const items = [
+      { sequence: 1, receivedAt: 1, elapsedMs: 24, protocol: 'sse', raw: '{"answer":"hello"}', data: { answer: 'hello' }, sse: { event: 'message' } },
+      { sequence: 2, receivedAt: 2, elapsedMs: 48, protocol: 'sse', raw: '{"cid":"c-1"}', data: { cid: 'c-1' }, sse: { event: 'done' } }
+    ];
+    const view = render(<VirtualEvents items={items} label="Raw Events" />);
+
+    const rows = screen.getAllByRole('option');
+    expect(rows[0].getAttribute('title')).toBe('View event payload');
+    expect(rows[0].getAttribute('aria-selected')).toBe('false');
+    expect(rows[0].getAttribute('data-disclosure-state')).toBe('collapsed');
+    expect(rows[0].querySelector('.codicon-chevron-right')).toBeTruthy();
+
+    await user.click(rows[0]);
+    expect(rows[0].getAttribute('aria-selected')).toBe('true');
+    expect(rows[0].getAttribute('data-disclosure-state')).toBe('expanded');
+    expect(rows[0].querySelector('.codicon-chevron-down')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Event payload' }).textContent).toContain('hello');
+    expect(screen.getByText('Event payload opened for message #1.')).toBeTruthy();
+
+    rows[1].focus();
+    await user.keyboard('{Enter}');
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    expect(rows[1].getAttribute('data-disclosure-state')).toBe('expanded');
+    expect(screen.getByRole('region', { name: 'Event payload' }).textContent).toContain('c-1');
+    const accessibilityResult = await axe.run(view.container, { rules: { 'color-contrast': { enabled: false } } });
+    expect(accessibilityResult.violations).toEqual([]);
+  });
+
+  it('filters raw events by type, mapping, health, terminal state, and text without inventing vendor semantics', () => {
+    const rawEvents = [
+      { sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {}, sse: { event: 'start' }, mappingRuleId: 'start' },
+      { sequence: 2, receivedAt: 2, elapsedMs: 1, protocol: 'sse', raw: '{"kind":"CUSTOM_CARD"}', data: { kind: 'CUSTOM_CARD' }, sse: { event: 'custom_card' } },
+      { sequence: 3, receivedAt: 3, elapsedMs: 2, protocol: 'sse', raw: '{broken', data: '{broken', sse: { event: 'message' }, parseError: 'Invalid JSON' },
+      { sequence: 4, receivedAt: 4, elapsedMs: 3, protocol: 'sse', raw: '{}', data: {}, sse: { event: 'done' }, mappingRuleId: 'done' }
+    ];
+    const terminal = terminalSequences([{ version: 1, type: 'stream.completed', sequence: 4, rawSequence: 4, receivedAt: 4 }]);
+
+    expect(rawEvents.filter((item) => eventMatchesFilters(item, { ...DEFAULT_EVENT_FILTERS, mapping: 'unmatched' }, 'raw', terminal)).map((item) => item.sequence)).toEqual([2, 3]);
+    expect(rawEvents.filter((item) => eventMatchesFilters(item, { ...DEFAULT_EVENT_FILTERS, issue: 'parse-error' }, 'raw', terminal)).map((item) => item.sequence)).toEqual([3]);
+    expect(rawEvents.filter((item) => eventMatchesFilters(item, { ...DEFAULT_EVENT_FILTERS, terminal: 'terminal' }, 'raw', terminal)).map((item) => item.sequence)).toEqual([4]);
+    expect(rawEvents.filter((item) => eventMatchesFilters(item, { ...DEFAULT_EVENT_FILTERS, query: 'custom_card' }, 'raw', terminal)).map((item) => item.sequence)).toEqual([2]);
+  });
+
+  it('keeps separate persistent Raw and Normalized filters and clears the active set', async () => {
+    const user = userEvent.setup();
+    const rawEvents: RawStreamEvent[] = [
+      { sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {}, sse: { event: 'message' }, mappingRuleId: 'message' },
+      { sequence: 2, receivedAt: 2, elapsedMs: 1, protocol: 'sse', raw: '{"kind":"CUSTOM_CARD"}', data: { kind: 'CUSTOM_CARD' }, sse: { event: 'custom_card' } }
+    ];
+    function InspectorHarness(): React.JSX.Element {
+      const [filters, setFilters] = useState<InspectorEventFilters>(() => normalizeInspectorEventFilters({ raw: { ...DEFAULT_EVENT_FILTERS, query: 'custom_card' } }));
+      return <Inspector profile={profile} snapshot={{ ...snapshot, rawEvents }} tab="Raw Events" setTab={vi.fn()} requestPreview={{}} eventFilters={filters} onEventFiltersChange={setFilters} />;
+    }
+    render(<InspectorHarness />);
+
+    let eventList = within(screen.getByRole('listbox', { name: 'Raw Events' }));
+    expect(eventList.getByRole('option', { name: /custom_card/i })).toBeTruthy();
+    expect(eventList.queryByRole('option', { name: /message/i })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Clear event filters' }));
+    eventList = within(screen.getByRole('listbox', { name: 'Raw Events' }));
+    expect(eventList.getAllByRole('option')).toHaveLength(2);
+    await user.selectOptions(screen.getByLabelText('Mapping status'), 'unmatched');
+    eventList = within(screen.getByRole('listbox', { name: 'Raw Events' }));
+    expect(eventList.getAllByRole('option')).toHaveLength(1);
+    expect(eventList.getByRole('option', { name: /custom_card/i })).toBeTruthy();
+  });
+
   it('switches all Profile Configuration sections and persists selection in the parent state', async () => {
     const user = userEvent.setup();
     render(<SettingsHarness />);
@@ -160,6 +400,23 @@ describe('Webview DOM behavior', () => {
     await user.click(screen.getByRole('button', { name: 'Security' }));
     expect(screen.getByRole('heading', { level: 1, name: 'Security' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Security' }).getAttribute('aria-current')).toBe('page');
+  });
+
+  it('patches Assistant streaming effect parameters from Chat UI settings', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    render(<SettingsWorkspace section="chat-ui" onSectionChange={vi.fn()} profile={profile} post={post} />);
+
+    await user.selectOptions(screen.getByLabelText('Assistant streaming effect'), 'dots');
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'streaming', 'effect'], value: 'dots' });
+
+    const speed = screen.getByLabelText('Assistant streaming animation speed');
+    await user.clear(speed);
+    await user.type(speed, '1200');
+    fireEvent.blur(speed);
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'streaming', 'speedMs'], value: 1200 });
+    await user.selectOptions(screen.getByLabelText('Message action toolbar visibility'), 'interaction');
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'messageActionVisibility'], value: 'interaction' });
   });
 
   it('disables network and privileged chat actions in Restricted Mode while leaving local inspection available', async () => {
@@ -181,6 +438,84 @@ describe('Webview DOM behavior', () => {
     expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('exposes import and only enables replay for runs with recorded raw events', () => {
+    const replayable = localRun('replayable', [{ sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {} }]);
+    const unavailable = localRun('unavailable');
+    const { rerender } = render(<Replay runs={[replayable, unavailable]} active={false} trusted={true} />);
+
+    expect((screen.getByRole('button', { name: 'Import run' }) as HTMLButtonElement).disabled).toBe(false);
+    const replayButtons = screen.getAllByRole('button', { name: 'Replay' }) as HTMLButtonElement[];
+    expect(replayButtons).toHaveLength(2);
+    expect(replayButtons[0]?.disabled).toBe(false);
+    expect(replayButtons[1]?.disabled).toBe(true);
+    expect(screen.getByText('Replay starts without recorded chat context.')).toBeTruthy();
+    expect(screen.getByText('Not replayable: raw events were not recorded.')).toBeTruthy();
+
+    rerender(<Replay runs={[replayable]} active={true} trusted={true} />);
+    expect((screen.getByRole('button', { name: 'Replay' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Finish or stop the current request before replaying a run.')).toBeTruthy();
+  });
+
+  it('keeps completed replay progress visible and announced', () => {
+    render(<Replay runs={[localRun('completed', [{ sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {} }])]} replay={{ runId: 'completed', status: 'completed', speed: 1, index: 1, total: 1 }} active={false} trusted={true} />);
+
+    const status = screen.getByRole('status');
+    expect(status.textContent).toContain('Completed');
+    expect(status.textContent).toContain('1 / 1 events');
+    expect((screen.getByRole('progressbar') as HTMLProgressElement).value).toBe(100);
+  });
+
+  it('shows bounded recorded-run request and reducer summary details', async () => {
+    const run: LocalRunSummary = { ...localRun('details', [{ sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {} }]), normalizedEventCount: 4, messageCount: 2, errorCount: 1, request: { method: 'POST', url: 'https://example.test/chat', variantId: 'continuation' }, metrics: { ...localRun('base').metrics, reconnectCount: 2 } };
+    render(<Replay runs={[run]} active={false} trusted={true} />);
+
+    await userEvent.setup().click(screen.getByText('Run details'));
+    expect(screen.getByText('https://example.test/chat')).toBeTruthy();
+    expect(screen.getByText('continuation')).toBeTruthy();
+    expect(screen.getByText('Reconnects').parentElement?.textContent).toContain('2');
+  });
+
+  it('renders safe Markdown and routes links through the host protocol', async () => {
+    const post = vi.fn();
+    const message = { ...assistantMessage('markdown', ''), parts: [{ type: 'markdown', text: '## Result\n\n- **Ready**\n\n[Docs](https://example.test/docs)' }] };
+    render(<MobileChatPreview {...mobileProps({ post, snapshot: { ...snapshot, messages: [message] } })} />);
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Result' })).toBeTruthy();
+    expect(screen.getByText('Ready').closest('strong')).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole('link', { name: 'Docs' }));
+    expect(post).toHaveBeenCalledWith({ type: 'uri.open', uri: 'https://example.test/docs' });
+  });
+
+  it('uses configured action and follow-up overflow limits and fills the composer locally', async () => {
+    const setDraft = vi.fn();
+    const message: ChatMessage = {
+      ...assistantMessage('choices', 'Choose'),
+      actions: [
+        { id: 'fill', label: 'Use draft', actionId: 'input.fill', payload: { text: 'Prepared text' } },
+        { id: 'one', label: 'One', actionId: 'request.send', payload: { text: 'one' } },
+      ],
+      followups: Array.from({ length: 4 }, (_, index) => ({ id: `f-${index}`, label: `Follow ${index}`, prompt: `Prompt ${index}`, behavior: 'fill' as const })),
+    };
+    const configured = { ...profile, ui: { ...profile.ui, components: { responseActions: { visible: true, maxPrimary: 1 }, followups: { visible: true, maxVisible: 2 } } } };
+    render(<MobileChatPreview {...mobileProps({ profile: configured, setDraft, snapshot: { ...snapshot, messages: [message] } })} />);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Use draft' }));
+    expect(setDraft).toHaveBeenCalledWith('Prepared text');
+    expect(screen.getByText('More actions')).toBeTruthy();
+    expect(screen.getByText('More suggestions')).toBeTruthy();
+  });
+
+  it('replaces a form with its acknowledged submitted state', () => {
+    const message: ChatMessage = {
+      ...assistantMessage('form-message', ''),
+      parts: [{ type: 'form', form: { type: 'form', id: 'contact', title: 'Contact', fields: [{ id: 'name', type: 'text', label: 'Name' }], submit: { action: 'request.send', messageTemplate: 'Submit', interactionKind: 'formSubmit' } } }],
+    };
+    render(<MobileChatPreview {...mobileProps({ acceptedForms: new Set(['form-message:contact']), snapshot: { ...snapshot, messages: [message] } })} />);
+
+    expect(screen.getByText('Form submitted.')).toBeTruthy();
+    expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull();
+  });
+
   it('has no detectable axe violations in the representative chat and settings surfaces', async () => {
     const chat = render(<MobileChatPreview {...mobileProps()} />);
     const chatResult = await axe.run(chat.container, { rules: { 'color-contrast': { enabled: false } } });
@@ -190,6 +525,11 @@ describe('Webview DOM behavior', () => {
     const settings = render(<SettingsHarness />);
     const settingsResult = await axe.run(settings.container, { rules: { 'color-contrast': { enabled: false } } });
     expect(settingsResult.violations).toEqual([]);
+    cleanup();
+
+    const runs = render(<Replay runs={[localRun('replayable', [{ sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {} }]), localRun('unavailable')]} active={false} trusted={true} />);
+    const runsResult = await axe.run(runs.container, { rules: { 'color-contrast': { enabled: false } } });
+    expect(runsResult.violations).toEqual([]);
   });
 });
 
@@ -211,6 +551,10 @@ function mobileProps(overrides: Partial<React.ComponentProps<typeof MobileChatPr
     selectedMessageId: undefined,
     ...overrides,
   };
+}
+
+function localRun(id: string, rawEvents?: RawStreamEvent[]): LocalRunSummary {
+  return { id, profileId: profile.id, createdAt: 1, replayable: Boolean(rawEvents?.length), hasSnapshot: false, metrics: { eventCount: rawEvents?.length ?? 0, byteCount: 0, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0 }, result: { type: 'completed' } };
 }
 
 const profile: TurnStageProfile = {

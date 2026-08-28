@@ -1,0 +1,155 @@
+.safe-markdown {
+  min-width: 0;
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size, 13px);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.safe-markdown__paragraph,
+.safe-markdown__heading,
+.safe-markdown__list,
+.safe-markdown__blockquote {
+  margin-block: var(--vscode-spacing-size8, 8px);
+}
+
+.safe-markdown__paragraph {
+  white-space: pre-wrap;
+}
+
+.safe-markdown__heading {
+  color: var(--vscode-editor-foreground);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.safe-markdown__heading:first-child,
+.safe-markdown__paragraph:first-child,
+.safe-markdown__list:first-child,
+.safe-markdown__blockquote:first-child,
+.safe-markdown__code-block:first-child {
+  margin-block-start: 0;
+}
+
+.safe-markdown__heading:last-child,
+.safe-markdown__paragraph:last-child,
+.safe-markdown__list:last-child,
+.safe-markdown__blockquote:last-child,
+.safe-markdown__code-block:last-child {
+  margin-block-end: 0;
+}
+
+.safe-markdown__heading h1,
+.safe-markdown__heading h2,
+.safe-markdown__heading h3,
+.safe-markdown__heading h4,
+.safe-markdown__heading h5,
+.safe-markdown__heading h6 {
+  font-size: inherit;
+}
+
+.safe-markdown__list {
+  padding-inline-start: calc(var(--vscode-spacing-size16, 16px) + var(--vscode-spacing-size8, 8px));
+}
+
+.safe-markdown__list li + li {
+  margin-block-start: var(--vscode-spacing-size4, 4px);
+}
+
+.safe-markdown__blockquote {
+  margin-inline: 0;
+  padding-inline-start: var(--vscode-spacing-size12, 12px);
+  border-inline-start: 2px solid var(--vscode-textBlockQuote-border, var(--vscode-editorWidget-border));
+  color: var(--vscode-textPreformat-foreground, var(--vscode-descriptionForeground));
+}
+
+.safe-markdown__rule {
+  margin-block: var(--vscode-spacing-size12, 12px);
+  border: 0;
+  border-block-start: 1px solid var(--vscode-editorWidget-border);
+}
+
+.safe-markdown__inline-code,
+.safe-markdown__code-block {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.safe-markdown__inline-code {
+  padding-inline: var(--vscode-spacing-size4, 4px);
+  border-radius: 2px;
+  background: var(--vscode-textCodeBlock-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-textPreformat-foreground, var(--vscode-editor-foreground));
+}
+
+.safe-markdown__link {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.safe-markdown__link:hover {
+  color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
+}
+
+.safe-markdown__blocked-link {
+  color: var(--vscode-descriptionForeground);
+}
+
+.safe-markdown__code-block {
+  position: relative;
+  min-width: 0;
+  margin-block: var(--vscode-spacing-size8, 8px);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 2px;
+  background: var(--vscode-textCodeBlock-background, var(--vscode-editorWidget-background));
+}
+
+.safe-markdown__code-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: var(--vscode-spacing-size24, 24px);
+  padding-inline-start: var(--vscode-spacing-size8, 8px);
+  border-block-end: 1px solid var(--vscode-editorWidget-border);
+}
+
+.safe-markdown__language {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, var(--vscode-font-size, 13px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: lowercase;
+}
+
+.safe-markdown__code-block pre {
+  max-width: 100%;
+  margin: 0;
+  padding: var(--vscode-spacing-size8, 8px);
+  color: var(--vscode-editor-foreground);
+  font-size: var(--vscode-editor-font-size, var(--vscode-font-size, 13px));
+  line-height: 1.45;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.safe-markdown__copy-status,
+.safe-markdown__copy-feedback {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.safe-markdown__copy-feedback {
+  color: var(--vscode-errorForeground);
+}

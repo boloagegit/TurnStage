@@ -124,7 +124,9 @@ describe('ProfileValidator', () => {
     const profile = validProfile();
     profile.ui = {
       layout: { preset: 'wide' as 'compact', inspectorPosition: 'left' as 'right', inspectorWidth: 120.5 },
+      streaming: { effect: 'typewriter' as 'caret', speedMs: 399, intensityPercent: 100.5 },
       messageActions: ['request.send'],
+      messageActionVisibility: 'hover' as 'always',
     };
 
     const messages = new ProfileValidator().validate(profile).map((entry) => entry.message);
@@ -133,7 +135,26 @@ describe('ProfileValidator', () => {
       'Unknown UI layout preset: wide.',
       'Unknown Inspector position: left.',
       'Inspector width must be an integer from 240 to 960.',
+      'Unknown Assistant streaming effect: typewriter.',
+      'Assistant streaming speed must be an integer from 400 to 4000 milliseconds.',
+      'Assistant streaming intensity must be an integer from 10 to 100 percent.',
       'Unknown action id: request.send.',
+      'Unknown message action visibility: hover.',
+    ]));
+  });
+
+  it('validates configurable message metric definitions', () => {
+    const profile = validProfile();
+    profile.stream.mappings = [
+      { id: 'missing', match: { event: 'a' }, emit: { type: 'message.metric.updated', metric: {} } },
+      { id: 'invalid', match: { event: 'b' }, emit: { type: 'message.metric.updated', metric: { id: 'latency', value: { path: '$.latency' }, aggregation: 'average', format: 'clock' } } },
+    ];
+
+    const messages = new ProfileValidator().validate(profile).map((entry) => entry.message);
+    expect(messages).toEqual(expect.arrayContaining([
+      'Message metrics require id and value fields.',
+      'Unknown message metric aggregation: average.',
+      'Unknown message metric format: clock.',
     ]));
   });
 

@@ -9,7 +9,8 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const temporaryRoots = [];
 
 try {
-  let vscodeExecutablePath = await downloadAndUnzipVSCode();
+  const requestedVersion = process.env.TURNSTAGE_VSCODE_VERSION?.trim() || undefined;
+  let vscodeExecutablePath = await downloadAndUnzipVSCode(requestedVersion);
   try {
     await access(vscodeExecutablePath);
   } catch {

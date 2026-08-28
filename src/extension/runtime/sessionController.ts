@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { ControlDefinition, InteractionContext, LocalRun, NormalizedEvent, OpeningDefinition, PreparedRequest, RawStreamEvent, RemoteSessionReference, RuntimeErrorData, SessionSnapshot, TurnResult, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
+import type { ChatMessage, ControlDefinition, InteractionContext, LocalRun, LocalRunSummary, MetricsSnapshot, NormalizedEvent, OpeningDefinition, PreparedRequest, RawStreamEvent, RemoteSessionReference, RuntimeErrorData, SessionSnapshot, TurnResult, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
 import { MappingEngine } from '../mapping/mappingEngine';
 import { RequestBuilder } from '../request/requestBuilder';
 import { getPath } from '../request/templateResolver';
@@ -7,7 +7,7 @@ import { redactKnownSecrets, type SecretService } from '../security/security';
 import { HttpStreamTransport } from '../transport/transport';
 import { TurnStageError, errors } from '../errors';
 import { fetchWithRedirectPolicy } from '../transport/fetchPolicy';
-import { LocalRunRepository } from '../history/localRunRepository';
+import { LocalRunRepository, type LocalRunImportResult } from '../history/localRunRepository';
 import { RemoteSessionRepository } from '../history/remoteSessionRepository';
 import { EventBuffer } from './eventBuffer';
 import { MetricsCollector } from './metrics';
@@ -15,6 +15,7 @@ import { createSnapshot, reduceEvent } from './reducer';
 import { ReplayEngine, type ReplaySpeed } from '../replay/replayEngine';
 import { selectOpeningFallback } from '../opening/fallbackResolver';
 import { localize } from '../l10n';
+import { logAt } from '../logging';
 
 export class SessionController implements vscode.Disposable {
   snapshot: SessionSnapshot;
@@ -25,9 +26,13 @@ export class SessionController implements vscode.Disposable {
   private metrics = new MetricsCollector();
   private readonly mapping: MappingEngine;
   private readonly rawBuffer: EventBuffer<RawStreamEvent>;
+  private readonly maxBufferedEvents: number;
+  private readonly maxConversationMessages: number;
   private runs: LocalRun[] = [];
   private lastInteraction?: { text: string; interaction: InteractionContext };
   private replayEngine?: ReplayEngine;
+  private replayMetrics?: MetricsSnapshot;
+  private currentTurn?: { clientRequestId: string; startedAt: number };
   private environmentSecretValues: string[] = [];
   private readonly remoteSessionRepository: RemoteSessionRepository;
 
@@ -45,7 +50,9 @@ export class SessionController implements vscode.Disposable {
     this.remoteSessionRepository = new RemoteSessionRepository(context);
     this.mapping = new MappingEngine(profile.stream);
     const config = vscode.workspace.getConfiguration('turnstage');
-    this.rawBuffer = new EventBuffer(config.get('maxBufferedEvents', 5000), config.get('maxBufferedBytes', 10 * 1024 * 1024));
+    this.maxBufferedEvents = config.get('maxBufferedEvents', 5000);
+    this.maxConversationMessages = config.get('maxConversationMessages', 500);
+    this.rawBuffer = new EventBuffer(this.maxBufferedEvents, config.get('maxBufferedBytes', 10 * 1024 * 1024));
     for (const control of profile.controls ?? []) {
       if (control.persist === 'secret' && !vscode.workspace.isTrusted) continue;
       this.controls[control.id] = this.persistedControl(control) ?? control.default;
@@ -62,12 +69,23 @@ export class SessionController implements vscode.Disposable {
     return this.runs;
   }
   getRuns(): LocalRun[] { return this.runs; }
+  getRunSummaries(): LocalRunSummary[] { return this.runs.map((run) => ({ id: run.id, profileId: run.profileId, createdAt: run.createdAt, metrics: structuredClone(run.metrics), result: structuredClone(run.result), replayable: Boolean(run.rawEvents?.length), hasSnapshot: Boolean(run.snapshot), rawEventCount: run.rawEvents?.length ?? 0, normalizedEventCount: run.normalizedEvents?.length ?? 0, messageCount: run.snapshot?.messages.length ?? 0, errorCount: run.snapshot?.errors.length ?? (run.result.type === 'failed' ? 1 : 0), request: run.request ? { method: run.request.method, url: run.request.url, variantId: run.request.variantId } : undefined })); }
   addBuiltInFixture(rawEvents: RawStreamEvent[]): void {
     const fixtureSnapshot = createSnapshot(vscode.workspace.isTrusted); fixtureSnapshot.controls = this.publicControls();
     const safeRawEvents = rawEvents.map((event) => this.publicRawEvent(event));
-    const run: LocalRun = { id: `fixture-${this.profile.id}`, profileId: this.profile.id, createdAt: 0, rawEvents: safeRawEvents, normalizedEvents: [], snapshot: fixtureSnapshot, metrics: { eventCount: rawEvents.length, byteCount: rawEvents.reduce((total, item) => total + Buffer.byteLength(item.raw), 0), parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0 }, result: { type: 'completed' } };
+    const run: LocalRun = { id: `fixture-${this.profile.id}`, profileId: this.profile.id, createdAt: 0, rawEvents: safeRawEvents, normalizedEvents: [], snapshot: fixtureSnapshot, metrics: { eventCount: rawEvents.length, byteCount: rawEvents.reduce((total, item) => total + Buffer.byteLength(item.raw), 0), parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0, reconnectCount: 0 }, result: { type: 'completed' } };
     const safeRun = this.publicRun(run);
     this.runs = [safeRun, ...this.runs.filter((item) => item.id !== safeRun.id)]; this.changed();
+  }
+  async importRun(): Promise<LocalRunImportResult | undefined> {
+    if (isActive(this.snapshot.turnState)) throw new Error(localize('Finish or stop the current request before importing a run.'));
+    const retention = this.profile.history?.localRuns?.maxRuns ?? vscode.workspace.getConfiguration('turnstage').get('runRetention', 20);
+    const imported = await this.runRepository.import(this.profile.id, retention);
+    if (!imported) return undefined;
+    const safeRun = this.publicRun(imported.run);
+    this.runs = [safeRun, ...this.runs.filter((item) => item.id !== safeRun.id)].slice(0, retention);
+    this.changed(true);
+    return { ...imported, run: safeRun };
   }
   async setControl(id: string, value: unknown): Promise<void> {
     const definition = this.profile.controls?.find((item) => item.id === id); if (!definition) return;
@@ -107,7 +125,7 @@ export class SessionController implements vscode.Disposable {
       if (typeof message !== 'string') { const fallback = selectOpeningFallback(opening, data, { status: response.status, missingMessage: true }); if (fallback) { this.useOpeningFallback(fallback); return; } throw new TurnStageError('OpeningError', localize('Opening response did not contain a message.')); }
       this.snapshot.opening = this.publicValue({ message, starters: Array.isArray(starters) ? starters as any : [] }); this.snapshot.sessionState = 'ready';
     } catch (error) {
-      this.log.appendLine(`[opening] ${this.publicValue(safeMessage(error))}`);
+      logAt(this.log, 'error', `[opening] ${this.publicValue(safeMessage(error))}`);
       const type = error instanceof TurnStageError ? error.type : 'NetworkError'; const fallback = selectOpeningFallback(opening, undefined, { errorType: type }) ?? (opening.failurePolicy?.useFallbackOnNetworkError ? opening.fallbacks?.[0] : undefined);
       if (opening.failurePolicy?.useFallbackOnNetworkError && fallback) this.useOpeningFallback(fallback);
       else { this.snapshot.sessionState = 'failed'; this.snapshot.errors.push(this.publicValue(toError(error))); }
@@ -120,30 +138,39 @@ export class SessionController implements vscode.Disposable {
   async send(text: string, interaction: InteractionContext): Promise<void> {
     text = text.trim(); if (!text || isActive(this.snapshot.turnState)) return;
     if (!vscode.workspace.isTrusted) { this.snapshot.errors.push(toError(errors.trust())); this.changed(); return; }
-    this.snapshot.turnState = 'submitting'; this.snapshot.errors = []; this.finalized = false; this.lastInteraction = { text, interaction }; this.metrics = new MetricsCollector(); this.metrics.start();
     const clientRequestId = crypto.randomUUID();
+    const startedAt = Date.now();
+    this.currentTurn = { clientRequestId, startedAt };
+    this.rawBuffer.clear();
+    this.snapshot.rawEvents = [];
+    this.snapshot.normalizedEvents = [];
+    this.snapshot.droppedEventCount = 0;
+    this.snapshot.droppedNormalizedEventCount = 0;
+    this.snapshot.turnState = 'submitting'; this.snapshot.errors = []; this.finalized = false; this.lastInteraction = { text, interaction }; this.metrics = new MetricsCollector(); this.metrics.start();
     try {
-      const request = await this.requestBuilder().build(this.profile.conversation.send, this.contextFor(text, interaction, clientRequestId));
+      const request = await this.requestBuilder().build(this.profile.conversation.send, this.contextFor(text, interaction, clientRequestId, startedAt));
       this.registerRequestSecrets(request);
       this.requestPreview = this.publicValue(request.redacted);
       this.snapshot.messages.push({ id: `user-${clientRequestId}`, role: 'user', status: 'completed', createdAt: Date.now(), completedAt: Date.now(), parts: [{ type: 'text', text }], citations: [], actions: [], followups: [] });
-      this.snapshot.messages.push({ id: `assistant-${clientRequestId}`, role: 'assistant', status: 'pending', createdAt: Date.now(), parts: [], citations: [], actions: [], followups: [], metadata: { clientRequestId } });
+      this.snapshot.messages.push({ id: `assistant-${clientRequestId}`, role: 'assistant', status: 'pending', createdAt: Date.now(), parts: [], citations: [], actions: [], followups: [], timing: {}, metadata: { clientRequestId } });
+      this.boundSnapshotCollections();
       this.snapshot.turnState = 'waitingStart'; this.changed(); this.abortController = new AbortController();
       const transport = new HttpStreamTransport();
       const result = await transport.start(request, this.profile.stream.transport === 'fixture' ? 'ndjson' : this.profile.stream.transport as any, {
         onHeaders: (latency) => { this.metrics.headers(latency); this.changed(); },
         onChunk: (bytes, latency) => { this.metrics.chunk(bytes, latency); },
-        onEvent: async (raw) => {
-          await this.acceptRaw(raw);
-          return !this.finalized;
-        },
-      }, this.abortController.signal);
+        onEvent: (raw) => this.acceptRaw(raw),
+      }, this.abortController.signal, this.profile.stream.dataFormat ?? 'json');
+      this.metrics.reconnectCount(result.reconnectCount ?? 0);
       if (result.aborted) await this.finalizeTurn({ type: 'aborted', reason: 'user_cancel' });
       else if (!this.finalized) {
         if (this.profile.stream.unexpectedEndPolicy === 'completeWithWarning') { this.snapshot.errors.push({ type: 'UnexpectedStreamEndWarning', message: localize('The stream ended without a terminal event.') }); await this.finalizeTurn({ type: 'completed' }); }
         else await this.finalizeTurn({ type: 'failed', error: toError(errors.unexpectedEnd()) });
       }
-    } catch (error) { await this.finalizeTurn({ type: error instanceof TurnStageError && error.type === 'UserAbortError' ? 'aborted' : 'failed', ...(error instanceof TurnStageError && error.type === 'UserAbortError' ? { reason: 'user_cancel' } : { error: toError(error) }) } as TurnResult); }
+    } catch (error) {
+      if (error instanceof TurnStageError && typeof error.details.reconnectCount === 'number') this.metrics.reconnectCount(error.details.reconnectCount);
+      await this.finalizeTurn({ type: error instanceof TurnStageError && error.type === 'UserAbortError' ? 'aborted' : 'failed', ...(error instanceof TurnStageError && error.type === 'UserAbortError' ? { reason: 'user_cancel' } : { error: toError(error) }) } as TurnResult);
+    }
   }
 
   async retry(): Promise<void> { if (this.lastInteraction) await this.send(this.lastInteraction.text, { ...this.lastInteraction.interaction, kind: 'retry' }); }
@@ -151,7 +178,7 @@ export class SessionController implements vscode.Disposable {
     if (!isActive(this.snapshot.turnState)) return; this.snapshot.turnState = 'stopping'; this.changed(); this.abortController?.abort(errors.abort());
     const stop = this.profile.conversation.stop;
     if (stop?.strategy === 'abortThenRequest' && stop.request && vscode.workspace.isTrusted) {
-      const stopContext = this.contextFor('', { kind: 'manual' }); const missing = (stop.requiredContext ?? []).filter((path) => getPath(stopContext, path) === undefined);
+      const stopContext = this.contextFor('', { kind: 'manual' }, this.currentTurn?.clientRequestId, this.currentTurn?.startedAt); const missing = (stop.requiredContext ?? []).filter((path) => getPath(stopContext, path) === undefined);
       if (missing.length) this.snapshot.errors.push({ type: 'RemoteStopWarning', message: localize('Local stream stopped. Remote stop was skipped because context is missing: {context}.', { context: missing.join(', ') }) });
       else try {
         const request = await this.requestBuilder().build(stop.request, stopContext);
@@ -177,11 +204,20 @@ export class SessionController implements vscode.Disposable {
     this.snapshot.messages.push({ id: `remote-reference-${reference.conversationId}`, role: 'system', status: 'completed', createdAt: Date.now(), completedAt: Date.now(), parts: [{ type: 'text', text: localize('Previous messages were not loaded. This profile only stores a remote session reference.') }], citations: [], actions: [], followups: [] }); this.changed(true);
   }
 
-  replay(runId: string, speed: ReplaySpeed = 1): void {
-    if (isActive(this.snapshot.turnState)) return; const run = this.runs.find((item) => item.id === runId); if (!run) return;
-    this.replayEngine?.dispose(); const remoteSessions = this.publicRemoteSessions(this.snapshot.remoteSessions ?? []); this.snapshot = createSnapshot(vscode.workspace.isTrusted); this.refreshSnapshotControls(); this.snapshot.remoteSessions = remoteSessions; this.snapshot.sessionState = 'ready'; this.snapshot.turnState = 'streaming'; this.finalized = false; this.metrics = new MetricsCollector(); this.metrics.start();
+  replay(runId: string, speed: ReplaySpeed = 1): 'started' | 'active' | 'notFound' | 'unavailable' {
+    if (isActive(this.snapshot.turnState)) return 'active';
+    const run = this.runs.find((item) => item.id === runId);
+    if (!run) return 'notFound';
+    if (!run.rawEvents?.length) return 'unavailable';
+    this.replayEngine?.dispose();
+    this.snapshot = this.replayStartingSnapshot(run);
+    this.replayMetrics = structuredClone(run.metrics);
+    this.requestPreview = run.request ? structuredClone(run.request) : undefined;
+    this.rawBuffer.clear();
+    this.finalized = false; this.metrics = new MetricsCollector(); this.metrics.start();
     this.replayEngine = new ReplayEngine(run.rawEvents ?? [], speed, (raw) => this.acceptRaw(raw), (state) => { this.snapshot.replay = { runId, ...state }; this.changed(); if (state.status === 'completed' && !this.finalized) void this.finalizeTurn(run.result, false); });
     void this.replayEngine.play();
+    return 'started';
   }
   pauseReplay(): void { this.replayEngine?.pause(); }
   resumeReplay(): void { this.replayEngine?.resume(); }
@@ -198,8 +234,18 @@ export class SessionController implements vscode.Disposable {
       if (result.type !== 'completed' && !preservePartial) message.parts = [];
       message.status = result.type; message.completedAt = Date.now(); for (const part of message.parts) if ((part.type === 'progress' || part.type === 'tool-call') && ['running', 'pending'].includes(String(part.status))) part.status = result.type === 'completed' ? 'completed' : result.type; if (result.type === 'failed' && this.profile.errorPolicy?.showErrorPart !== false) message.parts.push({ type: 'error', text: result.error.message });
     }
+    if (result.type === 'aborted' && this.profile.conversation.stop?.appendSystemNotice && ['user_cancel', 'remote_abort'].includes(result.reason)) {
+      const now = Date.now();
+      this.snapshot.messages.push({ id: `system-${crypto.randomUUID()}`, role: 'system', status: 'completed', createdAt: now, completedAt: now, parts: [{ type: 'text', text: localize('Conversation stopped.') }], citations: [], actions: [], followups: [] });
+    }
     if (result.type === 'failed' && this.profile.errorPolicy?.keepConversationId === false) this.snapshot.conversationId = undefined;
-    if (result.type === 'failed') this.snapshot.errors.push(result.error); this.snapshot.turnState = result.type; this.metrics.finish(result.type === 'aborted' ? result.reason : undefined); this.snapshot.metrics = { ...this.metrics.value }; this.changed(true);
+    if (result.type === 'failed') this.snapshot.errors.push(result.error);
+    this.snapshot.turnState = result.type;
+    this.metrics.finish(result.type === 'aborted' ? result.reason : undefined);
+    this.snapshot.metrics = this.replayMetrics ? structuredClone(this.replayMetrics) : { ...this.metrics.value };
+    this.syncActiveAssistantTiming(message);
+    this.replayMetrics = undefined;
+    this.boundSnapshotCollections(); this.changed(true);
     if (this.profile.history?.remoteSessions?.mode === 'referenceOnly' && this.snapshot.conversationId) {
       const reference: RemoteSessionReference = { conversationId: this.snapshot.conversationId, title: this.snapshot.title ?? this.snapshot.conversationId, createdAt: Date.now(), actorId: this.publicActorId(), environmentId: this.environment.id };
       this.snapshot.remoteSessions = this.publicRemoteSessions(await this.remoteSessionRepository.save(this.remoteSessionKey(), reference)); this.changed();
@@ -213,6 +259,7 @@ export class SessionController implements vscode.Disposable {
       const safeRun = this.publicRun(run);
       const retention = this.profile.history?.localRuns?.maxRuns ?? vscode.workspace.getConfiguration('turnstage').get('runRetention', 20); await this.runRepository.save(safeRun, retention); this.runs = [safeRun, ...this.runs].slice(0, retention); this.changed();
     }
+    this.currentTurn = undefined;
   }
 
   dispose(): void { void this.disposeAndWait(); }
@@ -223,29 +270,57 @@ export class SessionController implements vscode.Disposable {
     await this.finalizeTurn({ type: 'aborted', reason: 'panel_disposed' });
   }
 
-  private async acceptRaw(raw: RawStreamEvent): Promise<void> {
+  private async acceptRaw(raw: RawStreamEvent): Promise<boolean> {
     // A backend can accidentally emit duplicate terminal frames or continue
     // writing after completion. Once the turn is finalized, its persisted run
     // and visible snapshot must remain immutable.
-    if (this.finalized) return;
+    if (this.finalized) return false;
     this.metrics.raw(raw);
     if (raw.data === (this.profile.stream.doneValue ?? '[DONE]')) {
       this.rawBuffer.push(this.publicRawEvent(raw)); this.snapshot.rawEvents = this.rawBuffer.all(); this.snapshot.droppedEventCount = this.rawBuffer.dropped;
-      await this.finalizeTurn({ type: 'completed' }); return;
+      await this.finalizeTurn({ type: 'completed' }); return false;
     }
     const result = this.mapping.map(raw); raw.mappingRuleId = result.ruleIds.join(', ') || undefined; raw.mappingError = result.errors.map((item) => `${item.ruleId}: ${item.message}`).join('; ') || undefined;
     this.rawBuffer.push(this.publicRawEvent(raw)); this.snapshot.rawEvents = this.rawBuffer.all(); this.snapshot.droppedEventCount = this.rawBuffer.dropped;
     if (result.errors.length) { this.metrics.mappingError(result.errors.length); for (const error of result.errors) this.snapshot.errors.push({ type: 'MappingError', message: error.message, ruleId: error.ruleId, rawSequence: raw.sequence }); }
     if (!result.events.length) this.metrics.unmatched();
-    for (const event of result.events) { this.metrics.normalized(event); reduceEvent(this.snapshot, this.publicNormalizedEvent(event)); if (event.type === 'stream.completed') { await this.finalizeTurn({ type: 'completed' }); return; } if (event.type === 'stream.failed') { await this.finalizeTurn({ type: 'failed', error: this.snapshot.errors.at(-1) ?? { type: 'StreamError', message: localize('The stream failed.') } }); return; } if (event.type === 'stream.aborted') { await this.finalizeTurn({ type: 'aborted', reason: 'remote_abort' }); return; } }
-    this.snapshot.metrics = { ...this.metrics.value }; this.changed();
+    for (const event of result.events) {
+      this.metrics.normalized(event);
+      reduceEvent(this.snapshot, this.publicNormalizedEvent(event));
+      this.syncActiveAssistantTiming();
+      this.boundSnapshotCollections();
+      if (event.type === 'stream.completed') { await this.finalizeTurn({ type: 'completed' }); return false; }
+      if (event.type === 'stream.failed') { await this.finalizeTurn({ type: 'failed', error: this.snapshot.errors.at(-1) ?? { type: 'StreamError', message: localize('The stream failed.') } }); return false; }
+      if (event.type === 'stream.aborted') { await this.finalizeTurn({ type: 'aborted', reason: 'remote_abort' }); return false; }
+    }
+    this.snapshot.metrics = { ...this.metrics.value }; this.changed(); return true;
   }
 
-  private contextFor(text: string, interaction: InteractionContext, clientRequestId = crypto.randomUUID()): Record<string, unknown> {
+  private contextFor(text: string, interaction: InteractionContext, clientRequestId = this.currentTurn?.clientRequestId ?? crypto.randomUUID(), startedAt = this.currentTurn?.startedAt ?? Date.now()): Record<string, unknown> {
     const messages = this.snapshot.messages; const lastUser = [...messages].reverse().find((item) => item.role === 'user'); const lastAssistant = [...messages].reverse().find((item) => item.role === 'assistant');
-    return { input: { text }, conversation: { id: this.snapshot.conversationId, messages, lastUserMessage: lastUser, lastAssistantMessage: lastAssistant }, opening: this.snapshot.opening, controls: this.templateControls(), env: this.environment.variables, profile: { id: this.profile.id, name: this.profile.name }, workspace: { folder: vscode.workspace.getWorkspaceFolder(this.profileUri)?.uri.toString() }, runtime: { simulationContext: {} }, turn: { clientRequestId, assistantMessageId: lastAssistant?.id, interaction } };
+    return { input: { text }, conversation: { id: this.snapshot.conversationId, messages, lastUserMessage: lastUser, lastAssistantMessage: lastAssistant }, opening: this.snapshot.opening, controls: this.templateControls(), env: this.environment.variables, profile: { id: this.profile.id, name: this.profile.name }, workspace: { folder: vscode.workspace.getWorkspaceFolder(this.profileUri)?.uri.toString() }, runtime: { simulationContext: {} }, turn: { clientRequestId, startedAt, assistantMessageId: lastAssistant?.id, interaction } };
   }
-  private requestBuilder(): RequestBuilder { return new RequestBuilder((name) => this.secrets.get(this.environment.secretReferences?.[name] ?? name)); }
+  private boundSnapshotCollections(): void {
+    const normalizedOverflow = Math.max(0, this.snapshot.normalizedEvents.length - this.maxBufferedEvents);
+    if (normalizedOverflow) {
+      this.snapshot.normalizedEvents.splice(0, normalizedOverflow);
+      this.snapshot.droppedNormalizedEventCount = (this.snapshot.droppedNormalizedEventCount ?? 0) + normalizedOverflow;
+    }
+    const messageOverflow = Math.max(0, this.snapshot.messages.length - this.maxConversationMessages);
+    if (messageOverflow) {
+      this.snapshot.messages.splice(0, messageOverflow);
+      this.snapshot.droppedMessageCount = (this.snapshot.droppedMessageCount ?? 0) + messageOverflow;
+    }
+    if (this.snapshot.errors.length > 500) this.snapshot.errors.splice(0, this.snapshot.errors.length - 500);
+  }
+  private requestBuilder(): RequestBuilder {
+    return new RequestBuilder(async (name) => {
+      const storageName = this.environment.secretReferences?.[name] ?? name;
+      const value = await this.secrets.get(storageName);
+      if (value === undefined && storageName !== name) throw errors.missingSecret(storageName);
+      return value;
+    });
+  }
   private useOpeningFallback(selected?: NonNullable<OpeningDefinition['fallbacks']>[number]): void { const fallback = selected ?? this.profile.opening?.fallbacks?.[0]; if (fallback) { this.snapshot.opening = { message: fallback.message, starters: fallback.starters ?? [] }; this.snapshot.sessionState = 'ready'; } else this.snapshot.sessionState = 'failed'; this.changed(); }
   private legacyControlKey(id: string): string { const workspace = vscode.workspace.getWorkspaceFolder(this.profileUri)?.uri.toString() ?? 'no-workspace'; return `turnstage.control.${workspace}.${this.profile.id}.${id}`; }
   private workspaceControlKey(id: string): string { return this.legacyControlKey(id); }
@@ -306,6 +381,34 @@ export class SessionController implements vscode.Disposable {
   }
 
   private refreshSnapshotControls(): void { this.snapshot.controls = this.publicControls(); }
+  private syncActiveAssistantTiming(message?: ChatMessage): void {
+    const target = message ?? [...this.snapshot.messages].reverse().find((item) => item.role === 'assistant' && ['pending', 'streaming'].includes(item.status));
+    if (!target) return;
+    const { ttft, totalDuration } = this.snapshot.turnState === 'completed' || this.snapshot.turnState === 'failed' || this.snapshot.turnState === 'aborted'
+      ? this.snapshot.metrics
+      : this.metrics.value;
+    target.timing = {
+      ...(ttft !== undefined ? { ttft } : {}),
+      ...(totalDuration !== undefined ? { totalDuration } : {}),
+    };
+  }
+  private replayStartingSnapshot(run: LocalRun): SessionSnapshot {
+    const currentRemoteSessions = this.publicRemoteSessions(this.snapshot.remoteSessions ?? []);
+    const replaySnapshot = createSnapshot(vscode.workspace.isTrusted);
+    const recorded = run.snapshot;
+    if (recorded) {
+      const lastUserIndex = recorded.messages.map((message) => message.role).lastIndexOf('user');
+      replaySnapshot.messages = lastUserIndex >= 0 ? structuredClone(recorded.messages.slice(0, lastUserIndex + 1)) : [];
+      replaySnapshot.opening = recorded.opening ? structuredClone(recorded.opening) : undefined;
+      replaySnapshot.conversationId = recorded.conversationId;
+      replaySnapshot.title = recorded.title;
+    }
+    replaySnapshot.controls = this.publicControls();
+    replaySnapshot.remoteSessions = currentRemoteSessions;
+    replaySnapshot.sessionState = 'ready';
+    replaySnapshot.turnState = 'streaming';
+    return replaySnapshot;
+  }
   private publicControls(values: Record<string, unknown> = this.controls): Record<string, unknown> {
     const secretIds = new Set((this.profile.controls ?? []).filter((definition) => definition.persist === 'secret').map((definition) => definition.id));
     return Object.fromEntries(Object.entries(values ?? {}).filter(([id]) => !secretIds.has(id)));

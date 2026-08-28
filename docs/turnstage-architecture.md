@@ -165,6 +165,11 @@ active turn. It checks Workspace Trust, sets `submitting`, creates a client
 request ID, builds the selected request variant, adds a completed user message
 and pending assistant message, then starts `HttpStreamTransport`.
 
+Raw and normalized event collections, their drop counters, and turn metrics are
+reset before every accepted send. Conversation messages and the current
+conversation ID remain available for multi-turn requests, while every recorded
+run contains only the events from that turn.
+
 Transport callbacks update metrics and pass each raw event to `acceptRaw()`.
 `acceptRaw()` appends to the bounded raw buffer, maps it, records mapping
 diagnostics, reduces normalized events, and observes terminal normalized events.
@@ -175,6 +180,8 @@ All turn termination paths converge on `finalizeTurn(result)`:
   unexpected stream end, and panel disposal;
 - assistant status changes to completed/failed/aborted;
 - pending progress and tool parts are closed;
+- configured user/remote aborts can append a completed system notice after the
+  partial assistant content;
 - failed results append an error part unless `showErrorPart` is false;
 - metrics are finished and the snapshot is published;
 - a local run is stored unless `history.localRuns.enabled` is false.
@@ -267,10 +274,14 @@ Every message has:
 
 Webview-to-host message types include `webview.ready`, profile validation/text
 operations, control changes, session/request/conversation operations,
-`citation.open`, `action.invoke`, form operations, and run replay/export.
+`citation.open`, `action.invoke`, form operations, and run replay/import/export.
 Host-to-Webview types include `host.ready`, `workspace.section`, `profile.snapshot`,
-`profile.validation`, `session.snapshot`, `request.error`, `run.exported`, and
-`workspaceTrust.changed`.
+`profile.validation`, `session.snapshot`, `request.error`, `run.imported`,
+`run.exported`, and `workspaceTrust.changed`.
+
+`session.snapshot` carries only bounded local-run summaries for the Runs list;
+raw events, normalized events, requests, and recorded chat snapshots remain in
+the Extension Host and are resolved by run ID for replay or export.
 
 The host validates the envelope and instance ID with `isWebviewMessage`; this
 is a shallow discriminant check, not a full runtime schema validation of every
@@ -290,10 +301,13 @@ Tree-selected section, draft, inspector tab, split percentage, and linked
 message/event selection.
 
 `LocalRunRepository` stores per-profile JSON at the extension's
-`globalStorageUri/runs/<profileId>.json`, applies retention, and exports a run
-through a user-selected save dialog. A replay replaces the current snapshot,
-feeds recorded raw events through the same mapping/reducer path, and finishes
-using the stored result. It never calls the backend. `ReplayEngine` preserves
+`globalStorageUri/runs/<profileId>.json`, applies retention, and imports or
+exports a versioned run envelope through user-selected file dialogs. Import is
+bounded, accepts legacy raw-run exports, requires the current profile ID, and
+assigns a new ID on collision. A replay restores the recorded snapshot only
+through its last user message, feeds recorded raw events through the same
+mapping/reducer path, and finishes using the stored result. It never calls the
+backend. Runs without raw events cannot be replayed. `ReplayEngine` preserves
 recorded elapsed-time gaps at 0.25–4× speed and supports pause, resume, step,
 and stop while publishing progress in the session snapshot.
 
@@ -309,11 +323,13 @@ profiles come from the configured workspace glob; user profiles come from
 `globalStorageUri/configuration/profiles`. Every profile expands to
 Test and seven settings sections; selecting a child opens the same Custom
 Editor and the host sends `workspace.section` to select its surface. There is
-no duplicate navigation sidebar inside the Webview. **Test** places a phone-shaped
+no duplicate navigation sidebar inside the Webview. **Test** places a device
 chat preview on the left and a resizable Debug inspector on the right. The
-preview supports 390×844, 375×812, and 430×932 viewports and renders controls,
-opening/starter chips, messages, progress, tools, forms, citations, follow-ups,
-actions, and the composer. Debug provides Request, Raw Events, Normalized,
+preview provides Responsive plus Mobile (375×812, 390×844, 430×932), Tablet
+(768×1024, 1024×768), and Web (1280×720, 1440×900) sizes. Mobile and Tablet
+retain device chrome; Web uses a centered readable conversation column. Every
+mode renders controls, opening/starter chips, messages, progress, tools, forms,
+citations, follow-ups, actions, and the composer. Debug provides Request, Raw Events, Normalized,
 Metrics, Errors, and Runs views. Reducer-owned raw sequence metadata links
 assistant messages with raw/normalized events in both directions.
 
@@ -340,19 +356,22 @@ These are current implementation facts, not benchmark conclusions:
 - Profile-configured component visibility and active-turn allow/disable lists
   are applied by the Webview. Required stop context is checked before the
   remote stop request; a missing value produces a non-blocking warning.
-- `EventBatcher` exists as a reusable class but the editor currently batches
-  snapshots with a single debounced timer. Terminal updates bypass the timer
-  for an immediate flush; there is no batch-size cap in that path.
-- Raw events are bounded by event/byte limits; normalized events, messages, and
-  run JSON do not have equivalent global memory limits. Messages use browser
+- The editor batches snapshots through `EventBatcher` at the configured
+  interval with a maximum of 50 changes. Terminal updates bypass the timer for
+  an immediate flush.
+- Raw and normalized events are bounded by event limits, raw events also have
+  a byte limit, and messages have a conversation limit. Run JSON does not have
+  an equivalent global byte limit. Messages use browser
   content visibility rather than a fully windowed list. Stable per-message
   citation numbering and late citation metadata upsert are implemented. The
-  inspector supports text search and event-type filtering.
+  inspector supports persistent text, event-type, mapping-status, event-health,
+  and terminal-event filtering. Unknown vendor events remain available in Raw
+  Events and do not imply a generic renderer.
 - Disabling raw-event recording makes that run unavailable for replay; metrics,
   request metadata, and the terminal result remain available.
-- Reconnect attempts are not currently included in run metrics. `json` still
-  uses the line-oriented parser; `text-stream` has a decoded-chunk path but no
-  record framing beyond transport chunks.
+- Reconnect count is included in run metrics, but accumulated reconnect delay
+  is not. `json` buffers one bounded complete document; `text-stream` has a
+  decoded-chunk path but no record framing beyond transport chunks.
 
 ## Verification and measurements
 

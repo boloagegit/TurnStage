@@ -18,7 +18,7 @@ export interface TurnStageProfile {
   };
   errorPolicy?: { preservePartialContent?: boolean; showErrorPart?: boolean; keepConversationId?: boolean; allowContinuation?: boolean; releaseAllLocks?: boolean };
   security?: { allowedUriSchemes?: string[]; allowedDomains?: string[]; allowedCommands?: string[] };
-  metrics?: { enabled?: string[] };
+  metrics?: { enabled?: string[]; messageEnabled?: string[] };
 }
 
 export interface ControlDefinition {
@@ -105,9 +105,11 @@ export interface StreamDefinition {
 export interface UiDefinition {
   layout?: { preset?: 'chat-only' | 'split-inspector' | 'chat-with-metrics' | 'compact'; inspectorPosition?: 'right' | 'bottom'; inspectorWidth?: number };
   composer?: { placeholder?: string; multiline?: boolean; enterBehavior?: 'send' | 'newline'; shiftEnterBehavior?: 'send' | 'newline'; showStopWhileStreaming?: boolean };
+  streaming?: { effect?: 'none' | 'caret' | 'dots' | 'shimmer'; speedMs?: number; intensityPercent?: number };
   locks?: { whileTurnActive?: { disable?: string[]; allow?: string[] } };
   components?: Record<string, { visible?: boolean; label?: string; collapsible?: boolean; defaultCollapsed?: boolean; [key: string]: unknown }>;
   messageActions?: string[];
+  messageActionVisibility?: 'always' | 'interaction';
 }
 
 export interface TurnStageEnvironment {
@@ -173,6 +175,23 @@ export interface FormDefinition { type: 'form'; id: string; title: string; field
 export interface FormField { id: string; type: 'text' | 'textarea' | 'tel' | 'email' | 'number' | 'select' | 'checkbox'; label: string; required?: boolean; maxLength?: number; pattern?: string; options?: Array<{ label: string; value: string }> }
 
 export interface MessagePart { type: string; text?: string; [key: string]: unknown }
+export type MessageMetricFormat = 'number' | 'duration' | 'bytes' | 'percent' | 'text';
+export type MessageMetricAggregation = 'first' | 'last' | 'sum' | 'min' | 'max' | 'count';
+export interface MessageMetric {
+  id: string;
+  label?: string;
+  value: string | number | boolean;
+  unit?: string;
+  format?: MessageMetricFormat;
+  aggregation?: MessageMetricAggregation;
+  sampleCount?: number;
+}
+export interface MessageTiming {
+  /** Time from request start until the first rendered text or markdown delta. */
+  ttft?: number;
+  /** Time from request start until the turn reaches a terminal state. */
+  totalDuration?: number;
+}
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
@@ -183,6 +202,9 @@ export interface ChatMessage {
   citations: Citation[];
   actions: ResponseAction[];
   followups: Followup[];
+  /** TurnStage-owned timing values. Kept separate from server-mapped custom metrics. */
+  timing?: MessageTiming;
+  metrics?: MessageMetric[];
   metadata?: JsonObject;
 }
 
@@ -201,6 +223,8 @@ export interface MetricsSnapshot {
   parseErrorCount: number;
   mappingErrorCount: number;
   unmatchedEventCount: number;
+  /** Number of reconnect attempts made after the initial request attempt. */
+  reconnectCount?: number;
   abortReason?: string;
 }
 
@@ -217,6 +241,8 @@ export interface SessionSnapshot {
   metrics: MetricsSnapshot;
   errors: RuntimeErrorData[];
   droppedEventCount: number;
+  droppedNormalizedEventCount?: number;
+  droppedMessageCount?: number;
   trusted: boolean;
   controls: Record<string, unknown>;
   replay?: ReplaySnapshot;
@@ -254,4 +280,20 @@ export interface LocalRun {
   snapshot?: SessionSnapshot;
   metrics: MetricsSnapshot;
   result: TurnResult;
+}
+
+/** Bounded metadata for the Runs list; full run payloads remain host-side. */
+export interface LocalRunSummary {
+  id: string;
+  profileId: string;
+  createdAt: number;
+  metrics: MetricsSnapshot;
+  result: TurnResult;
+  replayable: boolean;
+  hasSnapshot: boolean;
+  rawEventCount?: number;
+  normalizedEventCount?: number;
+  messageCount?: number;
+  errorCount?: number;
+  request?: { method?: string; url?: string; variantId?: string };
 }

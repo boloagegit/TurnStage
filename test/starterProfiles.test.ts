@@ -5,10 +5,24 @@ import { ProfileCodec } from '../src/extension/config/profileCodec';
 import { ProfileValidator } from '../src/extension/config/profileValidator';
 
 describe('starter resources', () => {
+  const profileIds = ['basic-sse-chat', 'agent-flow', 'enterprise-chat'];
   const codec = new ProfileCodec();
-  const environment = codec.parse(readFileSync('resources/templates/local.environment.jsonc', 'utf8')).profile as unknown as TurnStageEnvironment;
+  const environmentText = readFileSync('resources/templates/local.environment.jsonc', 'utf8');
+  const environment = codec.parse(environmentText).profile as unknown as TurnStageEnvironment;
 
-  for (const id of ['basic-sse-chat', 'agent-flow']) {
+  it('relies on manifest file matching instead of copy-location-dependent schema paths', () => {
+    expect(environmentText).not.toContain('"$schema"');
+    for (const id of profileIds) {
+      expect(readFileSync(`resources/templates/${id}.turnstage.jsonc`, 'utf8')).not.toContain('"$schema"');
+    }
+  });
+
+  it('keeps the local mock-server starters credential-free', () => {
+    for (const id of profileIds) expect(readFileSync(`resources/templates/${id}.turnstage.jsonc`, 'utf8')).not.toContain('${secret.');
+    expect(environment.secretReferences).toBeUndefined();
+  });
+
+  for (const id of profileIds) {
     it(`${id} parses and passes semantic validation`, () => {
       const parsed = codec.parse(readFileSync(`resources/templates/${id}.turnstage.jsonc`, 'utf8'));
       expect(parsed.errors).toEqual([]);
@@ -20,7 +34,10 @@ describe('starter resources', () => {
       expect(events.at(-1)?.event).toBe('done');
     });
 
-    it(`${id} exposes every stream mock scenario through a profile control`, () => {
+  }
+
+  for (const id of ['basic-sse-chat', 'agent-flow']) {
+    it(`${id} exposes every generic stream mock scenario through a profile control`, () => {
       const parsed = codec.parse(readFileSync(`resources/templates/${id}.turnstage.jsonc`, 'utf8'));
       const mode = parsed.profile?.controls?.find((control) => control.id === 'mode');
       expect(mode?.options?.map((option) => option.value)).toEqual([
@@ -30,4 +47,10 @@ describe('starter resources', () => {
       expect(JSON.stringify(parsed.profile?.conversation.send.variants)).toContain('controls.mode');
     });
   }
+
+  it('enterprise-chat exposes the contract-specific mock scenarios', () => {
+    const parsed = codec.parse(readFileSync('resources/templates/enterprise-chat.turnstage.jsonc', 'utf8'));
+    const mode = parsed.profile?.controls?.find((control) => control.id === 'mode');
+    expect(mode?.options?.map((option) => option.value)).toEqual(['normal', 'contract-slow', 'contract-error', 'contract-actions', 'opening-options']);
+  });
 });

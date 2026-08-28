@@ -8,33 +8,45 @@ export const DEFAULT_MAX_ERROR_BODY_BYTES = 4_096;
 export interface HttpStreamTransportOptions { maxErrorBodyBytes?: number; maxEventBytes?: number }
 export type StreamSinkEventResult = void | boolean;
 export interface StreamSink { onHeaders(latencyMs: number, contentType: string): void; onChunk(bytes: number, latencyMs: number): void; onEvent(event: RawStreamEvent): Promise<StreamSinkEventResult> | StreamSinkEventResult }
-export interface TransportResult { sawData: boolean; aborted: boolean }
+/**
+ * reconnectCount is the exact number of reconnect attempts made after the
+ * initial request. It is zero when the initial request succeeds or when no
+ * retry is allowed.
+ */
+export interface TransportResult { sawData: boolean; aborted: boolean; reconnectCount: number }
+
+interface AttemptResult { sawData: boolean; aborted: boolean }
 
 export class HttpStreamTransport {
   constructor(private readonly options: HttpStreamTransportOptions = {}) {}
 
-  async start(request: PreparedRequest, protocol: RawStreamEvent['protocol'], sink: StreamSink, signal: AbortSignal): Promise<TransportResult> {
+  async start(request: PreparedRequest, protocol: RawStreamEvent['protocol'], sink: StreamSink, signal: AbortSignal, dataFormat: 'json' | 'text' = 'json'): Promise<TransportResult> {
     const startedAt = Date.now();
     const reconnect = request.reconnect;
     const maxAttempts = Math.min(5, Math.max(0, reconnect?.maxAttempts ?? 0));
+    let reconnectCount = 0;
     for (let attempt = 0; ; attempt++) {
       const elapsed = Date.now() - startedAt;
       const remainingTimeout = request.timeoutMs === undefined ? undefined : request.timeoutMs - elapsed;
-      if (remainingTimeout !== undefined && remainingTimeout <= 0) throw new TurnStageError('TimeoutError', localize('The total request timeout elapsed.'));
+      if (remainingTimeout !== undefined && remainingTimeout <= 0) throw withReconnectCount(new TurnStageError('TimeoutError', localize('The total request timeout elapsed.')), reconnectCount);
       try {
-        return await this.startAttempt({ ...request, timeoutMs: remainingTimeout }, protocol, sink, signal);
+        const result = await this.startAttempt({ ...request, timeoutMs: remainingTimeout }, protocol, sink, signal, dataFormat);
+        return { ...result, reconnectCount };
       } catch (error) {
-        if (!(error instanceof TurnStageError) || attempt >= maxAttempts || !isRetryable(error, reconnect?.retryOnStatuses)) throw error;
+        if (!(error instanceof TurnStageError)) throw error;
+        if (attempt >= maxAttempts || !isRetryable(error, reconnect?.retryOnStatuses)) throw withReconnectCount(error, reconnectCount);
         const baseDelay = Math.max(0, reconnect?.baseDelayMs ?? 500);
         const maxDelay = Math.max(baseDelay, reconnect?.maxDelayMs ?? 10_000);
         const retryAfter = typeof error.details.retryAfterMs === 'number' ? error.details.retryAfterMs : undefined;
         const delayMs = Math.min(maxDelay, retryAfter ?? baseDelay * 2 ** attempt);
-        await abortableDelay(delayMs, signal);
+        try { await abortableDelay(delayMs, signal); }
+        catch (delayError) { throw delayError instanceof TurnStageError ? withReconnectCount(delayError, reconnectCount) : delayError; }
+        reconnectCount++;
       }
     }
   }
 
-  private async startAttempt(request: PreparedRequest, protocol: RawStreamEvent['protocol'], sink: StreamSink, signal: AbortSignal): Promise<TransportResult> {
+  private async startAttempt(request: PreparedRequest, protocol: RawStreamEvent['protocol'], sink: StreamSink, signal: AbortSignal, dataFormat: 'json' | 'text'): Promise<AttemptResult> {
     const startedAt = Date.now(); let totalTimer: ReturnType<typeof setTimeout> | undefined; let idleTimer: ReturnType<typeof setTimeout> | undefined;
     let sawData = false;
     const localAbort = new AbortController();
@@ -49,19 +61,21 @@ export class HttpStreamTransport {
       const expected = protocol === 'sse' ? 'text/event-stream' : protocol === 'ndjson' ? /ndjson|jsonl/ : undefined;
       if (expected && (typeof expected === 'string' ? !contentType.includes(expected) : !expected.test(contentType))) throw new TurnStageError('UnexpectedContentTypeError', localize('Expected {expected}, received {actual}.', { expected: String(expected), actual: contentType || localize('no content type') }));
       if (!response.body) throw new TurnStageError('NetworkError', localize('The response had no readable body.'));
-      reader = response.body.getReader(); const decoder = new TextDecoder(); const maxEventBytes = normalizeByteLimit(this.options.maxEventBytes, DEFAULT_MAX_EVENT_BYTES); const parser = protocol === 'sse' ? new SseParser({ maxEventBytes }) : new NdjsonParser({ maxRecordBytes: maxEventBytes }); let sequence = 0; let firstChunk = true; resetIdle();
+      reader = response.body.getReader(); const decoder = new TextDecoder(); const maxEventBytes = normalizeByteLimit(this.options.maxEventBytes, DEFAULT_MAX_EVENT_BYTES); const parser = protocol === 'sse' ? new SseParser({ maxEventBytes }) : protocol === 'ndjson' || protocol === 'fixture' ? new NdjsonParser({ maxRecordBytes: maxEventBytes }) : undefined; let jsonBuffer = ''; let jsonBytes = 0; let sequence = 0; let firstChunk = true; resetIdle();
       const emit = async (event: RawStreamEvent): Promise<boolean> => { sawData = true; return (await sink.onEvent(event)) !== false; };
       while (true) {
         const { value, done } = await reader.read(); if (done) break;
         resetIdle(); sink.onChunk(value.byteLength, firstChunk ? Date.now() - startedAt : 0); firstChunk = false;
         const text = decoder.decode(value, { stream: true });
         if (protocol === 'text-stream') { assertEventBytes(protocol, value.byteLength, maxEventBytes); if (text && !(await emit(toRawEvent(protocol, text, ++sequence, startedAt)))) { await cancelReader(reader); return { sawData, aborted: false }; } continue; }
-        const parsed = parser.feed(text);
-        for (const item of parsed) { const event = protocol === 'sse' ? toRawEvent(protocol, (item as any).raw, ++sequence, startedAt, item as any) : toRawEvent(protocol, item as string, ++sequence, startedAt); if (!(await emit(event))) { await cancelReader(reader); return { sawData, aborted: false }; } }
+        if (protocol === 'json') { jsonBytes += value.byteLength; assertEventBytes(protocol, jsonBytes, maxEventBytes); jsonBuffer += text; continue; }
+        const parsed = parser!.feed(text);
+        for (const item of parsed) { const event = protocol === 'sse' ? toRawEvent(protocol, (item as any).raw, ++sequence, startedAt, item as any, dataFormat) : toRawEvent(protocol, item as string, ++sequence, startedAt, undefined, dataFormat); if (!(await emit(event))) { await cancelReader(reader); return { sawData, aborted: false }; } }
       }
       const decoderTail = decoder.decode(); if (protocol === 'text-stream' && decoderTail) { assertEventBytes(protocol, new TextEncoder().encode(decoderTail).byteLength, maxEventBytes); if (!(await emit(toRawEvent(protocol, decoderTail, ++sequence, startedAt)))) return { sawData, aborted: false }; }
-      const tail = protocol === 'text-stream' ? [] : parser.finish();
-      for (const item of tail) { const event = protocol === 'sse' ? toRawEvent(protocol, (item as any).raw, ++sequence, startedAt, item as any) : toRawEvent(protocol, item as string, ++sequence, startedAt); if (!(await emit(event))) return { sawData, aborted: false }; }
+      if (protocol === 'json') { if (decoderTail) { jsonBytes += new TextEncoder().encode(decoderTail).byteLength; assertEventBytes(protocol, jsonBytes, maxEventBytes); jsonBuffer += decoderTail; } if (jsonBuffer.trim()) await emit(toRawEvent(protocol, jsonBuffer, ++sequence, startedAt, undefined, dataFormat)); return { sawData, aborted: false }; }
+      const tail = protocol === 'text-stream' ? [] : parser!.finish();
+      for (const item of tail) { const event = protocol === 'sse' ? toRawEvent(protocol, (item as any).raw, ++sequence, startedAt, item as any, dataFormat) : toRawEvent(protocol, item as string, ++sequence, startedAt, undefined, dataFormat); if (!(await emit(event))) return { sawData, aborted: false }; }
       return { sawData, aborted: false };
     } catch (error) {
       if (reader) await cancelReader(reader);
@@ -86,6 +100,11 @@ function isRetryable(error: TurnStageError, configuredStatuses: number[] | undef
   const status = error.details.status;
   const statuses = configuredStatuses?.length ? configuredStatuses : [429, 502, 503, 504];
   return typeof status === 'number' && statuses.includes(status);
+}
+
+function withReconnectCount(error: TurnStageError, reconnectCount: number): TurnStageError {
+  if (reconnectCount <= 0 || error.details.reconnectCount === reconnectCount) return error;
+  return new TurnStageError(error.type, error.message, { ...error.details, reconnectCount });
 }
 
 function parseRetryAfter(value: string | null): number | undefined {

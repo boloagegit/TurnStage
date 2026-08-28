@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import type { ChatMessage, Citation, Followup, LocalRun, MessagePart, MetricsSnapshot, NormalizedEvent, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ResponseAction, RuntimeErrorData, SessionSnapshot, Starter } from '../../shared/types';
+import type { ChatMessage, Citation, Followup, LocalRun, MessageMetric, MessageMetricAggregation, MessagePart, MetricsSnapshot, NormalizedEvent, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ResponseAction, RuntimeErrorData, SessionSnapshot, Starter } from '../../shared/types';
+import { localize } from '../l10n';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -9,12 +10,23 @@ const sessionStates = new Set<SessionSnapshot['sessionState']>(['notStarted', 'l
 const turnStates = new Set<SessionSnapshot['turnState']>(['idle', 'submitting', 'waitingStart', 'streaming', 'stopping', 'completed', 'failed', 'aborted']);
 const messageRoles = new Set<ChatMessage['role']>(['user', 'assistant', 'system', 'tool']);
 const messageStatuses = new Set<ChatMessage['status']>(['pending', 'streaming', 'completed', 'failed', 'aborted']);
+const messageMetricFormats = new Set<NonNullable<MessageMetric['format']>>(['number', 'duration', 'bytes', 'percent', 'text']);
+const messageMetricAggregations = new Set<MessageMetricAggregation>(['first', 'last', 'sum', 'min', 'max', 'count']);
 const starterBehaviors = new Set<Starter['behavior']>(['send', 'fill', 'action']);
 const followupBehaviors = starterBehaviors;
 const actionAppearances = new Set<NonNullable<ResponseAction['appearance']>>(['primary', 'secondary', 'link']);
 const citationKinds = new Set<NonNullable<Citation['kind']>>(['url', 'file', 'symbol', 'artifact']);
 const replayStatuses = new Set<ReplaySnapshot['status']>(['idle', 'playing', 'paused', 'completed', 'stopped']);
 const replaySpeeds = new Set<ReplaySnapshot['speed']>([0.25, 0.5, 1, 2, 4]);
+export const LOCAL_RUN_EXPORT_FORMAT = 'turnstage-run' as const;
+export const LOCAL_RUN_EXPORT_VERSION = 1 as const;
+export const MAX_RUN_IMPORT_BYTES = 20 * 1024 * 1024;
+
+export interface LocalRunImportResult {
+  run: LocalRun;
+  uri: vscode.Uri;
+  duplicate: boolean;
+}
 
 export class LocalRunRepository {
   constructor(private readonly context: vscode.ExtensionContext) {}
@@ -49,7 +61,49 @@ export class LocalRunRepository {
 
   async export(run: LocalRun): Promise<vscode.Uri | undefined> {
     const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`${run.profileId}-${run.id}.turnstage-run.json`), filters: { 'TurnStage Run': ['json'] } });
-    if (uri) await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify(run, null, 2))); return uri;
+    if (uri) {
+      const exported = { format: LOCAL_RUN_EXPORT_FORMAT, version: LOCAL_RUN_EXPORT_VERSION, exportedAt: Date.now(), run };
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify(exported, null, 2)));
+    }
+    return uri;
+  }
+
+  async import(profileId: string, retention: number): Promise<LocalRunImportResult | undefined> {
+    if (!isNonEmptyString(profileId)) return undefined;
+    const selected = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: localize('Import Run'), filters: { [localize('TurnStage Runs')]: ['json'] } });
+    const uri = selected?.[0];
+    if (!uri) return undefined;
+    const stat = await vscode.workspace.fs.stat(uri);
+    if (stat.size > MAX_RUN_IMPORT_BYTES) throw new Error(localize('The selected run is larger than {size} MB.', { size: MAX_RUN_IMPORT_BYTES / 1024 / 1024 }));
+    const bytes = await vscode.workspace.fs.readFile(uri);
+    if (bytes.byteLength > MAX_RUN_IMPORT_BYTES) throw new Error(localize('The selected run is larger than {size} MB.', { size: MAX_RUN_IMPORT_BYTES / 1024 / 1024 }));
+
+    let parsed: unknown;
+    try { parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown; }
+    catch { throw new Error(localize('The selected file is not valid JSON.')); }
+    const exported = asRecord(parsed);
+    let candidate: unknown = parsed;
+    if (exported?.format !== undefined || exported?.version !== undefined || exported?.run !== undefined) {
+      if (exported?.format !== LOCAL_RUN_EXPORT_FORMAT || !isFiniteNumber(exported.version)) throw new Error(localize('The selected file is not a supported TurnStage run export.'));
+      if (exported.version !== LOCAL_RUN_EXPORT_VERSION) throw new Error(localize('Run export version {version} is not supported.', { version: exported.version }));
+      candidate = exported.run;
+    }
+    const source = asRecord(candidate);
+    if (!source || !isNonEmptyString(source.profileId)) throw new Error(localize('The selected file is not a supported TurnStage run export.'));
+    if (source.profileId !== profileId) throw new Error(localize('This run belongs to profile {profileId}. Open that profile before importing it.', { profileId: source.profileId.slice(0, 1024) }));
+    const safeRun = sanitizeLocalRun(candidate, profileId);
+    if (!safeRun) throw new Error(localize('The selected run contains invalid or unsupported data.'));
+    const storageUri = this.uri(profileId);
+    const stored = await withQueue(localSaveQueues, storageUri.toString(), async () => {
+      const existing = await this.list(profileId);
+      const duplicate = existing.some((run) => run.id === safeRun.id);
+      const imported = duplicate ? { ...safeRun, id: crypto.randomUUID() } : safeRun;
+      const runs = [imported, ...existing.filter((run) => run.id !== imported.id)].slice(0, normalizeRetention(retention));
+      await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(storageUri, '..'));
+      await vscode.workspace.fs.writeFile(storageUri, new TextEncoder().encode(JSON.stringify(runs)));
+      return { run: imported, duplicate };
+    });
+    return { ...stored, uri };
   }
 }
 
@@ -183,7 +237,7 @@ function sanitizeMetrics(value: unknown): MetricsSnapshot | undefined {
     if (!isTimestamp(record.requestStartedAt)) return undefined;
     metrics.requestStartedAt = record.requestStartedAt;
   }
-  const durations = ['headersLatency', 'firstChunkLatency', 'firstEventLatency', 'ttft', 'streamDuration', 'totalDuration', 'averageEventGap', 'maxEventGap'] as const;
+  const durations = ['headersLatency', 'firstChunkLatency', 'firstEventLatency', 'ttft', 'streamDuration', 'totalDuration', 'averageEventGap', 'maxEventGap', 'reconnectCount'] as const;
   for (const key of durations) {
     if (record[key] !== undefined) {
       if (!isNonNegativeNumber(record[key])) return undefined;
@@ -244,6 +298,12 @@ function sanitizeSnapshot(value: unknown): SessionSnapshot | undefined {
   const errors = sanitizeErrors(record.errors);
   if (!messages || !rawEvents || !normalizedEvents || !metrics || !errors || !isRecord(record.controls)) return undefined;
   const snapshot: SessionSnapshot = { sessionId: record.sessionId, sessionState: record.sessionState as SessionSnapshot['sessionState'], turnState: record.turnState as SessionSnapshot['turnState'], messages, rawEvents, normalizedEvents, metrics, errors, droppedEventCount: record.droppedEventCount, trusted: record.trusted, controls: record.controls };
+  for (const key of ['droppedNormalizedEventCount', 'droppedMessageCount'] as const) {
+    if (record[key] !== undefined) {
+      if (!isNonNegativeNumber(record[key])) return undefined;
+      snapshot[key] = record[key];
+    }
+  }
   for (const key of ['conversationId', 'title'] as const) {
     if (record[key] !== undefined) {
       if (typeof record[key] !== 'string') return undefined;
@@ -288,9 +348,58 @@ function sanitizeMessages(value: unknown): ChatMessage[] | undefined {
       if (!isRecord(record.metadata)) return undefined;
       message.metadata = record.metadata;
     }
+    if (record.timing !== undefined) {
+      const timing = asRecord(record.timing);
+      if (!timing) return undefined;
+      if (timing.ttft !== undefined && !isNonNegativeNumber(timing.ttft)) return undefined;
+      if (timing.totalDuration !== undefined && !isNonNegativeNumber(timing.totalDuration)) return undefined;
+      message.timing = {
+        ...(timing.ttft !== undefined ? { ttft: timing.ttft } : {}),
+        ...(timing.totalDuration !== undefined ? { totalDuration: timing.totalDuration } : {}),
+      };
+    }
+    if (record.metrics !== undefined) {
+      const metrics = sanitizeMessageMetrics(record.metrics);
+      if (!metrics) return undefined;
+      message.metrics = metrics;
+    }
     messages.push(message);
   }
   return messages;
+}
+
+function sanitizeMessageMetrics(value: unknown): MessageMetric[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const metrics: MessageMetric[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record || !isNonEmptyString(record.id) || !isMetricValue(record.value)) return undefined;
+    const metric: MessageMetric = { id: record.id, value: record.value };
+    for (const key of ['label', 'unit'] as const) {
+      if (record[key] !== undefined) {
+        if (typeof record[key] !== 'string') return undefined;
+        metric[key] = record[key];
+      }
+    }
+    if (record.format !== undefined) {
+      if (typeof record.format !== 'string' || !messageMetricFormats.has(record.format as NonNullable<MessageMetric['format']>)) return undefined;
+      metric.format = record.format as NonNullable<MessageMetric['format']>;
+    }
+    if (record.aggregation !== undefined) {
+      if (typeof record.aggregation !== 'string' || !messageMetricAggregations.has(record.aggregation as MessageMetricAggregation)) return undefined;
+      metric.aggregation = record.aggregation as MessageMetricAggregation;
+    }
+    if (record.sampleCount !== undefined) {
+      if (!isNonNegativeNumber(record.sampleCount)) return undefined;
+      metric.sampleCount = record.sampleCount;
+    }
+    metrics.push(metric);
+  }
+  return metrics;
+}
+
+function isMetricValue(value: unknown): value is MessageMetric['value'] {
+  return typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value));
 }
 
 function sanitizeMessageParts(value: unknown): MessagePart[] | undefined {

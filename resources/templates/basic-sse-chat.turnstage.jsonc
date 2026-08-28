@@ -1,5 +1,4 @@
 {
-  "$schema": "../../resources/schemas/turnstage-profile.schema.json",
   "version": 1,
   "id": "basic-sse-chat",
   "name": "Basic SSE Chat",
@@ -48,7 +47,7 @@
       { "id": "error", "match": { "event": "error" }, "emit": { "type": "stream.failed", "error": { "path": "$" } } }
     ]
   },
-  "ui": { "layout": { "preset": "split-inspector", "inspectorPosition": "right" }, "composer": { "placeholder": "Enter a test message...", "multiline": true, "enterBehavior": "send", "shiftEnterBehavior": "newline", "showStopWhileStreaming": true }, "locks": { "whileTurnActive": { "disable": ["composer", "actor", "mode", "newConversation", "environment"], "allow": ["stop", "configuration.open", "inspector.open", "message.copy"] } }, "components": { "opening": { "visible": true }, "progress": { "visible": true, "label": "Progress", "collapsible": true, "defaultCollapsed": false }, "citations": { "visible": false }, "toolCalls": { "visible": false }, "followups": { "visible": false }, "responseActions": { "visible": false }, "diagnostics": { "visible": true, "defaultCollapsed": true }, "metrics": { "visible": true } }, "messageActions": ["message.copy", "message.retry", "message.editAndResend", "message.inspectRaw"] },
+  "ui": { "layout": { "preset": "split-inspector", "inspectorPosition": "right" }, "composer": { "placeholder": "Enter a test message...", "multiline": true, "enterBehavior": "send", "shiftEnterBehavior": "newline", "showStopWhileStreaming": true }, "streaming": { "effect": "caret", "speedMs": 900, "intensityPercent": 70 }, "locks": { "whileTurnActive": { "disable": ["composer", "actor", "mode", "newConversation", "environment"], "allow": ["stop", "configuration.open", "inspector.open", "message.copy"] } }, "components": { "opening": { "visible": true }, "progress": { "visible": true, "label": "Progress", "collapsible": true, "defaultCollapsed": false }, "citations": { "visible": false }, "toolCalls": { "visible": false }, "followups": { "visible": false }, "responseActions": { "visible": false }, "diagnostics": { "visible": true, "defaultCollapsed": true }, "metrics": { "visible": true } }, "messageActions": ["message.copy", "message.retry", "message.editAndResend", "message.inspectRaw"] },
   "history": { "localRuns": { "enabled": true, "maxRuns": 20, "recordRawEvents": true, "recordNormalizedEvents": true, "recordChatSnapshot": true } },
   "errorPolicy": { "preservePartialContent": true, "showErrorPart": true, "keepConversationId": true, "allowContinuation": true, "releaseAllLocks": true },
   "metrics": { "enabled": ["headersLatency", "firstChunkLatency", "firstEventLatency", "ttft", "streamDuration", "totalDuration", "eventCount", "byteCount", "averageEventGap", "maxEventGap", "parseErrorCount", "mappingErrorCount", "unmatchedEventCount"] }

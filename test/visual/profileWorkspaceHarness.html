@@ -65,8 +65,25 @@
     const inspectorWidth = Number(query.get('width')) || undefined;
     const multiline = query.get('multiline') !== 'false';
     const showStopWhileStreaming = query.get('stop') !== 'false';
+    const streamingEffect = query.get('effect') ?? 'caret';
+    const streamingSpeed = Number(query.get('speed')) || 900;
+    const streamingIntensity = Number(query.get('intensity')) || 70;
     const messageActions = query.has('actions') ? query.get('actions').split(',').filter(Boolean) : undefined;
+    const messageActionVisibility = query.get('actionVisibility') ?? 'always';
     const active = query.get('active') === 'true';
+    const viewportPresets = {
+      'mobile-s': { width: 320, height: 568 },
+      'mobile-m': { width: 375, height: 667 },
+      'mobile-l': { width: 425, height: 812 },
+      tablet: { width: 768, height: 1024 },
+      laptop: { width: 1024, height: 768 },
+      'laptop-l': { width: 1440, height: 900 }
+    };
+    const device = query.get('device');
+    const viewportDefinition = viewportPresets[device];
+    const chatViewport = viewportDefinition
+      ? { preset: device, ...viewportDefinition, zoom: query.get('zoom') ?? 'fit' }
+      : { preset: 'responsive', width: 390, height: 844, zoom: 'fit' };
     const envelope = { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-harness' };
     const profile = {
       version: 1,
@@ -79,9 +96,12 @@
       ui: {
         layout: { preset, inspectorPosition, ...(inspectorWidth ? { inspectorWidth } : {}) },
         composer: { placeholder: 'Type a message for the slow SSE stream…', multiline, enterBehavior: 'send', showStopWhileStreaming },
+        streaming: { effect: streamingEffect, speedMs: streamingSpeed, intensityPercent: streamingIntensity },
+        messageActionVisibility,
         ...(messageActions ? { messageActions } : {}),
-        components: { opening: { visible: true }, progress: { visible: true }, metrics: { visible: true } }
+        components: { opening: { visible: true }, progress: { visible: true }, metrics: { visible: true }, messageMetrics: { visible: true } }
       },
+      metrics: { messageEnabled: ['ttft', 'totalDuration', 'e2e', 'tokens'] },
       errorPolicy: { allowContinuation: true }
     };
     const rawEvents = ['start', 'status', 'message', 'message', 'title', 'done'].map((type, index) => ({ sequence: index + 1, receivedAt: 1000 + index * 600, elapsedMs: 606 + index * 601, protocol: 'sse', sse: { event: type }, raw: `event: ${type}`, data: { type, text: index === 2 ? 'Here is ' : index === 3 ? 'the sample result.' : undefined } }));
@@ -90,21 +110,43 @@
       normalizedEvents: rawEvents.map((item) => ({ version: 1, type: item.sse.event, sequence: item.sequence, rawSequence: item.sequence, receivedAt: item.receivedAt })),
       messages: [
         { id: 'user-1', role: 'user', status: 'completed', createdAt: 1000, parts: [{ type: 'text', text: 'Verify themed streaming layout' }], citations: [], actions: [], followups: [], metadata: { rawSequences: [] } },
-        { id: 'assistant-1', role: 'assistant', status: active ? 'streaming' : 'completed', createdAt: 1600, completedAt: active ? undefined : 4600, parts: [{ type: 'progress', text: 'Preparing the streamed response', status: active ? 'running' : 'completed' }, { type: 'text', text: 'Here is the sample result.' }], citations: [], actions: [], followups: [], metadata: { rawSequences: [1, 2, 3, 4, 5, 6] } }
+        { id: 'assistant-1', role: 'assistant', status: active ? 'streaming' : 'completed', createdAt: 1600, completedAt: active ? undefined : 4600, parts: [{ type: 'progress', text: 'Preparing the streamed response', status: active ? 'running' : 'completed' }, { type: 'text', text: 'Here is the sample result.' }], citations: [], actions: [], followups: [], timing: { ttft: 1808, totalDuration: active ? undefined : 3612 }, metrics: [{ id: 'e2e', label: 'E2E', value: 180, unit: 'ms', format: 'duration', aggregation: 'last', sampleCount: 1 }, { id: 'tokens', label: 'Tokens', value: 42, format: 'number', aggregation: 'sum', sampleCount: 2 }], metadata: { rawSequences: [1, 2, 3, 4, 5, 6] } }
       ],
       metrics: { eventCount: 6, byteCount: 420, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0, totalDuration: 3612 }
     };
+    const runs = [
+      { id: 'replayable-run', profileId: profile.id, createdAt: 4600, replayable: true, hasSnapshot: true, metrics: snapshot.metrics, result: { type: 'completed' } },
+      { id: 'metadata-only-run', profileId: profile.id, createdAt: 4000, replayable: false, hasSnapshot: false, metrics: { ...snapshot.metrics, eventCount: 0 }, result: { type: 'aborted', reason: 'user_cancel' } }
+    ];
     const dispatch = (message) => window.dispatchEvent(new MessageEvent('message', { data: { ...envelope, ...message } }));
+    window.__turnstageMessages = [];
+    const applyProfilePatch = (path, value) => {
+      let target = profile;
+      for (let index = 0; index < path.length - 1; index += 1) {
+        const key = path[index];
+        const nextKey = path[index + 1];
+        if (!target[key] || typeof target[key] !== 'object') target[key] = typeof nextKey === 'number' ? [] : {};
+        target = target[key];
+      }
+      target[path.at(-1)] = value;
+    };
     window.acquireVsCodeApi = () => ({
-      getState: () => ({ section: query.get('section') ?? 'test', inspectorTab: query.get('tab') ?? 'Raw Events', splitPercent: 50, draft: query.get('draft') ?? '' }),
+      getState: () => ({ section: query.get('section') ?? 'test', inspectorTab: query.get('tab') ?? 'Raw Events', splitPercent: Number(query.get('split')) || 50, splitCustomized: query.has('split'), draft: query.get('draft') ?? '', chatViewport }),
       setState: () => {},
       postMessage: (message) => {
+        window.__turnstageMessages.push(JSON.parse(JSON.stringify(message)));
+        if (message.type === 'profile.patch') {
+          applyProfilePatch(message.path, message.value);
+          setTimeout(() => dispatch({ type: 'profile.snapshot', profile: JSON.parse(JSON.stringify(profile)), version: 1, environments: ['local'] }), 0);
+          return;
+        }
         if (message.type !== 'webview.ready') return;
         setTimeout(() => {
           dispatch({ type: 'host.ready', trusted: true, locale: 'en', direction: 'ltr' });
           dispatch({ type: 'profile.snapshot', profile, version: 1, environments: ['local'] });
           dispatch({ type: 'profile.validation', diagnostics: [] });
-          dispatch({ type: 'session.snapshot', snapshot: JSON.parse(JSON.stringify(snapshot)), runs: [], requestPreview: { method: 'POST', url: 'http://localhost/chat' } });
+          dispatch({ type: 'profile.validated', valid: true });
+          dispatch({ type: 'session.snapshot', snapshot: JSON.parse(JSON.stringify(snapshot)), runs: JSON.parse(JSON.stringify(runs)), requestPreview: { method: 'POST', url: 'http://localhost/chat' } });
         }, 0);
       }
     });

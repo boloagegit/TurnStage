@@ -179,8 +179,8 @@ function streamRecordTooLarge(protocol: 'sse' | 'ndjson', maxBytes: number, obse
   return new TurnStageError(STREAM_RECORD_TOO_LARGE_ERROR, localize('The {protocol} stream record exceeded the maximum size of {maxBytes} bytes.', { protocol, maxBytes }), { protocol, maxBytes, observedBytes });
 }
 
-export function toRawEvent(protocol: RawStreamEvent['protocol'], raw: string, sequence: number, startedAt: number, sse?: ParsedSse): RawStreamEvent {
+export function toRawEvent(protocol: RawStreamEvent['protocol'], raw: string, sequence: number, startedAt: number, sse?: ParsedSse, dataFormat: 'json' | 'text' = 'json'): RawStreamEvent {
   const text = sse?.data ?? raw; let data: unknown = text; let parseError: string | undefined;
-  if (protocol !== 'text-stream') try { data = JSON.parse(text); } catch (error) { if (text !== '[DONE]') parseError = error instanceof Error ? error.message : String(error); }
+  if (protocol !== 'text-stream' && dataFormat === 'json') try { data = JSON.parse(text); } catch (error) { if (text !== '[DONE]') parseError = error instanceof Error ? error.message : String(error); }
   return { sequence, receivedAt: Date.now(), elapsedMs: Date.now() - startedAt, protocol, sse: sse ? { event: sse.event, id: sse.id, retry: sse.retry } : undefined, raw, data, parseError };
 }

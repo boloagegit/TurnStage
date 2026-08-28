@@ -24,6 +24,7 @@ const mock = vi.hoisted(() => {
   const directories: string[] = [];
   const writes: Array<{ path: string; bytes: Uint8Array }> = [];
   const showSaveDialog = vi.fn();
+  const showOpenDialog = vi.fn();
   const workspace = {
     isTrusted: true,
     getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }),
@@ -39,15 +40,16 @@ const mock = vi.hoisted(() => {
         writes.push({ path: uri.path, bytes });
       },
       createDirectory: async (uri: Uri) => { directories.push(uri.path); },
+      stat: async (uri: Uri) => ({ type: 1, ctime: 0, mtime: 0, size: files.get(uri.path)?.byteLength ?? 0 }),
     },
   };
 
-  return { Uri, files, directories, writes, showSaveDialog, workspace, window: { showSaveDialog } };
+  return { Uri, files, directories, writes, showSaveDialog, showOpenDialog, workspace, window: { showSaveDialog, showOpenDialog } };
 });
 
 vi.mock('vscode', () => ({ Uri: mock.Uri, workspace: mock.workspace, window: mock.window }));
 
-import { LocalRunRepository } from '../src/extension/history/localRunRepository';
+import { LOCAL_RUN_EXPORT_FORMAT, LOCAL_RUN_EXPORT_VERSION, MAX_RUN_IMPORT_BYTES, LocalRunRepository } from '../src/extension/history/localRunRepository';
 import { SessionController } from '../src/extension/runtime/sessionController';
 
 describe('LocalRunRepository', () => {
@@ -56,6 +58,7 @@ describe('LocalRunRepository', () => {
     mock.directories.length = 0;
     mock.writes.length = 0;
     mock.showSaveDialog.mockReset();
+    mock.showOpenDialog.mockReset();
   });
 
   it('returns an empty list for missing or malformed profile history', async () => {
@@ -130,8 +133,12 @@ describe('LocalRunRepository', () => {
       defaultUri: expect.objectContaining({ path: 'profile-a-run-7.turnstage-run.json' }),
       filters: { 'TurnStage Run': ['json'] },
     });
-    expect(storedText('/exports/run-7.turnstage-run.json')).toBe(JSON.stringify(selected, null, 2));
-    expect(JSON.parse(storedText('/exports/run-7.turnstage-run.json'))).toEqual(selected);
+    expect(JSON.parse(storedText('/exports/run-7.turnstage-run.json'))).toEqual({
+      format: LOCAL_RUN_EXPORT_FORMAT,
+      version: LOCAL_RUN_EXPORT_VERSION,
+      exportedAt: expect.any(Number),
+      run: selected,
+    });
   });
 
   it('does not write anything when export is cancelled', async () => {
@@ -139,6 +146,107 @@ describe('LocalRunRepository', () => {
     mock.showSaveDialog.mockResolvedValue(undefined);
 
     expect(await repository.export(run('run-8'))).toBeUndefined();
+    expect(mock.writes).toEqual([]);
+  });
+
+  it('imports versioned and legacy exports into matching profile history', async () => {
+    const repository = makeRepository();
+    const versionedUri = new mock.Uri('/imports/versioned.turnstage-run.json');
+    const legacyUri = new mock.Uri('/imports/legacy.turnstage-run.json');
+    const versionedRun = run('versioned', 'profile-a');
+    const legacyRun = run('legacy', 'profile-a');
+    mock.files.set(versionedUri.path, new TextEncoder().encode(JSON.stringify({ format: LOCAL_RUN_EXPORT_FORMAT, version: LOCAL_RUN_EXPORT_VERSION, exportedAt: 1, run: versionedRun })));
+    mock.files.set(legacyUri.path, new TextEncoder().encode(JSON.stringify(legacyRun)));
+    mock.showOpenDialog.mockResolvedValueOnce([versionedUri]).mockResolvedValueOnce([legacyUri]);
+
+    expect(await repository.import('profile-a', 10)).toMatchObject({ run: versionedRun, uri: versionedUri, duplicate: false });
+    expect(await repository.import('profile-a', 10)).toMatchObject({ run: legacyRun, uri: legacyUri, duplicate: false });
+    expect((await repository.list('profile-a')).map((item) => item.id)).toEqual(['legacy', 'versioned']);
+  });
+
+  it('preserves assistant timing and mapped message metrics across import', async () => {
+    const repository = makeRepository();
+    const context = extensionContext();
+    const controller = controllerFor(profileWithHistory({}), context, new LocalRunRepository(context as never));
+    const recorded = structuredClone(controller.snapshot);
+    recorded.turnState = 'completed';
+    recorded.metrics = { ...recorded.metrics, ttft: 125, totalDuration: 480 };
+    recorded.messages = [{
+      id: 'assistant-timed', role: 'assistant', status: 'completed', createdAt: 1, completedAt: 481,
+      parts: [{ type: 'text', text: 'Measured response' }], citations: [], actions: [], followups: [],
+      timing: { ttft: 125, totalDuration: 480 },
+      metrics: [{ id: 'tokens', label: 'Tokens', value: 42, format: 'number', aggregation: 'sum', sampleCount: 2 }],
+    }];
+    const importedRun = run('timed-run', controller.profile.id, { snapshot: recorded, metrics: recorded.metrics });
+    const uri = new mock.Uri('/imports/timed.turnstage-run.json');
+    mock.files.set(uri.path, new TextEncoder().encode(JSON.stringify({ format: LOCAL_RUN_EXPORT_FORMAT, version: LOCAL_RUN_EXPORT_VERSION, exportedAt: 1, run: importedRun })));
+    mock.showOpenDialog.mockResolvedValue([uri]);
+
+    const imported = await repository.import(controller.profile.id, 10);
+
+    expect(imported?.run.snapshot?.messages[0]).toMatchObject({
+      timing: { ttft: 125, totalDuration: 480 },
+      metrics: [{ id: 'tokens', value: 42, aggregation: 'sum', sampleCount: 2 }],
+    });
+  });
+
+  it('creates a new id instead of overwriting an imported duplicate', async () => {
+    const repository = makeRepository();
+    const original = run('same-id', 'profile-a', { createdAt: 1 });
+    await repository.save(original, 10);
+    const uri = new mock.Uri('/imports/duplicate.turnstage-run.json');
+    mock.files.set(uri.path, new TextEncoder().encode(JSON.stringify({ ...original, createdAt: 2 })));
+    mock.showOpenDialog.mockResolvedValue([uri]);
+
+    const imported = await repository.import('profile-a', 10);
+
+    expect(imported?.duplicate).toBe(true);
+    expect(imported?.run.id).not.toBe(original.id);
+    expect(await repository.list('profile-a')).toHaveLength(2);
+    expect((await repository.list('profile-a')).find((item) => item.id === original.id)?.createdAt).toBe(1);
+  });
+
+  it('serializes concurrent imports so duplicate ids remain distinct', async () => {
+    const repository = makeRepository();
+    const firstUri = new mock.Uri('/imports/concurrent-1.turnstage-run.json');
+    const secondUri = new mock.Uri('/imports/concurrent-2.turnstage-run.json');
+    const sharedRun = run('concurrent-import', 'profile-a');
+    mock.files.set(firstUri.path, new TextEncoder().encode(JSON.stringify(sharedRun)));
+    mock.files.set(secondUri.path, new TextEncoder().encode(JSON.stringify(sharedRun)));
+    mock.showOpenDialog.mockResolvedValueOnce([firstUri]).mockResolvedValueOnce([secondUri]);
+
+    const imported = await Promise.all([repository.import('profile-a', 10), repository.import('profile-a', 10)]);
+
+    expect(imported.map((item) => item?.duplicate).sort()).toEqual([false, true]);
+    const stored = await repository.list('profile-a');
+    expect(stored).toHaveLength(2);
+    expect(new Set(stored.map((item) => item.id)).size).toBe(2);
+  });
+
+  it('rejects unsupported, mismatched, malformed, and oversized imports without writing history', async () => {
+    const repository = makeRepository();
+    const unsupported = new mock.Uri('/imports/unsupported.json');
+    const mismatch = new mock.Uri('/imports/mismatch.json');
+    const malformed = new mock.Uri('/imports/malformed.json');
+    const oversized = new mock.Uri('/imports/oversized.json');
+    mock.files.set(unsupported.path, new TextEncoder().encode(JSON.stringify({ format: LOCAL_RUN_EXPORT_FORMAT, version: 99, run: run('run-1') })));
+    mock.files.set(mismatch.path, new TextEncoder().encode(JSON.stringify(run('run-2', 'profile-b'))));
+    mock.files.set(malformed.path, new TextEncoder().encode('{broken'));
+    mock.files.set(oversized.path, new Uint8Array(MAX_RUN_IMPORT_BYTES + 1));
+    mock.showOpenDialog.mockResolvedValueOnce([unsupported]).mockResolvedValueOnce([mismatch]).mockResolvedValueOnce([malformed]).mockResolvedValueOnce([oversized]);
+
+    await expect(repository.import('profile-a', 10)).rejects.toThrow('version 99');
+    await expect(repository.import('profile-a', 10)).rejects.toThrow('profile profile-b');
+    await expect(repository.import('profile-a', 10)).rejects.toThrow('not valid JSON');
+    await expect(repository.import('profile-a', 10)).rejects.toThrow('larger than 20 MB');
+    expect(await repository.list('profile-a')).toEqual([]);
+    expect(mock.writes).toEqual([]);
+  });
+
+  it('does not write anything when import is cancelled', async () => {
+    mock.showOpenDialog.mockResolvedValue(undefined);
+
+    expect(await makeRepository().import('profile-a', 10)).toBeUndefined();
     expect(mock.writes).toEqual([]);
   });
 });
@@ -193,6 +301,80 @@ describe('SessionController local-run recording', () => {
 
     expect(await repository.list(profile.id)).toEqual([]);
     expect(mock.writes).toEqual([]);
+  });
+
+  it('restores conversation context through the last user message before rebuilding the assistant reply', async () => {
+    const context = extensionContext();
+    const repository = new LocalRunRepository(context as never);
+    const profile = profileWithHistory({});
+    profile.stream.mappings = [{ id: 'text', match: {}, emit: { type: 'content.text.delta', text: { path: '$.text' } } }];
+    const controller = controllerFor(profile, context, repository);
+    const recordedSnapshot = structuredClone(controller.snapshot);
+    recordedSnapshot.opening = { message: 'Welcome', starters: [] };
+    recordedSnapshot.conversationId = 'conversation-1';
+    recordedSnapshot.messages = [
+      { id: 'prior-assistant', role: 'assistant', status: 'completed', createdAt: 1, completedAt: 1, parts: [{ type: 'text', text: 'Earlier answer' }], citations: [], actions: [], followups: [] },
+      { id: 'current-user', role: 'user', status: 'completed', createdAt: 2, completedAt: 2, parts: [{ type: 'text', text: 'Replay this' }], citations: [], actions: [], followups: [] },
+      { id: 'recorded-assistant', role: 'assistant', status: 'completed', createdAt: 3, completedAt: 3, parts: [{ type: 'text', text: 'Recorded answer' }], citations: [], actions: [], followups: [] },
+    ];
+    const replayRun = run('replay-1', profile.id, {
+      metrics: { eventCount: 1, byteCount: 25, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0, ttft: 120, totalDuration: 360 },
+      snapshot: recordedSnapshot,
+      rawEvents: [{ sequence: 1, receivedAt: 3, elapsedMs: 0, protocol: 'sse', raw: '{"text":"Rebuilt answer"}', data: { text: 'Rebuilt answer' } }],
+    });
+    (controller as unknown as { runs: LocalRun[] }).runs = [replayRun];
+
+    expect(controller.replay(replayRun.id)).toBe('started');
+    await vi.waitFor(() => expect(controller.snapshot.turnState).toBe('completed'));
+
+    expect(controller.snapshot.opening).toEqual(recordedSnapshot.opening);
+    expect(controller.snapshot.conversationId).toBe('conversation-1');
+    expect(controller.snapshot.messages.map((message) => message.id)).toEqual(['prior-assistant', 'current-user', 'assistant-1']);
+    expect(controller.snapshot.messages.at(-1)?.parts).toEqual([{ type: 'text', text: 'Rebuilt answer' }]);
+    expect(controller.snapshot.messages.at(-1)?.timing).toEqual({ ttft: 120, totalDuration: 360 });
+    expect(controller.snapshot.replay).toMatchObject({ runId: replayRun.id, status: 'completed', index: 1, total: 1 });
+  });
+
+  it('refuses unavailable or active replay without replacing the visible snapshot', () => {
+    const context = extensionContext();
+    const repository = new LocalRunRepository(context as never);
+    const controller = controllerFor(profileWithHistory({}), context, repository);
+    const unavailable = run('no-raw-events', controller.profile.id, { rawEvents: [] });
+    (controller as unknown as { runs: LocalRun[] }).runs = [unavailable];
+    controller.snapshot.messages = [{ id: 'visible', role: 'user', status: 'completed', createdAt: 1, completedAt: 1, parts: [{ type: 'text', text: 'Keep me' }], citations: [], actions: [], followups: [] }];
+    const visibleSnapshot = controller.snapshot;
+
+    expect(controller.replay(unavailable.id)).toBe('unavailable');
+    expect(controller.snapshot).toBe(visibleSnapshot);
+    controller.snapshot.turnState = 'streaming';
+    expect(controller.replay(unavailable.id)).toBe('active');
+    expect(controller.snapshot).toBe(visibleSnapshot);
+  });
+
+  it('publishes bounded run summaries while keeping replay payloads host-side', () => {
+    const context = extensionContext();
+    const controller = controllerFor(profileWithHistory({}), context, new LocalRunRepository(context as never));
+    const fullRun = run('summary-run', controller.profile.id, { request: { method: 'POST', url: 'https://example.test', headers: {}, body: { secret: 'host-only' } }, rawEvents: [{ sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{"large":true}', data: { large: true } }], snapshot: structuredClone(controller.snapshot) });
+    (controller as unknown as { runs: LocalRun[] }).runs = [fullRun];
+
+    expect(controller.getRunSummaries()).toEqual([{
+      id: fullRun.id,
+      profileId: fullRun.profileId,
+      createdAt: fullRun.createdAt,
+      metrics: fullRun.metrics,
+      result: fullRun.result,
+      replayable: true,
+      hasSnapshot: true,
+      rawEventCount: 1,
+      normalizedEventCount: 0,
+      messageCount: 0,
+      errorCount: 0,
+      request: { method: 'POST', url: 'https://example.test', variantId: undefined },
+    }]);
+    expect(controller.getRunSummaries()[0]).not.toHaveProperty('rawEvents');
+    expect(controller.getRunSummaries()[0]).not.toHaveProperty('snapshot');
+    expect(controller.getRunSummaries()[0]?.request).not.toHaveProperty('headers');
+    expect(controller.getRunSummaries()[0]?.request).not.toHaveProperty('body');
   });
 });
 

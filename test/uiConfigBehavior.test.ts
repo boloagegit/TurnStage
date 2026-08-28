@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnStageProfile } from '../src/shared/types';
 import { clampSplit, DEFAULT_SPLIT_PERCENT, initialSplitPercent, splitTrackSizes } from '../src/webview/main';
-import { DEFAULT_MESSAGE_ACTIONS, resolveComposer, resolveMessageActions, resolveUiLayout } from '../src/webview/uiConfig';
+import { DEFAULT_MESSAGE_ACTIONS, resolveComposer, resolveMessageActions, resolveMessageActionVisibility, resolveStreaming, resolveUiLayout } from '../src/webview/uiConfig';
 
 function profile(messageActions?: string[]): TurnStageProfile {
   return {
@@ -49,10 +49,23 @@ describe('profile-driven UI behavior', () => {
     expect(resolveComposer({ composer: { placeholder: 'Ask', multiline: false, enterBehavior: 'newline', shiftEnterBehavior: 'send', showStopWhileStreaming: false } })).toEqual({ placeholder: 'Ask', multiline: false, enterBehavior: 'newline', shiftEnterBehavior: 'send', showStopWhileStreaming: false });
   });
 
+  it('resolves bounded Assistant streaming effects and parameters', () => {
+    expect(resolveStreaming()).toEqual({ effect: 'caret', speedMs: 900, intensityPercent: 70 });
+    expect(resolveStreaming({ streaming: { effect: 'dots', speedMs: 1_200, intensityPercent: 80 } })).toEqual({ effect: 'dots', speedMs: 1_200, intensityPercent: 80 });
+    expect(resolveStreaming({ streaming: { effect: 'typewriter' as 'caret', speedMs: 100, intensityPercent: 250 } })).toEqual({ effect: 'caret', speedMs: 400, intensityPercent: 100 });
+  });
+
   it('uses the declared message action order and applies role capabilities', () => {
     expect(resolveMessageActions(profile(), 'assistant', true)).toEqual(DEFAULT_MESSAGE_ACTIONS);
     expect(resolveMessageActions(profile(['message.inspectRaw', 'message.copy', 'message.retry']), 'user', true)).toEqual(['message.inspectRaw', 'message.copy']);
     expect(resolveMessageActions(profile(['message.retry', 'message.editAndResend', 'message.copy']), 'assistant', false)).toEqual(['message.retry', 'message.editAndResend', 'message.copy']);
+  });
+
+  it('keeps message actions visible by default and supports interaction-only profiles', () => {
+    expect(resolveMessageActionVisibility()).toBe('always');
+    expect(resolveMessageActionVisibility({ messageActionVisibility: 'always' })).toBe('always');
+    expect(resolveMessageActionVisibility({ messageActionVisibility: 'interaction' })).toBe('interaction');
+    expect(resolveMessageActionVisibility({ messageActionVisibility: 'hidden' as 'always' })).toBe('always');
   });
 
   it('allows an empty toolbar and ignores unsupported action IDs defensively', () => {

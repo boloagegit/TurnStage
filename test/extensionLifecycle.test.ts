@@ -29,10 +29,19 @@ describe('Extension host editor lifecycle', () => {
     expect(editorSource).toContain('await rehydrate();');
   });
 
-  it('waits for an editor controller before executing start, replay, or export', () => {
+  it('waits for an editor controller before executing start, replay, import, or export', () => {
     expect(activateSource).toContain('openAndWaitForController(editor, uri)');
     expect(editorSource).toContain('async waitForController(uri: vscode.Uri, timeoutMs = 5000)');
     expect(editorSource).toContain('if (current && this.controllers.get(documentKey) === current) this.controllers.delete(documentKey);');
+    expect(activateSource).toContain("command('importRun'");
+    expect(editorSource).toContain('async importRun(uri: vscode.Uri)');
+  });
+
+  it('routes Open and Run back to Test when the profile editor is already showing configuration', () => {
+    expect(activateSource).toContain("command('openProfile', async (item?: ProfileTreeItem | vscode.Uri) => openProfile(editor, asUri(item)))");
+    expect(activateSource).toContain("await openProfileSection(editor, uri, 'test');");
+    expect(activateSource).toContain("if (uri) await openProfileSection(editor, uri, 'test');");
+    expect(editorSource).toContain('this.pendingSections.set(key, section);');
   });
 
   it('offers a localized snooze action and persists it globally', () => {

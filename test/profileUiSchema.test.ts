@@ -30,6 +30,7 @@ function propertySchema(node: SchemaNode, name: string): SchemaNode {
 }
 
 const uiSchema = propertySchema(schema, 'ui');
+const metricsSchema = propertySchema(schema, 'metrics');
 
 function resolveSchema(node: SchemaNode): SchemaNode {
   if (!node.$ref) return node;
@@ -76,18 +77,20 @@ function matchesSchema(value: unknown, node: SchemaNode): boolean {
 const validUi: UiDefinition = {
   layout: { preset: 'split-inspector', inspectorPosition: 'right', inspectorWidth: 360 },
   composer: { placeholder: 'Enter a test message...', multiline: true, enterBehavior: 'send', shiftEnterBehavior: 'newline', showStopWhileStreaming: true },
+  streaming: { effect: 'dots', speedMs: 1200, intensityPercent: 80 },
   locks: { whileTurnActive: { disable: ['composer', 'actor'], allow: ['stop', 'message.copy'] } },
   components: {
     progress: { visible: true, label: 'Progress', collapsible: true, defaultCollapsed: false, icon: 'activity' },
     'custom-panel': { visible: false, label: 'Custom panel', customSetting: { compact: true } },
   },
   messageActions: ['message.copy', 'message.retry'],
+  messageActionVisibility: 'always',
 };
 
 describe('profile UI schema', () => {
   it('declares every UiDefinition field and keeps extension points scoped', () => {
     expect(uiSchema).toMatchObject({ type: 'object', additionalProperties: false });
-    expect(Object.keys(uiSchema.properties ?? {})).toEqual(['layout', 'composer', 'locks', 'components', 'messageActions']);
+    expect(Object.keys(uiSchema.properties ?? {})).toEqual(['layout', 'composer', 'streaming', 'locks', 'components', 'messageActions', 'messageActionVisibility']);
 
     const layout = propertySchema(uiSchema, 'layout');
     expect(layout).toMatchObject({ type: 'object', additionalProperties: false });
@@ -100,6 +103,13 @@ describe('profile UI schema', () => {
     expect(Object.keys(composer.properties ?? {})).toEqual(['placeholder', 'multiline', 'enterBehavior', 'shiftEnterBehavior', 'showStopWhileStreaming']);
     expect(propertySchema(composer, 'enterBehavior').enum).toEqual(['send', 'newline']);
     expect(propertySchema(composer, 'shiftEnterBehavior').enum).toEqual(['send', 'newline']);
+
+    const streaming = propertySchema(uiSchema, 'streaming');
+    expect(streaming).toMatchObject({ type: 'object', additionalProperties: false });
+    expect(Object.keys(streaming.properties ?? {})).toEqual(['effect', 'speedMs', 'intensityPercent']);
+    expect(propertySchema(streaming, 'effect').enum).toEqual(['none', 'caret', 'dots', 'shimmer']);
+    expect(propertySchema(streaming, 'speedMs')).toEqual({ type: 'integer', minimum: 400, maximum: 4000 });
+    expect(propertySchema(streaming, 'intensityPercent')).toEqual({ type: 'integer', minimum: 10, maximum: 100 });
 
     const locks = propertySchema(uiSchema, 'locks');
     expect(locks).toMatchObject({ type: 'object', additionalProperties: false });
@@ -119,6 +129,25 @@ describe('profile UI schema', () => {
       uniqueItems: true,
       items: { enum: ['message.copy', 'message.retry', 'message.editAndResend', 'message.inspectRaw'] },
     });
+    expect(propertySchema(uiSchema, 'messageActionVisibility').enum).toEqual(['always', 'interaction']);
+  });
+
+  it('keeps run and per-message metric filters typed and closed', () => {
+    expect(metricsSchema).toMatchObject({ type: 'object', additionalProperties: false });
+    expect(Object.keys(metricsSchema.properties ?? {})).toEqual(['enabled', 'messageEnabled']);
+    expect(propertySchema(metricsSchema, 'enabled')).toEqual({
+      type: 'array',
+      uniqueItems: true,
+      items: { type: 'string' },
+    });
+    expect(propertySchema(metricsSchema, 'messageEnabled')).toEqual({
+      type: 'array',
+      uniqueItems: true,
+      items: { type: 'string' },
+    });
+    expect(matchesSchema({ enabled: ['ttft'], messageEnabled: ['e2e'] }, metricsSchema)).toBe(true);
+    expect(matchesSchema({ enabled: ['ttft'], messageEnabled: ['e2e'], typo: true }, metricsSchema)).toBe(false);
+    expect(matchesSchema({ messageEnabled: ['e2e', 'e2e'] }, metricsSchema)).toBe(false);
   });
 
   it('accepts a complete UiDefinition, including arbitrary component names and extension fields', () => {
@@ -130,10 +159,14 @@ describe('profile UI schema', () => {
     ['an unsupported layout preset', { ...validUi, layout: { preset: 'wide' } }],
     ['a misspelled lock field', { ...validUi, locks: { whileTurnActive: { disablee: ['composer'] } } }],
     ['a wrong composer type', { ...validUi, composer: { multiline: 'yes' } }],
+    ['an unsupported streaming effect', { ...validUi, streaming: { effect: 'typewriter' } }],
+    ['a streaming speed below the supported range', { ...validUi, streaming: { speedMs: 100 } }],
+    ['a fractional streaming intensity', { ...validUi, streaming: { intensityPercent: 50.5 } }],
     ['a wrong component metadata type', { ...validUi, components: { panel: { visible: 'yes' } } }],
     ['a non-string message action', { ...validUi, messageActions: ['message.copy', 42] }],
     ['an unsupported message action', { ...validUi, messageActions: ['request.send'] }],
     ['duplicate message actions', { ...validUi, messageActions: ['message.copy', 'message.copy'] }],
+    ['an unsupported message action visibility', { ...validUi, messageActionVisibility: 'hover' }],
     ['an Inspector width below the supported range', { ...validUi, layout: { inspectorWidth: 120 } }],
     ['a fractional Inspector width', { ...validUi, layout: { inspectorWidth: 360.5 } }],
   ])('rejects %s', (_description, value) => {

@@ -167,6 +167,7 @@ The current reducer handles these types:
 | `form.upsert` | Add a declarative form part |
 | `diagnostic.updated` | Add a diagnostic part |
 | `usage.updated` | Add a usage part |
+| `message.metric.updated` | Extract and aggregate one metric on a correlated chat message |
 | `stream.completed` | Set turn to completed, then finalize |
 | `stream.failed` | Add a stream error and finalize as failed |
 | `stream.aborted` | Finalize as aborted |
@@ -175,6 +176,48 @@ The reducer creates an assistant message when an event arrives and no pending
 assistant exists. This allows message/content events before a start event. It
 deduplicates an event when sequence, type, and mapping rule ID all match an
 existing normalized event.
+
+### Per-message metrics
+
+Every Assistant response receives two host-measured timing values without a
+mapping rule: `ttft` is the interval from request start to the first mapped
+text or Markdown delta, and `totalDuration` is the interval from request start
+to terminal completion, failure, or abort. During a live turn the footer uses
+non-numeric waiting/streaming labels until each value is known; it does not
+display a misleading zero. A response that ends without displayable text marks
+TTFT unavailable.
+
+`message.metric.updated` is the generic measurement seam for values reported
+by a backend event. The mapping can correlate a sample to an explicit
+`messageId`; when omitted, the current assistant response is used.
+
+```jsonc
+{
+  "id": "message-e2e",
+  "match": { "event": "diagnostic" },
+  "emit": {
+    "type": "message.metric.updated",
+    "messageId": { "path": "$.assistantMessageId" },
+    "metric": {
+      "id": "e2e",
+      "label": "E2E",
+      "value": { "path": "$.e2e_ms" },
+      "unit": "ms",
+      "format": "duration",
+      "aggregation": "last"
+    }
+  }
+}
+```
+
+Metric `id` and `value` are required. Supported aggregation modes are `first`,
+`last` (default), `sum`, `min`, `max`, and `count`. Supported display formats
+are `number`, `duration`, `bytes`, `percent`, and `text`. Numeric aggregations
+ignore non-finite samples. Profiles may restrict the compact metrics rendered
+under each message with `metrics.messageEnabled`; use `ttft` and
+`totalDuration` for the two built-ins and mapped metric IDs for backend values.
+The complete normalized event remains available in Debug regardless of that
+display filter.
 
 ## Examples
 

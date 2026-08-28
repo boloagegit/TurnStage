@@ -9,7 +9,7 @@ const workspaceStyles = readFileSync(resolve(root, 'src/webview/settingsWorkspac
 describe('Profile Configuration surface', () => {
   it('uses a non-main root and names profile configuration explicitly', () => {
     expect(workspaceSource).not.toMatch(/<main\b/);
-    expect(workspaceSource).toContain('<div className="settings-workspace">');
+    expect(workspaceSource).toContain("settings-workspace--embedded");
     expect(workspaceSource).toContain("t('Profile Configuration')");
     expect(workspaceSource).toContain("t('Profile configuration toolbar')");
     expect(workspaceSource).not.toContain("t('Settings')");

@@ -42,7 +42,7 @@ export function redactKnownSecrets(value: unknown, secrets: readonly unknown[]):
 export class UriPolicy {
   async open(citation: Citation, profile: TurnStageProfile, profileUri: vscode.Uri): Promise<void> {
     if (!vscode.workspace.isTrusted) throw errors.trust();
-    if (citation.kind === 'url' && citation.uri) {
+    if ((citation.kind === 'url' || citation.kind === 'artifact') && citation.uri) {
       const uri = vscode.Uri.parse(citation.uri, true);
       const schemes = profile.security?.allowedUriSchemes ?? ['https'];
       if (!schemes.includes(uri.scheme) || ['javascript', 'command', 'data'].includes(uri.scheme)) throw new Error(localize('URI scheme {scheme} is not allowed.', { scheme: uri.scheme }));
@@ -50,14 +50,33 @@ export class UriPolicy {
       if (domains?.length && !domains.includes(uri.authority)) throw new Error(localize('Domain {domain} is not allowed.', { domain: uri.authority }));
       await vscode.env.openExternal(uri); return;
     }
-    if ((citation.kind === 'file' || citation.kind === 'symbol') && citation.path) {
+    if ((citation.kind === 'file' || citation.kind === 'symbol' || citation.kind === 'artifact') && citation.path) {
       const folder = vscode.workspace.getWorkspaceFolder(profileUri);
       if (!folder) throw new Error(localize('The profile is not inside a workspace folder.'));
       const uri = vscode.Uri.joinPath(folder.uri, citation.path);
       const relative = vscode.workspace.asRelativePath(uri, false);
       if (relative.startsWith('..')) throw new Error(localize('Files outside the workspace are not allowed.'));
       const document = await vscode.workspace.openTextDocument(uri);
-      await vscode.window.showTextDocument(document);
+      const range = citationRange(citation.range);
+      if (range) await vscode.window.showTextDocument(document, { selection: range });
+      else await vscode.window.showTextDocument(document);
     }
   }
+}
+
+function citationRange(value: unknown): vscode.Range | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const start = citationPosition(record.start ?? record);
+  const end = citationPosition(record.end) ?? start;
+  return start && end ? new vscode.Range(start, end) : undefined;
+}
+
+function citationPosition(value: unknown): vscode.Position | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const line = typeof record.line === 'number' ? record.line : typeof record.startLine === 'number' ? record.startLine : undefined;
+  const character = typeof record.character === 'number' ? record.character : typeof record.column === 'number' ? record.column : typeof record.startColumn === 'number' ? record.startColumn : 0;
+  if (!Number.isInteger(line) || !Number.isInteger(character) || Number(line) < 0 || Number(character) < 0) return undefined;
+  return new vscode.Position(Number(line), Number(character));
 }

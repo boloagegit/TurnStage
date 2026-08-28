@@ -18,7 +18,7 @@ export const SETTINGS_SECTIONS = [
   { id: 'opening-flow', label: 'Opening & Flow', description: 'Opening behavior, variants, stop, and recovery.' },
   { id: 'request', label: 'Request', description: 'Endpoint, timing, payload, and redacted preview.' },
   { id: 'stream-mapping', label: 'Stream & Mapping', description: 'Transport, framing, and event mappings.' },
-  { id: 'chat-ui', label: 'Chat UI', description: 'Layout, composer, visibility, and interaction locks.' },
+  { id: 'chat-ui', label: 'Chat UI', description: 'Layout, composer, streaming effects, visibility, and interaction locks.' },
   { id: 'history-errors', label: 'History & Errors', description: 'Local run retention and failure behavior.' },
   { id: 'security', label: 'Security', description: 'Trust, URI schemes, domains, and commands.' }
 ] as const;
@@ -35,6 +35,8 @@ export interface SettingsWorkspaceProps {
   /** The section selected by the host tree/editor. */
   section: SettingsSectionId;
   onSectionChange: (section: SettingsSectionId) => void;
+  /** Use the compact, single-pane layout beside the Chat preview. */
+  embedded?: boolean;
 }
 
 type PatchPath = Array<string | number>;
@@ -48,14 +50,15 @@ export function SettingsWorkspace({
   requestPreview,
   remoteName,
   section,
-  onSectionChange
+  onSectionChange,
+  embedded = false
 }: SettingsWorkspaceProps): React.JSX.Element {
   const patch = (path: PatchPath, value: unknown) => post({ type: 'profile.patch', path, value });
 
   const active = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0];
   const sectionTitleId = `profile-configuration-section-title-${active.id}`;
   const sectionDescriptionId = `profile-configuration-section-description-${active.id}`;
-  return <div className="settings-workspace">
+  return <div className={`settings-workspace ${embedded ? 'settings-workspace--embedded' : ''}`}>
     <header className="settings-header" aria-label={t('Profile configuration toolbar')}>
       <div className="settings-title-block">
         <p id="profile-configuration-title" className="settings-surface-title">{t('Profile Configuration')}</p>
@@ -265,6 +268,8 @@ function HistoryErrorsSection({ profile, snapshot, patch }: { profile: TurnStage
           <SettingCheckbox id="settings-history-snapshot" label={t('Record chat snapshot')} checked={localRuns?.recordChatSnapshot ?? true} onChange={(value) => patch(['history', 'localRuns', 'recordChatSnapshot'], value)} />
         </SettingCheckboxGroup>
         <NumberSettingField label={t('Maximum local runs')} id="settings-history-max-runs" value={localRuns?.maxRuns} placeholder="20" min={1} max={100} hint={t('Older runs are evicted after this count.')} onCommit={(value) => patch(['history', 'localRuns', 'maxRuns'], value)} />
+        <ListPatchField label={t('Visible metrics')} id="settings-visible-metrics" value={profile.metrics?.enabled ?? []} placeholder="ttft, totalDuration, eventCount" hint={t('Leave empty to show every available metric.')} onCommit={(value) => patch(['metrics', 'enabled'], value)} wide />
+        <ListPatchField label={t('Visible message metrics')} id="settings-visible-message-metrics" value={profile.metrics?.messageEnabled ?? []} placeholder="ttft, totalDuration, e2e, tokens" hint={t('Leave empty to show TTFT, total duration, and every mapped message metric.')} onCommit={(value) => patch(['metrics', 'messageEnabled'], value)} wide />
       </div>
       <div className="settings-history-note"><strong>{t('Remote sessions')}</strong><span>{t(profile.history?.remoteSessions?.mode === 'referenceOnly' ? 'Reference-only history is enabled.' : 'No remote session history is configured.')}</span></div>
     </section>

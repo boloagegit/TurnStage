@@ -20,4 +20,14 @@ describe('ReplayEngine', () => {
     const playing = engine.play(); engine.pause(); await vi.advanceTimersByTimeAsync(500); expect(accepted).toEqual([1]); await engine.step(); expect(accepted).toEqual([1, 2]); engine.setSpeed(4); engine.resume(); await vi.advanceTimersByTimeAsync(50); await playing; expect(accepted).toEqual([1, 2, 3]);
     const stopped: number[] = []; const second = new ReplayEngine(events, 1, async (event) => { stopped.push(event.sequence); }, () => undefined); const secondPlaying = second.play(); second.stop(); await secondPlaying; expect(stopped).toEqual([1]);
   });
+
+  it('stops consuming delayed trailing events when the sink reaches a terminal event', async () => {
+    vi.useFakeTimers(); const accepted: number[] = []; const states: Array<{ status: string; index: number; total: number }> = [];
+    const engine = new ReplayEngine(events, 1, async (event) => { accepted.push(event.sequence); return false; }, (state) => states.push(state));
+
+    await engine.play();
+
+    expect(accepted).toEqual([1]);
+    expect(states.at(-1)).toMatchObject({ status: 'completed', index: events.length, total: events.length });
+  });
 });

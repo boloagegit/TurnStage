@@ -110,6 +110,39 @@ describe('reduceEvent', () => {
     expect(message.actions).toEqual([]);
   });
 
+  it('attaches configurable metrics to the explicit message and applies aggregation', () => {
+    const snapshot = createSnapshot(true);
+    reduceEvent(snapshot, event('conversation.started', 1, { conversationId: 'conv-1', assistantMessageId: 'assistant-server-1' }));
+    reduceEvent(snapshot, event('message.metric.updated', 2, { messageId: 'assistant-server-1', metric: { id: 'tokens', label: 'Tokens', value: 12, aggregation: 'sum', format: 'number' } }));
+    reduceEvent(snapshot, event('message.metric.updated', 3, { messageId: 'assistant-server-1', metric: { id: 'tokens', label: 'Tokens', value: 8, aggregation: 'sum', format: 'number' } }));
+    reduceEvent(snapshot, event('message.metric.updated', 4, { metric: { id: 'e2e', label: 'E2E', value: 180, unit: 'ms', format: 'duration', aggregation: 'last' } }));
+
+    expect(assistantMessage(snapshot).metrics).toEqual([
+      { id: 'tokens', label: 'Tokens', value: 20, aggregation: 'sum', format: 'number', sampleCount: 2 },
+      { id: 'e2e', label: 'E2E', value: 180, unit: 'ms', format: 'duration', aggregation: 'last', sampleCount: 1 },
+    ]);
+  });
+
+  it('supports first, min, max, and count metrics without accepting invalid numeric samples', () => {
+    const snapshot = createSnapshot(true);
+    reduceEvent(snapshot, event('message.metric.updated', 1, { metric: { id: 'first', value: 'initial', aggregation: 'first' } }));
+    reduceEvent(snapshot, event('message.metric.updated', 2, { metric: { id: 'first', value: 'ignored', aggregation: 'first' } }));
+    reduceEvent(snapshot, event('message.metric.updated', 3, { metric: { id: 'min', value: 9, aggregation: 'min' } }));
+    reduceEvent(snapshot, event('message.metric.updated', 4, { metric: { id: 'min', value: 4, aggregation: 'min' } }));
+    reduceEvent(snapshot, event('message.metric.updated', 5, { metric: { id: 'max', value: 2, aggregation: 'max' } }));
+    reduceEvent(snapshot, event('message.metric.updated', 6, { metric: { id: 'max', value: 7, aggregation: 'max' } }));
+    reduceEvent(snapshot, event('message.metric.updated', 7, { metric: { id: 'events', aggregation: 'count' } }));
+    reduceEvent(snapshot, event('message.metric.updated', 8, { metric: { id: 'events', aggregation: 'count' } }));
+    reduceEvent(snapshot, event('message.metric.updated', 9, { metric: { id: 'min', value: 'invalid', aggregation: 'min' } }));
+
+    expect(assistantMessage(snapshot).metrics?.map(({ id, value, sampleCount }) => ({ id, value, sampleCount }))).toEqual([
+      { id: 'first', value: 'initial', sampleCount: 2 },
+      { id: 'min', value: 4, sampleCount: 2 },
+      { id: 'max', value: 7, sampleCount: 2 },
+      { id: 'events', value: 2, sampleCount: 2 },
+    ]);
+  });
+
   it('updates a declarative form by id without duplicating it', () => {
     const snapshot = createSnapshot(true);
     reduceEvent(snapshot, event('form.upsert', 1, { form: { id: 'form-1', title: 'First', fields: [], submit: { action: 'send', messageTemplate: 'one', interactionKind: 'formSubmit' } } }));

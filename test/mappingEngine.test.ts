@@ -94,4 +94,26 @@ describe('MappingEngine', () => {
     expect(result.errors[0]).toMatchObject({ ruleId: 'broken' });
     expect(result.errors[0]?.message).toEqual(expect.any(String));
   });
+
+  it('extracts a generic message metric and optional message correlation id', () => {
+    const stream: StreamDefinition = {
+      transport: 'sse',
+      mappings: [{
+        id: 'message-e2e',
+        match: { event: 'diagnostic' },
+        emit: {
+          type: 'message.metric.updated',
+          messageId: { path: '$.assistantMessageId' },
+          metric: { id: 'e2e', label: 'E2E', value: { path: '$.e2e_ms' }, unit: 'ms', format: 'duration', aggregation: 'last' },
+        },
+      }],
+    };
+
+    const result = new MappingEngine(stream).map(raw({ assistantMessageId: 'assistant-7', e2e_ms: 180 }, 'diagnostic'));
+    expect(result.events[0]).toMatchObject({
+      type: 'message.metric.updated',
+      messageId: 'assistant-7',
+      metric: { id: 'e2e', label: 'E2E', value: 180, unit: 'ms', format: 'duration', aggregation: 'last' },
+    });
+  });
 });

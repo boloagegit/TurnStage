@@ -128,8 +128,18 @@ describe('MetricsCollector', () => {
       parseErrorCount: 1,
       mappingErrorCount: 2,
       unmatchedEventCount: 1,
+      reconnectCount: 0,
       abortReason: 'user_cancel',
     });
+  });
+
+  it('starts with zero reconnects and records the highest transport count', () => {
+    const metrics = new MetricsCollector();
+    expect(metrics.value.reconnectCount).toBe(0);
+    metrics.reconnectCount(1);
+    metrics.reconnectCount(3);
+    metrics.reconnectCount(2);
+    expect(metrics.value.reconnectCount).toBe(3);
   });
 });
 
@@ -283,6 +293,34 @@ describe('isActive and SessionController.finalizeTurn', () => {
     expect(controller.snapshot.normalizedEvents).toEqual([]);
     expect(controller.snapshot.messages[0]?.parts).toEqual([{ type: 'text', text: 'final' }]);
     expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('bounds normalized events, messages, and errors while recording drop counts', async () => {
+    const { SessionController } = await import('../src/extension/runtime/sessionController');
+    const controller = new SessionController(
+      { version: 1, id: 'bounds-test', name: 'Bounds', conversation: { send: { method: 'POST', url: 'https://example.test' } }, stream: { transport: 'sse', mappings: [] } },
+      {} as never,
+      { version: 1, id: 'env', name: 'Environment', variables: {} },
+      {} as never,
+      { get: vi.fn() } as never,
+      { save: vi.fn() } as never,
+      vi.fn(),
+      { appendLine: vi.fn() } as never,
+    );
+    const bounded = controller as unknown as { maxBufferedEvents: number; maxConversationMessages: number; boundSnapshotCollections: () => void };
+    bounded.maxBufferedEvents = 2;
+    bounded.maxConversationMessages = 2;
+    controller.snapshot.normalizedEvents = [1, 2, 3].map((sequence) => ({ version: 1, type: 'event', sequence, receivedAt: sequence }));
+    controller.snapshot.messages = [1, 2, 3].map((sequence) => ({ id: `m-${sequence}`, role: 'system' as const, status: 'completed' as const, createdAt: sequence, parts: [], citations: [], actions: [], followups: [] }));
+    controller.snapshot.errors = Array.from({ length: 503 }, (_, index) => ({ type: 'Error', message: String(index) }));
+
+    bounded.boundSnapshotCollections();
+
+    expect(controller.snapshot.normalizedEvents.map((event) => event.sequence)).toEqual([2, 3]);
+    expect(controller.snapshot.messages.map((message) => message.id)).toEqual(['m-2', 'm-3']);
+    expect(controller.snapshot.errors).toHaveLength(500);
+    expect(controller.snapshot.droppedNormalizedEventCount).toBe(1);
+    expect(controller.snapshot.droppedMessageCount).toBe(1);
   });
 
   it('lets extension deactivation await active-turn finalization and run persistence', async () => {

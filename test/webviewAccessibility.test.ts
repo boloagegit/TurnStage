@@ -75,7 +75,19 @@ describe('Inspector keyboard helpers', () => {
     expect(baseStyles).toContain('@media (max-width: 64em)');
     expect(baseStyles).toContain('var(--preview-size, 64fr)');
     expect(baseStyles).toContain('var(--inspector-size, 36fr)');
-    expect(mobileSource).toContain('Math.max(0.1, Math.min(1, widthScale, heightScale))');
+    expect(mobileSource).toContain('mobile-chat-preview__viewport-toolbar');
+    expect(mobileSource).toContain("preset: 'custom'");
+    expect(mobileStyles).toContain('scale(var(--mcp-preview-scale');
+    expect(mobileStyles).toContain('@container (max-width: 560px)');
+    expect(mobileStyles).toContain('@container (max-width: 430px)');
+    expect(mobileStyles).toContain('var(--vscode-dropdown-background');
+    expect(mobileStyles).toContain('var(--vscode-dropdown-foreground');
+    expect(mobileStyles).toContain('var(--vscode-dropdown-border');
+    expect(mobileStyles).toContain('var(--vscode-dropdown-listBackground');
+    expect(mobileStyles).toContain('outline: 1px solid var(--mcp-focus);');
+    expect(mobileStyles).toContain('outline-offset: -1px;');
+    expect(baseStyles).toContain('outline: 1px solid var(--vscode-focusBorder);');
+    expect(baseStyles).toContain('outline-offset: -1px;');
   });
 
   it('uses logical directional CSS and keeps long-script content breakable', () => {

@@ -1,0 +1,5 @@
+{"event":"start","data":{"cid":"fixture-contract","assistantMessageId":"fixture-assistant"}}
+{"event":"status","data":{"text":"Analyzing the test request…"}}
+{"event":"message","data":{"text":"This is a fully synthetic contract-test response."}}
+{"event":"title","data":{"title":"Synthetic test conversation"}}
+{"event":"done","data":{"ok":true}}

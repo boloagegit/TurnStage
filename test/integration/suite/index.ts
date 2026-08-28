@@ -118,7 +118,7 @@ async function assertCustomEditorAndTextFallback(profileUri: vscode.Uri): Promis
   const customTab = await waitFor(() => activeTabInput() instanceof vscode.TabInputCustom ? activeTabInput() : undefined, 'the TurnStage custom editor tab');
   assert.equal((customTab as vscode.TabInputCustom).viewType, 'turnstage.profileEditor');
   assert.equal((customTab as vscode.TabInputCustom).uri.toString(), profileUri.toString());
-  assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.label, 'Integration Profile · TurnStage', 'Run Profile should identify the custom editor instead of looking like a JSONC text tab');
+  await waitFor(() => vscode.window.tabGroups.activeTabGroup.activeTab?.label === 'Integration Profile · TurnStage' ? true : undefined, 'the custom editor to replace the backing JSONC filename with the profile title');
   assert.ok(vscode.workspace.textDocuments.some((item) => item.uri.toString() === profileUri.toString()), 'Custom editor must be backed by the shared TextDocument');
 
   // Hiding a custom editor disposes its webview DOM because the provider uses

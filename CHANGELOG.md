@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+## 0.5.0
+
+- Added host-measured TTFT and total duration to every Assistant response. Live messages use waiting/streaming states instead of displaying a false zero, recorded runs retain the measurements, and Replay shows the original recorded timings beside profile-mapped message metrics.
+- Added a compact metrics selector to Profile Configuration. `metrics.messageEnabled` accepts the built-in `ttft` and `totalDuration` IDs plus any metric emitted through `message.metric.updated`.
+- Added explicit successful profile-validation feedback and made Custom Editor titles reliable before asynchronous profile loading completes.
+- Expanded the synthetic POST + SSE contract, fixtures, and tests while keeping contract-specific fields and unknown custom-card events in profile mappings and Raw Events rather than the generic runtime. The mock delay override is now `TURNSTAGE_MOCK_CONTRACT_SLOW_DELAY_MS`.
+- Raised the minimum supported VS Code version from 1.96 to 1.106 after testing the semantic Custom Editor title and Webview flow across adjacent releases. Existing version-1 profiles and prior run exports remain compatible and require no migration.
+- Network requests and run import remain unavailable in Restricted Mode; fixture replay, request redaction, SecretStorage ownership, bounded event/message retention, and URI/command allowlists are unchanged.
+
+## 0.4.1
+
+- Fixed the chat composer so Enter and the in-field Send button clear the submitted draft immediately while preserving the trimmed message sent to the Extension Host.
+- Added a bounded `TURNSTAGE_MOCK_ENTERPRISE_SLOW_DELAY_MS` override to the bundled mock server so streaming, control locking, and user-cancel behavior can be inspected reliably in the installed extension.
+- Existing profiles and stored runs remain compatible and require no migration. Request ownership, workspace-trust restrictions, redaction, and SecretStorage behavior are unchanged.
+
+## 0.4.0
+
+- Added persistent Raw Events and Normalized inspectors with text, event-type, mapping-status, event-health, and terminal-event filters plus compact VS Code-native status icons.
+- Added a synthetic enterprise POST + SSE mock contract and adaptation guide covering request-backed openings, first and continuation turns, abort-then-stop behavior, partial failures, actions, diagnostics, and deterministic streaming modes.
+- Kept proprietary and unknown events inspectable without assigning product-specific behavior. The bundled custom-card fixture remains unmatched in Raw Events, while contract-specific CTA fields are normalized by the example profile instead of the extension runtime.
+- Existing version-1 profiles remain compatible and require no migration. Secret values remain in VS Code SecretStorage, request previews stay redacted, and unknown raw events continue through the bounded debug pipeline.
+
+## 0.3.0
+
+- Added persistent Mobile, Tablet, Web, and Responsive chat preview sizes. Web previews use a centered readable conversation column and omit mobile-only device chrome.
+- Added an auto-growing multiline chat composer and profile-configurable Assistant streaming indicators (caret, dots, shimmer, or none) with bounded speed and intensity controls. Existing profiles use a subtle caret by default, and reduced-motion preferences disable animation.
+- Expanded profile-driven chat configuration for starters, opening requests and responses, fallbacks, failure policy, request variant headers, stop requests, remote-session scopes, visible metrics, response actions, follow-ups, forms, and citations.
+- Added safe Markdown rendering with links routed through the extension URI policy, bounded code blocks, and code-copy controls. Added host-mediated confirmations and working built-in action behavior for retry, abort, reset, request, citation, URI, form, and inspector actions.
+- Added versioned local-run import with legacy export compatibility, profile validation, bounded file reads, duplicate-safe IDs, and localized feedback. Replay now restores recorded chat context, rejects runs without raw events, and exposes clear progress and blocking states.
+- Recorded Runs now sends bounded summaries instead of full persisted run payloads and exposes request, event, message, error, and reconnect details without leaking request bodies or headers.
+- Added configurable message/event memory bounds, real Webview event batching, reconnect metrics, log-level filtering, project fixture discovery, complete JSON-document streaming, and text-mode SSE/NDJSON handling.
+- Existing version-1 profiles remain compatible. New fields and limits use backward-compatible defaults; imported run files continue to accept the previous export format.
+- Security-sensitive links, commands, setting patches, and workspace fixture paths remain allowlisted and workspace trust restrictions continue to disable network requests.
+
 ## 0.2.3
 
 - Profile editor tabs now use the profile display name with a TurnStage suffix instead of looking like ordinary JSONC text tabs.

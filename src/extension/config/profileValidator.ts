@@ -7,7 +7,8 @@ export interface ValidationIssue { severity: 'error' | 'warning'; message: strin
 const requiredEmitFields: Record<string, string[]> = {
   'conversation.started': ['conversationId'], 'content.text.delta': ['text'], 'content.markdown.delta': ['text'],
   'tool.started': ['toolCallId', 'name'], 'tool.completed': ['toolCallId'], 'citation.upsert': ['citation'],
-  'content.citation': ['citationId'], 'followup.upsert': ['followup'], 'action.upsert': ['action'], 'form.upsert': ['form']
+  'content.citation': ['citationId'], 'followup.upsert': ['followup'], 'action.upsert': ['action'], 'form.upsert': ['form'],
+  'message.metric.updated': ['metric']
 };
 
 function issue(tree: Node | undefined, path: (string | number)[], message: string, severity: 'error' | 'warning' = 'error'): ValidationIssue {
@@ -114,6 +115,23 @@ export class ProfileValidator {
     if (inspectorPosition !== undefined && !['right', 'bottom'].includes(String(inspectorPosition))) out.push(issue(tree, ['ui', 'layout', 'inspectorPosition'], localize('Unknown Inspector position: {value}.', { value: String(inspectorPosition) })));
     const inspectorWidth = profile.ui?.layout?.inspectorWidth as unknown;
     if (inspectorWidth !== undefined && (typeof inspectorWidth !== 'number' || !Number.isInteger(inspectorWidth) || inspectorWidth < 240 || inspectorWidth > 960)) out.push(issue(tree, ['ui', 'layout', 'inspectorWidth'], localize('Inspector width must be an integer from 240 to 960.')));
+    const streamingEffect = profile.ui?.streaming?.effect as unknown;
+    if (streamingEffect !== undefined && !['none', 'caret', 'dots', 'shimmer'].includes(String(streamingEffect))) out.push(issue(tree, ['ui', 'streaming', 'effect'], localize('Unknown Assistant streaming effect: {value}.', { value: String(streamingEffect) })));
+    const streamingSpeed = profile.ui?.streaming?.speedMs as unknown;
+    if (streamingSpeed !== undefined && (typeof streamingSpeed !== 'number' || !Number.isInteger(streamingSpeed) || streamingSpeed < 400 || streamingSpeed > 4000)) out.push(issue(tree, ['ui', 'streaming', 'speedMs'], localize('Assistant streaming speed must be an integer from 400 to 4000 milliseconds.')));
+    const streamingIntensity = profile.ui?.streaming?.intensityPercent as unknown;
+    if (streamingIntensity !== undefined && (typeof streamingIntensity !== 'number' || !Number.isInteger(streamingIntensity) || streamingIntensity < 10 || streamingIntensity > 100)) out.push(issue(tree, ['ui', 'streaming', 'intensityPercent'], localize('Assistant streaming intensity must be an integer from 10 to 100 percent.')));
+    const messageActionVisibility = profile.ui?.messageActionVisibility as unknown;
+    if (messageActionVisibility !== undefined && !['always', 'interaction'].includes(String(messageActionVisibility))) out.push(issue(tree, ['ui', 'messageActionVisibility'], localize('Unknown message action visibility: {value}.', { value: String(messageActionVisibility) })));
+    profile.stream.mappings.forEach((mapping, index) => {
+      if (mapping.emit.type !== 'message.metric.updated') return;
+      const metric = mapping.emit.metric;
+      if (!metric || typeof metric !== 'object' || Array.isArray(metric)) { out.push(issue(tree, ['stream', 'mappings', index, 'emit', 'metric'], localize('Message metrics require id and value fields.'))); return; }
+      const definition = metric as Record<string, unknown>;
+      if (!('id' in definition) || !('value' in definition)) out.push(issue(tree, ['stream', 'mappings', index, 'emit', 'metric'], localize('Message metrics require id and value fields.')));
+      if (definition.aggregation !== undefined && !['first', 'last', 'sum', 'min', 'max', 'count'].includes(String(definition.aggregation))) out.push(issue(tree, ['stream', 'mappings', index, 'emit', 'metric', 'aggregation'], localize('Unknown message metric aggregation: {value}.', { value: String(definition.aggregation) })));
+      if (definition.format !== undefined && !['number', 'duration', 'bytes', 'percent', 'text'].includes(String(definition.format))) out.push(issue(tree, ['stream', 'mappings', index, 'emit', 'metric', 'format'], localize('Unknown message metric format: {value}.', { value: String(definition.format) })));
+    });
     const secretNames = new Set<string>();
     const source = JSON.stringify(profile);
     for (const match of source.matchAll(/\$\{secret\.([A-Za-z0-9_-]+)\}/g)) if (match[1]) secretNames.add(match[1]);

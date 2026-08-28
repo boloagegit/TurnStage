@@ -229,6 +229,14 @@ redacted request, but raw events, normalized events, snapshot content, and
 backend diagnostics can contain arbitrary backend data. Treat exported runs as
 potentially sensitive and store them accordingly.
 
+Imported run files are untrusted input. TurnStage bounds the selected file at
+20 MiB, validates the versioned or legacy run structure, requires a matching
+profile ID, and writes only sanitized run data to profile-scoped global
+storage. Import never starts a request, opens a citation, invokes an action, or
+writes values to SecretStorage. Full imported payloads remain in the Extension
+Host; the Webview receives only run summaries until replay is explicitly
+selected.
+
 ## Current security limitations
 
 - Profile validation does not resolve every template path, secret reference,

@@ -207,6 +207,7 @@ profile.id / profile.name
 workspace.folder
 runtime.simulationContext
 turn.clientRequestId
+turn.startedAt
 turn.assistantMessageId
 turn.interaction
 ```
@@ -226,9 +227,11 @@ validation. Optional fields are `requiredContext`,
 
 Current execution always aborts the local fetch first. For `abortThenRequest`,
 it then builds and sends the stop request when the workspace is trusted. A
-missing required context is not preflight-validated; template resolution can
-fail and is recorded as a non-blocking remote-stop warning. The stop response
-is not streamed or interpreted.
+missing `requiredContext` entry skips the remote request and records a
+non-blocking remote-stop warning. The stop request reuses the live turn's
+client request ID and start timestamp. The stop response is not streamed or
+interpreted. When `appendSystemNotice` is true, a user or remote abort appends a
+completed system message after the preserved partial assistant response.
 
 ## Stream
 
@@ -247,26 +250,34 @@ is not streamed or interpreted.
 
 `transport` accepts `sse`, `ndjson`, `json`, `text-stream`, or `fixture`.
 `mappings` is required and must contain at least one rule. `dataFormat` is
-`json` or `text`; it is currently metadata for the profile and does not choose
-a separate parser. `mappingMode` is `firstMatch` or `allMatches`; default
+`json` or `text`; it selects whether framed SSE/NDJSON payloads are JSON-decoded
+or preserved as text. `mappingMode` is `firstMatch` or `allMatches`; default
 runtime behavior is first-match. `unexpectedEndPolicy` is `fail` or
 `completeWithWarning`; runtime default is failure. `doneValue` defaults to the
 string `[DONE]` and is checked before mapping.
 
 The current HTTP implementation uses the SSE parser for `sse`, the
-line-oriented NDJSON parser for `ndjson` and `json`, and a decoded-chunk path
-for `text-stream` (without higher-level record framing). `fixture` runs are
-normally injected from bundled JSONL resources and replayed without a network
-call. See [event-mapping.md](event-mapping.md) for mapping rules.
+line-oriented parser for `ndjson`, one bounded complete document for `json`,
+and a decoded-chunk path for `text-stream` (without higher-level record
+framing). A fixture profile loads
+`.vscode/turnstage/fixtures/<profile-id>.jsonl`; bundled demo profiles load the
+equivalent extension resource. Both replay without a network call. See
+[event-mapping.md](event-mapping.md) for mapping rules.
 
 ## UI, history, errors, security, metrics
 
 The `ui` object supports typed layout presets (`chat-only`, `split-inspector`,
 `chat-with-metrics`, `compact`), inspector position/width, composer hints,
+Assistant streaming indicators (`none`, `caret`, `dots`, or `shimmer`) with a
+bounded animation speed (`400`–`4000` ms) and intensity (`10`–`100` percent),
 lock hints, component visibility metadata, and message action names. The
 Webview applies layout/composer settings, component visibility, labels, and
 active-turn allow/disable lists. The allow list wins while a turn is active;
 Stop, Inspector, Configuration, history viewing, and Copy keep safe defaults.
+`ui.messageActionVisibility` is `always` by default so Copy, Retry,
+Edit-and-resend, and Inspect remain discoverable. Set it to `interaction` to
+hide the row until its message is hovered or receives keyboard focus; touch
+layouts keep the actions visible because hover is unavailable.
 Message actions still resolve through the host-owned action registry and
 command allowlist rather than arbitrary profile code.
 
@@ -293,9 +304,17 @@ active-turn locks.
 `allowedDomains`, and `allowedCommands`. URI and command checks are host-side;
 see [security.md](security.md).
 
-`metrics.enabled` is a unique string array in the schema. The collector emits
-the fields described in [performance.md](performance.md), regardless of an
-enabled-list filter.
+`metrics.enabled` is a unique string array for run-level metric presentation.
+`metrics.messageEnabled` optionally restricts which metrics are rendered below
+an Assistant message. The built-in IDs are `ttft` and `totalDuration`; any
+mapped per-message metric ID can be listed beside them. An empty or omitted
+list shows both built-ins and every mapped metric. Per-message samples are
+emitted through `message.metric.updated`; the mapping supplies the metric ID,
+extracted value, optional message ID, label, unit, display format, and
+aggregation. See
+[event-mapping.md](event-mapping.md#per-message-metrics). The run collector
+still emits the fields described in [performance.md](performance.md),
+regardless of an enabled-list filter.
 
 ## Environment schema
 
@@ -303,7 +322,6 @@ Environment files use this shape:
 
 ```jsonc
 {
-  "$schema": "../../resources/schemas/turnstage-environment.schema.json",
   "version": 1,
   "id": "local",
   "name": "Local Mock Server",
@@ -315,6 +333,10 @@ Environment files use this shape:
   }
 }
 ```
+
+TurnStage registers both profile and environment schemas with VS Code by file
+name, so copied starter files do not need a relative `$schema` path. This keeps
+validation working in workspace and user profile directories alike.
 
 The environment schema requires `version`, `id`, `name`, and `variables`,
 rejects unknown root properties, and permits arbitrary JSON values under

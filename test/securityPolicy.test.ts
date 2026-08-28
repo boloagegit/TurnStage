@@ -34,6 +34,19 @@ const mock = vi.hoisted(() => {
     toString(): string { return `${this.scheme}://${this.authority}${this.path}`; }
   }
 
+  class Position {
+    constructor(readonly line: number, readonly character: number) {}
+  }
+
+  class Range {
+    constructor(readonly start: Position, readonly end: Position) {}
+  }
+
+  class WorkspaceEdit {
+    readonly replacements: Array<{ uri: Uri; range: Range; content: string }> = [];
+    replace(uri: Uri, range: Range, content: string): void { this.replacements.push({ uri, range, content }); }
+  }
+
   const openExternal = vi.fn(async () => true);
   const executeCommand = vi.fn(async () => undefined);
   const workspace = {
@@ -46,22 +59,29 @@ const mock = vi.hoisted(() => {
       return `../${uri.path.replace(/^\/+/, '')}`;
     }),
     openTextDocument: vi.fn(async (uri: Uri) => ({ uri })),
+    applyEdit: vi.fn(async (edit: WorkspaceEdit) => { void edit; return true; }),
     getConfiguration: vi.fn(() => ({ get: vi.fn((_key: string, fallback: unknown) => fallback) })),
   };
 
   return {
     Uri,
+    Position,
+    Range,
+    WorkspaceEdit,
     workspace,
     env: { openExternal, clipboard: { writeText: vi.fn(async () => undefined) } },
     commands: { executeCommand },
-    window: { showTextDocument: vi.fn(async (document: unknown) => document) },
+    window: {
+      showTextDocument: vi.fn(async (document: unknown) => document),
+      showWarningMessage: vi.fn(async (_message: string, _options: unknown, action?: string) => action),
+    },
   };
 });
 
 vi.mock('vscode', () => mock);
 
 import { SecretService, UriPolicy, redactDeep, redactHeaders } from '../src/extension/security/security';
-import { TurnStageEditorProvider } from '../src/extension/editors/turnstageEditorProvider';
+import { TurnStageEditorProvider, isAllowedPatchPath } from '../src/extension/editors/turnstageEditorProvider';
 
 const profileUri = new mock.Uri('file', '/workspace/.vscode/turnstage/profiles/demo.turnstage.jsonc');
 
@@ -131,6 +151,17 @@ describe('UriPolicy', () => {
     const document = await mock.workspace.openTextDocument.mock.results[0]?.value;
     expect(mock.workspace.openTextDocument).toHaveBeenCalledWith(expect.objectContaining({ path: '/workspace/docs/readme.md' }));
     expect(mock.window.showTextDocument).toHaveBeenCalledWith(await document);
+  });
+
+  it('selects a configured source range and supports workspace artifacts', async () => {
+    await policy.open(citation({ kind: 'artifact', path: 'reports/result.json', range: { start: { line: 4, column: 2 }, end: { line: 6, character: 8 } } }), profile(), profileUri as never);
+
+    expect(mock.window.showTextDocument).toHaveBeenCalledWith(expect.anything(), {
+      selection: expect.objectContaining({
+        start: expect.objectContaining({ line: 4, character: 2 }),
+        end: expect.objectContaining({ line: 6, character: 8 }),
+      }),
+    });
   });
 
   it.each(['../outside.txt', '../../etc/passwd', '../workspace-evil/secret.txt'])('rejects a path outside the workspace: %s', async (path) => {
@@ -244,5 +275,114 @@ describe('profile command allowlist', () => {
 
     await expect(invoke('run-command', controller(['workbench.action.test']))).rejects.toThrow('Profile commands are disabled in untrusted workspaces.');
     expect(mock.commands.executeCommand).not.toHaveBeenCalled();
+  });
+});
+
+describe('response action dispatch', () => {
+  type ActionProvider = { invokeAction: (actionId: string, sourceMessageId: string | undefined, controller: unknown) => Promise<void> };
+  const invoke = (actionId: string, controller: unknown) => (Object.create(TurnStageEditorProvider.prototype) as ActionProvider).invokeAction(actionId, 'message-1', controller);
+
+  it('confirms configured actions and sends their payload through the controller', async () => {
+    const send = vi.fn(async () => undefined);
+    const actionController = {
+      profile: profile(), profileUri,
+      snapshot: { messages: [{ id: 'message-1', role: 'assistant', actions: [{ id: 'send-again', label: 'Send', actionId: 'request.send', payload: { text: 'Next question' }, confirm: { title: 'Continue?', message: 'Send another request' } }] }] },
+      send,
+    };
+
+    await invoke('send-again', actionController);
+
+    expect(mock.window.showWarningMessage).toHaveBeenCalledWith('Continue?', { modal: true, detail: 'Send another request' }, 'Continue');
+    expect(send).toHaveBeenCalledWith('Next question', expect.objectContaining({ kind: 'responseAction', actionId: 'send-again', sourceMessageId: 'message-1' }));
+  });
+
+  it('uses generic action payload fields after profile mapping', async () => {
+    const send = vi.fn(async () => undefined);
+    const actionController = {
+      profile: profile(), profileUri,
+      snapshot: { messages: [{ id: 'message-1', role: 'assistant', actions: [{ id: 'cta-details', label: 'Details', actionId: 'request.send', payload: { text: 'Explain the details', interactionKey: 'sample_details' } }] }] },
+      send,
+    };
+
+    await invoke('cta-details', actionController);
+
+    expect(send).toHaveBeenCalledWith('Explain the details', expect.objectContaining({ kind: 'responseAction', actionId: 'cta-details', actionKey: 'sample_details', sourceMessageId: 'message-1' }));
+  });
+
+  it('fails visibly for stale or unsupported action ids', async () => {
+    const actionController = { profile: profile(), profileUri, snapshot: { messages: [{ id: 'message-1', actions: [] }] } };
+    await expect(invoke('missing', actionController)).rejects.toThrow('no longer available');
+  });
+});
+
+describe('profile patch allowlist', () => {
+  it('accepts every configuration path exposed by the settings surface', () => {
+    const paths = [
+      ['conversation', 'send', 'timeoutMs'],
+      ['conversation', 'send', 'idleTimeoutMs'],
+      ['conversation', 'send', 'headers'],
+      ['conversation', 'send', 'body'],
+      ['opening', 'starters'],
+      ['opening', 'request'],
+      ['opening', 'response'],
+      ['opening', 'fallbacks'],
+      ['opening', 'failurePolicy'],
+      ['conversation', 'send', 'variants', 0, 'headers'],
+      ['history', 'remoteSessions'],
+      ['metrics', 'enabled'],
+      ['stream', 'transport'],
+      ['stream', 'dataFormat'],
+      ['stream', 'doneValue'],
+      ['security', 'allowedUriSchemes'],
+      ['security', 'allowedDomains'],
+      ['security', 'allowedCommands'],
+      ['ui', 'messageActions'],
+    ] as const;
+
+    for (const path of paths) expect(isAllowedPatchPath(path), path.join('.')).toBe(true);
+  });
+
+  it('rejects prototype-pollution paths and arbitrary profile paths', () => {
+    const rejected = [
+      ['__proto__'],
+      ['prototype'],
+      ['constructor'],
+      ['ui', '__proto__'],
+      ['ui', 'prototype'],
+      ['ui', 'constructor'],
+      ['conversation', 'send', 'unknown'],
+      ['security', 'secretToken'],
+      ['notAProfilePath'],
+    ] as const;
+
+    for (const path of rejected) expect(isAllowedPatchPath(path), path.join('.')).toBe(false);
+  });
+
+  it('reports a rejected patch instead of silently ignoring it', async () => {
+    type PatchProvider = { patchDocument: (document: unknown, path: Array<string | number>, value: unknown) => Promise<void> };
+    const provider = Object.create(TurnStageEditorProvider.prototype) as PatchProvider;
+
+    await expect(provider.patchDocument({}, ['ui', 'notAllowed'], true)).rejects.toThrow('This profile setting cannot be edited from the configuration surface.');
+  });
+
+  it('turns an allowed GUI change into a structured WorkspaceEdit for the JSONC document', async () => {
+    type PatchProvider = { patchDocument: (document: unknown, path: Array<string | number>, value: unknown) => Promise<void> };
+    const provider = Object.create(TurnStageEditorProvider.prototype) as PatchProvider;
+    const source = '{\n  "version": 1,\n  "id": "demo",\n  "name": "Demo",\n  "conversation": { "send": { "method": "POST", "url": "https://example.test" } },\n  "stream": { "transport": "sse", "mappings": [] }\n}\n';
+    const document = {
+      uri: profileUri,
+      getText: () => source,
+      positionAt: (offset: number) => new mock.Position(0, offset),
+    };
+
+    mock.workspace.applyEdit.mockClear();
+    await provider.patchDocument(document, ['ui', 'messageActionVisibility'], 'interaction');
+
+    expect(mock.workspace.applyEdit).toHaveBeenCalledTimes(1);
+    const edit = mock.workspace.applyEdit.mock.calls[0]?.[0];
+    if (!edit) throw new Error('Expected a WorkspaceEdit.');
+    expect(edit.replacements).toHaveLength(1);
+    expect(edit.replacements[0]?.uri).toBe(profileUri);
+    expect(edit.replacements[0]?.content).toContain('"messageActionVisibility": "interaction"');
   });
 });
