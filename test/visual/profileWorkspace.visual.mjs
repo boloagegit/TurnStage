@@ -66,6 +66,34 @@ try {
   assert.ok(screenshotPayload.dataUrl.startsWith('data:image/png;base64,iVBOR'), 'Screenshot button must generate a PNG payload');
   const screenshotBytes = Buffer.from(screenshotPayload.dataUrl.slice('data:image/png;base64,'.length), 'base64');
   assert.ok(screenshotBytes.length > 1_000, 'Generated PNG must contain the rendered Chat viewport');
+  const screenshotComposerMargins = await page.evaluate(async (dataUrl) => {
+    const capturedImage = document.createElement('img');
+    await new Promise((resolveLoad, rejectLoad) => {
+      capturedImage.onload = resolveLoad;
+      capturedImage.onerror = rejectLoad;
+      capturedImage.src = dataUrl;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = capturedImage.naturalWidth;
+    canvas.height = capturedImage.naturalHeight;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('Canvas context is unavailable');
+    context.drawImage(capturedImage, 0, 0);
+    const sampleY = Math.max(0, canvas.height - 30);
+    const background = context.getImageData(0, canvas.height - 1, 1, 1).data;
+    const row = context.getImageData(0, sampleY, canvas.width, 1).data;
+    const differsFromBackground = (offset) => Math.abs(row[offset] - background[0]) + Math.abs(row[offset + 1] - background[1]) + Math.abs(row[offset + 2] - background[2]) > 12;
+    let first = -1;
+    let last = -1;
+    for (let x = 0; x < canvas.width; x += 1) {
+      if (!differsFromBackground(x * 4)) continue;
+      if (first < 0) first = x;
+      last = x;
+    }
+    return { left: first, right: last < 0 ? -1 : canvas.width - 1 - last, width: canvas.width };
+  }, screenshotPayload.dataUrl);
+  assert.ok(screenshotComposerMargins.left > 0 && screenshotComposerMargins.right > 0, 'Captured composer must be inset from both Chat viewport edges');
+  assert.ok(Math.abs(screenshotComposerMargins.left - screenshotComposerMargins.right) <= 2, `Captured composer must remain centered; observed margins ${JSON.stringify(screenshotComposerMargins)}`);
   await writeFile(resolve(artifactDirectory, 'chat-viewport-capture-dark.png'), screenshotBytes);
   assert.equal(await page.getByRole('region', { name: 'Opening' }).getByRole('heading', { name: 'Opening' }).count(), 1, 'Opening content must be explicitly labelled');
   const assistantMessage = page.locator('[data-message-id="assistant-1"]');
@@ -282,7 +310,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, rightPaneConfiguration: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: true, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, rightPaneConfiguration: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: true, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

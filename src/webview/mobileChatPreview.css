@@ -924,8 +924,9 @@
   display: grid;
   gap: var(--mcp-space-1);
   margin-block-start: 0;
-  width: min(48rem, calc(100% - (2 * var(--mcp-space-4))));
-  margin-inline: auto;
+  width: auto;
+  margin-inline: 0;
+  padding-inline: max(var(--mcp-space-4), calc((100% - 48rem) / 2));
   margin-block-end: max(var(--mcp-space-3), env(safe-area-inset-bottom));
 }
 
@@ -1133,7 +1134,8 @@
 
   .mobile-chat-preview__composer {
     width: auto;
-    margin-inline: var(--mcp-space-3);
+    margin-inline: 0;
+    padding-inline: var(--mcp-space-3);
   }
 
   .mobile-chat-preview__message--user {

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.6.1
+
+- Fixed exported Chat PNGs positioning the composer against the leading edge in wide Responsive and Web viewports. The composer now shares the same centered content insets as the header and conversation while preserving the existing compact mobile margins.
+- Added output-image regression coverage that checks the generated PNG itself for balanced composer margins. Existing profiles, runs, and screenshot files require no migration.
+
 ## 0.6.0
 
 - Added a localized, keyboard-accessible camera action to the Chat preview toolbar. It captures only the logical Chat viewport as a PNG—excluding the viewport controls and Debug pane—and uses the native VS Code save dialog.
