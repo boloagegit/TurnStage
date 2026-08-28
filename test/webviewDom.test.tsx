@@ -128,6 +128,19 @@ describe('Webview DOM behavior', () => {
     expect(metrics.textContent).not.toContain('Tokens');
   });
 
+  it('keeps backend usage data out of Chat unless the profile explicitly enables it', () => {
+    const usageSnapshot: SessionSnapshot = {
+      ...snapshot,
+      messages: [{ ...snapshot.messages[0]!, parts: [...snapshot.messages[0]!.parts, { type: 'usage', usage: { inputTokens: 24, outputTokens: 18 } }] }],
+    };
+    const { rerender } = render(<MobileChatPreview {...mobileProps({ snapshot: usageSnapshot })} />);
+    expect(screen.queryByText('Usage')).toBeNull();
+
+    const optedIn = { ...profile, ui: { ...profile.ui, components: { ...profile.ui?.components, usage: { visible: true } } } };
+    rerender(<MobileChatPreview {...mobileProps({ profile: optedIn, snapshot: usageSnapshot })} />);
+    expect(screen.getByText('Usage')).toBeTruthy();
+  });
+
   it('shows TurnStage-owned TTFT and total duration on each assistant response', () => {
     const timedSnapshot: SessionSnapshot = {
       ...snapshot,

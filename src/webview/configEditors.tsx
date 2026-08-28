@@ -10,7 +10,7 @@ type Post = (message: WebviewPayload) => void;
 
 const methods = ['POST', 'GET', 'PUT', 'PATCH', 'DELETE'] as const;
 const operators = ['equals', 'notEquals', 'exists', 'notExists', 'oneOf', 'contains', 'startsWith', 'endsWith', 'regex'] as const;
-const componentNames = ['opening', 'starters', 'progress', 'toolCalls', 'citations', 'followups', 'responseActions', 'forms', 'diagnostics', 'metrics'] as const;
+const componentNames = ['opening', 'starters', 'progress', 'toolCalls', 'citations', 'followups', 'responseActions', 'forms', 'diagnostics', 'metrics', 'usage'] as const;
 const messageActionOptions: Array<{ id: MessageActionId; label: string }> = [
   { id: 'message.copy', label: 'Copy' },
   { id: 'message.retry', label: 'Retry' },
@@ -316,7 +316,7 @@ export function UiConfigEditor({ profile, post }: { profile: TurnStageProfile; p
       <Field label={t('Animation speed (ms)')}><PatchNumber aria-label={t('Assistant streaming animation speed')} value={streaming.speedMs} min={400} max={4000} disabled={streaming.effect === 'none'} onCommit={(value) => post({ type: 'profile.patch', path: ['ui', 'streaming', 'speedMs'], value })} /></Field>
       <Field label={t('Intensity (%)')}><PatchNumber aria-label={t('Assistant streaming intensity')} value={streaming.intensityPercent} min={10} max={100} disabled={streaming.effect === 'none'} onCommit={(value) => post({ type: 'profile.patch', path: ['ui', 'streaming', 'intensityPercent'], value })} /></Field>
     </div></section>
-    <section className="config-section"><div className="section-heading"><div><h3>{t('Components')}</h3><p>{t('Choose which response surfaces appear in Chat. The runtime treats an omitted visibility flag as visible.')}</p></div></div><div className="component-grid">{componentNames.map((name) => <Checkbox key={name} label={localizeHumanized(name)} checked={profile.ui?.components?.[name]?.visible ?? true} onChange={(value) => post({ type: 'profile.patch', path: ['ui', 'components', name, 'visible'], value })} />)}</div></section>
+    <section className="config-section"><div className="section-heading"><div><h3>{t('Components')}</h3><p>{t('Choose which response surfaces appear in Chat. Usage is hidden unless explicitly enabled.')}</p></div></div><div className="component-grid">{componentNames.map((name) => <Checkbox key={name} label={localizeHumanized(name)} checked={profile.ui?.components?.[name]?.visible ?? name !== 'usage'} onChange={(value) => post({ type: 'profile.patch', path: ['ui', 'components', name, 'visible'], value })} />)}</div></section>
     <MessageActionsEditor profile={profile} post={post} />
     <section className="config-section"><div className="section-heading"><div><h3>{t('Active-turn locks')}</h3><p>{t('Comma-separated component or control IDs. Stop should normally remain allowed.')}</p></div></div><div className="form-grid">
       <Field label={t('Disable while active')} hint={t('Example: {ids}', { ids: 'composer, model, newConversation' })} wide><input aria-label={t('Components disabled while active')} value={disableText} onChange={(event) => setDisableText(event.target.value)} onBlur={() => post({ type: 'profile.patch', path: ['ui', 'locks', 'whileTurnActive', 'disable'], value: parseList(disableText) })} /></Field>

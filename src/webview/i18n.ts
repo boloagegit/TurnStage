@@ -577,7 +577,7 @@ const zhTw: Record<string, string> = {
   'Enter key behavior': 'Enter 鍵行為',
   'New line': '換行',
   'Components': '元件',
-  'Choose which response surfaces appear in Chat. The runtime treats an omitted visibility flag as visible.': '選擇聊天中顯示的回應介面。執行階段會將省略的可見性旗標視為可見。',
+  'Choose which response surfaces appear in Chat. Usage is hidden unless explicitly enabled.': '選擇聊天中顯示的回應介面；用量資訊必須明確啟用才會顯示。',
   'Active-turn locks': '進行中回合鎖定',
   'Comma-separated component or control IDs. Stop should normally remain allowed.': '以逗號分隔元件或控制項 ID；通常應允許停止。',
   'Disable while active': '進行中停用',

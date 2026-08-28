@@ -301,7 +301,9 @@ aggregation. Assistant messages also expose built-in TTFT and total-turn time,
 measured by the Extension Host from the request start. The compact footer shows
 only these two built-ins by default. `metrics.messageEnabled` can explicitly
 opt into a mapped metric ID, but backend-reported duration or token values stay
-out of the chat surface by default and remain available in Debug data.
+out of the chat surface by default and remain available in Debug data. A
+backend `usage.updated` message part is likewise hidden in Chat unless
+`ui.components.usage.visible` is explicitly enabled.
 
 The test workspace keeps Chat on the left and provides Debug and Configure as
 two modes of the right pane. Configure exposes the same seven profile sections

@@ -572,7 +572,7 @@ function MobileMessagePart({ profile, part, messageId, citations, post, trusted,
     if (!componentVisible(profile, 'diagnostics')) return null;
     return <details className="mobile-chat-preview__part"><summary>{t('Diagnostics')}</summary><JsonPreview value={part.diagnostic} /></details>;
   }
-  if (part.type === 'usage') return <details className="mobile-chat-preview__part"><summary>{t('Usage')}</summary><JsonPreview value={part.usage} /></details>;
+  if (part.type === 'usage') return componentVisible(profile, 'usage') ? <details className="mobile-chat-preview__part"><summary>{t('Usage')}</summary><JsonPreview value={part.usage} /></details> : null;
   if (part.type === 'error') return <div className="mobile-chat-preview__error-part" role="alert"><strong>{t('Response failed')}</strong>{part.text && <p>{part.text}</p>}</div>;
   if (part.type === 'form' && isFormDefinition(part.form)) return componentVisible(profile, 'forms') ? <MobileForm form={part.form} messageId={messageId} post={post} trusted={trusted} accepted={accepted === true} /> : null;
   return null;
@@ -699,7 +699,9 @@ function isMessageInteractiveTarget(target: EventTarget | null): boolean {
 }
 
 function componentVisible(profile: TurnStageProfile, name: string): boolean {
-  return profile.ui?.components?.[name]?.visible !== false;
+  const configured = profile.ui?.components?.[name]?.visible;
+  if (configured !== undefined) return configured;
+  return name !== 'usage';
 }
 
 function staticOpening(profile: TurnStageProfile): NonNullable<SessionSnapshot['opening']> | undefined {

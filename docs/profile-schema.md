@@ -317,6 +317,11 @@ aggregation. See
 still emits the fields described in [performance.md](performance.md),
 regardless of an enabled-list filter.
 
+Backend `usage.updated` data is also hidden from Chat by default because its
+token accounting cannot be verified by TurnStage. It remains inspectable in
+Debug; set `ui.components.usage.visible` to `true` only when the backend's
+measurement scope is understood.
+
 ## Environment schema
 
 Environment files use this shape:
