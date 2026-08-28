@@ -193,15 +193,15 @@ by a backend event. The mapping can correlate a sample to an explicit
 
 ```jsonc
 {
-  "id": "message-e2e",
+  "id": "backend-duration",
   "match": { "event": "diagnostic" },
   "emit": {
     "type": "message.metric.updated",
     "messageId": { "path": "$.assistantMessageId" },
     "metric": {
-      "id": "e2e",
-      "label": "E2E",
-      "value": { "path": "$.e2e_ms" },
+      "id": "backendDuration",
+      "label": "Backend reported",
+      "value": { "path": "$.durationMs" },
       "unit": "ms",
       "format": "duration",
       "aggregation": "last"
@@ -216,8 +216,10 @@ are `number`, `duration`, `bytes`, `percent`, and `text`. Numeric aggregations
 ignore non-finite samples. Profiles may restrict the compact metrics rendered
 under each message with `metrics.messageEnabled`; use `ttft` and
 `totalDuration` for the two built-ins and mapped metric IDs for backend values.
-The complete normalized event remains available in Debug regardless of that
-display filter.
+Only the built-ins appear by default. Backend-reported duration and token
+counts require an explicit profile opt-in because TurnStage cannot verify their
+measurement scope or accuracy. The complete normalized event remains available
+in Debug regardless of that display filter.
 
 ## Examples
 

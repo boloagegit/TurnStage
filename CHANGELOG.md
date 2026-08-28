@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.5.1
+
+- Changed the Assistant message footer to show only TurnStage-measured TTFT and total duration by default. Backend-reported duration and token metrics remain available in Debug and require an explicit `metrics.messageEnabled` opt-in before appearing in chat.
+- Renamed the bundled diagnostic example from the ambiguous `E2E` label to `Backend reported`. Existing profile mappings and recorded values remain compatible; no migration is required.
+
 ## 0.5.0
 
 - Added host-measured TTFT and total duration to every Assistant response. Live messages use waiting/streaming states instead of displaying a false zero, recorded runs retain the measurements, and Replay shows the original recorded timings beside profile-mapped message metrics.

@@ -286,7 +286,7 @@ const zhTw: Record<string, string> = {
   'Leave empty to show every available metric.': '留空即可顯示所有可用指標。',
   'Visible message metrics': '顯示的訊息指標',
   'Leave empty to show every metric attached to a message by message.metric.updated mappings.': '留空即可顯示由 message.metric.updated 映射附加到訊息的所有指標。',
-  'Leave empty to show TTFT, total duration, and every mapped message metric.': '留空即可顯示 TTFT、總時間及所有映射到訊息的指標。',
+  'Leave empty to show only TTFT and total duration. Add mapped metric IDs explicitly.': '留空只顯示 TTFT 與總時間；其他映射指標必須明確加入。',
   'Remote session scope': '遠端工作階段範圍',
   'Choose which profile values identify a reusable remote conversation reference.': '選擇用來識別可重用遠端對話參照的設定檔值。',
   'Remote sessions': '遠端工作階段',

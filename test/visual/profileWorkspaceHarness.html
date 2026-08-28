@@ -101,7 +101,7 @@
         ...(messageActions ? { messageActions } : {}),
         components: { opening: { visible: true }, progress: { visible: true }, metrics: { visible: true }, messageMetrics: { visible: true } }
       },
-      metrics: { messageEnabled: ['ttft', 'totalDuration', 'e2e', 'tokens'] },
+      metrics: { messageEnabled: ['ttft', 'totalDuration'] },
       errorPolicy: { allowContinuation: true }
     };
     const rawEvents = ['start', 'status', 'message', 'message', 'title', 'done'].map((type, index) => ({ sequence: index + 1, receivedAt: 1000 + index * 600, elapsedMs: 606 + index * 601, protocol: 'sse', sse: { event: type }, raw: `event: ${type}`, data: { type, text: index === 2 ? 'Here is ' : index === 3 ? 'the sample result.' : undefined } }));

@@ -92,7 +92,7 @@
       { "id": "action-request", "match": { "event": "action", "path": "$.actionId", "operator": "equals", "value": "request.send" }, "emit": { "type": "action.upsert", "action": { "id": { "path": "$.id" }, "label": { "path": "$.label" }, "actionId": "request.send", "payload": { "text": { "path": "$.payload.messageText" }, "interactionKey": { "path": "$.payload.ctaKey" } } } } },
       { "id": "action-uri", "match": { "event": "action", "path": "$.actionId", "operator": "equals", "value": "uri.open" }, "emit": { "type": "action.upsert", "action": { "id": { "path": "$.id" }, "label": { "path": "$.label" }, "actionId": "uri.open", "payload": { "uri": { "path": "$.payload.uri" }, "interactionKey": { "path": "$.payload.ctaKey" } } } } },
       { "id": "diagnostic", "match": { "event": "diagnostic" }, "continue": true, "emit": { "type": "diagnostic.updated", "diagnostic": { "path": "$" } } },
-      { "id": "message-e2e", "match": { "event": "diagnostic" }, "emit": { "type": "message.metric.updated", "metric": { "id": "e2e", "label": "E2E", "value": { "path": "$.e2e_ms" }, "unit": "ms", "format": "duration", "aggregation": "last" } } },
+      { "id": "backend-duration", "match": { "event": "diagnostic" }, "emit": { "type": "message.metric.updated", "metric": { "id": "backendDuration", "label": "Backend reported", "value": { "path": "$.e2e_ms" }, "unit": "ms", "format": "duration", "aggregation": "last" } } },
       { "id": "title", "match": { "event": "title" }, "emit": { "type": "conversation.title.updated", "title": { "path": "$.title" } } },
       { "id": "done", "match": { "event": "done" }, "emit": { "type": "stream.completed" } },
       { "id": "error", "match": { "event": "error" }, "emit": { "type": "stream.failed", "error": { "path": "$.message" } } }
@@ -109,5 +109,5 @@
   "history": { "remoteSessions": { "mode": "referenceOnly", "scope": ["profile", "actor", "environment"] }, "localRuns": { "enabled": true, "maxRuns": 20, "recordRawEvents": true, "recordNormalizedEvents": true, "recordChatSnapshot": true } },
   "errorPolicy": { "preservePartialContent": true, "showErrorPart": true, "keepConversationId": true, "allowContinuation": true, "releaseAllLocks": true },
   "security": { "allowedUriSchemes": ["https"], "allowedDomains": ["example.com"], "allowedCommands": [] },
-  "metrics": { "enabled": ["headersLatency", "firstEventLatency", "ttft", "totalDuration", "eventCount", "byteCount"], "messageEnabled": ["ttft", "totalDuration", "e2e"] }
+  "metrics": { "enabled": ["headersLatency", "firstEventLatency", "ttft", "totalDuration", "eventCount", "byteCount"], "messageEnabled": ["ttft", "totalDuration"] }
 }

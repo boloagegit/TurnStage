@@ -201,7 +201,7 @@ export function EventsEditor({ profile, post, mappingTestResult }: { profile: Tu
     const next: MappingRule = {
       id: uniqueRuleId(profile, `message-metric-${number}`),
       match: { event: 'done' },
-      emit: { type: 'message.metric.updated', metric: { id: 'e2e', label: 'E2E', value: { path: '$.e2e_ms' }, format: 'duration', unit: 'ms', aggregation: 'last' } }
+      emit: { type: 'message.metric.updated', metric: { id: 'backendDuration', label: 'Backend reported', value: { path: '$.durationMs' }, format: 'duration', unit: 'ms', aggregation: 'last' } }
     };
     post({ type: 'profile.patch', path: ['stream', 'mappings'], value: [...profile.stream.mappings, next] });
   };

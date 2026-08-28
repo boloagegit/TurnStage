@@ -97,18 +97,35 @@ describe('Webview DOM behavior', () => {
     const metricSnapshot: SessionSnapshot = {
       ...snapshot,
       messages: [{ ...snapshot.messages[0]!, metrics: [
-        { id: 'e2e', label: 'E2E', value: 180, unit: 'ms', format: 'duration', aggregation: 'last', sampleCount: 1 },
+        { id: 'backendDuration', label: 'Backend reported', value: 180, unit: 'ms', format: 'duration', aggregation: 'last', sampleCount: 1 },
         { id: 'bytes', label: 'Payload', value: 2048, format: 'bytes', aggregation: 'last', sampleCount: 1 },
         { id: 'hidden', label: 'Hidden', value: 7 },
       ] }]
     };
-    render(<MobileChatPreview {...mobileProps({ profile: { ...profile, metrics: { messageEnabled: ['e2e', 'bytes'] } }, snapshot: metricSnapshot })} />);
+    render(<MobileChatPreview {...mobileProps({ profile: { ...profile, metrics: { messageEnabled: ['backendDuration', 'bytes'] } }, snapshot: metricSnapshot })} />);
 
     const metrics = screen.getByLabelText('Message metrics');
-    expect(metrics.textContent).toContain('E2E');
+    expect(metrics.textContent).toContain('Backend reported');
     expect(metrics.textContent).toContain('180 ms');
     expect(metrics.textContent).toContain('2 KiB');
     expect(metrics.textContent).not.toContain('Hidden');
+  });
+
+  it('hides backend-reported and token metrics unless a profile explicitly enables them', () => {
+    const metricSnapshot: SessionSnapshot = {
+      ...snapshot,
+      messages: [{ ...snapshot.messages[0]!, timing: { ttft: 125, totalDuration: 480 }, metrics: [
+        { id: 'backendDuration', label: 'Backend reported', value: 180, unit: 'ms', format: 'duration' },
+        { id: 'tokens', label: 'Tokens', value: 42, format: 'number' },
+      ] }],
+    };
+    render(<MobileChatPreview {...mobileProps({ snapshot: metricSnapshot })} />);
+
+    const metrics = screen.getByLabelText('Message metrics');
+    expect(metrics.textContent).toContain('TTFT');
+    expect(metrics.textContent).toContain('Total');
+    expect(metrics.textContent).not.toContain('Backend reported');
+    expect(metrics.textContent).not.toContain('Tokens');
   });
 
   it('shows TurnStage-owned TTFT and total duration on each assistant response', () => {

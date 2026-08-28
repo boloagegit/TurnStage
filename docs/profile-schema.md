@@ -308,7 +308,8 @@ see [security.md](security.md).
 `metrics.messageEnabled` optionally restricts which metrics are rendered below
 an Assistant message. The built-in IDs are `ttft` and `totalDuration`; any
 mapped per-message metric ID can be listed beside them. An empty or omitted
-list shows both built-ins and every mapped metric. Per-message samples are
+list shows only the two built-ins; mapped backend values require explicit
+opt-in. Per-message samples are
 emitted through `message.metric.updated`; the mapping supplies the metric ID,
 extracted value, optional message ID, label, unit, display format, and
 aggregation. See

@@ -299,9 +299,9 @@ arbitrary per-message measurements through `message.metric.updated` mappings,
 including message correlation, display format, and first/last/sum/min/max/count
 aggregation. Assistant messages also expose built-in TTFT and total-turn time,
 measured by the Extension Host from the request start. The compact footer shows
-these built-ins beside mapped measurements; `metrics.messageEnabled` can select
-any of them by ID (`ttft`, `totalDuration`, or a mapped metric ID) without
-removing the underlying run or Debug data.
+only these two built-ins by default. `metrics.messageEnabled` can explicitly
+opt into a mapped metric ID, but backend-reported duration or token values stay
+out of the chat surface by default and remain available in Debug data.
 
 The test workspace keeps Chat on the left and provides Debug and Configure as
 two modes of the right pane. Configure exposes the same seven profile sections

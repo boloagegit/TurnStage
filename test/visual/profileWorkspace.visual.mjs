@@ -57,7 +57,7 @@ try {
   const messageMetricText = await assistantMessage.getByLabel('Message metrics').innerText();
   assert.ok(messageMetricText.includes('TTFT') && messageMetricText.includes('1,808 ms'), 'Per-message TTFT must be visible');
   assert.ok(messageMetricText.includes('Total') && messageMetricText.includes('3,612 ms'), 'Per-message total duration must be visible');
-  assert.ok(messageMetricText.includes('180 ms'), 'Mapped per-message duration metric must be visible');
+  assert.ok(!messageMetricText.includes('E2E') && !messageMetricText.includes('Tokens'), 'Backend-reported and token metrics must not appear unless a profile opts in');
   await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'message-actions-metrics-dark.png') });
   await page.getByRole('tab', { name: 'Raw Events' }).click();
   const firstEventRow = page.getByRole('listbox', { name: 'Raw Events' }).getByRole('option').first();

@@ -457,10 +457,10 @@ function MobileMessage({ profile, message, post, send, setDraft, trusted, select
   const messageLabelValues = { role: roleLabel, status: statusLabel };
   const messageActions = resolveMessageActions(profile, message.role, Boolean(onSelectMessage));
   const messageActionVisibility = resolveMessageActionVisibility(profile.ui);
-  const enabledMessageMetrics = profile.metrics?.messageEnabled?.length ? new Set(profile.metrics.messageEnabled) : undefined;
-  const showTtft = message.role === 'assistant' && message.timing !== undefined && (!enabledMessageMetrics || enabledMessageMetrics.has('ttft'));
-  const showTotalDuration = message.role === 'assistant' && message.timing !== undefined && (!enabledMessageMetrics || enabledMessageMetrics.has('totalDuration'));
-  const messageMetrics = (message.metrics ?? []).filter((metric) => !enabledMessageMetrics || enabledMessageMetrics.has(metric.id));
+  const enabledMessageMetrics = new Set(profile.metrics?.messageEnabled?.length ? profile.metrics.messageEnabled : ['ttft', 'totalDuration']);
+  const showTtft = message.role === 'assistant' && message.timing !== undefined && enabledMessageMetrics.has('ttft');
+  const showTotalDuration = message.role === 'assistant' && message.timing !== undefined && enabledMessageMetrics.has('totalDuration');
+  const messageMetrics = (message.metrics ?? []).filter((metric) => enabledMessageMetrics.has(metric.id));
   const streaming = resolveStreaming(profile.ui);
   const streamingAssistant = message.role === 'assistant' && (message.status === 'pending' || message.status === 'streaming');
   const trailingTextPartIndex = parts.map((part) => part.type === 'text' || part.type === 'markdown').lastIndexOf(true);
