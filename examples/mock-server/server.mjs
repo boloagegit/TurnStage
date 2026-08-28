@@ -49,7 +49,7 @@ async function handleContractStream(request, response, body, mode) {
   const cid = continuation ? body.cid : `cid-${Date.now()}`;
   const assistantMessageId = `assistant-${Date.now()}`;
   contractSessions.set(cid, { assistantMessageId, stopped: false });
-  response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive' });
+  response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-request-id': 'mock-contract-stream' });
   response.flushHeaders();
   const wait = mode === 'contract-slow' ? contractSlowDelayMs : 35;
   const write = async (event, data) => {
@@ -119,7 +119,7 @@ const server = http.createServer(async (request, response) => {
   if (!request.url?.endsWith('/stream')) return json(response, 404, { code: 'NOT_FOUND' });
   if (mode === 'http-401') return json(response, 401, { code: 'AUTH_REQUIRED' });
   if (mode === 'http-500') return json(response, 500, { code: 'SAMPLE_FAILURE' });
-  response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive' });
+  response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-request-id': 'mock-basic-stream' });
   response.flushHeaders();
   const write = async (event, data, wait = mode === 'slow' ? 600 : 55) => { await delay(wait); if (response.destroyed) return; const payload = sse(event, data); if (mode === 'chunk-split') { const point = Math.max(1, Math.floor(payload.length / 2)); response.write(payload.slice(0, point)); await delay(20); response.write(payload.slice(point)); } else response.write(payload); };
   if (mode === 'idle-timeout') { await delay(120000); response.end(); return; }

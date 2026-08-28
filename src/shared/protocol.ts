@@ -9,10 +9,12 @@ export const WORKSPACE_SECTIONS = [
   'request',
   'stream-mapping',
   'chat-ui',
+  'scenario-tests',
   'history-errors',
   'security'
 ] as const;
 export type WorkspaceSection = typeof WORKSPACE_SECTIONS[number];
+export type InspectorTargetTab = 'Network' | 'Raw Events' | 'Normalized';
 
 interface Envelope { protocolVersion: 1; editorInstanceId: string; requestId: string }
 type WithoutEnvelope<T> = T extends unknown ? Omit<T, keyof Envelope> : never;
@@ -61,11 +63,14 @@ export type WebviewMessage = Envelope & (
   | { type: 'run.replay.speed'; speed: 0.25 | 0.5 | 1 | 2 | 4 }
   | { type: 'run.import' }
   | { type: 'run.export'; runId: string }
+  | { type: 'visual.baseline.save'; dataUrl: string; viewport: { id: string; width: number; height: number } }
+  | { type: 'visual.compare'; dataUrl: string; viewport: { id: string; width: number; height: number } }
 );
 
 export type HostMessage = Envelope & (
   | { type: 'host.ready'; trusted: boolean; remoteName?: string; locale: string; direction: 'ltr' | 'rtl' }
   | { type: 'workspace.section'; section: WorkspaceSection }
+  | { type: 'inspector.focus'; tab: InspectorTargetTab; networkId?: string; sequence?: number; messageId?: string }
   | { type: 'profile.snapshot'; profile?: TurnStageProfile; parseError?: string; version: number; environments: string[] }
   | { type: 'profile.validation'; diagnostics: Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number }> }
   | { type: 'profile.validated'; valid: boolean }
@@ -76,6 +81,7 @@ export type HostMessage = Envelope & (
   | { type: 'form.accepted'; formId: string; sourceMessageId?: string }
   | { type: 'run.imported'; path: string; runId: string; duplicate: boolean }
   | { type: 'run.exported'; path: string }
+  | { type: 'visual.result'; operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselinePath: string; diffPath?: string }
   | { type: 'workspaceTrust.changed'; trusted: boolean }
 );
 export type WebviewPayload = WithoutEnvelope<WebviewMessage>;
@@ -85,6 +91,7 @@ const MAX_ID_LENGTH = 1024;
 const MAX_TEXT_LENGTH = 1024 * 1024;
 const MAX_VALUE_DEPTH = 24;
 const MAX_VALUE_NODES = 20_000;
+const MAX_PNG_DATA_URL_LENGTH = 32 * 1024 * 1024 + 64;
 const interactionKinds = new Set<InteractionContext['kind']>(['manual', 'starter', 'followup', 'responseAction', 'formSubmit', 'retry']);
 const streamProtocols = new Set<RawStreamEvent['protocol']>(['sse', 'ndjson', 'json', 'text-stream', 'fixture']);
 const replaySpeeds = new Set([0.25, 0.5, 1, 2, 4]);
@@ -117,6 +124,13 @@ function isInteractionContext(value: unknown): value is InteractionContext {
   return value.formValues === undefined || (isRecord(value.formValues) && isStructuredValue(value.formValues));
 }
 
+function isVisualCapture(message: Record<string, unknown>): boolean {
+  if (!isBoundedString(message.dataUrl, MAX_PNG_DATA_URL_LENGTH) || !message.dataUrl.startsWith('data:image/png;base64,')) return false;
+  if (!isRecord(message.viewport) || !isBoundedString(message.viewport.id, 100)) return false;
+  return Number.isInteger(message.viewport.width) && Number(message.viewport.width) >= 1 && Number(message.viewport.width) <= 2560
+    && Number.isInteger(message.viewport.height) && Number(message.viewport.height) >= 1 && Number(message.viewport.height) <= 2160;
+}
+
 function hasEnvelope(message: Record<string, unknown>, instanceId: string): boolean {
   return message.protocolVersion === PROTOCOL_VERSION
     && message.editorInstanceId === instanceId
@@ -143,6 +157,7 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
     case 'run.replay.play': return isBoundedString(message.runId) && typeof message.speed === 'number' && replaySpeeds.has(message.speed);
     case 'run.replay.speed': return typeof message.speed === 'number' && replaySpeeds.has(message.speed);
     case 'run.export': return isBoundedString(message.runId);
+    case 'visual.baseline.save': case 'visual.compare': return isVisualCapture(message);
     default: return false;
   }
 }
@@ -154,6 +169,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
   switch (message.type) {
     case 'host.ready': return typeof message.trusted === 'boolean' && optionalBoundedString(message.remoteName) && isBoundedString(message.locale, 64) && (message.direction === 'ltr' || message.direction === 'rtl');
     case 'workspace.section': return isWorkspaceSection(message.section);
+    case 'inspector.focus': return (message.tab === 'Network' || message.tab === 'Raw Events' || message.tab === 'Normalized') && optionalBoundedString(message.networkId) && optionalBoundedString(message.messageId) && (message.sequence === undefined || (Number.isInteger(message.sequence) && Number(message.sequence) >= 0));
     case 'profile.snapshot': return (message.profile === undefined || (isRecord(message.profile) && isStructuredValue(message.profile))) && optionalBoundedString(message.parseError) && Number.isInteger(message.version) && Array.isArray(message.environments) && message.environments.every((item) => isBoundedString(item));
     case 'profile.validation': return Array.isArray(message.diagnostics) && message.diagnostics.length <= 10_000 && message.diagnostics.every((item) => isRecord(item) && (item.severity === 'error' || item.severity === 'warning') && isBoundedString(item.message, MAX_TEXT_LENGTH) && Number.isInteger(item.offset) && Number(item.offset) >= 0 && Number.isInteger(item.length) && Number(item.length) >= 0);
     case 'profile.validated': return typeof message.valid === 'boolean';
@@ -164,6 +180,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'form.accepted': return isBoundedString(message.formId) && optionalBoundedString(message.sourceMessageId);
     case 'run.imported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedString(message.runId) && typeof message.duplicate === 'boolean';
     case 'run.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH);
+    case 'visual.result': return (message.operation === 'baseline' || message.operation === 'compare') && ['saved', 'passed', 'failed'].includes(String(message.status)) && optionalBoundedString(message.baselinePath) && optionalBoundedString(message.diffPath) && (message.differencePercent === undefined || (typeof message.differencePercent === 'number' && Number.isFinite(message.differencePercent) && message.differencePercent >= 0 && message.differencePercent <= 100));
     case 'workspaceTrust.changed': return typeof message.trusted === 'boolean';
     default: return false;
   }

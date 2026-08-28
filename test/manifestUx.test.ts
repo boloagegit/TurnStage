@@ -95,10 +95,46 @@ describe('VS Code contribution UX', () => {
       expect.objectContaining({ command: 'turnstage.newConversation', enablement: 'isWorkspaceTrusted' }),
       expect.objectContaining({ command: 'turnstage.importRun', enablement: 'isWorkspaceTrusted' }),
       expect.objectContaining({ command: 'turnstage.exportRun', enablement: 'isWorkspaceTrusted' }),
+      expect.objectContaining({ command: 'turnstage.exportEvidenceBundle', enablement: 'isWorkspaceTrusted' }),
     ]));
     expect(manifest.contributes.menus['view/item/context']).toContainEqual(expect.objectContaining({
       command: 'turnstage.runProfile',
       when: expect.stringContaining('isWorkspaceTrusted'),
+    }));
+  });
+
+  it('offers failure evidence from the native test-message toolbar and context menu', () => {
+    expect(manifest.contributes.commands).toContainEqual(expect.objectContaining({
+      command: 'turnstage.openTestEvidence',
+      icon: '$(go-to-file)',
+    }));
+    for (const menu of ['testing/message/content', 'testing/message/context']) {
+      expect(manifest.contributes.menus[menu]).toContainEqual({
+        command: 'turnstage.openTestEvidence',
+        when: 'testMessage =~ /^turnstage\\.evidence\\./',
+        group: 'navigation@1',
+      });
+    }
+    expect(manifest.contributes.menus.commandPalette).toContainEqual({
+      command: 'turnstage.openTestEvidence',
+      when: 'false',
+    });
+  });
+
+  it('exposes sanitized contract report export as a native command', () => {
+    expect(manifest.contributes.commands).toContainEqual(expect.objectContaining({
+      command: 'turnstage.runContractTests',
+      icon: '$(run-all)',
+      enablement: 'isWorkspaceTrusted',
+    }));
+    expect(manifest.contributes.commands).toContainEqual(expect.objectContaining({
+      command: 'turnstage.exportTestReport',
+      icon: '$(export)',
+    }));
+    expect(manifest.contributes.commands).toContainEqual(expect.objectContaining({
+      command: 'turnstage.exportEvidenceBundle',
+      icon: '$(package)',
+      enablement: 'isWorkspaceTrusted',
     }));
   });
 });

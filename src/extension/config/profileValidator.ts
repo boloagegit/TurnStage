@@ -1,6 +1,10 @@
 import { findNodeAtLocation, type Node } from 'jsonc-parser';
-import type { MatchCondition, RequestDefinition, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
+import type { MatchCondition, RequestDefinition, ScenarioAssertionDefinition, ScenarioComparisonTargetDefinition, ScenarioPerformanceMetric, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
 import { localize } from '../l10n';
+import { isSafeAssertionRegex, isValidAssertionPath } from '../testing/assertionEvaluator';
+import { isValidComparisonPath } from '../testing/scenarioComparison';
+import { isSafeReportDirectory } from '../testing/scenarioConfig';
+import { scenarioPerformanceMetrics } from '../testing/performanceEvaluator';
 
 export interface ValidationIssue { severity: 'error' | 'warning'; message: string; offset: number; length: number }
 
@@ -10,6 +14,10 @@ const requiredEmitFields: Record<string, string[]> = {
   'content.citation': ['citationId'], 'followup.upsert': ['followup'], 'action.upsert': ['action'], 'form.upsert': ['form'],
   'message.metric.updated': ['metric']
 };
+const assertionOperators = new Set<ScenarioAssertionDefinition['operator']>(['equals', 'notEquals', 'exists', 'notExists', 'contains', 'regex', 'oneOf', 'lessThan', 'lessThanOrEqual', 'greaterThan', 'greaterThanOrEqual', 'sequenceEquals', 'sequenceContains']);
+const assertionsWithoutValue = new Set<ScenarioAssertionDefinition['operator']>(['exists', 'notExists']);
+const performanceMetrics = new Set<ScenarioPerformanceMetric>(scenarioPerformanceMetrics);
+const reportFormats = new Set(['json', 'junit', 'html']);
 
 function issue(tree: Node | undefined, path: (string | number)[], message: string, severity: 'error' | 'warning' = 'error'): ValidationIssue {
   const node = tree ? findNodeAtLocation(tree, path) : undefined;
@@ -40,6 +48,50 @@ function requestTemplatePaths(request: Partial<RequestDefinition> | undefined): 
   return paths;
 }
 
+function validateAssertions(assertions: ScenarioAssertionDefinition[] | undefined, tree: Node | undefined, path: Array<string | number>, out: ValidationIssue[]): void {
+  if (assertions === undefined) return;
+  if (!Array.isArray(assertions)) { out.push(issue(tree, path, localize('Scenario assertions must be an array.'))); return; }
+  if (assertions.length > 100) out.push(issue(tree, path, localize('A scenario step can define at most 100 assertions.')));
+  for (const [index, assertion] of assertions.entries()) {
+    const assertionPath = [...path, index];
+    if (!assertion || typeof assertion !== 'object' || Array.isArray(assertion)) { out.push(issue(tree, assertionPath, localize('Scenario assertion must be an object.'))); continue; }
+    if (!isValidAssertionPath(assertion.path)) out.push(issue(tree, [...assertionPath, 'path'], localize('Unsupported assertion path: {path}.', { path: String(assertion.path) })));
+    if (!assertionOperators.has(assertion.operator)) { out.push(issue(tree, [...assertionPath, 'operator'], localize('Unsupported assertion operator: {operator}.', { operator: String(assertion.operator) }))); continue; }
+    if (!assertionsWithoutValue.has(assertion.operator) && !Object.prototype.hasOwnProperty.call(assertion, 'value')) out.push(issue(tree, [...assertionPath, 'value'], localize('Assertion operator {operator} requires a value.', { operator: assertion.operator })));
+    if (assertion.operator === 'regex' && !isSafeAssertionRegex(assertion.value)) out.push(issue(tree, [...assertionPath, 'value'], localize('Assertion regex must be valid, safe, and no longer than 256 characters.')));
+    if (['oneOf', 'sequenceEquals', 'sequenceContains'].includes(assertion.operator) && !Array.isArray(assertion.value)) out.push(issue(tree, [...assertionPath, 'value'], localize('Assertion operator {operator} requires an array value.', { operator: assertion.operator })));
+    if (['lessThan', 'lessThanOrEqual', 'greaterThan', 'greaterThanOrEqual'].includes(assertion.operator) && (typeof assertion.value !== 'number' || !Number.isFinite(assertion.value))) out.push(issue(tree, [...assertionPath, 'value'], localize('Assertion operator {operator} requires a finite number.', { operator: assertion.operator })));
+  }
+}
+
+function validateComparisonTarget(target: ScenarioComparisonTargetDefinition | undefined, profile: TurnStageProfile, environments: TurnStageEnvironment[], tree: Node | undefined, path: Array<string | number>, out: ValidationIssue[]): void {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) { out.push(issue(tree, path, localize('Comparison target must be an object.'))); return; }
+  if (target.label !== undefined && (typeof target.label !== 'string' || target.label.length > 100)) out.push(issue(tree, [...path, 'label'], localize('Comparison target label must be at most 100 characters.')));
+  if (target.environment !== undefined && (typeof target.environment !== 'string' || !environments.some((environment) => environment.id === target.environment))) out.push(issue(tree, [...path, 'environment'], localize('Environment "{environment}" was not found.', { environment: String(target.environment) })));
+  if (target.controls !== undefined && (!target.controls || typeof target.controls !== 'object' || Array.isArray(target.controls))) { out.push(issue(tree, [...path, 'controls'], localize('Comparison target controls must be an object.'))); return; }
+  const controls = target.controls && typeof target.controls === 'object' && !Array.isArray(target.controls) ? target.controls : {};
+  for (const id of Object.keys(controls).filter((controlId) => !(profile.controls ?? []).some((control) => control.id === controlId))) out.push(issue(tree, [...path, 'controls'], localize('Scenario references unknown control: {id}.', { id })));
+  for (const id of Object.keys(controls).filter((controlId) => profile.controls?.some((control) => control.id === controlId && control.persist === 'secret'))) out.push(issue(tree, [...path, 'controls'], localize('Scenario controls cannot set secret control: {id}.', { id })));
+}
+
+function validatePerformanceMap(
+  value: unknown,
+  field: string,
+  path: Array<string | number>,
+  tree: Node | undefined,
+  out: ValidationIssue[],
+  validateValue: (value: unknown) => boolean,
+  invalidValueMessage: string,
+): void {
+  if (value === undefined) return;
+  const fieldPath = [...path, field];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) { out.push(issue(tree, fieldPath, localize('Performance {field} must be an object.', { field }))); return; }
+  for (const [metric, metricValue] of Object.entries(value as Record<string, unknown>)) {
+    if (!performanceMetrics.has(metric as ScenarioPerformanceMetric)) out.push(issue(tree, [...fieldPath, metric], localize('Unsupported performance metric: {metric}.', { metric })));
+    else if (!validateValue(metricValue)) out.push(issue(tree, [...fieldPath, metric], invalidValueMessage));
+  }
+}
+
 export class ProfileValidator {
   validate(profile: TurnStageProfile | undefined, tree?: Node, environments: TurnStageEnvironment[] = []): ValidationIssue[] {
     if (!profile) return [issue(tree, [], localize('Profile could not be parsed.'))];
@@ -52,6 +104,7 @@ export class ProfileValidator {
     if (!conversation || typeof conversation !== 'object' || Array.isArray(conversation) || !(conversation as Record<string, unknown>).send || typeof (conversation as Record<string, unknown>).send !== 'object') out.push(issue(tree, ['conversation'], localize('Conversation send request is required.')));
     if (!stream || typeof stream !== 'object' || Array.isArray(stream) || !Array.isArray((stream as Record<string, unknown>).mappings)) out.push(issue(tree, ['stream'], localize('Stream mappings must be an array.')));
     if (sourceProfile.controls !== undefined && !Array.isArray(sourceProfile.controls)) out.push(issue(tree, ['controls'], localize('Controls must be an array.')));
+    if (sourceProfile.tests !== undefined && (!sourceProfile.tests || typeof sourceProfile.tests !== 'object' || Array.isArray(sourceProfile.tests) || !Array.isArray((sourceProfile.tests as Record<string, unknown>).scenarios))) out.push(issue(tree, ['tests'], localize('Tests must contain a scenarios array.')));
     if (out.length) return out;
     if (profile.version !== 1) out.push(issue(tree, ['version'], localize('Unsupported config version: {version}.', { version: String(profile.version) })));
     if (!profile.id?.trim()) out.push(issue(tree, ['id'], localize('Profile id is required.')));
@@ -78,6 +131,127 @@ export class ProfileValidator {
     if (profile.environment && environments.length && !environments.some((env) => env.id === profile.environment)) out.push(issue(tree, ['environment'], localize('Environment "{environment}" was not found.', { environment: profile.environment })));
     for (const duplicate of duplicates((profile.controls ?? []).map((control) => control.id))) out.push(issue(tree, ['controls'], localize('Duplicate control id: {id}.', { id: duplicate })));
     for (const duplicate of duplicates((profile.stream?.mappings ?? []).map((mapping) => mapping.id))) out.push(issue(tree, ['stream', 'mappings'], localize('Duplicate mapping id: {id}.', { id: duplicate })));
+    const scenarios = profile.tests?.scenarios ?? [];
+    const reporting = profile.tests?.reporting as unknown;
+    if (reporting !== undefined) {
+      const reportingPath = ['tests', 'reporting'];
+      if (!reporting || typeof reporting !== 'object' || Array.isArray(reporting)) {
+        out.push(issue(tree, reportingPath, localize('Test reporting must be an object.')));
+      } else {
+        const definition = reporting as Record<string, unknown>;
+        const formats = definition.formats;
+        if (!Array.isArray(formats) || formats.length === 0 || formats.length > 3 || formats.some((format) => typeof format !== 'string' || !reportFormats.has(format))) out.push(issue(tree, [...reportingPath, 'formats'], localize('Test report formats must contain JSON, JUnit, HTML, or a unique combination.')));
+        else if (duplicates(formats as string[]).length) out.push(issue(tree, [...reportingPath, 'formats'], localize('Test report formats must be unique.')));
+        if (!isSafeReportDirectory(definition.outputDirectory)) out.push(issue(tree, [...reportingPath, 'outputDirectory'], localize('Test report outputDirectory must be a safe workspace-relative directory.')));
+      }
+    }
+    const visual = profile.tests?.visual as unknown;
+    if (visual !== undefined) {
+      const visualPath = ['tests', 'visual'];
+      if (!visual || typeof visual !== 'object' || Array.isArray(visual)) out.push(issue(tree, visualPath, localize('Visual regression settings must be an object.')));
+      else {
+        const definition = visual as Record<string, unknown>;
+        if (!isSafeReportDirectory(definition.baselineDirectory)) out.push(issue(tree, [...visualPath, 'baselineDirectory'], localize('Visual baselineDirectory must be a safe workspace-relative directory.')));
+        if (definition.maxDifferencePercent !== undefined && (typeof definition.maxDifferencePercent !== 'number' || !Number.isFinite(definition.maxDifferencePercent) || definition.maxDifferencePercent < 0 || definition.maxDifferencePercent > 100)) out.push(issue(tree, [...visualPath, 'maxDifferencePercent'], localize('Visual maximum difference must be a finite percentage from 0 to 100.')));
+        if (definition.channelTolerance !== undefined && (!Number.isInteger(definition.channelTolerance) || Number(definition.channelTolerance) < 0 || Number(definition.channelTolerance) > 255)) out.push(issue(tree, [...visualPath, 'channelTolerance'], localize('Visual channel tolerance must be an integer from 0 to 255.')));
+      }
+    }
+    if (scenarios.length > 100) out.push(issue(tree, ['tests', 'scenarios'], localize('A profile can define at most 100 scenarios.')));
+    for (const duplicate of duplicates(scenarios.flatMap((scenario) => scenario && typeof scenario === 'object' && !Array.isArray(scenario) && typeof scenario.id === 'string' ? [scenario.id] : []))) out.push(issue(tree, ['tests', 'scenarios'], localize('Duplicate scenario id: {id}.', { id: duplicate })));
+    scenarios.forEach((scenario, scenarioIndex) => {
+      const scenarioPath: Array<string | number> = ['tests', 'scenarios', scenarioIndex];
+      if (!scenario || typeof scenario !== 'object' || Array.isArray(scenario)) { out.push(issue(tree, scenarioPath, localize('Scenario must be an object.'))); return; }
+      if (typeof scenario.id !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(scenario.id)) out.push(issue(tree, [...scenarioPath, 'id'], localize('Scenario id must use lowercase letters, numbers, and hyphens.')));
+      if (typeof scenario.name !== 'string' || !scenario.name.trim()) out.push(issue(tree, [...scenarioPath, 'name'], localize('Scenario name is required.')));
+      if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) { out.push(issue(tree, [...scenarioPath, 'steps'], localize('A scenario requires at least one step.'))); return; }
+      if (scenario.steps.length > 100) out.push(issue(tree, [...scenarioPath, 'steps'], localize('A scenario can define at most 100 steps.')));
+      if (scenario.controls !== undefined && (!scenario.controls || typeof scenario.controls !== 'object' || Array.isArray(scenario.controls))) {
+        out.push(issue(tree, [...scenarioPath, 'controls'], localize('Scenario controls must be an object.')));
+      }
+      const scenarioControls = scenario.controls && typeof scenario.controls === 'object' && !Array.isArray(scenario.controls) ? scenario.controls : {};
+      const unknownControls = Object.keys(scenarioControls).filter((id) => !(profile.controls ?? []).some((control) => control.id === id));
+      for (const id of unknownControls) out.push(issue(tree, [...scenarioPath, 'controls'], localize('Scenario references unknown control: {id}.', { id })));
+      for (const id of Object.keys(scenarioControls).filter((controlId) => profile.controls?.some((control) => control.id === controlId && control.persist === 'secret'))) out.push(issue(tree, [...scenarioPath, 'controls'], localize('Scenario controls cannot set secret control: {id}.', { id })));
+      const comparison = scenario.comparison as unknown;
+      if (comparison !== undefined) {
+        const comparisonPath = [...scenarioPath, 'comparison'];
+        if (!comparison || typeof comparison !== 'object' || Array.isArray(comparison)) {
+          out.push(issue(tree, comparisonPath, localize('Scenario comparison must be an object.')));
+        } else {
+          const definition = comparison as Record<string, unknown>;
+          validateComparisonTarget(definition.baseline as ScenarioComparisonTargetDefinition | undefined, profile, environments, tree, [...comparisonPath, 'baseline'], out);
+          validateComparisonTarget(definition.candidate as ScenarioComparisonTargetDefinition | undefined, profile, environments, tree, [...comparisonPath, 'candidate'], out);
+          const ignorePaths = definition.ignorePaths;
+          if (ignorePaths !== undefined) {
+            if (!Array.isArray(ignorePaths)) out.push(issue(tree, [...comparisonPath, 'ignorePaths'], localize('Comparison ignorePaths must be an array.')));
+            else {
+              if (ignorePaths.length > 100) out.push(issue(tree, [...comparisonPath, 'ignorePaths'], localize('A comparison can ignore at most 100 paths.')));
+              for (const [pathIndex, path] of ignorePaths.entries()) if (!isValidComparisonPath(path)) out.push(issue(tree, [...comparisonPath, 'ignorePaths', pathIndex], localize('Unsupported comparison path: {path}.', { path: String(path) })));
+              const stringPaths = ignorePaths.filter((path): path is string => typeof path === 'string');
+              if (duplicates(stringPaths).length) out.push(issue(tree, [...comparisonPath, 'ignorePaths'], localize('Comparison ignore paths must be unique.')));
+            }
+          }
+        }
+      }
+      const performance = scenario.performance as unknown;
+      if (performance !== undefined) {
+        const performancePath = [...scenarioPath, 'performance'];
+        if (!performance || typeof performance !== 'object' || Array.isArray(performance)) {
+          out.push(issue(tree, performancePath, localize('Scenario performance must be an object.')));
+        } else {
+          const definition = performance as Record<string, unknown>;
+          validatePerformanceMap(definition.thresholds, 'thresholds', performancePath, tree, out, (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 900_000, localize('Performance thresholds must be finite numbers from 0 to 900000 milliseconds.'));
+          const regression = definition.regression;
+          if (regression !== undefined) {
+            if (!comparison) out.push(issue(tree, [...performancePath, 'regression'], localize('Performance regression rules require a baseline comparison.')));
+            if (!regression || typeof regression !== 'object' || Array.isArray(regression)) out.push(issue(tree, [...performancePath, 'regression'], localize('Performance regression must be an object.')));
+            else {
+              for (const [metric, rawLimit] of Object.entries(regression as Record<string, unknown>)) {
+                const limitPath = [...performancePath, 'regression', metric];
+                if (!performanceMetrics.has(metric as ScenarioPerformanceMetric)) { out.push(issue(tree, limitPath, localize('Unsupported performance metric: {metric}.', { metric }))); continue; }
+                if (!rawLimit || typeof rawLimit !== 'object' || Array.isArray(rawLimit)) { out.push(issue(tree, limitPath, localize('Performance regression limit must be an object.'))); continue; }
+                const limit = rawLimit as Record<string, unknown>;
+                const maxIncreaseMs = limit.maxIncreaseMs;
+                const maxIncreasePercent = limit.maxIncreasePercent;
+                if (maxIncreaseMs === undefined && maxIncreasePercent === undefined) out.push(issue(tree, limitPath, localize('Performance regression limit requires maxIncreaseMs or maxIncreasePercent.')));
+                if (maxIncreaseMs !== undefined && (typeof maxIncreaseMs !== 'number' || !Number.isFinite(maxIncreaseMs) || maxIncreaseMs < 0 || maxIncreaseMs > 900_000)) out.push(issue(tree, [...limitPath, 'maxIncreaseMs'], localize('maxIncreaseMs must be a finite number from 0 to 900000.')));
+                if (maxIncreasePercent !== undefined && (typeof maxIncreasePercent !== 'number' || !Number.isFinite(maxIncreasePercent) || maxIncreasePercent < 0 || maxIncreasePercent > 10_000)) out.push(issue(tree, [...limitPath, 'maxIncreasePercent'], localize('maxIncreasePercent must be a finite number from 0 to 10000.')));
+              }
+            }
+          }
+        }
+      }
+      const faults = scenario.faults as unknown;
+      if (faults !== undefined) {
+        const faultPath = [...scenarioPath, 'faults'];
+        if (!faults || typeof faults !== 'object' || Array.isArray(faults)) out.push(issue(tree, faultPath, localize('Scenario faults must be an object.')));
+        else {
+          const definition = faults as Record<string, unknown>;
+          const allowed = new Set(['delayBeforeRequestMs', 'delayPerChunkMs', 'httpStatus', 'disconnectAfterEvents', 'corruptEventAt']);
+          for (const key of Object.keys(definition)) if (!allowed.has(key)) out.push(issue(tree, [...faultPath, key], localize('Unsupported Fault Lab setting: {field}.', { field: key })));
+          for (const key of ['delayBeforeRequestMs', 'delayPerChunkMs'] as const) {
+            const value = definition[key];
+            if (value !== undefined && (!Number.isInteger(value) || Number(value) < 0 || Number(value) > 30_000)) out.push(issue(tree, [...faultPath, key], localize('{field} must be an integer from 0 to 30000.', { field: key })));
+          }
+          const status = definition.httpStatus;
+          if (status !== undefined && (!Number.isInteger(status) || Number(status) < 400 || Number(status) > 599)) out.push(issue(tree, [...faultPath, 'httpStatus'], localize('Fault Lab HTTP status must be an integer from 400 to 599.')));
+          for (const key of ['disconnectAfterEvents', 'corruptEventAt'] as const) {
+            const value = definition[key];
+            if (value !== undefined && (!Number.isInteger(value) || Number(value) < 1 || Number(value) > 10_000)) out.push(issue(tree, [...faultPath, key], localize('{field} must be an integer from 1 to 10000.', { field: key })));
+          }
+          if (!Object.keys(definition).length) out.push(issue(tree, faultPath, localize('Fault Lab requires at least one fault setting.')));
+        }
+      }
+      for (const duplicate of duplicates(scenario.steps.flatMap((step) => step && typeof step === 'object' && !Array.isArray(step) && typeof step.id === 'string' ? [step.id] : []))) out.push(issue(tree, [...scenarioPath, 'steps'], localize('Duplicate scenario step id: {id}.', { id: duplicate })));
+      scenario.steps.forEach((step, stepIndex) => {
+        const stepPath = [...scenarioPath, 'steps', stepIndex];
+        if (!step || typeof step !== 'object' || Array.isArray(step)) { out.push(issue(tree, stepPath, localize('Scenario step must be an object.'))); return; }
+        if (typeof step.id !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(step.id)) out.push(issue(tree, [...stepPath, 'id'], localize('Scenario step id must use lowercase letters, numbers, and hyphens.')));
+        if (typeof step.input !== 'string' || !step.input.trim()) out.push(issue(tree, [...stepPath, 'input'], localize('Scenario step input is required.')));
+        validateAssertions(step.assertions, tree, [...stepPath, 'assertions'], out);
+      });
+      validateAssertions(scenario.assertions, tree, [...scenarioPath, 'assertions'], out);
+    });
     profile.stream?.mappings?.forEach((rule, index) => {
       const required = requiredEmitFields[rule.emit.type] ?? [];
       for (const field of required) if (!(field in rule.emit)) out.push(issue(tree, ['stream', 'mappings', index, 'emit'], localize('{type} requires emit.{field}.', { type: rule.emit.type, field })));

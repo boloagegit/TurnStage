@@ -40,9 +40,180 @@ The schema requires `version`, `id`, `name`, `conversation`, and `stream`.
 | `errorPolicy` | boolean-valued object, optional | Error display/continuation hints; not every flag is interpreted by the runtime |
 | `security` | object, optional | URI scheme/domain and VS Code command allowlists |
 | `metrics` | object, optional | Optional list of metric names |
+| `tests` | object, optional | Multi-turn scenarios exposed through VS Code Test Explorer |
 
 The root schema has `additionalProperties: false`, so an unknown root key is a
 JSON Schema error even where a nested object deliberately permits extensions.
+
+## Conversation contract scenarios
+
+`tests.scenarios` defines repeatable multi-turn tests without embedding or
+executing JavaScript:
+
+```jsonc
+{
+  "tests": {
+    "scenarios": [{
+      "id": "basic-multi-turn",
+      "name": "Basic multi-turn contract",
+      "controls": { "mode": "normal" },
+      "steps": [{
+        "id": "first-message",
+        "input": "Hello",
+        "assertions": [
+          { "path": "turn.state", "operator": "equals", "value": "completed" },
+          { "path": "assistant.text", "operator": "contains", "value": "sample" },
+          { "path": "events.normalized[*].type", "operator": "sequenceContains", "value": ["conversation.started", "stream.completed"] }
+        ]
+      }, {
+        "id": "continuation",
+        "input": "Continue",
+        "assertions": [
+          { "path": "conversation.id", "operator": "exists" },
+          { "path": "network[*].status", "operator": "contains", "value": 200 }
+        ]
+      }],
+      "assertions": [
+        { "path": "metrics.totalDuration", "operator": "lessThan", "value": 10000 }
+      ]
+    }]
+  }
+}
+```
+
+Scenario and step IDs are lowercase slugs and unique within their scope. A
+scenario has 1–100 steps and each assertion collection has at most 100 items.
+`controls` is applied only to the isolated test session; it is never persisted,
+and secret-persisted controls cannot be supplied by a scenario.
+
+Supported assertion roots are `session`, `turn`, `conversation`, `assistant`,
+`messages`, `events`, `metrics`, `errors`, `controls`, and `network`. Paths use
+bounded dotted properties, numeric array indexes, and `[*]` wildcards.
+The operators are:
+
+| Operator | Expected value |
+| --- | --- |
+| `equals`, `notEquals` | Any JSON value |
+| `exists`, `notExists` | No value |
+| `contains` | String fragment, array member, or object property name |
+| `regex` | A valid pattern of at most 256 characters; unsafe nested quantifiers are rejected |
+| `oneOf` | Array of accepted values |
+| `lessThan`, `lessThanOrEqual`, `greaterThan`, `greaterThanOrEqual` | Finite number |
+| `sequenceEquals`, `sequenceContains` | Array; `sequenceContains` checks ordered subsequence membership |
+
+Every settled step also runs built-in invariants: the turn and messages must be
+terminal, Assistant status/completion timestamps must agree, progress/tool
+parts must not remain active, metrics must be finite and non-negative, and the
+event count must cover the retained raw-event buffer. These checks are runner
+invariants, not configurable application-specific behavior.
+
+The Test Explorer hierarchy is Profile → Scenario → Step. Running one step
+executes its preceding steps as setup so multi-turn conversation state remains
+valid. Failed Test messages include a command link that opens the profile's
+Test workspace with the captured evidence and selects the related Network or
+Event row. Evidence is held in memory for the current Extension Host only; it
+is not added to Recorded Runs or exports. Network scenarios are skipped in
+Restricted Mode.
+
+### Baseline comparison and performance budgets
+
+An optional `comparison` runs the same scenario in two isolated sessions. Each
+target can select an environment and override non-secret controls. The
+candidate keeps the scenario assertions; the baseline is used as semantic and
+performance reference and still receives built-in state-invariant checks.
+
+```jsonc
+{
+  "tests": {
+    "reporting": {
+      "formats": ["json", "junit", "html"],
+      "outputDirectory": ".turnstage/reports"
+    },
+    "visual": {
+      "baselineDirectory": ".turnstage/baselines",
+      "maxDifferencePercent": 0.1,
+      "channelTolerance": 16
+    },
+    "scenarios": [{
+      "id": "candidate-check",
+      "name": "Compare candidate behavior",
+      "comparison": {
+        "baseline": { "label": "Baseline", "environment": "baseline", "controls": { "mode": "stable" } },
+        "candidate": { "label": "Candidate", "environment": "candidate", "controls": { "mode": "candidate" } },
+        "ignorePaths": ["session.title", "messages[*].metadata.requestId"]
+      },
+      "performance": {
+        "thresholds": { "scenario.durationMs": 10000, "metrics.ttft": 2000 },
+        "regression": { "metrics.ttft": { "maxIncreaseMs": 250, "maxIncreasePercent": 15 } }
+      },
+      "faults": {
+        "delayBeforeRequestMs": 250,
+        "disconnectAfterEvents": 3
+      },
+      "steps": [{ "id": "first", "input": "Hello" }]
+    }]
+  }
+}
+```
+
+Semantic comparison includes settled session state, messages, normalized
+events, errors, and bounded Network summaries. It excludes raw events, request
+bodies, request URLs, headers, controls, secrets, and complete response
+payloads. Runtime IDs, message timestamps/timing, and normalized-event
+sequencing are ignored by default. Additional `ignorePaths` must begin with
+`session`, `messages`, `events`, `errors`, or `network`; paths are limited to
+512 characters, 24 segments, and 100 entries.
+
+Supported performance keys are `scenario.durationMs`,
+`metrics.headersLatency`, `metrics.firstChunkLatency`,
+`metrics.firstEventLatency`, `metrics.ttft`, `metrics.streamDuration`,
+`metrics.totalDuration`, `metrics.averageEventGap`, and
+`metrics.maxEventGap`. Thresholds are inclusive maximums in milliseconds.
+Regression rules require `comparison` and can set an absolute increase, a
+percentage increase, or both. Missing baseline metrics fail closed.
+
+`tests.reporting` writes one sanitized report per profile after a trusted Test
+Explorer run. `formats` accepts `json`, `junit`, `html`, or a unique combination. `outputDirectory`
+must be workspace-relative with no traversal, URI scheme, backslash, drive
+prefix, or absolute path. Reports contain stable IDs, status, duration,
+comparison counts, check IDs/kinds, and location kinds only; they do not
+contain names, prompts, assertion values, request/response data, raw events, or
+Debug evidence. **TurnStage: Export Contract Test Report** can also save the
+most recent in-memory report through a native dialog. **TurnStage: Run
+Conversation Contracts** runs every discovered contract and resolves only
+after its reports have been written, which gives Extension Host automation a
+stable entry point without depending on workbench-internal Testing commands.
+The default `.turnstage/reports/` directory is gitignored by this repository;
+gitignore any custom generated-report directory unless the artifacts are
+intentionally retained by CI outside the source tree.
+
+### Fault Lab, visual baselines, and evidence bundles
+
+`scenario.faults` activates only in the isolated Test Explorer session. For a
+comparison it applies to the candidate while the baseline remains clean. The
+bounded fields are `delayBeforeRequestMs`, `delayPerChunkMs`, `httpStatus`,
+`disconnectAfterEvents`, and `corruptEventAt`. Fault Lab never changes an
+interactive profile run and cannot execute scripts or select another URL.
+
+The Chat viewport toolbar can save and compare real PNG captures. Baselines
+are keyed by profile, viewport preset, and logical dimensions under
+`tests.visual.baselineDirectory`. `maxDifferencePercent` controls the pass
+threshold; `channelTolerance` ignores small per-channel RGBA differences.
+These actions require Workspace Trust and explicit user input. Baseline PNGs
+may contain visible conversation content and should be reviewed before commit.
+
+**TurnStage: Export Evidence Bundle** creates a new folder containing
+`index.html`, `report.json`, `junit.xml`, and `manifest.json`. The HTML is a
+self-contained, offline-readable summary with no external scripts or assets.
+Raw events, headers, payloads, message content, and secrets are excluded. If a
+visual result exists, a second explicit choice can include its baseline/diff
+PNGs; that choice warns that the images may contain visible chat content.
+
+Network Debug passively recognizes valid W3C `traceparent` values and bounded
+`x-request-id`, `request-id`, `x-correlation-id`, or `correlation-id` headers.
+It exposes trace/span/request identifiers for search and evidence correlation,
+but does not create spans, propagate new headers, load an OpenTelemetry SDK, or
+send telemetry to a collector.
 
 ## Controls
 

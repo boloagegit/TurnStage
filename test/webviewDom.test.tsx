@@ -471,11 +471,11 @@ describe('Webview DOM behavior', () => {
     const entries: NetworkExchange[] = [
       {
         id: 'opening-1', kind: 'opening', attempt: 1, method: 'POST', url: 'https://api.example.test/v1/chat/opening', state: 'completed', startedAt: 1_000, completedAt: 1_120, status: 200,
-        requestHeaders: { Authorization: 'Bearer ••••••••', Accept: 'application/json' }, requestBody: { actor: 'demo' }, responseHeaders: { 'content-type': 'application/json', 'set-cookie': '••••••••' }, responseBodyPreview: '{"message":"Hello"}', timing: { headers: 40, total: 120, timeout: 30_000 }, transferredBytes: 19, eventCount: 0,
+        requestHeaders: { Authorization: 'Bearer local-debug-token', Accept: 'application/json' }, requestBody: { actor: 'demo' }, responseHeaders: { 'content-type': 'application/json', 'set-cookie': '••••••••' }, responseBodyPreview: '{"message":"Hello"}', timing: { headers: 40, total: 120, timeout: 30_000 }, transferredBytes: 19, eventCount: 0,
       },
       {
         id: 'stream-1', kind: 'stream', attempt: 1, method: 'POST', url: 'https://api.example.test/v1/chat/stream', variantId: 'first-turn', protocol: 'sse', state: 'failed', startedAt: 2_000, completedAt: 32_000, status: 200,
-        requestHeaders: { Authorization: 'Bearer ••••••••', Accept: 'text/event-stream' }, requestBody: { message: 'Hello' }, responseHeaders: { 'content-type': 'text/event-stream' }, responseBodyPreview: 'event: start\ndata: {}', error: { type: 'IdleTimeoutError', message: 'The stream idle timeout elapsed.' }, timing: { headers: 50, firstChunk: 80, total: 30_000, timeout: 120_000, idleTimeout: 30_000 }, transferredBytes: 24, eventCount: 1,
+        requestHeaders: { Authorization: 'Bearer local-debug-token', Accept: 'text/event-stream' }, requestBody: { message: 'Hello' }, responseHeaders: { 'content-type': 'text/event-stream' }, responseBodyPreview: 'event: start\ndata: {}', error: { type: 'IdleTimeoutError', message: 'The stream idle timeout elapsed.' }, timing: { headers: 50, firstChunk: 80, total: 30_000, timeout: 120_000, idleTimeout: 30_000 }, transferredBytes: 24, eventCount: 1,
       },
     ];
     render(<NetworkInspector entries={entries} />);
@@ -491,13 +491,25 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByText(/event: start/)).toBeTruthy();
     await user.click(within(list).getByRole('option', { name: /opening/i }));
     await user.click(screen.getByRole('tab', { name: 'Headers' }));
-    expect(screen.getByText('Bearer ••••••••')).toBeTruthy();
+    expect(screen.getByText('Bearer local-debug-token')).toBeTruthy();
+    expect(screen.getByRole('status', { name: /Authorization is visible/ })).toBeTruthy();
     expect(screen.getByText('••••••••')).toBeTruthy();
 
     await user.type(screen.getByLabelText('Filter network requests'), 'missing');
     expect(within(list).queryAllByRole('option')).toHaveLength(0);
     expect(screen.getByText('No matching requests')).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'Request details' })).toBeNull();
+  });
+
+  it('selects the requested Network evidence row from an external failure location', () => {
+    const entries: NetworkExchange[] = [
+      { id: 'opening-1', kind: 'opening', attempt: 1, method: 'POST', url: 'https://example.test/opening', state: 'completed', startedAt: 1, status: 200, requestHeaders: {}, timing: {}, transferredBytes: 0, eventCount: 0 },
+      { id: 'stream-1', kind: 'stream', attempt: 1, method: 'POST', url: 'https://example.test/stream', state: 'failed', startedAt: 2, status: 500, requestHeaders: {}, timing: {}, transferredBytes: 0, eventCount: 0 },
+    ];
+    render(<NetworkInspector entries={entries} selectedEntryId="opening-1" />);
+
+    expect(screen.getByRole('option', { name: /opening/i }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('region', { name: 'Request details' }).textContent).toContain('/opening');
   });
 
   it('switches all Profile Configuration sections and persists selection in the parent state', async () => {
@@ -524,6 +536,51 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'streaming', 'speedMs'], value: 1200 });
     await user.selectOptions(screen.getByLabelText('Message action toolbar visibility'), 'interaction');
     expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'messageActionVisibility'], value: 'interaction' });
+  });
+
+  it('adds a conversation contract through the Scenarios configuration surface', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={profile} post={post} />);
+
+    await user.click(screen.getAllByRole('button', { name: 'Add scenario' })[0]!);
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'profile.patch',
+      path: ['tests', 'scenarios'],
+      value: [expect.objectContaining({ id: 'scenario-1', steps: [expect.objectContaining({ id: 'step-1' })] })],
+    }));
+  });
+
+  it('patches CI reporting and comparison performance settings from the Scenarios GUI', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured: TurnStageProfile = {
+      ...profile,
+      tests: {
+        scenarios: [{
+          id: 'compare', name: 'Compare', steps: [{ id: 'turn', input: 'Hello' }],
+          comparison: { baseline: { label: 'Baseline' }, candidate: { label: 'Candidate' }, ignorePaths: ['session.title'] },
+        }],
+      },
+    };
+    const { container, rerender } = render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={configured} post={post} />);
+
+    await user.click(screen.getByRole('checkbox', { name: 'Write reports to the workspace' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['tests', 'reporting'], value: { formats: ['json'], outputDirectory: '.turnstage/reports' } });
+
+    rerender(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={{ ...configured, tests: { ...configured.tests!, reporting: { formats: ['json'], outputDirectory: '.turnstage/reports' } } }} post={post} />);
+    await user.click(screen.getByRole('checkbox', { name: 'JUnit XML' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['tests', 'reporting'], value: { formats: ['json', 'junit'], outputDirectory: '.turnstage/reports' } });
+
+    const ttft = screen.getByRole('spinbutton', { name: 'TTFT maximum milliseconds' });
+    await user.type(ttft, '900');
+    fireEvent.blur(ttft);
+    expect(post).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'profile.patch', path: ['tests', 'scenarios'],
+      value: [expect.objectContaining({ performance: { thresholds: { 'metrics.ttft': 900 }, regression: undefined } })],
+    }));
+    expect(screen.getAllByRole('spinbutton')).toHaveLength(27);
+    expect((await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })).violations).toEqual([]);
   });
 
   it('disables network and privileged chat actions in Restricted Mode while leaving local inspection available', async () => {

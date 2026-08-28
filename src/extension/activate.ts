@@ -15,19 +15,22 @@ import {
 import { configureL10n } from './l10n';
 import type { DisplayLanguagePreference } from './displayLanguage';
 import { confirmRestartSession } from './confirmRestartSession';
+import { ScenarioTestController } from './testing/scenarioTestController';
+import type { ScenarioEvidenceLocation } from '../shared/types';
+import { VisualRegressionService } from './testing/visualRegression';
 
 let activeEditor: TurnStageEditorProvider | undefined;
 export const TURNSTAGE_WALKTHROUGH_ID = 'turnstage.turnstage#gettingStarted';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   configureL10n((message, values) => vscode.l10n.t(message, values ?? {}));
-  const output = vscode.window.createOutputChannel(vscode.l10n.t('TurnStage')); const diagnostics = vscode.languages.createDiagnosticCollection('turnstage'); const repository = new ProfileRepository(context.globalStorageUri); const environments = new EnvironmentRepository(context.globalStorageUri); const duplicateDiagnostics = new ProfileDuplicateDiagnostics(repository, diagnostics); const tree = new ProfileTreeProvider(repository, (entries) => duplicateDiagnostics.refresh(entries)); const editor = new TurnStageEditorProvider(context, diagnostics, output, environments); activeEditor = editor; const secrets = new SecretService(context);
+  const output = vscode.window.createOutputChannel(vscode.l10n.t('TurnStage')); const diagnostics = vscode.languages.createDiagnosticCollection('turnstage'); const repository = new ProfileRepository(context.globalStorageUri); const environments = new EnvironmentRepository(context.globalStorageUri); const duplicateDiagnostics = new ProfileDuplicateDiagnostics(repository, diagnostics); const tree = new ProfileTreeProvider(repository, (entries) => duplicateDiagnostics.refresh(entries)); const visualRegression = new VisualRegressionService(context); const editor = new TurnStageEditorProvider(context, diagnostics, output, environments, visualRegression); activeEditor = editor; const secrets = new SecretService(context); const scenarioTests = new ScenarioTestController(context, repository, environments, output, visualRegression);
   const demoProvider = vscode.workspace.registerTextDocumentContentProvider('turnstage-demo', { provideTextDocumentContent: async (uri) => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(context.extensionUri, 'resources', 'templates', uri.path.split('/').pop()!))) });
   context.subscriptions.push(output, diagnostics, tree, duplicateDiagnostics, demoProvider);
   context.subscriptions.push(vscode.window.registerTreeDataProvider('turnstage.profiles', tree), vscode.window.registerCustomEditorProvider('turnstage.profileEditor', editor, { webviewOptions: { retainContextWhenHidden: false }, supportsMultipleEditorsPerDocument: false }));
 
   const command = (id: string, handler: (...args: any[]) => unknown) => context.subscriptions.push(vscode.commands.registerCommand(`turnstage.${id}`, handler));
-  const refreshProfileState = async () => { tree.refresh(); await duplicateDiagnostics.refresh(); };
+  const refreshProfileState = async () => { tree.refresh(); await Promise.all([duplicateDiagnostics.refresh(), scenarioTests.refresh()]); };
   command('refreshProfiles', refreshProfileState);
   command('initializeWorkspace', async () => { if (!requireWorkspaceTrust()) return; await initializeWorkspace(context); await refreshProfileState(); });
   command('initializeUser', async () => { if (!requireWorkspaceTrust()) return; await initializeUser(context, repository, environments); await refreshProfileState(); });
@@ -98,8 +101,44 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   command('importRun', async (item?: ProfileTreeItem | vscode.Uri) => { if (!requireWorkspaceTrust()) return; const uri = asUri(item) ?? activeCustomEditorUri(); if (!uri) { void showNotification('error', vscode.l10n.t('Open a profile in the TurnStage editor first.')); return; } const controller = await openAndWaitForController(editor, uri); if (!controller) { void showNotification('error', vscode.l10n.t('The TurnStage profile editor did not become ready in time.')); return; } try { const imported = await editor.importRun(uri); if (!imported) return; const message = imported.duplicate ? vscode.l10n.t('Run imported as a copy from {path}.', { path: displayExportUri(imported.uri) }) : vscode.l10n.t('Run imported from {path}.', { path: displayExportUri(imported.uri) }); void showNotification('information', message); } catch (error) { void showNotification('error', vscode.l10n.t('Could not import run: {error}', { error: error instanceof Error ? error.message : String(error) })); } });
   command('exportRun', async (item?: ProfileTreeItem | vscode.Uri) => { if (!requireWorkspaceTrust()) return; const uri = asUri(item) ?? activeCustomEditorUri(); if (!uri) { void showNotification('error', vscode.l10n.t('Open a profile in the TurnStage editor first.')); return; } const controller = await openAndWaitForController(editor, uri); if (!controller) { void showNotification('error', vscode.l10n.t('The TurnStage profile editor did not become ready in time.')); return; } const exported = await editor.exportRun(uri); if (exported) { void showNotification('information', vscode.l10n.t('Run exported to {path}.', { path: displayExportUri(exported) })); return; } await editor.showSection(uri, 'test'); void showNotification('information', vscode.l10n.t('No recorded runs are available. Open Test to run a profile first.')); });
   command('openOutput', () => output.show(true));
+  command('runContractTests', () => scenarioTests.runAll());
+  command('exportTestReport', async () => {
+    if (!scenarioTests.hasReport()) { void showNotification('information', vscode.l10n.t('No conversation contract results are available. Run a scenario from Test Explorer first.')); return; }
+    const format = await vscode.window.showQuickPick([
+      { label: 'JSON', value: 'json' as const },
+      { label: vscode.l10n.t('JUnit XML'), value: 'junit' as const },
+      { label: 'HTML', value: 'html' as const },
+    ], { title: vscode.l10n.t('Export Conversation Contract Report') });
+    if (!format) return;
+    const uri = await scenarioTests.exportLastReport(format.value);
+    if (uri) void showNotification('information', vscode.l10n.t('Contract report exported to {path}.', { path: displayExportUri(uri) }));
+  });
+  command('exportEvidenceBundle', async () => {
+    if (!requireWorkspaceTrust()) return;
+    if (!scenarioTests.hasReport()) { void showNotification('information', vscode.l10n.t('No conversation contract results are available. Run a scenario from Test Explorer first.')); return; }
+    const uri = await scenarioTests.exportEvidenceBundle();
+    if (uri) {
+      const index = vscode.Uri.joinPath(uri, 'index.html');
+      void showNotification('information', vscode.l10n.t('Evidence bundle exported to {path}.', { path: displayExportUri(uri) }));
+      await vscode.env.openExternal(index);
+    }
+  });
+  command('openTestEvidence', async (argument?: unknown) => {
+    const messageReference = scenarioTests.getMessageEvidence(argument);
+    if (messageReference) {
+      if (!await editor.showScenarioEvidence(messageReference.uri, messageReference.evidence, messageReference.location)) void showNotification('error', vscode.l10n.t('The TurnStage profile editor could not display this test evidence.'));
+      return;
+    }
+    const value = isRecord(argument) ? argument : undefined;
+    const evidenceId = typeof value?.evidenceId === 'string' ? value.evidenceId : undefined;
+    const reference = evidenceId ? scenarioTests.getEvidence(evidenceId) : undefined;
+    if (!reference) { void showNotification('error', vscode.l10n.t('This test evidence is no longer available. Run the scenario again.')); return; }
+    const location = isScenarioEvidenceLocation(value?.location) ? value.location : reference.location;
+    if (!await editor.showScenarioEvidence(reference.uri, reference.evidence, location)) void showNotification('error', vscode.l10n.t('The TurnStage profile editor could not display this test evidence.'));
+  });
   command('migrateProfile', async (item?: ProfileTreeItem | vscode.Uri) => { if (!requireWorkspaceTrust()) return; const uri = asUri(item); if (!uri) return; const document = await vscode.workspace.openTextDocument(uri); const result = new ProfileMigrator().migrate(document.getText()); if (!result.changed) { void showNotification('information', vscode.l10n.t('This TurnStage profile is already current.')); return; } const migrateLabel = vscode.l10n.t('Migrate'); const confirmation = await vscode.window.showInformationMessage(vscode.l10n.t('Migrate profile from version {from} to {to}? A backup will be created.', { from: result.fromVersion, to: result.toVersion }), { modal: true, detail: result.notes.join('\n') }, migrateLabel); if (confirmation !== migrateLabel) return; const backup = uri.with({ path: `${uri.path}.v${result.fromVersion}.backup` }); await vscode.workspace.fs.writeFile(backup, new TextEncoder().encode(document.getText())); const edit = new vscode.WorkspaceEdit(); edit.replace(uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), result.text); await vscode.workspace.applyEdit(edit); await vscode.commands.executeCommand('vscode.diff', backup, uri, vscode.l10n.t('TurnStage Migration')); });
   output.appendLine(vscode.l10n.t('TurnStage activated in {host}.', { host: vscode.env.remoteName ?? vscode.l10n.t('Local Extension Host') }));
+  void scenarioTests.refresh().catch((error) => logScenarioTestError(output, error));
 }
 
 export async function deactivate(): Promise<void> {
@@ -113,6 +152,18 @@ function requireWorkspaceTrust(): boolean {
   void showNotification('error', vscode.l10n.t('This action requires a trusted workspace. Profile editing and fixture replay remain available.'));
   return false;
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+
+function isScenarioEvidenceLocation(value: unknown): value is ScenarioEvidenceLocation {
+  if (!isRecord(value) || !['network', 'rawEvent', 'normalizedEvent', 'message', 'profile'].includes(String(value.kind))) return false;
+  if (value.networkId !== undefined && (typeof value.networkId !== 'string' || value.networkId.length > 512)) return false;
+  if (value.messageId !== undefined && (typeof value.messageId !== 'string' || value.messageId.length > 512)) return false;
+  if (value.path !== undefined && (typeof value.path !== 'string' || value.path.length > 512)) return false;
+  return ['sequence', 'rawSequence'].every((key) => value[key] === undefined || (Number.isInteger(value[key]) && Number(value[key]) >= 0));
+}
+
+function logScenarioTestError(output: vscode.OutputChannel, error: unknown): void { output.appendLine(`[error] [tests] ${error instanceof Error ? error.message : String(error)}`); }
 
 function canStartNetwork(openingMode: string | undefined): boolean {
   if (openingMode !== 'request' || vscode.workspace.isTrusted) return true;

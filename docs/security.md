@@ -167,16 +167,19 @@ Redaction boundaries to account for when designing profiles:
   profiles should still avoid putting unrelated sensitive values in endpoint
   paths or locally constructed error messages.
 
-The live Debug **Network** inspector receives redacted request headers/body,
-redacted response headers, a response preview capped at 64 KiB per request,
-structured error details, and timing counters. Sensitive request headers and
-`Set-Cookie` are masked, and known current-session secret values are scrubbed
-from the response preview and errors before they reach the Webview. At most 50
+The live Debug **Network** inspector receives request headers, a redacted request
+body, redacted response headers, a response preview capped at 64 KiB per
+request, structured error details, and timing counters. In a Trusted Workspace,
+the exact outgoing `Authorization` header is intentionally exposed to the
+Webview for authentication debugging. `Cookie`, `Set-Cookie`, `X-API-Key`, and
+`Proxy-Authorization` remain masked, and known current-session secret values are
+scrubbed from response previews and errors before they reach the Webview. At most 50
 entries are retained; restarting the session clears them. These entries are
 not persisted in Recorded Runs or written to the Output Channel. Response data
 unrelated to a current-session secret is not a general data-loss-prevention
 boundary, so test only against endpoints whose response data is appropriate to
-display locally.
+display locally. Treat full-editor screenshots and copied Network values as
+sensitive whenever Authorization is present.
 
 ## URI and citation policy
 
@@ -233,6 +236,48 @@ lookups and transforms (`trim`, `lowercase`, `uppercase`, `number`, `boolean`,
 user script, or profile-provided CSS/HTML execution path. Regex mappings are
 limited to 256 characters by semantic validation and are tested against at
 most 4096 characters of actual input.
+
+Conversation-contract assertions use a separate bounded dotted/indexed path
+resolver and a fixed operator allowlist. Assertion paths, collection sizes,
+regular expressions, and returned failure evidence are bounded; profiles
+cannot call functions or execute assertion scripts. Scenario control overrides
+remain in the isolated test session and secret-persisted controls are rejected.
+Failure evidence is retained only in Extension Host memory (at most 100
+records) and is never added to Recorded Runs or exports. Because evidence can
+contain exact live request headers in a trusted workspace, opening it is a
+local debugging action and contract execution is disabled in Restricted Mode.
+
+Baseline/candidate comparison operates on a semantic projection owned by the
+Extension Host. It excludes raw events, request bodies, URLs, headers,
+controls, secrets, and complete response payloads. User-defined ignore paths
+can remove only bounded fields under `session`, `messages`, `events`, `errors`,
+or `network`; they cannot read files, invoke code, or expand the evidence scope.
+
+Configured JSON/JUnit/HTML reports use a separate summary projection instead of
+serializing `ScenarioRunResult.evidence`. Reports contain stable IDs, status,
+duration, numeric comparison summaries, and check metadata only. They omit
+profile/scenario names, messages, assertion actual/expected values, prompts,
+request previews, Network payloads, and raw/normalized payload contents.
+Automatic report output is trusted-workspace-only and accepts only a validated
+workspace-relative directory. Restricted Mode performs no contract network
+request and writes no configured report.
+
+Fault Lab settings are fixed numeric fields with strict bounds and are passed
+only to isolated contract-test sessions. They cannot execute code, rewrite a
+URL, alter global `fetch`, or affect an interactive Chat session. The clean
+baseline of a comparison never receives the candidate fault plan.
+
+Visual baseline and comparison actions require Workspace Trust and an explicit
+toolbar action. PNG input is limited to 24 MiB, validated before decode, and
+stored under a validated workspace-relative directory (or Extension global
+storage for a user profile). A visual image can contain the visible chat, so
+Evidence Bundle export excludes it by default and requires a second explicit
+opt-in before copying it. The HTML report has no external resources or script.
+
+Correlation capture accepts only a structurally valid W3C `traceparent` and
+bounded printable request IDs. `tracestate`, `baggage`, arbitrary headers, and
+payloads are not retained as correlation metadata. TurnStage does not install
+an OpenTelemetry SDK, create spans, or send background telemetry.
 
 The host should continue rejecting unknown protocol versions and untrusted
 payloads. Avoid broadening `allowedPatchRoots`, URI schemes, command allowlists,

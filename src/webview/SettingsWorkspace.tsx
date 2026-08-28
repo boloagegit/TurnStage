@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import type { MappingTestResult, WebviewPayload } from '../shared/protocol';
-import type { SessionSnapshot, TurnStageProfile } from '../shared/types';
+import type { ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
@@ -19,6 +19,7 @@ export const SETTINGS_SECTIONS = [
   { id: 'request', label: 'Request', description: 'Endpoint, timing, payload, and redacted preview.' },
   { id: 'stream-mapping', label: 'Stream & Mapping', description: 'Transport, framing, and event mappings.' },
   { id: 'chat-ui', label: 'Chat UI', description: 'Layout, composer, streaming effects, visibility, and interaction locks.' },
+  { id: 'scenario-tests', label: 'Scenarios', description: 'Multi-turn inputs, assertions, and contract-test setup.' },
   { id: 'history-errors', label: 'History & Errors', description: 'Local run retention and failure behavior.' },
   { id: 'security', label: 'Security', description: 'Trust, URI schemes, domains, and commands.' }
 ] as const;
@@ -96,6 +97,7 @@ export function SettingsWorkspace({
           {active.id === 'request' && <RequestSection profile={profile} requestPreview={requestPreview} remoteName={remoteName} patch={patch} />}
           {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
           {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
+          {active.id === 'scenario-tests' && <ScenarioTestsSection profile={profile} patch={patch} />}
           {active.id === 'history-errors' && <HistoryErrorsSection profile={profile} snapshot={snapshot} patch={patch} />}
           {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} />}
         </section>
@@ -315,6 +317,207 @@ function SecuritySection({ profile, snapshot, remoteName, patch }: { profile: Tu
   </div>;
 }
 
+const assertionOperators: ScenarioAssertionOperator[] = ['equals', 'notEquals', 'exists', 'notExists', 'contains', 'regex', 'oneOf', 'lessThan', 'lessThanOrEqual', 'greaterThan', 'greaterThanOrEqual', 'sequenceEquals', 'sequenceContains'];
+const performanceMetricOptions: Array<{ id: ScenarioPerformanceMetric; label: string }> = [
+  { id: 'scenario.durationMs', label: 'Scenario duration' },
+  { id: 'metrics.headersLatency', label: 'Headers latency' },
+  { id: 'metrics.firstChunkLatency', label: 'First chunk latency' },
+  { id: 'metrics.firstEventLatency', label: 'First event latency' },
+  { id: 'metrics.ttft', label: 'TTFT' },
+  { id: 'metrics.streamDuration', label: 'Stream duration' },
+  { id: 'metrics.totalDuration', label: 'Total duration' },
+  { id: 'metrics.averageEventGap', label: 'Average event gap' },
+  { id: 'metrics.maxEventGap', label: 'Maximum event gap' },
+];
+
+function ScenarioTestsSection({ profile, patch }: { profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void }): React.JSX.Element {
+  const scenarios = profile.tests?.scenarios ?? [];
+  const save = (next: ScenarioDefinition[]) => patch(['tests', 'scenarios'], next);
+  const setReportFormat = (format: ScenarioReportFormat, checked: boolean) => {
+    const reporting = profile.tests?.reporting;
+    if (!reporting) return;
+    const formats = toggleValue(reporting.formats, format, checked);
+    if (formats.length) patch(['tests', 'reporting'], { ...reporting, formats });
+  };
+  const addScenario = () => {
+    const ordinal = scenarios.length + 1;
+    const id = uniqueId(new Set(scenarios.map((scenario) => scenario.id)), `scenario-${ordinal}`);
+    save([...scenarios, { id, name: t('Scenario {number}', { number: formatNumber(ordinal) }), steps: [{ id: 'step-1', name: t('First message'), input: '', assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }] }] }]);
+  };
+  return <div className="settings-section-stack">
+    <section className="settings-card" aria-labelledby="scenario-reporting-heading">
+      <SectionHeading id="scenario-reporting-heading" title={t('CI reports')} description={t('Write sanitized contract summaries after Test Explorer runs.')} />
+      <SettingCheckbox id="settings-test-reporting-enabled" label={t('Write reports to the workspace')} checked={Boolean(profile.tests?.reporting)} onChange={(enabled) => patch(['tests', 'reporting'], enabled ? { formats: ['json'], outputDirectory: '.turnstage/reports' } : undefined)} />
+      {profile.tests?.reporting ? <div className="settings-form-grid scenario-reporting-fields">
+        <SettingCheckboxGroup legend={t('Report formats')}>
+          <SettingCheckbox id="settings-test-reporting-json" label="JSON" checked={profile.tests.reporting.formats.includes('json')} onChange={(checked) => setReportFormat('json', checked)} />
+          <SettingCheckbox id="settings-test-reporting-junit" label={t('JUnit XML')} checked={profile.tests.reporting.formats.includes('junit')} onChange={(checked) => setReportFormat('junit', checked)} />
+          <SettingCheckbox id="settings-test-reporting-html" label="HTML" checked={profile.tests.reporting.formats.includes('html')} onChange={(checked) => setReportFormat('html', checked)} />
+        </SettingCheckboxGroup>
+        <SettingField label={t('Output directory')} id="settings-test-reporting-directory" hint={t('Workspace-relative; traversal and absolute paths are rejected.')}><PatchInput id="settings-test-reporting-directory" value={profile.tests.reporting.outputDirectory} onCommit={(value) => patch(['tests', 'reporting'], { ...profile.tests!.reporting!, outputDirectory: value })} spellCheck={false} /></SettingField>
+      </div> : null}
+    </section>
+    <section className="settings-card" aria-labelledby="scenario-visual-heading">
+      <SectionHeading id="scenario-visual-heading" title={t('Visual regression')} description={t('Compare the rendered Chat viewport with a workspace baseline.')} />
+      <SettingCheckbox id="settings-visual-enabled" label={t('Enable visual baselines')} checked={Boolean(profile.tests?.visual)} onChange={(enabled) => patch(['tests', 'visual'], enabled ? { baselineDirectory: '.turnstage/baselines', maxDifferencePercent: 0.1, channelTolerance: 16 } : undefined)} />
+      {profile.tests?.visual ? <div className="settings-form-grid">
+        <SettingField label={t('Baseline directory')} id="settings-visual-directory" hint={t('Workspace-relative; one PNG is stored per viewport.')}><PatchInput id="settings-visual-directory" value={profile.tests.visual.baselineDirectory} onCommit={(value) => patch(['tests', 'visual'], { ...profile.tests!.visual!, baselineDirectory: value })} spellCheck={false} /></SettingField>
+        <NumberSettingField label={t('Maximum difference (%)')} id="settings-visual-difference" value={profile.tests.visual.maxDifferencePercent} placeholder="0.1" min={0} max={100} step={0.1} onCommit={(value) => patch(['tests', 'visual'], { ...profile.tests!.visual!, maxDifferencePercent: value })} />
+        <NumberSettingField label={t('Channel tolerance')} id="settings-visual-tolerance" value={profile.tests.visual.channelTolerance} placeholder="16" min={0} max={255} onCommit={(value) => patch(['tests', 'visual'], { ...profile.tests!.visual!, channelTolerance: value })} />
+      </div> : null}
+    </section>
+    <section className="settings-card" aria-labelledby="scenario-contract-heading">
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="scenario-contract-heading">{t('Conversation contracts')}</h2><p className="settings-card-description">{t('Each scenario runs in an isolated host session. Assertions inspect bounded runtime evidence and never execute JavaScript.')}</p></div><IconButton type="button" icon="add" label={t('Add scenario')} onClick={addScenario} /></div>
+      {!scenarios.length ? <div className="settings-empty settings-empty--action"><span>{t('No scenarios configured.')}</span><button type="button" onClick={addScenario}>{t('Add scenario')}</button></div> : <div className="scenario-list">
+        {scenarios.map((scenario, scenarioIndex) => <ScenarioEditor key={`${scenario.id}-${scenarioIndex}`} scenario={scenario} index={scenarioIndex} onChange={(value) => save(replaceAt(scenarios, scenarioIndex, value))} onDelete={() => save(scenarios.filter((_, index) => index !== scenarioIndex))} />)}
+      </div>}
+    </section>
+    <p className="settings-footnote">{t('Run these scenarios from VS Code Test Explorer. Every completed step also receives TurnStage state-invariant checks.')}</p>
+  </div>;
+}
+
+function ScenarioEditor({ scenario, index, onChange, onDelete }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void; onDelete: () => void }): React.JSX.Element {
+  const addStep = () => {
+    const ordinal = scenario.steps.length + 1;
+    const id = uniqueId(new Set(scenario.steps.map((step) => step.id)), `step-${ordinal}`);
+    onChange({ ...scenario, steps: [...scenario.steps, { id, name: t('Message {number}', { number: formatNumber(ordinal) }), input: '', assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }] }] });
+  };
+  return <article className="scenario-editor" aria-labelledby={`scenario-editor-title-${index}`}>
+    <header className="scenario-editor__header"><div><strong id={`scenario-editor-title-${index}`}>{scenario.name || scenario.id}</strong><code>{scenario.id}</code></div><div><IconButton type="button" icon="add" label={t('Add step to {name}', { name: scenario.name || scenario.id })} onClick={addStep} /><IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={onDelete} /></div></header>
+    <div className="settings-form-grid scenario-editor__identity">
+      <SettingField label={t('Scenario name')} id={`scenario-name-${index}`}><PatchInput id={`scenario-name-${index}`} value={scenario.name} onCommit={(value) => onChange({ ...scenario, name: value })} required /></SettingField>
+      <SettingField label={t('Scenario ID')} id={`scenario-id-${index}`} hint={t('Lowercase letters, numbers, and hyphens.')}><PatchInput id={`scenario-id-${index}`} value={scenario.id} onCommit={(value) => onChange({ ...scenario, id: value })} required spellCheck={false} /></SettingField>
+      <SettingField label={t('Description')} id={`scenario-description-${index}`} wide><PatchInput id={`scenario-description-${index}`} value={scenario.description ?? ''} onCommit={(value) => onChange({ ...scenario, description: value || undefined })} multiline rows={2} /></SettingField>
+      <JsonPatchField label={t('Scenario controls (JSON)')} id={`scenario-controls-${index}`} value={scenario.controls ?? {}} hint={t('Applied only to this test run. Secret controls are not accepted.')} onCommit={(value) => onChange({ ...scenario, controls: isRecord(value) && Object.keys(value).length ? value : undefined })} />
+    </div>
+    <ScenarioComparisonEditor scenario={scenario} index={index} onChange={onChange} />
+    <ScenarioFaultEditor scenario={scenario} index={index} onChange={onChange} />
+    <div className="scenario-steps">
+      {scenario.steps.map((step, stepIndex) => <ScenarioStepEditor key={`${step.id}-${stepIndex}`} step={step} scenarioIndex={index} stepIndex={stepIndex} onChange={(value) => onChange({ ...scenario, steps: replaceAt(scenario.steps, stepIndex, value) })} onDelete={() => onChange({ ...scenario, steps: scenario.steps.filter((_, itemIndex) => itemIndex !== stepIndex) })} canDelete={scenario.steps.length > 1} />)}
+    </div>
+    <AssertionsEditor idPrefix={`scenario-${index}-final`} title={t('Final assertions')} assertions={scenario.assertions ?? []} onChange={(value) => onChange({ ...scenario, assertions: value.length ? value : undefined })} />
+  </article>;
+}
+
+function ScenarioFaultEditor({ scenario, index, onChange }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void }): React.JSX.Element {
+  const enabled = Boolean(scenario.faults);
+  const update = (field: keyof NonNullable<ScenarioDefinition['faults']>, value: number | undefined) => {
+    const faults = { ...(scenario.faults ?? {}) };
+    if (value === undefined) delete faults[field]; else faults[field] = value;
+    onChange({ ...scenario, faults: Object.keys(faults).length ? faults : undefined });
+  };
+  return <details className="scenario-advanced" open={enabled}>
+    <summary>{t('Fault Lab')}</summary>
+    <div className="scenario-advanced__content">
+      <SettingCheckbox id={`scenario-faults-enabled-${index}`} label={t('Inject deterministic transport faults')} checked={enabled} onChange={(checked) => onChange({ ...scenario, faults: checked ? { disconnectAfterEvents: 1 } : undefined })} />
+      {scenario.faults ? <div className="settings-form-grid">
+        <NumberSettingField label={t('Request delay (ms)')} id={`scenario-fault-request-delay-${index}`} value={scenario.faults.delayBeforeRequestMs} placeholder="0" min={0} max={30000} onCommit={(value) => update('delayBeforeRequestMs', value)} />
+        <NumberSettingField label={t('Chunk delay (ms)')} id={`scenario-fault-chunk-delay-${index}`} value={scenario.faults.delayPerChunkMs} placeholder="0" min={0} max={30000} onCommit={(value) => update('delayPerChunkMs', value)} />
+        <NumberSettingField label={t('Synthetic HTTP status')} id={`scenario-fault-http-${index}`} value={scenario.faults.httpStatus} placeholder="503" min={400} max={599} onCommit={(value) => update('httpStatus', value)} />
+        <NumberSettingField label={t('Disconnect after event')} id={`scenario-fault-disconnect-${index}`} value={scenario.faults.disconnectAfterEvents} placeholder="3" min={1} max={10000} onCommit={(value) => update('disconnectAfterEvents', value)} />
+        <NumberSettingField label={t('Corrupt event')} id={`scenario-fault-corrupt-${index}`} value={scenario.faults.corruptEventAt} placeholder="2" min={1} max={10000} onCommit={(value) => update('corruptEventAt', value)} />
+      </div> : null}
+    </div>
+  </details>;
+}
+
+function ScenarioComparisonEditor({ scenario, index, onChange }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void }): React.JSX.Element {
+  const enabled = Boolean(scenario.comparison);
+  const updatePerformance = (metric: ScenarioPerformanceMetric, field: 'threshold' | 'maxIncreaseMs' | 'maxIncreasePercent', value: number | undefined) => {
+    const thresholds = { ...(scenario.performance?.thresholds ?? {}) };
+    const regression = { ...(scenario.performance?.regression ?? {}) };
+    if (field === 'threshold') {
+      if (value === undefined) delete thresholds[metric]; else thresholds[metric] = value;
+    } else {
+      const limit = { ...(regression[metric] ?? {}) };
+      if (value === undefined) delete limit[field]; else limit[field] = value;
+      if (Object.keys(limit).length) regression[metric] = limit; else delete regression[metric];
+    }
+    const performance = compactPerformance(thresholds, regression);
+    onChange({ ...scenario, performance });
+  };
+  const setComparisonEnabled = (checked: boolean) => {
+    if (checked) { onChange({ ...scenario, comparison: { baseline: { label: t('Baseline') }, candidate: { label: t('Candidate') } } }); return; }
+    const performance = compactPerformance({ ...(scenario.performance?.thresholds ?? {}) }, {});
+    onChange({ ...scenario, comparison: undefined, performance });
+  };
+  return <details className="scenario-advanced" open={enabled || Boolean(scenario.performance)}>
+    <summary>{t('Compare & performance')}</summary>
+    <div className="scenario-advanced__content">
+      <SettingCheckbox id={`scenario-comparison-enabled-${index}`} label={t('Run baseline and candidate')} checked={enabled} onChange={setComparisonEnabled} />
+      {scenario.comparison ? <>
+        <div className="scenario-target-grid">
+          <fieldset><legend>{t('Baseline')}</legend>
+            <SettingField label={t('Label')} id={`scenario-baseline-label-${index}`}><PatchInput id={`scenario-baseline-label-${index}`} value={scenario.comparison.baseline.label ?? ''} onCommit={(value) => onChange({ ...scenario, comparison: { ...scenario.comparison!, baseline: { ...scenario.comparison!.baseline, label: value || undefined } } })} /></SettingField>
+            <SettingField label={t('Environment ID')} id={`scenario-baseline-environment-${index}`}><PatchInput id={`scenario-baseline-environment-${index}`} value={scenario.comparison.baseline.environment ?? ''} placeholder={t('Profile default')} onCommit={(value) => onChange({ ...scenario, comparison: { ...scenario.comparison!, baseline: { ...scenario.comparison!.baseline, environment: value || undefined } } })} spellCheck={false} /></SettingField>
+            <JsonPatchField label={t('Control overrides (JSON)')} id={`scenario-baseline-controls-${index}`} value={scenario.comparison.baseline.controls ?? {}} rows={4} onCommit={(value) => onChange({ ...scenario, comparison: { ...scenario.comparison!, baseline: { ...scenario.comparison!.baseline, controls: isRecord(value) && Object.keys(value).length ? value : undefined } } })} />
+          </fieldset>
+          <fieldset><legend>{t('Candidate')}</legend>
+            <SettingField label={t('Label')} id={`scenario-candidate-label-${index}`}><PatchInput id={`scenario-candidate-label-${index}`} value={scenario.comparison.candidate.label ?? ''} onCommit={(value) => onChange({ ...scenario, comparison: { ...scenario.comparison!, candidate: { ...scenario.comparison!.candidate, label: value || undefined } } })} /></SettingField>
+            <SettingField label={t('Environment ID')} id={`scenario-candidate-environment-${index}`}><PatchInput id={`scenario-candidate-environment-${index}`} value={scenario.comparison.candidate.environment ?? ''} placeholder={t('Profile default')} onCommit={(value) => onChange({ ...scenario, comparison: { ...scenario.comparison!, candidate: { ...scenario.comparison!.candidate, environment: value || undefined } } })} spellCheck={false} /></SettingField>
+            <JsonPatchField label={t('Control overrides (JSON)')} id={`scenario-candidate-controls-${index}`} value={scenario.comparison.candidate.controls ?? {}} rows={4} onCommit={(value) => onChange({ ...scenario, comparison: { ...scenario.comparison!, candidate: { ...scenario.comparison!.candidate, controls: isRecord(value) && Object.keys(value).length ? value : undefined } } })} />
+          </fieldset>
+        </div>
+        <ListPatchField label={t('Ignore dynamic paths')} id={`scenario-comparison-ignore-${index}`} value={scenario.comparison.ignorePaths ?? []} placeholder="messages[*].metadata.requestId" hint={t('Removed from both semantic snapshots before comparison.')} onCommit={(value) => onChange({ ...scenario, comparison: { ...scenario.comparison!, ignorePaths: value.length ? value : undefined } })} wide />
+      </> : null}
+      <div className="scenario-budget" role="group" aria-label={t('Performance budgets')}>
+        <div className="scenario-budget__header" aria-hidden="true"><span>{t('Metric')}</span><span>{t('Maximum (ms)')}</span><span>{t('Increase (ms)')}</span><span>{t('Increase (%)')}</span></div>
+        {performanceMetricOptions.map((metric) => <div className="scenario-budget__row" key={metric.id}>
+          <span title={metric.id}>{t(metric.label)}</span>
+          <OptionalNumberInput id={`scenario-${index}-${metric.id}-threshold`} label={t('{metric} maximum milliseconds', { metric: t(metric.label) })} shortLabel={t('Maximum (ms)')} value={scenario.performance?.thresholds?.[metric.id]} max={900000} onCommit={(value) => updatePerformance(metric.id, 'threshold', value)} />
+          <OptionalNumberInput id={`scenario-${index}-${metric.id}-increase-ms`} label={t('{metric} maximum increase milliseconds', { metric: t(metric.label) })} shortLabel={t('Increase (ms)')} value={scenario.performance?.regression?.[metric.id]?.maxIncreaseMs} max={900000} disabled={!enabled} onCommit={(value) => updatePerformance(metric.id, 'maxIncreaseMs', value)} />
+          <OptionalNumberInput id={`scenario-${index}-${metric.id}-increase-percent`} label={t('{metric} maximum increase percent', { metric: t(metric.label) })} shortLabel={t('Increase (%)')} value={scenario.performance?.regression?.[metric.id]?.maxIncreasePercent} max={10000} disabled={!enabled} onCommit={(value) => updatePerformance(metric.id, 'maxIncreasePercent', value)} />
+        </div>)}
+      </div>
+    </div>
+  </details>;
+}
+
+function ScenarioStepEditor({ step, scenarioIndex, stepIndex, onChange, onDelete, canDelete }: { step: ScenarioStepDefinition; scenarioIndex: number; stepIndex: number; onChange: (value: ScenarioStepDefinition) => void; onDelete: () => void; canDelete: boolean }): React.JSX.Element {
+  const prefix = `scenario-${scenarioIndex}-step-${stepIndex}`;
+  return <section className="scenario-step" aria-labelledby={`${prefix}-title`}>
+    <header><div><span className="scenario-step__index">{formatNumber(stepIndex + 1)}</span><strong id={`${prefix}-title`}>{step.name?.trim() || step.id}</strong></div><IconButton type="button" icon="trash" label={t('Delete step {name}', { name: step.name?.trim() || step.id })} onClick={onDelete} disabled={!canDelete} /></header>
+    <div className="settings-form-grid">
+      <SettingField label={t('Step name')} id={`${prefix}-name`}><PatchInput id={`${prefix}-name`} value={step.name ?? ''} onCommit={(value) => onChange({ ...step, name: value || undefined })} /></SettingField>
+      <SettingField label={t('Step ID')} id={`${prefix}-id`}><PatchInput id={`${prefix}-id`} value={step.id} onCommit={(value) => onChange({ ...step, id: value })} required spellCheck={false} /></SettingField>
+      <SettingField label={t('User message')} id={`${prefix}-input`} wide><PatchInput id={`${prefix}-input`} value={step.input} onCommit={(value) => onChange({ ...step, input: value })} multiline rows={3} required /></SettingField>
+    </div>
+    <AssertionsEditor idPrefix={prefix} title={t('Step assertions')} assertions={step.assertions ?? []} onChange={(value) => onChange({ ...step, assertions: value.length ? value : undefined })} />
+  </section>;
+}
+
+function AssertionsEditor({ idPrefix, title, assertions, onChange }: { idPrefix: string; title: string; assertions: ScenarioAssertionDefinition[]; onChange: (value: ScenarioAssertionDefinition[]) => void }): React.JSX.Element {
+  const add = () => onChange([...assertions, { path: 'assistant.text', operator: 'exists' }]);
+  return <div className="assertion-editor"><div className="assertion-editor__heading"><strong>{title}</strong><IconButton type="button" icon="add" label={t('Add assertion')} onClick={add} /></div>
+    {!assertions.length ? <p className="settings-muted">{t('No explicit assertions. Built-in state invariants still run.')}</p> : <div className="assertion-list">{assertions.map((assertion, index) => <AssertionRow key={`${assertion.id ?? assertion.path}-${index}`} assertion={assertion} idPrefix={`${idPrefix}-assertion-${index}`} onChange={(value) => onChange(replaceAt(assertions, index, value))} onDelete={() => onChange(assertions.filter((_, itemIndex) => itemIndex !== index))} />)}</div>}
+  </div>;
+}
+
+function AssertionRow({ assertion, idPrefix, onChange, onDelete }: { assertion: ScenarioAssertionDefinition; idPrefix: string; onChange: (value: ScenarioAssertionDefinition) => void; onDelete: () => void }): React.JSX.Element {
+  const expectsValue = assertion.operator !== 'exists' && assertion.operator !== 'notExists';
+  return <div className="assertion-row">
+    <label><span>{t('Path')}</span><PatchInput id={`${idPrefix}-path`} value={assertion.path} onCommit={(value) => onChange({ ...assertion, path: value })} spellCheck={false} placeholder="assistant.text" /></label>
+    <label><span>{t('Operator')}</span><select id={`${idPrefix}-operator`} value={assertion.operator} onChange={(event) => { const operator = event.target.value as ScenarioAssertionOperator; if (operator === 'exists' || operator === 'notExists') { const withoutValue = { ...assertion }; delete withoutValue.value; onChange({ ...withoutValue, operator }); } else { onChange({ ...assertion, operator }); } }}>{assertionOperators.map((operator) => <option key={operator} value={operator}>{localizeHumanized(operator)}</option>)}</select></label>
+    <JsonValuePatchInput id={`${idPrefix}-value`} value={assertion.value} disabled={!expectsValue} onCommit={(value) => onChange({ ...assertion, value })} />
+    <IconButton type="button" icon="trash" label={t('Delete assertion')} onClick={onDelete} />
+  </div>;
+}
+
+function JsonValuePatchInput({ id, value, disabled, onCommit }: { id: string; value: unknown; disabled?: boolean; onCommit: (value: unknown) => void }): React.JSX.Element {
+  const source = value === undefined ? '' : JSON.stringify(value);
+  const [draft, setDraft] = useState(source);
+  const [invalid, setInvalid] = useState(false);
+  useEffect(() => { setDraft(source); setInvalid(false); }, [source]);
+  const commit = () => {
+    if (disabled) return;
+    try { onCommit(JSON.parse(draft || 'null') as unknown); setInvalid(false); } catch { setInvalid(true); }
+  };
+  return <label className="assertion-value"><span>{t('Expected value')}</span><input id={id} value={draft} disabled={disabled} aria-invalid={invalid || undefined} spellCheck={false} placeholder={disabled ? '—' : '"completed"'} onChange={(event) => { setDraft(event.target.value); setInvalid(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); event.currentTarget.blur(); } if (event.key === 'Escape') { setDraft(source); setInvalid(false); event.currentTarget.blur(); } }} /></label>;
+}
+
+function replaceAt<T>(values: readonly T[], index: number, value: T): T[] { return values.map((item, itemIndex) => itemIndex === index ? value : item); }
+function uniqueId(values: ReadonlySet<string>, preferred: string): string { if (!values.has(preferred)) return preferred; for (let index = 2; index < 10_000; index++) if (!values.has(`${preferred}-${index}`)) return `${preferred}-${index}`; return `${preferred}-${Date.now()}`; }
+
 function SectionHeading({ id, title, description }: { id: string; title: string; description: string }): React.JSX.Element {
   return <div className="settings-card-heading"><div><h2 id={id}>{title}</h2><p className="settings-card-description">{description}</p></div></div>;
 }
@@ -325,15 +528,27 @@ function SettingField({ label, id, hint, error, wide, children }: { label: strin
   return <div className={`settings-field ${wide ? 'settings-field-wide' : ''}`}><label htmlFor={id}>{label}</label>{React.isValidElement(children) ? React.cloneElement(children, { 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined } as Record<string, unknown>) : children}{(hint || error) && <p id={descriptionId} className={error ? 'settings-field-error' : 'settings-field-hint'}>{error || hint}</p>}</div>;
 }
 
-function NumberSettingField({ label, id, value, placeholder, min, max, hint, onCommit }: { label: string; id: string; value?: number; placeholder: string; min: number; max: number; hint?: string; onCommit: (value: number | undefined) => void }): React.JSX.Element {
+function NumberSettingField({ label, id, value, placeholder, min, max, step = 1, hint, onCommit }: { label: string; id: string; value?: number; placeholder: string; min: number; max: number; step?: number; hint?: string; onCommit: (value: number | undefined) => void }): React.JSX.Element {
   const [draft, setDraft] = useState(value === undefined ? '' : String(value));
   useEffect(() => setDraft(value === undefined ? '' : String(value)), [value]);
   const commit = () => {
     if (!draft.trim()) { if (value !== undefined) onCommit(undefined); return; }
-    const parsed = Number.parseInt(draft, 10);
+    const parsed = Number(draft);
     if (Number.isFinite(parsed)) onCommit(Math.min(max, Math.max(min, parsed)));
   };
-  return <SettingField label={label} id={id} hint={hint}><input id={id} type="number" min={min} max={max} value={draft} placeholder={placeholder} inputMode="numeric" onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); event.currentTarget.blur(); } if (event.key === 'Escape') { setDraft(value === undefined ? '' : String(value)); event.currentTarget.blur(); } }} /></SettingField>;
+  return <SettingField label={label} id={id} hint={hint}><input id={id} type="number" min={min} max={max} step={step} value={draft} placeholder={placeholder} inputMode="decimal" onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); event.currentTarget.blur(); } if (event.key === 'Escape') { setDraft(value === undefined ? '' : String(value)); event.currentTarget.blur(); } }} /></SettingField>;
+}
+
+function OptionalNumberInput({ id, label, shortLabel, value, max, disabled, onCommit }: { id: string; label: string; shortLabel: string; value?: number; max: number; disabled?: boolean; onCommit: (value: number | undefined) => void }): React.JSX.Element {
+  const source = value === undefined ? '' : String(value);
+  const [draft, setDraft] = useState(source);
+  useEffect(() => setDraft(source), [source]);
+  const commit = () => {
+    if (!draft.trim()) { if (value !== undefined) onCommit(undefined); return; }
+    const parsed = Number(draft);
+    if (Number.isFinite(parsed)) onCommit(Math.min(max, Math.max(0, parsed)));
+  };
+  return <label className="scenario-budget__cell" htmlFor={id}><span className="scenario-budget__cell-label">{shortLabel}</span><input id={id} type="number" min={0} max={max} value={draft} disabled={disabled} inputMode="decimal" aria-label={label} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); event.currentTarget.blur(); } if (event.key === 'Escape') { setDraft(source); event.currentTarget.blur(); } }} /></label>;
 }
 
 function SettingCheckboxGroup({ legend, hint, children }: { legend: string; hint?: string; children: React.ReactNode }): React.JSX.Element {
@@ -358,7 +573,7 @@ function PatchInput({ id, value, onCommit, multiline = false, rows = 3, ...props
     : <input id={id} {...props} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={onKeyDown} />;
 }
 
-function JsonPatchField({ label, id, value, hint, onCommit }: { label: string; id: string; value: unknown; hint?: string; onCommit: (value: unknown) => void }): React.JSX.Element {
+function JsonPatchField({ label, id, value, hint, rows = 8, onCommit }: { label: string; id: string; value: unknown; hint?: string; rows?: number; onCommit: (value: unknown) => void }): React.JSX.Element {
   const [draft, setDraft] = useState(() => stringifyJson(value));
   const [error, setError] = useState('');
   useEffect(() => { setDraft(stringifyJson(value)); setError(''); }, [value]);
@@ -373,7 +588,7 @@ function JsonPatchField({ label, id, value, hint, onCommit }: { label: string; i
   };
   const description = error || hint;
   const descriptionId = useId();
-  return <div className="settings-field settings-field-wide"><label htmlFor={id}>{label}</label><div className="settings-field-control"><textarea id={id} className="settings-code-input" rows={8} value={draft} spellCheck={false} aria-invalid={Boolean(error)} aria-describedby={description ? descriptionId : undefined} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(stringifyJson(value)); setError(''); event.currentTarget.blur(); } if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); commit(); event.currentTarget.blur(); } }} /><button type="button" className="settings-apply-action" onClick={commit}>{t('Apply JSON')}</button>{description && <p id={descriptionId} className={error ? 'settings-field-error' : 'settings-field-hint'}>{description}</p>}</div></div>;
+  return <div className="settings-field settings-field-wide"><label htmlFor={id}>{label}</label><div className="settings-field-control"><textarea id={id} className="settings-code-input" rows={rows} value={draft} spellCheck={false} aria-invalid={Boolean(error)} aria-describedby={description ? descriptionId : undefined} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(stringifyJson(value)); setError(''); event.currentTarget.blur(); } if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); commit(); event.currentTarget.blur(); } }} /><button type="button" className="settings-apply-action" onClick={commit}>{t('Apply JSON')}</button>{description && <p id={descriptionId} className={error ? 'settings-field-error' : 'settings-field-hint'}>{description}</p>}</div></div>;
 }
 
 function ListPatchField({ label, id, value, placeholder, hint, wide, onCommit }: { label: string; id: string; value: string[]; placeholder: string; hint?: string; wide?: boolean; onCommit: (value: string[]) => void }): React.JSX.Element {
@@ -404,6 +619,19 @@ function stringifyJson(value: unknown): string {
 
 function parseList(value: string): string[] {
   return [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
+}
+
+function toggleValue<T extends string>(values: readonly T[], value: T, checked: boolean): T[] {
+  return checked ? [...new Set([...values, value])] : values.filter((item) => item !== value);
+}
+
+function compactPerformance(
+  thresholds: NonNullable<ScenarioDefinition['performance']>['thresholds'],
+  regression: NonNullable<ScenarioDefinition['performance']>['regression'],
+): ScenarioDefinition['performance'] {
+  const hasThresholds = Boolean(thresholds && Object.keys(thresholds).length);
+  const hasRegression = Boolean(regression && Object.keys(regression).length);
+  return hasThresholds || hasRegression ? { thresholds: hasThresholds ? thresholds : undefined, regression: hasRegression ? regression : undefined } : undefined;
 }
 
 function parseStatusList(value: string): number[] {

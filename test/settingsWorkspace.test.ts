@@ -26,7 +26,7 @@ describe('Profile Configuration surface', () => {
   });
 
   it('provides compact local navigation for every profile section', () => {
-    for (const section of ['general', 'opening-flow', 'request', 'stream-mapping', 'chat-ui', 'history-errors', 'security']) {
+    for (const section of ['general', 'opening-flow', 'request', 'stream-mapping', 'chat-ui', 'scenario-tests', 'history-errors', 'security']) {
       expect(workspaceSource).toContain(`id: '${section}'`);
     }
     expect(workspaceSource).toContain('onSectionChange: (section: SettingsSectionId) => void');
@@ -37,6 +37,26 @@ describe('Profile Configuration surface', () => {
     expect(workspaceStyles).toContain('.settings-content-layout');
     expect(workspaceStyles).toContain('.settings-section-nav button.is-active');
     expect(workspaceStyles).toContain('grid-template-columns: 1fr');
+  });
+
+  it('provides a bounded scenario builder through one supported JSONC patch path', () => {
+    expect(workspaceSource).toContain("active.id === 'scenario-tests'");
+    expect(workspaceSource).toContain("patch(['tests', 'scenarios'], next)");
+    expect(workspaceSource).toContain('Conversation contracts');
+    expect(workspaceSource).toContain('Built-in state invariants still run.');
+    expect(workspaceSource).toContain('disabled={!canDelete}');
+    expect(workspaceStyles).toContain('.scenario-editor');
+    expect(workspaceStyles).toContain('.assertion-row');
+  });
+
+  it('configures sanitized reports, baseline comparison, ignore rules, and every supported performance metric', () => {
+    expect(workspaceSource).toContain("patch(['tests', 'reporting']");
+    expect(workspaceSource).toContain('Run baseline and candidate');
+    expect(workspaceSource).toContain('Ignore dynamic paths');
+    expect(workspaceSource).toContain('performanceMetricOptions.map');
+    for (const metric of ['scenario.durationMs', 'metrics.headersLatency', 'metrics.firstChunkLatency', 'metrics.firstEventLatency', 'metrics.ttft', 'metrics.streamDuration', 'metrics.totalDuration', 'metrics.averageEventGap', 'metrics.maxEventGap']) expect(workspaceSource).toContain(metric);
+    expect(workspaceStyles).toContain('.scenario-budget__row');
+    expect(workspaceStyles).toContain('var(--vscode-editorWidget-border)');
   });
 
   it('keeps JSONC patching and security/error guidance intact', () => {

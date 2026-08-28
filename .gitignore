@@ -11,6 +11,7 @@ coverage/
 artifacts/
 docs/performance-results.json
 test-results/
+.turnstage/reports/
 
 # Local environment and tool state
 .env

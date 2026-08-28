@@ -2,11 +2,13 @@ import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { clearTimeout } from 'node:timers';
 import { fileURLToPath } from 'node:url';
 import { downloadAndUnzipVSCode, runTests } from '@vscode/test-electron';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const temporaryRoots = [];
+let mockServer;
 
 try {
   const requestedVersion = process.env.TURNSTAGE_VSCODE_VERSION?.trim() || undefined;
@@ -20,8 +22,9 @@ try {
     vscodeExecutablePath = path.join(path.dirname(vscodeExecutablePath), 'Code');
     await access(vscodeExecutablePath);
   }
+  mockServer = await startMockServer();
   for (const trustMode of ['trusted', 'untrusted']) {
-    const workspace = await createWorkspace(trustMode);
+    const workspace = await createWorkspace(trustMode, mockServer.port);
     const userDataDirectory = await mkdtemp(path.join(tmpdir(), `turnstage-${trustMode}-user-data-`));
     temporaryRoots.push(workspace, userDataDirectory);
     const options = {
@@ -38,16 +41,43 @@ try {
   console.error('TurnStage Extension Host integration tests failed.', error);
   process.exitCode = 1;
 } finally {
+  if (mockServer?.child.exitCode === null) {
+    mockServer.child.kill('SIGTERM');
+    await new Promise((resolveExit) => mockServer.child.once('exit', resolveExit));
+  }
   await Promise.all(temporaryRoots.map((root) => rm(root, { recursive: true, force: true })));
 }
 
-async function createWorkspace(trustMode) {
+async function createWorkspace(trustMode, mockPort) {
   const workspace = await mkdtemp(path.join(tmpdir(), `turnstage-${trustMode}-integration-`));
   await mkdir(path.join(workspace, '.vscode', 'turnstage', 'profiles'), { recursive: true });
   await mkdir(path.join(workspace, '.vscode', 'turnstage', 'environments'), { recursive: true });
-  await writeFile(path.join(workspace, '.vscode', 'turnstage', 'profiles', 'integration.turnstage.jsonc'), JSON.stringify({ version: 1, id: 'integration', name: 'Integration Profile', environment: 'local', opening: { mode: 'static', message: 'Hello from integration.' }, conversation: { send: { method: 'POST', url: '${env.baseUrl}/basic/chat/stream', variants: [{ id: 'first', body: { message: { $value: 'input.text' } } }] } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] } }, null, 2));
-  await writeFile(path.join(workspace, '.vscode', 'turnstage', 'environments', 'local.environment.jsonc'), JSON.stringify({ version: 1, id: 'local', name: 'Local', variables: { baseUrl: 'http://127.0.0.1:8787' } }, null, 2));
+  await writeFile(path.join(workspace, '.vscode', 'turnstage', 'profiles', 'integration.turnstage.jsonc'), JSON.stringify({ version: 1, id: 'integration', name: 'Integration Profile', environment: 'local', opening: { mode: 'static', message: 'Hello from integration.' }, conversation: { send: { method: 'POST', url: '${env.baseUrl}/basic/chat/stream', variants: [{ id: 'first', body: { message: { $value: 'input.text' } } }] } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { reporting: { formats: ['json', 'junit'], outputDirectory: '.turnstage/reports' }, scenarios: [{ id: 'integration-contract', name: 'Integration contract', comparison: { baseline: { label: 'Integration baseline', environment: 'local' }, candidate: { label: 'Integration candidate', environment: 'local' } }, performance: { thresholds: { 'scenario.durationMs': 5000 }, regression: { 'scenario.durationMs': { maxIncreaseMs: 2000, maxIncreasePercent: 1000 } } }, steps: [{ id: 'first-message', input: 'Hello from Test Explorer', assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }] }] }] } }, null, 2));
+  await writeFile(path.join(workspace, '.vscode', 'turnstage', 'environments', 'local.environment.jsonc'), JSON.stringify({ version: 1, id: 'local', name: 'Local', variables: { baseUrl: `http://127.0.0.1:${mockPort}` } }, null, 2));
   return workspace;
+}
+
+async function startMockServer() {
+  const child = spawn(process.execPath, [path.join(projectRoot, 'examples', 'mock-server', 'server.mjs')], {
+    env: { ...process.env, TURNSTAGE_MOCK_PORT: '0' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const port = await new Promise((resolvePort, rejectPort) => {
+    let stderr = '';
+    const timer = setTimeout(() => rejectPort(new Error(`Timed out starting integration mock server. ${stderr}`)), 10_000);
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      const match = /listening on http:\/\/127\.0\.0\.1:(\d+)/.exec(chunk);
+      if (!match) return;
+      clearTimeout(timer);
+      resolvePort(Number(match[1]));
+    });
+    child.once('error', (error) => { clearTimeout(timer); rejectPort(error); });
+    child.once('exit', (code) => { clearTimeout(timer); rejectPort(new Error(`Integration mock server exited with code ${code}. ${stderr}`)); });
+  });
+  return { child, port };
 }
 
 async function runUntrustedTests(options) {

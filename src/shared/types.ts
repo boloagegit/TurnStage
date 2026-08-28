@@ -19,6 +19,177 @@ export interface TurnStageProfile {
   errorPolicy?: { preservePartialContent?: boolean; showErrorPart?: boolean; keepConversationId?: boolean; allowContinuation?: boolean; releaseAllLocks?: boolean };
   security?: { allowedUriSchemes?: string[]; allowedDomains?: string[]; allowedCommands?: string[] };
   metrics?: { enabled?: string[]; messageEnabled?: string[] };
+  tests?: ProfileTestsDefinition;
+}
+
+/** Declarative, profile-owned conversation tests. No field is executable code. */
+export interface ProfileTestsDefinition {
+  scenarios: ScenarioDefinition[];
+  /** Optional explicit, workspace-relative CI report output. */
+  reporting?: ScenarioReportingDefinition;
+  visual?: ScenarioVisualDefinition;
+}
+
+export interface ScenarioVisualDefinition {
+  /** Workspace-relative baseline directory. */
+  baselineDirectory: string;
+  /** Maximum changed pixels accepted after channel tolerance is applied. */
+  maxDifferencePercent?: number;
+  /** Per-channel RGBA delta ignored by the comparator. */
+  channelTolerance?: number;
+}
+
+export type ScenarioReportFormat = 'json' | 'junit' | 'html';
+
+export interface ScenarioReportingDefinition {
+  formats: ScenarioReportFormat[];
+  /** Workspace-relative directory. Absolute paths and traversal are rejected. */
+  outputDirectory: string;
+}
+
+/** Bounded, deterministic faults that are available only to isolated scenario sessions. */
+export interface ScenarioFaultDefinition {
+  /** Delay before each HTTP attempt, including retries. */
+  delayBeforeRequestMs?: number;
+  /** Delay before each received transport chunk is processed. */
+  delayPerChunkMs?: number;
+  /** Fail before issuing the HTTP request with a synthetic status. */
+  httpStatus?: number;
+  /** End the transport after this many parsed events have reached the runtime. */
+  disconnectAfterEvents?: number;
+  /** Replace this parsed event with a bounded parse-error event. */
+  corruptEventAt?: number;
+}
+
+export interface ScenarioComparisonTargetDefinition {
+  label?: string;
+  environment?: string;
+  controls?: Record<string, unknown>;
+}
+
+export interface ScenarioComparisonDefinition {
+  baseline: ScenarioComparisonTargetDefinition;
+  candidate: ScenarioComparisonTargetDefinition;
+  /** Bounded paths removed from both semantic snapshots before comparison. */
+  ignorePaths?: string[];
+}
+
+export type ScenarioPerformanceMetric =
+  | 'scenario.durationMs'
+  | 'metrics.headersLatency'
+  | 'metrics.firstChunkLatency'
+  | 'metrics.firstEventLatency'
+  | 'metrics.ttft'
+  | 'metrics.streamDuration'
+  | 'metrics.totalDuration'
+  | 'metrics.averageEventGap'
+  | 'metrics.maxEventGap';
+
+export interface ScenarioRegressionLimit {
+  maxIncreaseMs?: number;
+  maxIncreasePercent?: number;
+}
+
+export interface ScenarioPerformanceDefinition {
+  thresholds?: Partial<Record<ScenarioPerformanceMetric, number>>;
+  regression?: Partial<Record<ScenarioPerformanceMetric, ScenarioRegressionLimit>>;
+}
+
+export interface ScenarioDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  /** Control values applied before the opening request and first step. */
+  controls?: Record<string, unknown>;
+  steps: ScenarioStepDefinition[];
+  /** Assertions evaluated once after every step has completed. */
+  assertions?: ScenarioAssertionDefinition[];
+  comparison?: ScenarioComparisonDefinition;
+  performance?: ScenarioPerformanceDefinition;
+  /** Candidate-only for comparisons; applies to the sole run otherwise. */
+  faults?: ScenarioFaultDefinition;
+}
+
+export interface ScenarioStepDefinition {
+  id: string;
+  name?: string;
+  input: string;
+  assertions?: ScenarioAssertionDefinition[];
+}
+
+export type ScenarioAssertionOperator =
+  | 'equals'
+  | 'notEquals'
+  | 'exists'
+  | 'notExists'
+  | 'contains'
+  | 'regex'
+  | 'oneOf'
+  | 'lessThan'
+  | 'lessThanOrEqual'
+  | 'greaterThan'
+  | 'greaterThanOrEqual'
+  | 'sequenceEquals'
+  | 'sequenceContains';
+
+export interface ScenarioAssertionDefinition {
+  id?: string;
+  /** A bounded data path such as turn.state, assistant.text, or events.normalized[*].type. */
+  path: string;
+  operator: ScenarioAssertionOperator;
+  value?: unknown;
+  message?: string;
+}
+
+export type ScenarioEvidenceLocation =
+  | { kind: 'network'; networkId?: string }
+  | { kind: 'rawEvent'; sequence?: number }
+  | { kind: 'normalizedEvent'; sequence?: number; rawSequence?: number }
+  | { kind: 'message'; messageId?: string }
+  | { kind: 'profile'; path?: string };
+
+export interface ScenarioCheckResult {
+  id: string;
+  label: string;
+  passed: boolean;
+  kind: 'assertion' | 'invariant' | 'comparison' | 'performance';
+  actual?: unknown;
+  expected?: unknown;
+  location: ScenarioEvidenceLocation;
+}
+
+export interface ScenarioStepResult {
+  stepId: string;
+  name: string;
+  durationMs: number;
+  checks: ScenarioCheckResult[];
+}
+
+export interface ScenarioRunEvidence {
+  profileId: string;
+  scenarioId: string;
+  snapshot: SessionSnapshot;
+  networkEntries: NetworkExchange[];
+  requestPreview?: PreparedRequest['redacted'];
+  faults?: ScenarioFaultDefinition;
+}
+
+export interface ScenarioRunResult {
+  scenarioId: string;
+  passed: boolean;
+  durationMs: number;
+  steps: ScenarioStepResult[];
+  checks: ScenarioCheckResult[];
+  evidence: ScenarioRunEvidence;
+  comparison?: {
+    baselineLabel: string;
+    candidateLabel: string;
+    baselineDurationMs: number;
+    candidateDurationMs: number;
+    differenceCount: number;
+    /** Bounded semantic field paths only; values remain in memory-only evidence. */
+    differencePaths: string[];
+  };
 }
 
 export interface ControlDefinition {
@@ -258,6 +429,16 @@ export interface NetworkExchange {
   };
   transferredBytes: number;
   eventCount: number;
+  correlation?: NetworkCorrelation;
+}
+
+export interface NetworkCorrelation {
+  traceId?: string;
+  spanId?: string;
+  traceFlags?: string;
+  traceSource?: 'request' | 'response';
+  requestId?: string;
+  requestIdHeader?: string;
 }
 
 export interface SessionSnapshot {

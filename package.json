@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -64,8 +64,13 @@
     "onCommand:turnstage.importRun",
     "onCommand:turnstage.exportRun",
     "onCommand:turnstage.openOutput",
+    "onCommand:turnstage.runContractTests",
+    "onCommand:turnstage.exportTestReport",
+    "onCommand:turnstage.exportEvidenceBundle",
+    "onCommand:turnstage.openTestEvidence",
     "onCommand:turnstage.migrateProfile",
-    "onCommand:turnstage.refreshProfiles"
+    "onCommand:turnstage.refreshProfiles",
+    "workspaceContains:**/*.turnstage.jsonc"
   ],
   "contributes": {
     "commands": [
@@ -225,6 +230,32 @@
         "command": "turnstage.openOutput",
         "title": "%command.openOutput%",
         "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.runContractTests",
+        "title": "%command.runContractTests%",
+        "category": "%command.category%",
+        "icon": "$(run-all)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.exportTestReport",
+        "title": "%command.exportTestReport%",
+        "category": "%command.category%",
+        "icon": "$(export)"
+      },
+      {
+        "command": "turnstage.exportEvidenceBundle",
+        "title": "%command.exportEvidenceBundle%",
+        "category": "%command.category%",
+        "icon": "$(package)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.openTestEvidence",
+        "title": "%command.openTestEvidence%",
+        "category": "%command.category%",
+        "icon": "$(go-to-file)"
       },
       {
         "command": "turnstage.migrateProfile",
@@ -474,7 +505,25 @@
           "group": "1_modification@1"
         }
       ],
+      "testing/message/content": [
+        {
+          "command": "turnstage.openTestEvidence",
+          "when": "testMessage =~ /^turnstage\\.evidence\\./",
+          "group": "navigation@1"
+        }
+      ],
+      "testing/message/context": [
+        {
+          "command": "turnstage.openTestEvidence",
+          "when": "testMessage =~ /^turnstage\\.evidence\\./",
+          "group": "navigation@1"
+        }
+      ],
       "commandPalette": [
+        {
+          "command": "turnstage.openTestEvidence",
+          "when": "false"
+        },
         {
           "command": "turnstage.duplicateProfile",
           "when": "false"
@@ -672,6 +721,7 @@
     "@vscode/codicons": "^0.0.36",
     "html-to-image": "1.11.13",
     "jsonc-parser": "^3.3.1",
+    "pngjs": "^7.0.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
@@ -680,6 +730,7 @@
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.6",
     "@types/node": "^24.3.0",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^19.1.11",
     "@types/react-dom": "^19.1.7",
     "@types/vscode": "1.106.0",

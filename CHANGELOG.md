@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.10.0
+
+- Added profile-defined multi-turn conversation contracts with a VS Code-native Test Explorer hierarchy, declarative bounded assertions, automatic terminal-state invariants, isolated non-secret scenario controls, and clickable failure evidence that reopens the related Network or Event row. Scenario evidence is memory-only, contract requests require Workspace Trust, and existing version-1 profiles remain compatible because `tests` is optional.
+- Added optional isolated baseline/candidate runs, bounded dynamic-field ignore rules, nine millisecond-based performance thresholds and regression budgets, and a VS Code-native Scenarios GUI. Missing baseline metrics fail closed, secret controls remain unavailable, and existing scenarios run unchanged when the new fields are absent.
+- Added sanitized versioned JSON and JUnit contract reports through native run/export commands or an explicit trusted-workspace output directory. Reports contain IDs, status, durations, counts, difference paths, and check metadata only; raw events, messages, prompts, headers, request/response bodies, assertion values, and Debug evidence are excluded.
+- Added an isolated Fault Lab for deterministic request delay, stream delay, synthetic HTTP status, disconnect, and malformed-event scenarios. Faults apply only to Test Explorer runs, use fixed bounded numeric controls, and do not change normal profile sessions.
+- Added real PNG visual baselines and pixel-difference output for the Chat viewport, with VS Code-native Save Baseline and Compare actions plus configurable difference and channel tolerances. Existing profiles remain compatible because visual settings are optional.
+- Added a privacy-bounded Evidence Bundle with an offline responsive HTML report, JSON, JUnit, and a manifest. Visible chat screenshots are excluded by default and require a separate explicit opt-in; raw events, request and response bodies, header values, message content, secrets, and profile or scenario display names remain excluded.
+- Added passive W3C `traceparent` and standard request-ID correlation in the Network inspector, search, and sanitized reports. TurnStage does not create spans, inject headers, load an OpenTelemetry SDK, or send telemetry to a collector.
+- Changed the Trusted-Workspace Network inspector to display the exact outgoing `Authorization` header, matching browser developer tools. The value remains live-session-only and is excluded from Output, request previews, Recorded Runs, exports, and Restricted Mode; cookies, API keys, proxy authorization, response data, and known-secret echoes retain their existing redaction.
+- Expanded privacy-bounded Output diagnostics with profile/environment IDs, request-build time, request header/body sizes, response request/trace IDs, last event and age, terminal-event state, maximum chunk gap, and parser/mapping/unmatched/drop counts. Output still omits all header values, request/response bodies, query values, and SSE payloads.
+
 ## 0.9.0
 
 - Added a Chrome-style Debug Network inspector with compact Opening, Stream-attempt, retry, and Stop rows plus searchable Headers, Payload, bounded Response, and Timing details. Timeout rows retain the HTTP/header/first-chunk phase and structured failure so an idle timeout after HTTP 200 is distinguishable from DNS, TLS, connection, or total-request failures.

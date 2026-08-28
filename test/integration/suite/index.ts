@@ -10,7 +10,7 @@ export async function run(): Promise<void> {
   const expectedTrust = process.env.TURNSTAGE_EXPECT_TRUST ?? 'trusted';
   const extension = vscode.extensions.getExtension('turnstage.turnstage');
   assert.ok(extension, 'TurnStage extension should be discoverable');
-  assert.equal(extension.isActive, false, 'TurnStage should be lazy and inactive before a command/editor is used');
+  assert.equal(extension.isActive, true, 'A workspace profile should activate TurnStage so Test Explorer can discover its scenarios');
 
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   assert.ok(workspaceFolder, 'The integration runner must open a workspace folder');
@@ -20,10 +20,9 @@ export async function run(): Promise<void> {
   const profileUri = vscode.Uri.joinPath(profileDirectory, 'integration.turnstage.jsonc');
   const initialProfileText = await readText(profileUri);
 
-  // A command is the first activation trigger in this suite. No profile scan
-  // or webview is created before this point.
+  // The profile activation event must not require a Webview to be opened.
   await vscode.commands.executeCommand('turnstage.openOutput');
-  assert.equal(extension.isActive, true, 'The command activation should complete');
+  assert.equal(extension.isActive, true, 'The activated extension should keep commands available');
 
   await assertRegisteredCommands();
   await assertManifestCapabilities(extension);
@@ -34,6 +33,7 @@ export async function run(): Promise<void> {
   assert.equal(await readText(profileUri), initialProfileText, 'Activation must not overwrite an existing profile');
 
   await assertProfileDiscovery(profileUri);
+  await assertConversationContractReports(workspaceRoot);
   await assertCustomEditorAndTextFallback(profileUri);
   await assertDiagnostics(profileDirectory, profileUri);
   await assertFileDiscoveryAfterCreateAndChange(profileDirectory);
@@ -61,6 +61,9 @@ async function assertRegisteredCommands(): Promise<void> {
     'turnstage.setSecret',
     'turnstage.replayRun',
     'turnstage.exportRun',
+    'turnstage.runContractTests',
+    'turnstage.exportTestReport',
+    'turnstage.openTestEvidence',
   ]) {
     assert.ok(commands.has(command), `${command} should be registered`);
   }
@@ -110,6 +113,33 @@ async function assertProfileDiscovery(profileUri: vscode.Uri): Promise<void> {
   assert.equal(profiles.length, 1, 'The clean temp workspace should start with one profile');
   const document = await vscode.workspace.openTextDocument(profileUri);
   assert.match(document.getText(), /"id"\s*:\s*"integration"/);
+}
+
+async function assertConversationContractReports(workspaceRoot: vscode.Uri): Promise<void> {
+  const reportDirectory = vscode.Uri.joinPath(workspaceRoot, '.turnstage', 'reports');
+  const jsonUri = vscode.Uri.joinPath(reportDirectory, 'integration.turnstage-contract-results.json');
+  const junitUri = vscode.Uri.joinPath(reportDirectory, 'integration.turnstage-contract-results.xml');
+  await vscode.commands.executeCommand('turnstage.refreshProfiles');
+  await vscode.commands.executeCommand('turnstage.runContractTests');
+  if (!vscode.workspace.isTrusted) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(await exists(jsonUri), false, 'Restricted Mode must not write configured contract reports');
+    assert.equal(await exists(junitUri), false, 'Restricted Mode must not write JUnit contract reports');
+    return;
+  }
+  const json = await waitFor(async () => await exists(jsonUri) ? readText(jsonUri) : undefined, 'the trusted JSON contract report', 15_000);
+  const junit = await waitFor(async () => await exists(junitUri) ? readText(junitUri) : undefined, 'the trusted JUnit contract report', 15_000);
+  const parsed = JSON.parse(json) as { format?: string; version?: number; summary?: { total?: number; passed?: number }; scenarios?: Array<{ comparison?: { differenceCount?: number } }> };
+  assert.equal(parsed.format, 'turnstage-contract-report');
+  assert.equal(parsed.version, 1);
+  assert.equal(parsed.summary?.total, 1);
+  assert.equal(parsed.summary?.passed, 1, json);
+  assert.equal(parsed.scenarios?.[0]?.comparison?.differenceCount, 0);
+  assert.match(junit, /<testsuite[^>]+tests="1"[^>]+failures="0"/);
+  for (const forbidden of ['Integration Profile', 'Integration contract', 'Integration baseline', 'Integration candidate', 'Hello from Test Explorer', 'rawEvents', 'requestPreview', 'actual', 'expected']) {
+    assert.equal(json.includes(forbidden), false, `JSON contract report must exclude ${forbidden}`);
+    assert.equal(junit.includes(forbidden), false, `JUnit contract report must exclude ${forbidden}`);
+  }
 }
 
 async function assertCustomEditorAndTextFallback(profileUri: vscode.Uri): Promise<void> {
@@ -220,6 +250,11 @@ function activeTabInput(): vscode.TabInputText | vscode.TabInputCustom | unknown
 
 async function readText(uri: vscode.Uri): Promise<string> {
   return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+}
+
+async function exists(uri: vscode.Uri): Promise<boolean> {
+  try { await vscode.workspace.fs.stat(uri); return true; }
+  catch { return false; }
 }
 
 async function writeText(uri: vscode.Uri, text: string): Promise<void> {

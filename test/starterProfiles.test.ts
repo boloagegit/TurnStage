@@ -48,6 +48,28 @@ describe('starter resources', () => {
     });
   }
 
+  it('basic-sse-chat declares its built-in two-turn scenario', () => {
+    const parsed = codec.parse(readFileSync('resources/templates/basic-sse-chat.turnstage.jsonc', 'utf8'));
+    const scenario = parsed.profile?.tests?.scenarios.find((item) => item.id === 'basic-two-turn');
+
+    expect(scenario).toMatchObject({ id: 'basic-two-turn', name: 'Basic two-turn contract' });
+    expect(scenario?.steps.map((step) => step.id)).toEqual(['first-turn', 'continuation']);
+    expect(scenario?.steps.every((step) => (step.assertions?.length ?? 0) > 0)).toBe(true);
+  });
+
+  it('agent-flow declares its built-in agent tools scenario', () => {
+    const parsed = codec.parse(readFileSync('resources/templates/agent-flow.turnstage.jsonc', 'utf8'));
+    const scenario = parsed.profile?.tests?.scenarios.find((item) => item.id === 'agent-tools');
+
+    expect(scenario).toMatchObject({ id: 'agent-tools', name: 'Agent tool and citation contract' });
+    expect(scenario?.steps).toHaveLength(1);
+    expect(scenario?.steps[0]?.assertions?.map((assertion) => assertion.path)).toEqual([
+      'turn.state',
+      'events.normalized[*].type',
+      'assistant.text',
+    ]);
+  });
+
   it('enterprise-chat exposes the contract-specific mock scenarios', () => {
     const parsed = codec.parse(readFileSync('resources/templates/enterprise-chat.turnstage.jsonc', 'utf8'));
     const mode = parsed.profile?.controls?.find((control) => control.id === 'mode');

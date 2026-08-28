@@ -52,4 +52,15 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'form.accepted', formId: 'form-1', sourceMessageId: 'message-1' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'workspaceTrust.changed', trusted: 'yes' }, 'editor-1')).toBe(false);
   });
+
+  it('accepts bounded inspector focus targets and rejects invalid selections', () => {
+    expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Network', networkId: 'network-2' }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Raw Events', sequence: 12 }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Normalized', sequence: 3, messageId: 'assistant-1' }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Events', sequence: 1 }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Raw Events', sequence: -1 }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Raw Events', sequence: 1.5 }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Raw Events', sequence: '1' }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Network', networkId: 'x'.repeat(1025) }, 'editor-1')).toBe(false);
+  });
 });

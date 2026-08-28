@@ -1,6 +1,8 @@
 import { toPng } from 'html-to-image';
 
 const MAX_CAPTURE_PIXELS = 8_000_000;
+const FONT_READY_TIMEOUT_MS = 1_000;
+export const CHAT_SCREENSHOT_TIMEOUT_MS = 15_000;
 const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
 export const MAX_CHAT_SCREENSHOT_BYTES = 24 * 1024 * 1024;
 const MAX_SCREENSHOT_DATA_URL_LENGTH = Math.ceil(MAX_CHAT_SCREENSHOT_BYTES / 3) * 4 + PNG_DATA_URL_PREFIX.length;
@@ -9,24 +11,56 @@ export interface ChatScreenshot {
   dataUrl: string;
 }
 
+interface ChatScreenshotDependencies {
+  render?: typeof toPng;
+  fontsReady?: Promise<unknown>;
+  timeoutMs?: number;
+}
+
 /** Render the logical Chat viewport, not its scaled preview or surrounding tools. */
-export async function captureChatScreenshot(node: HTMLElement): Promise<ChatScreenshot> {
+export async function captureChatScreenshot(node: HTMLElement, dependencies: ChatScreenshotDependencies = {}): Promise<ChatScreenshot> {
   const width = Math.max(1, Math.round(node.offsetWidth));
   const height = Math.max(1, Math.round(node.offsetHeight));
   const deviceRatio = Math.max(1, window.devicePixelRatio || 1);
   const pixelRatio = Math.max(1, Math.min(2, deviceRatio, Math.sqrt(MAX_CAPTURE_PIXELS / (width * height))));
-  await document.fonts?.ready;
+  const fontsReady = dependencies.fontsReady ?? document.fonts?.ready;
+  if (fontsReady) await settleWithin(fontsReady, FONT_READY_TIMEOUT_MS);
   const backgroundColor = getComputedStyle(node).backgroundColor;
-  const dataUrl = await toPng(node, {
+  const render = dependencies.render ?? toPng;
+  const dataUrl = await resolveWithin(render(node, {
     width,
     height,
     pixelRatio,
     backgroundColor,
     cacheBust: false,
+    // VS Code serves the UI and Codicon fonts through Webview resource URLs.
+    // Re-fetching and embedding those fonts can remain pending indefinitely in
+    // an Extension Development Host. The fonts are already loaded by the live
+    // Webview, so keep the capture bounded and use the rendered document fonts.
+    skipFonts: true,
     style: { transform: 'none', transformOrigin: 'top left' }
-  });
+  }), dependencies.timeoutMs ?? CHAT_SCREENSHOT_TIMEOUT_MS, 'Chat screenshot capture timed out.');
   if (dataUrl.length > MAX_SCREENSHOT_DATA_URL_LENGTH) throw new Error('The screenshot is too large to copy.');
   return { dataUrl };
+}
+
+async function settleWithin(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
+  await Promise.race([
+    promise.then(() => undefined, () => undefined),
+    new Promise<void>((resolve) => window.setTimeout(resolve, timeoutMs))
+  ]);
+}
+
+async function resolveWithin<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: number | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => { timeout = window.setTimeout(() => reject(new Error(message)), timeoutMs); })
+    ]);
+  } finally {
+    if (timeout !== undefined) window.clearTimeout(timeout);
+  }
 }
 
 export interface ClipboardWriteDependencies {

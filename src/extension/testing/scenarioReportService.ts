@@ -1,0 +1,98 @@
+import * as vscode from 'vscode';
+import type { ScenarioReportFormat, ScenarioReportingDefinition } from '../../shared/types';
+import { localize } from '../l10n';
+import { isSafeReportDirectory } from './scenarioConfig';
+import { createScenarioReport, serializeScenarioHtml, serializeScenarioJson, serializeScenarioJUnit, type ScenarioExecutionRecord } from './scenarioReport';
+import type { VisualRegressionService } from './visualRegression';
+
+interface ConfiguredReportGroup {
+  profileId: string;
+  profileUri: vscode.Uri;
+  reporting: ScenarioReportingDefinition;
+  records: ScenarioExecutionRecord[];
+}
+
+export class ScenarioReportService {
+  private records: ScenarioExecutionRecord[] = [];
+
+  constructor(private readonly output: vscode.OutputChannel, private readonly visualRegression?: VisualRegressionService) {}
+
+  record(records: readonly ScenarioExecutionRecord[]): void { this.records = [...records]; }
+  hasRecords(): boolean { return this.records.length > 0; }
+
+  async exportLast(format: ScenarioReportFormat): Promise<vscode.Uri | undefined> {
+    if (!this.records.length) return undefined;
+    const extension = reportExtension(format);
+    const uri = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file(`turnstage-contract-results.${extension}`),
+      filters: format === 'junit' ? { [localize('JUnit XML')]: ['xml'] } : format === 'html' ? { HTML: ['html'] } : { [localize('JSON')]: ['json'] },
+    });
+    if (!uri) return undefined;
+    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(serialize(format, this.records)));
+    return uri;
+  }
+
+  async exportEvidenceBundle(): Promise<vscode.Uri | undefined> {
+    if (!this.records.length) return undefined;
+    const visual = this.visualRegression?.getLatest();
+    let includeVisual = false;
+    if (visual) {
+      const choice = await vscode.window.showQuickPick([
+        { label: localize('Sanitized report only'), description: localize('Recommended. Excludes chat screenshots.'), includeVisual: false },
+        { label: localize('Include latest visual artifacts'), description: localize('May contain visible conversation content.'), includeVisual: true },
+      ], { title: localize('Evidence Bundle Contents') });
+      if (!choice) return undefined;
+      includeVisual = choice.includeVisual;
+    }
+    const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, openLabel: localize('Export Evidence Bundle') });
+    if (!selected?.[0]) return undefined;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const directory = vscode.Uri.joinPath(selected[0], `turnstage-evidence-${stamp}-${crypto.randomUUID().slice(0, 8)}`);
+    await vscode.workspace.fs.createDirectory(directory);
+    const generatedAt = new Date().toISOString();
+    const fileNames = ['index.html', 'report.json', 'junit.xml'];
+    if (includeVisual && visual) { fileNames.push('visual-baseline.png'); if (visual.diffUri) fileNames.push('visual-diff.png'); }
+    const files: Array<[string, string]> = [
+      ['index.html', serializeScenarioHtml(this.records, generatedAt)],
+      ['report.json', serializeScenarioJson(this.records, generatedAt)],
+      ['junit.xml', serializeScenarioJUnit(this.records, generatedAt)],
+      ['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 1, generatedAt, files: [...fileNames, 'manifest.json'], privacy: { rawEvents: false, payloads: false, headers: false, messageContent: false, secrets: false, visualChatContent: includeVisual }, summary: createScenarioReport(this.records, generatedAt).summary }, null, 2)}\n`],
+    ];
+    for (const [name, contents] of files) await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(directory, name), new TextEncoder().encode(contents));
+    if (includeVisual && visual) {
+      await vscode.workspace.fs.copy(visual.baselineUri, vscode.Uri.joinPath(directory, 'visual-baseline.png'), { overwrite: false });
+      if (visual.diffUri) await vscode.workspace.fs.copy(visual.diffUri, vscode.Uri.joinPath(directory, 'visual-diff.png'), { overwrite: false });
+    }
+    this.output.appendLine(`[info] [tests] ${localize('Exported sanitized evidence bundle to {path}.', { path: vscode.workspace.asRelativePath(directory) })}`);
+    return directory;
+  }
+
+  async writeConfigured(groups: readonly ConfiguredReportGroup[]): Promise<void> {
+    for (const group of groups) {
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(group.profileUri);
+      if (!workspaceFolder || !isSafeReportDirectory(group.reporting.outputDirectory)) {
+        this.output.appendLine(`[warn] [tests] ${localize('Skipped CI report for {profile}: outputDirectory must be workspace-relative and cannot contain traversal.', { profile: group.profileId })}`);
+        continue;
+      }
+      const segments = group.reporting.outputDirectory.split('/').filter(Boolean);
+      const directory = vscode.Uri.joinPath(workspaceFolder.uri, ...segments);
+      await vscode.workspace.fs.createDirectory(directory);
+      for (const format of [...new Set(group.reporting.formats)].filter((value): value is ScenarioReportFormat => value === 'json' || value === 'junit' || value === 'html')) {
+        const extension = reportExtension(format);
+        const target = vscode.Uri.joinPath(directory, `${safeFilePart(group.profileId)}.turnstage-contract-results.${extension}`);
+        await vscode.workspace.fs.writeFile(target, new TextEncoder().encode(serialize(format, group.records)));
+        this.output.appendLine(`[info] [tests] ${localize('Wrote {format} contract report to {path}.', { format: format.toUpperCase(), path: vscode.workspace.asRelativePath(target) })}`);
+      }
+    }
+  }
+}
+
+function serialize(format: ScenarioReportFormat, records: readonly ScenarioExecutionRecord[]): string {
+  return format === 'junit' ? serializeScenarioJUnit(records) : format === 'html' ? serializeScenarioHtml(records) : serializeScenarioJson(records);
+}
+
+function reportExtension(format: ScenarioReportFormat): string { return format === 'junit' ? 'xml' : format; }
+
+function safeFilePart(value: string): string { return value.replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 100) || 'profile'; }
+
+export type { ConfiguredReportGroup };

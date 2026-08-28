@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Buffer } from 'node:buffer';
-import { copyChatScreenshotToClipboard, MAX_CHAT_SCREENSHOT_BYTES, pngDataUrlToBlob } from '../src/webview/chatScreenshot';
+import { captureChatScreenshot, copyChatScreenshotToClipboard, MAX_CHAT_SCREENSHOT_BYTES, pngDataUrlToBlob } from '../src/webview/chatScreenshot';
+
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('chat screenshots', () => {
   it('creates a bounded PNG blob and rejects malformed, non-PNG, or oversized data', () => {
@@ -29,5 +31,21 @@ describe('chat screenshots', () => {
     const png = await representations['image/png'];
     expect(png).toBeInstanceOf(Blob);
     if (png instanceof Blob) expect(png.type).toBe('image/png');
+  });
+
+  it('does not wait forever for Webview fonts and bounds image rendering', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('window', { devicePixelRatio: 1, setTimeout, clearTimeout });
+    vi.stubGlobal('document', { fonts: { ready: new Promise(() => undefined) } });
+    vi.stubGlobal('getComputedStyle', () => ({ backgroundColor: 'rgb(0, 0, 0)' }));
+    const node = { offsetWidth: 390, offsetHeight: 844 } as HTMLElement;
+    const render = vi.fn(() => new Promise<string>(() => undefined));
+    const capture = captureChatScreenshot(node, { render, timeoutMs: 25 });
+    const rejection = expect(capture).rejects.toThrow('timed out');
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(render).toHaveBeenCalledWith(node, expect.objectContaining({ skipFonts: true }));
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
   });
 });

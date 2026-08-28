@@ -17,14 +17,17 @@ export type ProductIconName =
   | 'device-desktop'
   | 'device-mobile'
   | 'edit'
+  | 'diff'
   | 'file-code'
   | 'info'
   | 'refresh'
+  | 'save'
   | 'send'
   | 'screen-full'
   | 'settings-gear'
   | 'stop'
   | 'target'
+  | 'trash'
   | 'warning';
 
 const codicons: Record<ProductIconName, string> = {
@@ -43,14 +46,17 @@ const codicons: Record<ProductIconName, string> = {
   'device-desktop': 'device-desktop',
   'device-mobile': 'device-mobile',
   edit: 'edit',
+  diff: 'diff',
   'file-code': 'file-code',
   info: 'info',
   refresh: 'refresh',
+  save: 'save',
   send: 'send',
   'screen-full': 'screen-full',
   'settings-gear': 'settings-gear',
   stop: 'debug-stop',
   target: 'target',
+  trash: 'trash',
   warning: 'warning'
 };
 

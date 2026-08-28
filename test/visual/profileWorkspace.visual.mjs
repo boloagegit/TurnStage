@@ -77,7 +77,8 @@ try {
   assert.ok((await page.getByRole('tabpanel', { name: 'Timing' }).innerText()).includes('5,000 ms'), 'Timing view must expose the configured idle timeout');
   await page.getByRole('tab', { name: 'Headers' }).click();
   const networkHeaders = await page.getByRole('tabpanel', { name: 'Headers' }).innerText();
-  assert.ok(networkHeaders.includes('Bearer •••••••') && networkHeaders.includes('••••••••'), 'Header view must redact authorization and cookies');
+  assert.ok(networkHeaders.includes('Bearer local-debug-token') && networkHeaders.includes('••••••••'), 'Header view must show live Authorization while still masking response cookies');
+  assert.ok(networkHeaders.includes('4bf92f3577b34da6a3ce929d0e0e4736') && networkHeaders.includes('visual-request-2'), 'Header view must expose bounded trace and request correlation identifiers');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'network-timeout-dark.png') });
   await page.getByRole('tab', { name: 'Raw Events' }).click();
   const screenshotButton = page.getByRole('button', { name: 'Copy chat screenshot' });
@@ -86,6 +87,7 @@ try {
   assert.equal(await screenshotButton.evaluate((element) => element.matches(':focus-visible')), true, 'Screenshot button must expose keyboard focus');
   await screenshotButton.click();
   await page.waitForFunction(() => Array.isArray(globalThis.__turnstageClipboardItems) && globalThis.__turnstageClipboardItems.length === 1);
+  await page.locator('.mobile-chat-preview__status').filter({ hasText: 'Chat screenshot copied to clipboard.' }).waitFor();
   assert.equal(await page.locator('.mobile-chat-preview__status').textContent(), 'Chat screenshot copied to clipboard.', 'Screenshot action must confirm the clipboard write');
   const screenshotDataUrl = await page.evaluate(async () => {
     const clipboardItem = globalThis.__turnstageClipboardItems[0];
@@ -129,6 +131,14 @@ try {
   assert.ok(screenshotComposerMargins.left > 0 && screenshotComposerMargins.right > 0, 'Captured composer must be inset from both Chat viewport edges');
   assert.ok(Math.abs(screenshotComposerMargins.left - screenshotComposerMargins.right) <= 2, `Captured composer must remain centered; observed margins ${JSON.stringify(screenshotComposerMargins)}`);
   await writeFile(resolve(artifactDirectory, 'chat-viewport-capture-dark.png'), screenshotBytes);
+  await page.getByRole('button', { name: 'Save visual baseline' }).click();
+  await page.locator('.mobile-chat-preview__status').filter({ hasText: 'Visual baseline saved.' }).waitFor();
+  const baselineMessage = await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'visual.baseline.save'));
+  assert.ok(baselineMessage?.dataUrl.startsWith('data:image/png;base64,iVBOR'), 'Visual baseline must send a validated PNG capture to the Host');
+  assert.deepEqual(baselineMessage.viewport, { id: 'responsive', width: baselineMessage.viewport.width, height: baselineMessage.viewport.height }, 'Visual baseline must identify the active logical viewport');
+  await page.getByRole('button', { name: 'Compare visual baseline' }).click();
+  await page.locator('.mobile-chat-preview__status').filter({ hasText: 'Visual comparison passed (0%).' }).waitFor();
+  await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'visual-regression-toolbar-dark.png') });
   assert.equal(await page.getByRole('region', { name: 'Opening' }).getByRole('heading', { name: 'Opening' }).count(), 1, 'Opening content must be explicitly labelled');
   const assistantMessage = page.locator('[data-message-id="assistant-1"]');
   assert.equal(await assistantMessage.getByRole('group', { name: 'Message actions' }).evaluate((element) => getComputedStyle(element).opacity), '1', 'Message actions must be visible by default');
@@ -162,6 +172,24 @@ try {
   assert.equal(await page.locator('.settings-workspace--embedded').count(), 1, 'Configure uses the compact right-pane settings layout');
   assert.equal(await page.locator('[data-message-id="assistant-1"][data-selected="true"]').count(), 0, 'Configure must hide Debug message selection styling');
   await page.screenshot({ path: resolve(artifactDirectory, 'profile-config-right-pane-dark.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Scenarios', exact: true }).click();
+  await page.getByRole('heading', { level: 1, name: 'Scenarios' }).waitFor();
+  assert.equal(await page.locator('.scenario-editor').count(), 1, 'Scenario configuration must render the profile contract');
+  assert.equal(await page.locator('.scenario-step').count(), 1, 'Scenario configuration must keep its steps compact');
+  assert.equal(await page.locator('.assertion-row').count(), 3, 'Scenario configuration must render step and final assertions');
+  assert.equal(await page.getByRole('heading', { name: 'CI reports' }).count(), 1, 'Scenario configuration must expose CI report settings');
+  assert.equal(await page.getByRole('heading', { name: 'Visual regression' }).count(), 1, 'Scenario configuration must expose visual baseline settings');
+  assert.equal(await page.getByLabel('HTML').isChecked(), true, 'Scenario reports must expose HTML output');
+  assert.equal(await page.locator('.scenario-advanced[open]').count(), 1, 'Configured baseline comparison must remain expanded');
+  assert.equal(await page.locator('.scenario-budget__row').count(), 9, 'Every supported performance metric must be configurable');
+  assert.equal(await page.locator('.debug-pane').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Scenario configuration must not overflow the right pane horizontally');
+  await page.screenshot({ path: resolve(artifactDirectory, 'scenario-contract-settings-dark.png'), fullPage: true });
+  await page.locator('.scenario-advanced').filter({ hasText: 'Compare & performance' }).scrollIntoViewIfNeeded();
+  assert.equal(await page.locator('.scenario-target-grid fieldset').count(), 2, 'Baseline and candidate targets must both render in the GUI');
+  assert.equal(await page.locator('.scenario-budget').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Performance budgets must not overflow the embedded settings pane');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'scenario-comparison-performance-dark.png') });
+  await page.getByRole('button', { name: 'General', exact: true }).click();
+  await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
   const displayName = page.getByLabel('Display name');
   await displayName.fill('GUI Edited Profile');
   await displayName.blur();
@@ -355,7 +383,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, rightPaneConfiguration: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: true, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, rightPaneConfiguration: true, scenarioSettings: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: true, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

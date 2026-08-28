@@ -359,6 +359,8 @@ describe('profile patch allowlist', () => {
       ['security', 'allowedDomains'],
       ['security', 'allowedCommands'],
       ['ui', 'messageActions'],
+      ['tests', 'scenarios'],
+      ['tests', 'reporting'],
     ] as const;
 
     for (const path of paths) expect(isAllowedPatchPath(path), path.join('.')).toBe(true);
@@ -374,6 +376,7 @@ describe('profile patch allowlist', () => {
       ['ui', 'constructor'],
       ['conversation', 'send', 'unknown'],
       ['security', 'secretToken'],
+      ['tests', 'reporting', 'outputDirectory'],
       ['notAProfilePath'],
     ] as const;
 

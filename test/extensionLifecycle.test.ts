@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 const root = resolve(import.meta.dirname, '..');
 const editorSource = readFileSync(resolve(root, 'src/extension/editors/turnstageEditorProvider.ts'), 'utf8');
 const activateSource = readFileSync(resolve(root, 'src/extension/activate.ts'), 'utf8');
+const scenarioTestSource = readFileSync(resolve(root, 'src/extension/testing/scenarioTestController.ts'), 'utf8');
+const scenarioReportSource = readFileSync(resolve(root, 'src/extension/testing/scenarioReport.ts'), 'utf8');
 
 describe('Extension host editor lifecycle', () => {
   it('debounces profile document changes and cancels pending work on disposal', () => {
@@ -76,5 +78,36 @@ describe('Extension host editor lifecycle', () => {
   it('requires confirmation before a command restarts the current session', () => {
     expect(activateSource).toContain("!await confirmRestartSession()");
     expect(editorSource).toContain("case 'conversation.new': if (await confirmRestartSession())");
+  });
+
+  it('registers a native Test Explorer controller and a bounded failure-evidence command', () => {
+    expect(scenarioTestSource).toContain("vscode.tests.createTestController('turnstage.contracts'");
+    expect(scenarioTestSource).toContain('createRunProfile');
+    expect(scenarioTestSource).toContain("markdown.isTrusted = { enabledCommands: ['turnstage.openTestEvidence'] }");
+    expect(scenarioTestSource).toContain('message.contextValue = `${MESSAGE_EVIDENCE_PREFIX}${contextId}`');
+    expect(scenarioTestSource).toContain('messageEvidenceByContext.get(contextId)');
+    expect(scenarioTestSource).toContain('getMessageEvidence(argument: unknown)');
+    expect(activateSource).toContain("command('openTestEvidence'");
+    expect(activateSource).toContain('scenarioTests.getMessageEvidence(argument)');
+    expect(activateSource).toContain('isScenarioEvidenceLocation(value?.location)');
+    expect(editorSource).toContain("type: 'inspector.focus'");
+  });
+
+  it('keeps CI report projection separate from runtime evidence', () => {
+    expect(activateSource).toContain("command('runContractTests', () => scenarioTests.runAll())");
+    expect(scenarioTestSource).toContain('async runAll(): Promise<void>');
+    expect(activateSource).toContain("command('exportTestReport'");
+    expect(scenarioTestSource).toContain('ScenarioReportService');
+    expect(scenarioReportSource).toContain("format: SCENARIO_REPORT_FORMAT");
+    expect(scenarioReportSource).not.toContain('rawEvents');
+    expect(scenarioReportSource).not.toContain('requestPreview');
+    expect(scenarioReportSource).not.toContain('actualOutput');
+  });
+
+  it('exports a sanitized evidence bundle and opens its offline HTML entry point', () => {
+    expect(activateSource).toContain("command('exportEvidenceBundle'");
+    expect(activateSource).toContain('scenarioTests.exportEvidenceBundle()');
+    expect(activateSource).toContain("vscode.Uri.joinPath(uri, 'index.html')");
+    expect(activateSource).toContain('await vscode.env.openExternal(index)');
   });
 });

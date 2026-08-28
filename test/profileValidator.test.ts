@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TurnStageEnvironment, TurnStageProfile } from '../src/shared/types';
+import type { ScenarioAssertionDefinition, TurnStageEnvironment, TurnStageProfile } from '../src/shared/types';
 import { ProfileCodec } from '../src/extension/config/profileCodec';
 import { ProfileValidator } from '../src/extension/config/profileValidator';
 
@@ -54,6 +54,207 @@ describe('ProfileValidator', () => {
     const environments: TurnStageEnvironment[] = [{ version: 1, id: 'local', name: 'Local', variables: {} }];
 
     expect(new ProfileValidator().validate(validProfile(), undefined, environments)).toEqual([]);
+  });
+
+  it('accepts a valid declarative scenario with step and profile assertions', () => {
+    const profile = validProfile();
+    profile.controls = [
+      { id: 'actor', type: 'text', label: 'Actor', persist: 'none' },
+      { id: 'mode', type: 'select', label: 'Mode', persist: 'none', options: [{ label: 'Normal', value: 'normal' }] },
+    ];
+    profile.tests = {
+      scenarios: [{
+        id: 'basic-contract',
+        name: 'Basic contract',
+        description: 'Checks a normal conversation.',
+        controls: { actor: 'actor-a', mode: 'normal' },
+        steps: [{
+          id: 'first-turn',
+          name: 'First turn',
+          input: 'Hello',
+          assertions: [
+            { id: 'completed', path: 'turn.state', operator: 'equals', value: 'completed' },
+            { id: 'has-reply', path: 'assistant.text', operator: 'exists' },
+          ],
+        }],
+        assertions: [{ id: 'no-mapping-errors', path: 'metrics.mappingErrorCount', operator: 'equals', value: 0 }],
+      }],
+    };
+
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
+  });
+
+  it('accepts baseline comparison, performance budgets, ignore paths, and CI reporting', () => {
+    const profile = validProfile();
+    profile.controls = [{ id: 'mode', type: 'text', label: 'Mode', persist: 'none' }];
+    profile.tests = {
+      reporting: { formats: ['json', 'junit'], outputDirectory: '.turnstage/reports' },
+      scenarios: [{
+        id: 'candidate-contract', name: 'Candidate contract', steps: [{ id: 'turn', input: 'Hello' }],
+        comparison: {
+          baseline: { label: 'Baseline', environment: 'local', controls: { mode: 'baseline' } },
+          candidate: { label: 'Candidate', environment: 'local', controls: { mode: 'candidate' } },
+          ignorePaths: ['session.title', 'messages[*].parts[0].text'],
+        },
+        performance: {
+          thresholds: { 'scenario.durationMs': 5_000, 'metrics.ttft': 1_000 },
+          regression: { 'metrics.ttft': { maxIncreaseMs: 100, maxIncreasePercent: 20 } },
+        },
+      }],
+    };
+
+    expect(new ProfileValidator().validate(profile, undefined, [{ version: 1, id: 'local', name: 'Local', variables: {} }])).toEqual([]);
+  });
+
+  it('rejects unsafe or malformed Phase 2 comparison and report settings', () => {
+    const profile = validProfile();
+    profile.controls = [{ id: 'token', type: 'text', label: 'Token', persist: 'secret' }];
+    profile.tests = {
+      reporting: { formats: ['json', 'json'], outputDirectory: '../outside' },
+      scenarios: [{
+        id: 'invalid-phase-two', name: 'Invalid Phase 2', steps: [{ id: 'turn', input: 'Hello' }],
+        comparison: {
+          baseline: { environment: 'missing', controls: { token: 'secret' } },
+          candidate: {},
+          ignorePaths: ['request.headers.authorization', 'session.title', 'session.title'],
+        },
+        performance: {
+          thresholds: { 'metrics.ttft': -1, 'unknown.metric': 10 } as never,
+          regression: { 'scenario.durationMs': {} },
+        },
+      }],
+    };
+
+    const messages = new ProfileValidator().validate(profile, undefined, [{ version: 1, id: 'local', name: 'Local', variables: {} }]).map((entry) => entry.message);
+    expect(messages).toEqual(expect.arrayContaining([
+      'Test report formats must be unique.',
+      'Test report outputDirectory must be a safe workspace-relative directory.',
+      'Environment "missing" was not found.',
+      'Scenario controls cannot set secret control: token.',
+      'Unsupported comparison path: request.headers.authorization.',
+      'Comparison ignore paths must be unique.',
+      'Performance thresholds must be finite numbers from 0 to 900000 milliseconds.',
+      'Unsupported performance metric: unknown.metric.',
+      'Performance regression limit requires maxIncreaseMs or maxIncreasePercent.',
+    ]));
+  });
+
+  it('requires comparison before applying regression limits', () => {
+    const profile = validProfile();
+    profile.tests = { scenarios: [{ id: 'no-baseline', name: 'No baseline', steps: [{ id: 'turn', input: 'Hello' }], performance: { regression: { 'scenario.durationMs': { maxIncreasePercent: 10 } } } }] };
+
+    expect(new ProfileValidator().validate(profile).map((entry) => entry.message)).toContain('Performance regression rules require a baseline comparison.');
+  });
+
+  it('accepts bounded Fault Lab, visual baseline, and HTML reporting settings', () => {
+    const profile = validProfile();
+    profile.tests = {
+      reporting: { formats: ['json', 'junit', 'html'], outputDirectory: '.turnstage/reports' },
+      visual: { baselineDirectory: '.turnstage/baselines', maxDifferencePercent: 0.1, channelTolerance: 16 },
+      scenarios: [{ id: 'fault-check', name: 'Fault check', steps: [{ id: 'turn', input: 'Hello' }], faults: { delayBeforeRequestMs: 20, delayPerChunkMs: 5, httpStatus: 503, disconnectAfterEvents: 3, corruptEventAt: 2 } }],
+    };
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
+  });
+
+  it('rejects unbounded or unknown Fault Lab and visual settings', () => {
+    const profile = validProfile();
+    profile.tests = {
+      visual: { baselineDirectory: '../outside', maxDifferencePercent: 101, channelTolerance: 256 },
+      scenarios: [{ id: 'fault-check', name: 'Fault check', steps: [{ id: 'turn', input: 'Hello' }], faults: { delayBeforeRequestMs: 30_001, httpStatus: 200, disconnectAfterEvents: 0, arbitrary: 1 } as never }],
+    };
+    const messages = new ProfileValidator().validate(profile).map((entry) => entry.message);
+    expect(messages).toEqual(expect.arrayContaining([
+      'Visual baselineDirectory must be a safe workspace-relative directory.',
+      'Visual maximum difference must be a finite percentage from 0 to 100.',
+      'Visual channel tolerance must be an integer from 0 to 255.',
+      'delayBeforeRequestMs must be an integer from 0 to 30000.',
+      'Fault Lab HTTP status must be an integer from 400 to 599.',
+      'disconnectAfterEvents must be an integer from 1 to 10000.',
+      'Unsupported Fault Lab setting: arbitrary.',
+    ]));
+  });
+
+  it('reports duplicate scenario and step ids', () => {
+    const profile = validProfile();
+    profile.tests = {
+      scenarios: [
+        { id: 'duplicate', name: 'First', steps: [{ id: 'same-step', input: 'one' }, { id: 'same-step', input: 'duplicate step' }] },
+        { id: 'duplicate', name: 'Second', steps: [{ id: 'other-step', input: 'two' }] },
+      ],
+    };
+
+    const messages = new ProfileValidator().validate(profile).map((issue) => issue.message);
+
+    expect(messages).toEqual(expect.arrayContaining([
+      'Duplicate scenario id: duplicate.',
+      'Duplicate scenario step id: same-step.',
+    ]));
+  });
+
+  it('reports empty input and rejects unknown or secret scenario controls', () => {
+    const profile = validProfile();
+    profile.controls = [
+      { id: 'actor', type: 'text', label: 'Actor', persist: 'none' },
+      { id: 'token', type: 'text', label: 'Token', persist: 'secret' },
+    ];
+    profile.tests = {
+      scenarios: [{
+        id: 'controls',
+        name: 'Controls',
+        controls: { actor: 'actor-a', missing: 'value', token: 'secret-value' },
+        steps: [{ id: 'empty', input: '   ' }],
+      }],
+    };
+
+    const messages = new ProfileValidator().validate(profile).map((issue) => issue.message);
+
+    expect(messages).toEqual(expect.arrayContaining([
+      'Scenario references unknown control: missing.',
+      'Scenario controls cannot set secret control: token.',
+      'Scenario step input is required.',
+    ]));
+  });
+
+  it('reports invalid assertion paths, operators, regexes, numeric values, and arrays', () => {
+    const profile = validProfile();
+    const invalidOperator = 'not-supported' as ScenarioAssertionDefinition['operator'];
+    profile.tests = {
+      scenarios: [{
+        id: 'invalid-assertions',
+        name: 'Invalid assertions',
+        steps: [{
+          id: 'step',
+          input: 'Check this',
+          assertions: [
+            { path: 'filesystem.password', operator: 'equals', value: 'secret' },
+            { path: 'turn.state', operator: invalidOperator, value: 'completed' },
+            { path: 'assistant.text', operator: 'regex', value: '(a+)+$' },
+            { path: 'metrics.totalDuration', operator: 'lessThan', value: 'fast' },
+            { path: 'events.normalized[*].type', operator: 'sequenceContains', value: 'not-an-array' },
+          ],
+        }],
+      }],
+    };
+
+    const messages = new ProfileValidator().validate(profile).map((issue) => issue.message);
+
+    expect(messages).toEqual(expect.arrayContaining([
+      'Unsupported assertion path: filesystem.password.',
+      'Unsupported assertion operator: not-supported.',
+      'Assertion regex must be valid, safe, and no longer than 256 characters.',
+      'Assertion operator lessThan requires a finite number.',
+      'Assertion operator sequenceContains requires an array value.',
+    ]));
+  });
+
+  it('returns diagnostics instead of throwing for primitive scenarios and steps', () => {
+    const primitiveScenario = validProfile();
+    (primitiveScenario as unknown as { tests: { scenarios: unknown[] } }).tests = { scenarios: [null, 42, 'scenario'] };
+    expect(() => new ProfileValidator().validate(primitiveScenario)).not.toThrow();
+
+    const primitiveStep = validProfile();
+    (primitiveStep as unknown as { tests: { scenarios: unknown[] } }).tests = { scenarios: [{ id: 'primitive-step', name: 'Primitive step', steps: [null, 42, 'step'] }] };
+    expect(() => new ProfileValidator().validate(primitiveStep)).not.toThrow();
   });
 
   it('reports missing structure, duplicate ids, unsafe regexes, and policy violations', () => {

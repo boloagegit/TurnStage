@@ -90,7 +90,8 @@
     "history": { "type": "object", "additionalProperties": true },
     "errorPolicy": { "type": "object", "additionalProperties": { "type": "boolean" } },
     "security": { "type": "object", "additionalProperties": false, "properties": { "allowedUriSchemes": { "type": "array", "items": { "enum": ["https", "http", "file"] } }, "allowedDomains": { "type": "array", "items": { "type": "string" } }, "allowedCommands": { "type": "array", "items": { "type": "string" } } } },
-    "metrics": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }, "messageEnabled": { "type": "array", "items": { "type": "string" }, "uniqueItems": true } } }
+    "metrics": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }, "messageEnabled": { "type": "array", "items": { "type": "string" }, "uniqueItems": true } } },
+    "tests": { "$ref": "#/$defs/tests" }
   },
   "$defs": {
     "control": { "type": "object", "required": ["id", "type", "label"], "additionalProperties": true, "properties": { "id": { "type": "string" }, "type": { "enum": ["select", "boolean", "text"] }, "label": { "type": "string" }, "persist": { "enum": ["workspace", "global", "none", "secret"] }, "options": { "type": "array", "items": { "type": "object", "required": ["label", "value"], "properties": { "label": { "type": "string" }, "value": { "type": "string" } } } } } },
@@ -99,6 +100,157 @@
     "condition": { "type": "object", "additionalProperties": false, "properties": { "path": { "type": "string" }, "event": { "type": "string" }, "operator": { "enum": ["equals", "notEquals", "exists", "notExists", "oneOf", "contains", "startsWith", "endsWith", "regex"] }, "value": {} } },
     "request": { "type": "object", "required": ["method", "url"], "additionalProperties": true, "properties": { "method": { "enum": ["POST", "GET", "PUT", "PATCH", "DELETE"] }, "url": { "type": "string" }, "headers": { "type": "object", "additionalProperties": { "type": "string" } }, "body": {}, "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 900000 }, "idleTimeoutMs": { "type": "integer", "minimum": 1, "maximum": 900000 }, "reconnect": { "type": "object", "additionalProperties": false, "properties": { "maxAttempts": { "type": "integer", "minimum": 0, "maximum": 5 }, "baseDelayMs": { "type": "integer", "minimum": 0, "maximum": 30000 }, "maxDelayMs": { "type": "integer", "minimum": 0, "maximum": 120000 }, "retryOnStatuses": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "integer", "minimum": 400, "maximum": 599 } } } }, "redirectPolicy": { "enum": ["same-origin", "follow", "error"] }, "maxRedirects": { "type": "integer", "minimum": 0, "maximum": 10 }, "variants": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "body"], "properties": { "id": { "type": "string" }, "when": { "$ref": "#/$defs/condition" }, "body": {}, "headers": { "type": "object", "additionalProperties": { "type": "string" } } } } } } },
     "stop": { "type": "object", "required": ["strategy"], "additionalProperties": true, "properties": { "strategy": { "enum": ["abortOnly", "abortThenRequest"] }, "request": { "$ref": "#/$defs/request" }, "requiredContext": { "type": "array", "items": { "type": "string" } } } },
-    "stream": { "type": "object", "required": ["transport", "mappings"], "additionalProperties": false, "properties": { "transport": { "enum": ["sse", "ndjson", "json", "text-stream", "fixture"] }, "dataFormat": { "enum": ["json", "text"] }, "mappingMode": { "enum": ["firstMatch", "allMatches"] }, "unexpectedEndPolicy": { "enum": ["fail", "completeWithWarning"] }, "doneValue": { "type": "string" }, "mappings": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "match", "emit"], "properties": { "id": { "type": "string" }, "match": { "$ref": "#/$defs/condition" }, "emit": { "type": "object", "required": ["type"], "properties": { "type": { "type": "string" } }, "additionalProperties": true }, "continue": { "type": "boolean" } } } } } }
+    "stream": { "type": "object", "required": ["transport", "mappings"], "additionalProperties": false, "properties": { "transport": { "enum": ["sse", "ndjson", "json", "text-stream", "fixture"] }, "dataFormat": { "enum": ["json", "text"] }, "mappingMode": { "enum": ["firstMatch", "allMatches"] }, "unexpectedEndPolicy": { "enum": ["fail", "completeWithWarning"] }, "doneValue": { "type": "string" }, "mappings": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "match", "emit"], "properties": { "id": { "type": "string" }, "match": { "$ref": "#/$defs/condition" }, "emit": { "type": "object", "required": ["type"], "properties": { "type": { "type": "string" } }, "additionalProperties": true }, "continue": { "type": "boolean" } } } } } },
+    "tests": {
+      "type": "object",
+      "required": ["scenarios"],
+      "additionalProperties": false,
+      "properties": {
+        "scenarios": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/scenario" } },
+        "reporting": { "$ref": "#/$defs/scenarioReporting" },
+        "visual": { "$ref": "#/$defs/scenarioVisual" }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "required": ["id", "name", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "controls": { "type": "object", "additionalProperties": true },
+        "steps": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "$ref": "#/$defs/scenarioStep" } },
+        "assertions": { "$ref": "#/$defs/assertions" },
+        "comparison": { "$ref": "#/$defs/scenarioComparison" },
+        "performance": { "$ref": "#/$defs/scenarioPerformance" },
+        "faults": { "$ref": "#/$defs/scenarioFaults" }
+      }
+    },
+    "scenarioReporting": {
+      "type": "object",
+      "required": ["formats", "outputDirectory"],
+      "additionalProperties": false,
+      "properties": {
+        "formats": { "type": "array", "minItems": 1, "maxItems": 3, "uniqueItems": true, "items": { "enum": ["json", "junit", "html"] } },
+        "outputDirectory": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?![A-Za-z]:/)(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*\\\\)(?!.*://).+$" }
+      }
+    },
+    "scenarioVisual": {
+      "type": "object",
+      "required": ["baselineDirectory"],
+      "additionalProperties": false,
+      "properties": {
+        "baselineDirectory": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?![A-Za-z]:/)(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*\\\\)(?!.*://).+$" },
+        "maxDifferencePercent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "channelTolerance": { "type": "integer", "minimum": 0, "maximum": 255 }
+      }
+    },
+    "scenarioComparisonTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "maxLength": 100 },
+        "environment": { "type": "string" },
+        "controls": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "scenarioComparison": {
+      "type": "object",
+      "required": ["baseline", "candidate"],
+      "additionalProperties": false,
+      "properties": {
+        "baseline": { "$ref": "#/$defs/scenarioComparisonTarget" },
+        "candidate": { "$ref": "#/$defs/scenarioComparisonTarget" },
+        "ignorePaths": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+      }
+    },
+    "scenarioPerformance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "thresholds": { "$ref": "#/$defs/scenarioPerformanceThresholds" },
+        "regression": { "$ref": "#/$defs/scenarioPerformanceRegression" }
+      }
+    },
+    "scenarioPerformanceThresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scenario.durationMs": { "type": "number", "minimum": 0, "maximum": 900000 },
+        "metrics.headersLatency": { "type": "number", "minimum": 0, "maximum": 900000 },
+        "metrics.firstChunkLatency": { "type": "number", "minimum": 0, "maximum": 900000 },
+        "metrics.firstEventLatency": { "type": "number", "minimum": 0, "maximum": 900000 },
+        "metrics.ttft": { "type": "number", "minimum": 0, "maximum": 900000 },
+        "metrics.streamDuration": { "type": "number", "minimum": 0, "maximum": 900000 },
+        "metrics.totalDuration": { "type": "number", "minimum": 0, "maximum": 900000 },
+        "metrics.averageEventGap": { "type": "number", "minimum": 0, "maximum": 900000 },
+        "metrics.maxEventGap": { "type": "number", "minimum": 0, "maximum": 900000 }
+      }
+    },
+    "scenarioPerformanceRegression": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scenario.durationMs": { "$ref": "#/$defs/scenarioRegressionLimit" },
+        "metrics.headersLatency": { "$ref": "#/$defs/scenarioRegressionLimit" },
+        "metrics.firstChunkLatency": { "$ref": "#/$defs/scenarioRegressionLimit" },
+        "metrics.firstEventLatency": { "$ref": "#/$defs/scenarioRegressionLimit" },
+        "metrics.ttft": { "$ref": "#/$defs/scenarioRegressionLimit" },
+        "metrics.streamDuration": { "$ref": "#/$defs/scenarioRegressionLimit" },
+        "metrics.totalDuration": { "$ref": "#/$defs/scenarioRegressionLimit" },
+        "metrics.averageEventGap": { "$ref": "#/$defs/scenarioRegressionLimit" },
+        "metrics.maxEventGap": { "$ref": "#/$defs/scenarioRegressionLimit" }
+      }
+    },
+    "scenarioRegressionLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "maxIncreaseMs": { "type": "number", "minimum": 0, "maximum": 900000 },
+        "maxIncreasePercent": { "type": "number", "minimum": 0, "maximum": 10000 }
+      }
+    },
+    "scenarioFaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "delayBeforeRequestMs": { "type": "integer", "minimum": 0, "maximum": 30000 },
+        "delayPerChunkMs": { "type": "integer", "minimum": 0, "maximum": 30000 },
+        "httpStatus": { "type": "integer", "minimum": 400, "maximum": 599 },
+        "disconnectAfterEvents": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "corruptEventAt": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "scenarioStep": {
+      "type": "object",
+      "required": ["id", "input"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "name": { "type": "string" },
+        "input": { "type": "string", "minLength": 1 },
+        "assertions": { "$ref": "#/$defs/assertions" }
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/assertion" }
+    },
+    "assertion": {
+      "type": "object",
+      "required": ["path", "operator"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "path": { "type": "string", "maxLength": 512 },
+        "operator": { "enum": ["equals", "notEquals", "exists", "notExists", "contains", "regex", "oneOf", "lessThan", "lessThanOrEqual", "greaterThan", "greaterThanOrEqual", "sequenceEquals", "sequenceContains"] },
+        "value": {},
+        "message": { "type": "string" }
+      }
+    }
   }
 }

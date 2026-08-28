@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { ChatMessage, ControlDefinition, InteractionContext, LocalRun, LocalRunSummary, MetricsSnapshot, NetworkExchange, NetworkExchangeKind, NormalizedEvent, OpeningDefinition, PreparedRequest, RawStreamEvent, RemoteSessionReference, RuntimeErrorData, SessionSnapshot, TurnResult, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
+import type { ChatMessage, ControlDefinition, InteractionContext, LocalRun, LocalRunSummary, MetricsSnapshot, NetworkExchange, NetworkExchangeKind, NormalizedEvent, OpeningDefinition, PreparedRequest, RawStreamEvent, RemoteSessionReference, RuntimeErrorData, ScenarioFaultDefinition, ScenarioRunEvidence, SessionSnapshot, TurnResult, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
 import { MappingEngine } from '../mapping/mappingEngine';
 import { RequestBuilder } from '../request/requestBuilder';
 import { getPath } from '../request/templateResolver';
@@ -16,9 +16,12 @@ import { ReplayEngine, type ReplaySpeed } from '../replay/replayEngine';
 import { selectOpeningFallback } from '../opening/fallbackResolver';
 import { localize } from '../l10n';
 import { diagnosticUrl, diagnosticValue, logAt } from '../logging';
+import { extractNetworkCorrelation, mergeNetworkCorrelation } from '../observability/correlation';
 
 const MAX_NETWORK_ENTRIES = 50;
 const MAX_NETWORK_RESPONSE_PREVIEW_CHARS = 64 * 1024;
+
+export interface SessionRuntimeOptions { faults?: ScenarioFaultDefinition }
 
 export class SessionController implements vscode.Disposable {
   snapshot: SessionSnapshot;
@@ -49,6 +52,7 @@ export class SessionController implements vscode.Disposable {
     private readonly runRepository: LocalRunRepository,
     private readonly changed: (immediate?: boolean) => void,
     private readonly log: vscode.OutputChannel,
+    private readonly runtimeOptions: SessionRuntimeOptions = {},
   ) {
     this.snapshot = createSnapshot(vscode.workspace.isTrusted);
     this.remoteSessionRepository = new RemoteSessionRepository(context);
@@ -82,6 +86,25 @@ export class SessionController implements vscode.Disposable {
     const safeRun = this.publicRun(run);
     this.runs = [safeRun, ...this.runs.filter((item) => item.id !== safeRun.id)]; this.changed();
   }
+  applyScenarioEvidence(evidence: ScenarioRunEvidence): boolean {
+    if (isActive(this.snapshot.turnState) || evidence.profileId !== this.profile.id) return false;
+    this.replayEngine?.dispose();
+    for (const definition of this.profile.controls ?? []) {
+      if (definition.persist === 'secret') continue;
+      const value = evidence.snapshot.controls[definition.id];
+      if (value !== undefined && isControlValue(definition, value)) this.controls[definition.id] = structuredClone(value);
+    }
+    this.snapshot = structuredClone(evidence.snapshot);
+    this.snapshot.trusted = vscode.workspace.isTrusted;
+    this.refreshSnapshotControls();
+    this.networkEntries = structuredClone(evidence.networkEntries);
+    this.requestPreview = evidence.requestPreview ? structuredClone(evidence.requestPreview) : undefined;
+    this.rawBuffer.clear();
+    this.finalized = true;
+    this.lastInteraction = undefined;
+    this.changed(true);
+    return true;
+  }
   async importRun(): Promise<LocalRunImportResult | undefined> {
     if (isActive(this.snapshot.turnState)) throw new Error(localize('Finish or stop the current request before importing a run.'));
     const retention = this.profile.history?.localRuns?.maxRuns ?? vscode.workspace.getConfiguration('turnstage').get('runRetention', 20);
@@ -109,6 +132,17 @@ export class SessionController implements vscode.Disposable {
     this.changed();
   }
 
+  /** Applies scenario-only values without mutating workspace/global/secret persistence. */
+  setEphemeralControls(values: Record<string, unknown>): void {
+    for (const [id, value] of Object.entries(values)) {
+      const definition = this.profile.controls?.find((item) => item.id === id);
+      if (!definition || definition.persist === 'secret' || !isControlValue(definition, value)) continue;
+      this.controls[id] = value;
+    }
+    this.refreshSnapshotControls();
+    this.changed();
+  }
+
   async startSession(forceFallback = false): Promise<void> {
     if (this.profile.opening?.mode === 'request' && !vscode.workspace.isTrusted) { this.snapshot.errors.push(toError(errors.trust())); this.snapshot.sessionState = 'failed'; this.changed(); return; }
     this.snapshot.sessionState = 'loadingOpening'; this.snapshot.errors = []; this.changed();
@@ -118,6 +152,7 @@ export class SessionController implements vscode.Disposable {
     if (forceFallback) { this.useOpeningFallback(); return; }
     const logId = `opening-${crypto.randomUUID().slice(0, 8)}`;
     const startedAt = Date.now();
+    const scope = requestScopeEvidence(this.profile.id, this.environment.id);
     let phase = 'building-request';
     let networkEntry: NetworkExchange | undefined;
     try {
@@ -127,11 +162,11 @@ export class SessionController implements vscode.Disposable {
       this.requestPreview = this.publicValue(request.redacted);
       networkEntry = this.beginNetworkExchange('opening', request, startedAt);
       phase = 'waiting-headers';
-      logAt(this.log, 'info', `[${logId}] start method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} timeout=${formatDuration(request.timeoutMs ?? 30_000)}`);
+      logAt(this.log, 'info', `[${logId}] start ${scope} method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} build=${formatDuration(Date.now() - startedAt)} requestHeaders=${Object.keys(request.headers).length} headerBytes=${requestHeaderBytes(request)} bodyBytes=${requestBodyBytes(request)} timeout=${formatDuration(request.timeoutMs ?? 30_000)}`);
       const response = await fetchWithTimeout(request);
       phase = 'reading-response';
       this.recordNetworkHeaders(networkEntry, response.status, response.headers, Date.now() - startedAt);
-      logAt(this.log, 'info', `[${logId}] headers status=${response.status} latency=${formatDuration(Date.now() - startedAt)} contentType=${quoteDiagnostic(this.publicValue(response.headers.get('content-type') ?? 'none'))}`);
+      logAt(this.log, 'info', `[${logId}] headers status=${response.status} latency=${formatDuration(Date.now() - startedAt)} contentType=${quoteDiagnostic(this.publicValue(response.headers.get('content-type') ?? 'none'))}${responseHeaderEvidence(response.headers, (value) => this.publicValue(value))}`);
       const responseText = await response.text(); let data: unknown = responseText;
       try { data = responseText ? JSON.parse(responseText) : {}; } catch { /* fallback matching can still inspect status */ }
       this.appendNetworkResponse(networkEntry, responseText);
@@ -144,7 +179,7 @@ export class SessionController implements vscode.Disposable {
       logAt(this.log, 'info', `[${logId}] completed elapsed=${formatDuration(Date.now() - startedAt)} starters=${Array.isArray(starters) ? starters.length : 0}`);
     } catch (error) {
       this.finishNetworkExchange(networkEntry, 'failed', error);
-      logAt(this.log, 'error', `[${logId}] failed phase=${phase} type=${errorType(error)}${errorStatus(error)} elapsed=${formatDuration(Date.now() - startedAt)}${safeErrorMessage(error, (value) => this.publicValue(value))}`);
+      logAt(this.log, 'error', `[${logId}] failed ${scope} phase=${phase} type=${errorType(error)}${errorStatus(error)} elapsed=${formatDuration(Date.now() - startedAt)}${errorEvidence(error)}${safeErrorMessage(error, (value) => this.publicValue(value))}`);
       const type = error instanceof TurnStageError ? error.type : 'NetworkError'; const fallback = selectOpeningFallback(opening, undefined, { errorType: type }) ?? (opening.failurePolicy?.useFallbackOnNetworkError ? opening.fallbacks?.[0] : undefined);
       if (opening.failurePolicy?.useFallbackOnNetworkError && fallback) this.useOpeningFallback(fallback);
       else { this.snapshot.sessionState = 'failed'; this.snapshot.errors.push(this.publicValue(toError(error))); }
@@ -160,11 +195,17 @@ export class SessionController implements vscode.Disposable {
     const clientRequestId = crypto.randomUUID();
     const startedAt = Date.now();
     const logId = `request-${clientRequestId.slice(0, 8)}`;
+    const scope = requestScopeEvidence(this.profile.id, this.environment.id);
     let phase = 'building-request';
     let headerCount = 0;
     let chunkCount = 0;
     let eventCount = 0;
     let byteCount = 0;
+    let lastChunkAt: number | undefined;
+    let maxChunkGap = 0;
+    let lastEventAt: number | undefined;
+    let lastEventName: string | undefined;
+    let terminalEventSeen = false;
     let networkEntry: NetworkExchange | undefined;
     this.currentTurn = { clientRequestId, startedAt };
     this.rawBuffer.clear();
@@ -178,12 +219,13 @@ export class SessionController implements vscode.Disposable {
       this.registerRequestSecrets(request);
       this.requestPreview = this.publicValue(request.redacted);
       const protocol = this.profile.stream.transport === 'fixture' ? 'ndjson' : this.profile.stream.transport;
-      logAt(this.log, 'info', `[${logId}] start method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} variant=${quoteDiagnostic(request.redacted.variantId ?? 'default')} protocol=${protocol} timeout=${formatDuration(request.timeoutMs)} idleTimeout=${formatDuration(request.idleTimeoutMs)} reconnectMax=${Math.min(5, Math.max(0, request.reconnect?.maxAttempts ?? 0))}`);
+      logAt(this.log, 'info', `[${logId}] start ${scope} method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} variant=${quoteDiagnostic(request.redacted.variantId ?? 'default')} protocol=${protocol} build=${formatDuration(Date.now() - startedAt)} requestHeaders=${Object.keys(request.headers).length} headerBytes=${requestHeaderBytes(request)} bodyBytes=${requestBodyBytes(request)} timeout=${formatDuration(request.timeoutMs)} idleTimeout=${formatDuration(request.idleTimeoutMs)} reconnectMax=${Math.min(5, Math.max(0, request.reconnect?.maxAttempts ?? 0))}`);
       this.snapshot.messages.push({ id: `user-${clientRequestId}`, role: 'user', status: 'completed', createdAt: Date.now(), completedAt: Date.now(), parts: [{ type: 'text', text }], citations: [], actions: [], followups: [] });
       this.snapshot.messages.push({ id: `assistant-${clientRequestId}`, role: 'assistant', status: 'pending', createdAt: Date.now(), parts: [], citations: [], actions: [], followups: [], timing: {}, metadata: { clientRequestId } });
       this.boundSnapshotCollections();
       this.snapshot.turnState = 'waitingStart'; this.changed(); this.abortController = new AbortController(); phase = 'waiting-headers';
       const transport = new HttpStreamTransport({
+        faults: this.runtimeOptions.faults,
         onDiagnostic: (event) => {
           if (event.type === 'attempt.started') {
             networkEntry = this.beginNetworkExchange('stream', request, Date.now(), protocol as RawStreamEvent['protocol'], event.attempt);
@@ -203,9 +245,12 @@ export class SessionController implements vscode.Disposable {
           phase = 'waiting-first-chunk'; headerCount += 1;
           if (networkEntry) this.recordNetworkHeaders(networkEntry, status, headers, latency);
           this.metrics.headers(latency); this.changed();
-          logAt(this.log, 'info', `[${logId}] headers attempt=${headerCount} status=${status ?? 'unknown'} latency=${formatDuration(latency)} contentType=${quoteDiagnostic(this.publicValue(contentType || 'none'))}`);
+          logAt(this.log, 'info', `[${logId}] headers attempt=${headerCount} status=${status ?? 'unknown'} latency=${formatDuration(latency)} contentType=${quoteDiagnostic(this.publicValue(contentType || 'none'))}${responseHeaderEvidence(headers, (value) => this.publicValue(value))}`);
         },
         onChunk: (bytes, latency) => {
+          const now = Date.now();
+          if (lastChunkAt !== undefined) maxChunkGap = Math.max(maxChunkGap, now - lastChunkAt);
+          lastChunkAt = now;
           phase = 'streaming'; chunkCount += 1; byteCount += bytes; this.metrics.chunk(bytes, latency);
           if (networkEntry) { networkEntry.state = 'streaming'; networkEntry.transferredBytes += bytes; if (latency > 0 && networkEntry.timing.firstChunk === undefined) networkEntry.timing.firstChunk = latency; }
           const detail = `[${logId}] chunk=${chunkCount} bytes=${bytes} totalBytes=${byteCount} elapsed=${formatDuration(Date.now() - startedAt)}`;
@@ -216,6 +261,9 @@ export class SessionController implements vscode.Disposable {
           const keepReading = await this.acceptRaw(raw);
           if (networkEntry) { networkEntry.eventCount += 1; this.appendNetworkResponse(networkEntry, raw.raw, networkEntry.eventCount > 1 ? '\n\n' : ''); }
           const eventName = this.publicValue(raw.sse?.event ?? raw.protocol);
+          lastEventName = diagnosticValue(eventName, 80);
+          lastEventAt = Date.now();
+          terminalEventSeen ||= !keepReading;
           const mapping = raw.mappingRuleId ? this.publicValue(raw.mappingRuleId) : 'unmatched';
           logAt(this.log, 'debug', `[${logId}] event=${eventCount} sequence=${raw.sequence} name=${quoteDiagnostic(eventName)} bytes=${Buffer.byteLength(raw.raw)} elapsed=${formatDuration(raw.elapsedMs)} mapping=${quoteDiagnostic(mapping)} parseError=${Boolean(raw.parseError)} mappingError=${Boolean(raw.mappingError)}`);
           return keepReading;
@@ -228,14 +276,14 @@ export class SessionController implements vscode.Disposable {
         else await this.finalizeTurn({ type: 'failed', error: toError(errors.unexpectedEnd()) });
       }
       this.finishNetworkExchange(networkEntry, result.aborted ? 'aborted' : (this.snapshot as SessionSnapshot).turnState === 'failed' ? 'failed' : 'completed');
-      logAt(this.log, 'info', `[${logId}] ended state=${this.snapshot.turnState} elapsed=${formatDuration(Date.now() - startedAt)} headers=${headerCount} chunks=${chunkCount} events=${eventCount} bytes=${byteCount} reconnects=${result.reconnectCount}`);
+      logAt(this.log, 'info', `[${logId}] ended ${scope} state=${this.snapshot.turnState} elapsed=${formatDuration(Date.now() - startedAt)} headers=${headerCount} chunks=${chunkCount} events=${eventCount} bytes=${byteCount} reconnects=${result.reconnectCount}${streamDiagnosticSummary(this.snapshot, { lastEventName, lastEventAt, maxChunkGap, terminalEventSeen })}`);
     } catch (error) {
       if (error instanceof TurnStageError && typeof error.details.reconnectCount === 'number') this.metrics.reconnectCount(error.details.reconnectCount);
       const failurePhase = headerCount === 0 ? phase : chunkCount === 0 ? 'after-headers' : eventCount === 0 ? 'after-first-chunk' : 'streaming';
       const level = error instanceof TurnStageError && error.type === 'UserAbortError' ? 'info' : 'error';
       if (error instanceof TurnStageError && typeof error.details.responseBody === 'string') this.appendNetworkResponse(networkEntry, this.publicValue(error.details.responseBody));
       this.finishNetworkExchange(networkEntry, error instanceof TurnStageError && error.type === 'UserAbortError' ? 'aborted' : 'failed', error);
-      logAt(this.log, level, `[${logId}] failed phase=${failurePhase} type=${errorType(error)}${errorStatus(error)} elapsed=${formatDuration(Date.now() - startedAt)} headers=${headerCount} chunks=${chunkCount} events=${eventCount} bytes=${byteCount}${errorEvidence(error)}${safeErrorMessage(error, (value) => this.publicValue(value))}`);
+      logAt(this.log, level, `[${logId}] failed ${scope} phase=${failurePhase} type=${errorType(error)}${errorStatus(error)} elapsed=${formatDuration(Date.now() - startedAt)} headers=${headerCount} chunks=${chunkCount} events=${eventCount} bytes=${byteCount}${streamDiagnosticSummary(this.snapshot, { lastEventName, lastEventAt, maxChunkGap, terminalEventSeen })}${errorEvidence(error)}${safeErrorMessage(error, (value) => this.publicValue(value))}`);
       await this.finalizeTurn({ type: error instanceof TurnStageError && error.type === 'UserAbortError' ? 'aborted' : 'failed', ...(error instanceof TurnStageError && error.type === 'UserAbortError' ? { reason: 'user_cancel' } : { error: toError(error) }) } as TurnResult);
     }
   }
@@ -253,10 +301,12 @@ export class SessionController implements vscode.Disposable {
         const logId = `stop-${(this.currentTurn?.clientRequestId ?? crypto.randomUUID()).slice(0, 8)}`;
         const startedAt = Date.now();
         const networkEntry = this.beginNetworkExchange('stop', request, startedAt);
-        logAt(this.log, 'info', `[${logId}] start method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} timeout=${formatDuration(request.timeoutMs ?? 30_000)}`);
+        const scope = requestScopeEvidence(this.profile.id, this.environment.id);
+        logAt(this.log, 'info', `[${logId}] start ${scope} method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} build=${formatDuration(Date.now() - startedAt)} requestHeaders=${Object.keys(request.headers).length} headerBytes=${requestHeaderBytes(request)} bodyBytes=${requestBodyBytes(request)} timeout=${formatDuration(request.timeoutMs ?? 30_000)}`);
         try {
           const response = await fetchWithTimeout(request);
           this.recordNetworkHeaders(networkEntry, response.status, response.headers, Date.now() - startedAt);
+          logAt(this.log, 'info', `[${logId}] headers status=${response.status} latency=${formatDuration(Date.now() - startedAt)} contentType=${quoteDiagnostic(this.publicValue(response.headers.get('content-type') ?? 'none'))}${responseHeaderEvidence(response.headers, (value) => this.publicValue(value))}`);
           const preview = await readBoundedResponseText(response);
           this.appendNetworkResponse(networkEntry, preview.text);
           if (preview.truncated) networkEntry.responseBodyTruncated = true;
@@ -473,11 +523,12 @@ export class SessionController implements vscode.Disposable {
       ...(protocol ? { protocol } : {}),
       state: 'pending',
       startedAt,
-      requestHeaders: this.publicValue(request.redacted.headers),
+      requestHeaders: networkRequestHeaders(request),
       ...(request.redacted.body === undefined ? {} : { requestBody: this.publicValue(request.redacted.body) }),
       timing: { timeout: request.timeoutMs, idleTimeout: request.idleTimeoutMs },
       transferredBytes: 0,
       eventCount: 0,
+      correlation: extractNetworkCorrelation(request.headers, 'request'),
     };
     this.networkEntries.push(entry);
     if (this.networkEntries.length > MAX_NETWORK_ENTRIES) this.networkEntries.splice(0, this.networkEntries.length - MAX_NETWORK_ENTRIES);
@@ -491,6 +542,7 @@ export class SessionController implements vscode.Disposable {
     entry.timing.headers = latency;
     const values = headers instanceof Headers ? Object.fromEntries(headers.entries()) : headers ?? {};
     entry.responseHeaders = this.publicValue(redactHeaders(values));
+    entry.correlation = mergeNetworkCorrelation(entry.correlation, extractNetworkCorrelation(values, 'response'));
     this.changed();
   }
 
@@ -632,6 +684,34 @@ function safeErrorMessage(error: unknown, redact: (value: string) => string): st
   const withoutQueryValues = redact(safeMessage(error)).replace(/https?:\/\/[^\s"'<>]+/gi, (url) => diagnosticUrl(url));
   const message = diagnosticValue(withoutQueryValues, 240);
   return message ? ` message=${JSON.stringify(message)}` : '';
+}
+function requestScopeEvidence(profileId: string, environmentId: string): string { return `profile=${quoteDiagnostic(profileId)} environment=${quoteDiagnostic(environmentId)}`; }
+function requestHeaderBytes(request: PreparedRequest): number { return Object.entries(request.headers).reduce((total, [name, value]) => total + Buffer.byteLength(name) + Buffer.byteLength(value) + 4, 0); }
+function requestBodyBytes(request: PreparedRequest): number { return request.body === undefined ? 0 : Buffer.byteLength(request.body); }
+function networkRequestHeaders(request: PreparedRequest): Record<string, string> {
+  const redactedByName = new Map(Object.entries(request.redacted.headers).map(([name, value]) => [name.toLocaleLowerCase(), value]));
+  return Object.fromEntries(Object.entries(request.headers).map(([name, value]) => [name, name.toLocaleLowerCase() === 'authorization' ? value : redactedByName.get(name.toLocaleLowerCase()) ?? value]));
+}
+function responseHeaderEvidence(headers: Headers | Record<string, string> | undefined, redact: (value: string) => string): string {
+  if (!headers) return '';
+  const entries = headers instanceof Headers ? [...headers.entries()] : Object.entries(headers);
+  const values = new Map(entries.map(([name, value]) => [name.toLocaleLowerCase(), value]));
+  const evidence: string[] = [];
+  const contentLength = values.get('content-length');
+  if (contentLength && /^\d+$/.test(contentLength)) evidence.push(`contentLength=${contentLength}`);
+  const contentEncoding = values.get('content-encoding');
+  if (contentEncoding) evidence.push(`contentEncoding=${quoteDiagnostic(redact(contentEncoding))}`);
+  const requestId = ['x-request-id', 'x-correlation-id', 'request-id'].map((name) => values.get(name)).find(Boolean);
+  if (requestId) evidence.push(`requestId=${quoteDiagnostic(redact(requestId))}`);
+  const traceparent = values.get('traceparent');
+  if (traceparent) evidence.push(`traceparent=${quoteDiagnostic(redact(traceparent))}`);
+  return evidence.length ? ` ${evidence.join(' ')}` : '';
+}
+function streamDiagnosticSummary(snapshot: SessionSnapshot, state: { lastEventName?: string; lastEventAt?: number; maxChunkGap: number; terminalEventSeen: boolean }): string {
+  const lastEvent = state.lastEventName ? quoteDiagnostic(state.lastEventName) : 'none';
+  const lastEventAgo = state.lastEventAt === undefined ? 'none' : formatDuration(Date.now() - state.lastEventAt);
+  const metrics = snapshot.metrics;
+  return ` lastEvent=${lastEvent} lastEventAgo=${lastEventAgo} terminalEvent=${state.terminalEventSeen} maxChunkGap=${state.maxChunkGap > 0 ? formatDuration(state.maxChunkGap) : 'none'} parseErrors=${metrics.parseErrorCount} mappingErrors=${metrics.mappingErrorCount} unmatched=${metrics.unmatchedEventCount} droppedRaw=${snapshot.droppedEventCount} droppedNormalized=${snapshot.droppedNormalizedEventCount ?? 0}${metrics.abortReason ? ` abortReason=${quoteDiagnostic(metrics.abortReason)}` : ''}`;
 }
 function formatDuration(value: number | undefined): string { return value === undefined ? 'none' : `${Math.max(0, Math.round(value))}ms`; }
 function quoteDiagnostic(value: unknown): string { return JSON.stringify(diagnosticValue(value)); }

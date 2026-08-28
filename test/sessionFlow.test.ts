@@ -39,6 +39,12 @@ describe('SessionController end-to-end functional flow', () => {
     const savedRuns: LocalRun[] = [];
     const output = { appendLine: vi.fn() };
     const profile = basicProfile();
+    profile.conversation.send.headers = {
+      ...profile.conversation.send.headers,
+      Cookie: 'session=local-cookie',
+      'X-API-Key': 'local-api-key',
+      'X-Custom-Trace': 'prefix-${secret.apiToken}',
+    };
     const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: { baseUrl } };
     const controller = new SessionController(
       profile,
@@ -89,10 +95,16 @@ describe('SessionController end-to-end functional flow', () => {
     expect(assistantTiming?.totalDuration).toBeGreaterThanOrEqual(assistantTiming?.ttft ?? 0);
     expect(savedRuns[0]?.snapshot?.messages[1]?.timing).toEqual(assistantTiming);
     const outputText = output.appendLine.mock.calls.flat().join('\n');
-    expect(outputText).toContain('] start method=POST');
+    expect(outputText).toContain('] start profile="functional-session" environment="local" method=POST');
     expect(outputText).toContain('] headers attempt=1 status=200');
     expect(outputText).toContain('] firstChunk=1');
-    expect(outputText).toContain('] ended state=completed');
+    expect(outputText).toContain('] ended profile="functional-session" environment="local" state=completed');
+    expect(outputText).toContain('profile="functional-session" environment="local"');
+    expect(outputText).toMatch(/requestHeaders=6 headerBytes=\d+ bodyBytes=\d+/);
+    expect(outputText).toContain('requestId="mock-basic-stream"');
+    expect(outputText).toContain('lastEvent="done"');
+    expect(outputText).toContain('terminalEvent=true');
+    expect(outputText).toContain('parseErrors=0 mappingErrors=0 unmatched=0');
     expect(outputText).not.toContain('test-token');
     expect(outputText).not.toContain('Verify the complete flow');
     const networkEntries = controller.getNetworkEntries();
@@ -101,11 +113,16 @@ describe('SessionController end-to-end functional flow', () => {
       kind: 'stream', attempt: 1, method: 'POST', status: 200, state: 'completed',
       protocol: 'sse', transferredBytes: expect.any(Number), eventCount: 6,
       timing: { headers: expect.any(Number), firstChunk: expect.any(Number), total: expect.any(Number) },
-      requestHeaders: { Authorization: 'Bearer ••••••••' },
+      requestHeaders: { Authorization: 'Bearer test-token' },
     });
     expect(networkEntries[0]?.responseHeaders).toMatchObject({ 'content-type': expect.stringContaining('text/event-stream') });
+    expect(networkEntries[0]?.requestHeaders).toMatchObject({ Cookie: '••••••••', 'X-API-Key': '••••••••', 'X-Custom-Trace': 'prefix-••••••••' });
     expect(networkEntries[0]?.responseBodyPreview).toContain('sample result');
-    expect(JSON.stringify(networkEntries)).not.toContain('test-token');
+    expect(JSON.stringify(networkEntries)).toContain('Bearer test-token');
+    expect(JSON.stringify(networkEntries)).not.toContain('local-cookie');
+    expect(JSON.stringify(networkEntries)).not.toContain('local-api-key');
+    expect(outputText).not.toContain('local-cookie');
+    expect(outputText).not.toContain('local-api-key');
   });
 
   it('serializes reconnect attempts into a failed run when the retry budget is exhausted', async () => {
@@ -183,6 +200,8 @@ describe('SessionController end-to-end functional flow', () => {
     const outputText = output.appendLine.mock.calls.flat().join('\n');
     expect(outputText).toContain('IdleTimeoutError');
     expect(outputText).toContain('phase=after-headers');
+    expect(outputText).toContain('terminalEvent=false');
+    expect(outputText).toContain('lastEvent=none');
     expect(outputText).not.toContain('test-token');
     expect(outputText).not.toContain('Trigger idle timeout');
   });

@@ -57,6 +57,7 @@ type SendMessage = (text?: string, interaction?: InteractionContext) => void;
 type SetDraft = (value: string) => void;
 type PostMessage = (message: WebviewPayload) => void;
 export interface MessageActionFeedback { actionId: string; sourceMessageId: string; status: 'pending' | 'success' | 'info' | 'error'; message: string }
+export interface VisualFeedback { operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselinePath: string; diffPath?: string }
 
 export interface MobileChatPreviewProps {
   profile: TurnStageProfile;
@@ -75,6 +76,7 @@ export interface MobileChatPreviewProps {
   /** Form instances acknowledged by the Extension Host for this editor lifetime. */
   acceptedForms?: ReadonlySet<string>;
   messageActionFeedback?: MessageActionFeedback;
+  visualFeedback?: VisualFeedback;
   onMessageActionFeedback?: (feedback: MessageActionFeedback | undefined) => void;
   className?: string;
 }
@@ -100,6 +102,7 @@ export function MobileChatPreview({
   onViewportChange,
   acceptedForms,
   messageActionFeedback,
+  visualFeedback,
   onMessageActionFeedback,
   className
 }: MobileChatPreviewProps): React.JSX.Element {
@@ -113,6 +116,7 @@ export function MobileChatPreview({
   const [responsiveSize, setResponsiveSize] = useState({ width: viewport.width, height: viewport.height });
   const [fitScale, setFitScale] = useState(1);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
+  const [capturingVisual, setCapturingVisual] = useState<'baseline' | 'compare'>();
   const [screenshotStatus, setScreenshotStatus] = useState('');
   const snapshotMessages = snapshot?.messages ?? EMPTY_MESSAGES;
   const messageContentKey = getMessageContentKey(snapshotMessages);
@@ -242,6 +246,32 @@ export function MobileChatPreview({
     }
   };
 
+  const runVisual = async (operation: 'baseline' | 'compare') => {
+    const device = deviceRef.current;
+    if (!device || capturingVisual) return;
+    setCapturingVisual(operation);
+    setScreenshotStatus(t(operation === 'baseline' ? 'Capturing visual baseline…' : 'Comparing visual baseline…'));
+    try {
+      const screenshot = await captureChatScreenshot(device);
+      post({ type: operation === 'baseline' ? 'visual.baseline.save' : 'visual.compare', dataUrl: screenshot.dataUrl, viewport: { id: String(presetId), width: logicalWidth, height: logicalHeight } });
+    } catch {
+      setScreenshotStatus(t('Unable to capture visual snapshot.'));
+      setCapturingVisual(undefined);
+    }
+  };
+
+  useEffect(() => {
+    if (!visualFeedback) return;
+    setCapturingVisual(undefined);
+    if (visualFeedback.operation === 'baseline') setScreenshotStatus(t('Visual baseline saved.'));
+    else setScreenshotStatus(visualFeedback.status === 'passed' ? t('Visual comparison passed ({difference}%).', { difference: formatNumber(visualFeedback.differencePercent ?? 0) }) : t('Visual comparison failed ({difference}%).', { difference: formatNumber(visualFeedback.differencePercent ?? 0) }));
+  }, [visualFeedback]);
+  useEffect(() => {
+    if (!capturingVisual) return;
+    const timeout = window.setTimeout(() => { setCapturingVisual(undefined); setScreenshotStatus(t('Visual comparison timed out.')); }, 30_000);
+    return () => window.clearTimeout(timeout);
+  }, [capturingVisual]);
+
   const rootClassName = ['mobile-chat-preview', className].filter(Boolean).join(' ');
 
   return <section className={rootClassName} aria-label={t('Responsive chat preview')}>
@@ -272,6 +302,8 @@ export function MobileChatPreview({
       </label>
       {!responsive && viewport.zoom === 'fit' && <span className="mobile-chat-preview__fit-scale" aria-label={t('Preview scale')}>{formatNumber(Math.round(previewScale * 100))}%</span>}
       <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
+      <IconButton icon="save" label={t(capturingVisual === 'baseline' ? 'Capturing visual baseline…' : 'Save visual baseline')} type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'baseline'} onClick={() => void runVisual('baseline')} />
+      <IconButton icon="diff" label={t(capturingVisual === 'compare' ? 'Comparing visual baseline…' : 'Compare visual baseline')} type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'compare'} onClick={() => void runVisual('compare')} />
     </header>
     <div ref={stageRef} className="mobile-chat-preview__stage">
       <div className={`mobile-chat-preview__viewport-shell mobile-chat-preview__viewport-shell--${responsive ? 'responsive' : 'fixed'}`} data-viewport-mode={responsive ? 'responsive' : 'fixed'} style={viewportStyle}>

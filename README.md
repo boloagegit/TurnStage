@@ -35,9 +35,17 @@ renderer and inspector.
   as a PNG, ready to paste into an issue, document, or chat.
   Messages and their raw/normalized events can be selected in either direction.
 - Native Profile Tree resource rows with compact **Run**, **Open**, and
-  **Configure Profile** actions. Profile Configuration provides the seven
+  **Configure Profile** actions. Profile Configuration provides eight
   profile-specific sections in the Custom Editor; Test remains the live chat
   and Debug/Runs surface.
+- Profile-defined multi-turn conversation contracts in VS Code's native Test
+  Explorer. Each step receives declarative assertions plus built-in terminal-
+  state invariants; a failed assertion can reopen the captured session and
+  focus its related Network, Raw Events, or Normalized evidence. Optional
+  baseline/candidate comparison, performance budgets, Fault Lab injection,
+  real PNG visual baselines, passive trace/request ID correlation, and
+  sanitized JSON/JUnit/HTML evidence bundles support regression and CI without
+  executing profile code or sending background telemetry.
 - A localhost-only synthetic mock server and three starter profiles, including
   an enterprise first-turn/multi-turn contract example with no real identity or
   credentials.
@@ -82,9 +90,18 @@ does not declare a `browser` entry and therefore does not claim support for
 2. Open the **TurnStage** Activity Bar view.
 3. Run **TurnStage: Initialize Workspace** and choose a starter option.
 4. Select a profile in the `Profiles` Tree View to open the Custom Editor.
-5. Use **Configure Profile** for the seven profile configuration sections, or
+5. Use **Configure Profile** for the eight profile configuration sections, or
    use **Run Profile** for the phone chat preview and Debug inspector. Recorded
    runs are in the Debug panel's **Runs** tab.
+6. Open VS Code's **Testing** view to run any scenarios declared under
+   `tests.scenarios`. Conversation-contract tests make real profile requests
+   and therefore require a trusted workspace. **TurnStage: Run Conversation
+   Contracts** provides the same deterministic extension-owned entry point for
+   automation.
+7. Configure comparison, performance, and report settings from
+   **Configure Profile → Scenarios**, or edit the same fields in JSONC. Run
+   **TurnStage: Export Contract Test Report** to save the latest sanitized
+   results manually.
 
 Initialization is explicit. Merely installing the extension, opening a
 workspace, or opening the sidebar does not create profile files. Existing
@@ -322,7 +339,10 @@ including status, first-chunk latency, total/idle timeout settings, transferred
 bytes, event count, and a structured failure such as `IdleTimeoutError`. The
 filter searches request kind, method, URL, status, state, and variant. Network
 entries are live-session diagnostics: restarting the session clears them and
-they are not added to Recorded Runs.
+they are not added to Recorded Runs. In a Trusted Workspace, the Network
+Headers view shows the exact outgoing `Authorization` value so authentication
+problems can be compared with Chrome DevTools. Other structurally sensitive
+headers remain masked.
 
 ## Commands and settings
 
@@ -366,12 +386,15 @@ The contributed settings are:
 | `turnstage.notifications.enabled` | `true` | Show non-modal TurnStage notifications; selecting **Do not show again** sets it false at user scope |
 
 For request failures, run **TurnStage: Open Output**. The default `info` level
-records a correlated request timeline with the request method, URL without its
-query or fragment, selected variant, configured timeouts, response status and
-content type, first-chunk latency, terminal state, byte/event counts, and retry
-count. Safe network-client error codes are retained to distinguish DNS, proxy,
-TLS, connection, and TurnStage timeout failures. Set `turnstage.logLevel` to `debug` to add each transport attempt, chunk,
-SSE event name, mapping result, retry delay, and the exact timeout that fired.
+records a correlated request timeline with the profile/environment, request
+build time, method, URL without its query or fragment, selected variant,
+header/body byte counts, configured timeouts, response status/content type,
+safe server request/trace IDs, first-chunk latency, last event, terminal-event
+state, maximum chunk gap, parser/mapping/drop counts, byte/event totals, and
+retry count. Safe network-client error codes distinguish DNS, proxy, TLS,
+connection, and TurnStage timeout failures. Set `turnstage.logLevel` to `debug`
+to add each transport attempt, chunk, SSE event name, mapping result, retry
+delay, and the exact timeout that fired.
 Headers, request bodies, query values, SSE payloads, and known secrets are not
 written to the Output Channel.
 
@@ -379,7 +402,9 @@ Use **Debug → Network** for the request and response view. For a timeout, firs
 check whether a row received an HTTP status, then compare **Headers**, **First
 chunk**, **Total**, and **Idle timeout** under Timing. Output remains the more
 durable correlated timeline; Network deliberately includes bounded, redacted
-request/response previews for the current editor session only.
+request/response previews for the current editor session only, with the explicit
+exception that outgoing `Authorization` is visible there. Output never records
+that header value.
 
 `displayLanguage` has VS Code `application` scope, so one User setting applies
 across projects. `profileGlob` has VS Code `resource` scope. The runtime-limit settings use

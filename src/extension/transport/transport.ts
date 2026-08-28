@@ -1,4 +1,4 @@
-import type { PreparedRequest, RawStreamEvent } from '../../shared/types';
+import type { PreparedRequest, RawStreamEvent, ScenarioFaultDefinition } from '../../shared/types';
 import { DEFAULT_MAX_EVENT_BYTES, NdjsonParser, SseParser, toRawEvent } from './streamParser';
 import { TurnStageError } from '../errors';
 import { localize } from '../l10n';
@@ -9,7 +9,7 @@ export type TransportDiagnostic =
   | { type: 'attempt.started'; attempt: number; remainingTimeoutMs?: number }
   | { type: 'retry.scheduled'; attempt: number; nextAttempt: number; delayMs: number; errorType: string; status?: number }
   | { type: 'timeout.fired'; attempt: number; kind: 'total' | 'idle'; elapsedMs: number; sawData: boolean };
-export interface HttpStreamTransportOptions { maxErrorBodyBytes?: number; maxEventBytes?: number; onDiagnostic?: (event: TransportDiagnostic) => void }
+export interface HttpStreamTransportOptions { maxErrorBodyBytes?: number; maxEventBytes?: number; onDiagnostic?: (event: TransportDiagnostic) => void; faults?: ScenarioFaultDefinition }
 export type StreamSinkEventResult = void | boolean;
 export interface StreamSink { onHeaders(latencyMs: number, contentType: string, status?: number, headers?: Record<string, string>): void; onChunk(bytes: number, latencyMs: number): void; onEvent(event: RawStreamEvent): Promise<StreamSinkEventResult> | StreamSinkEventResult }
 /**
@@ -73,6 +73,9 @@ export class HttpStreamTransport {
       }, request.idleTimeoutMs);
     };
     try {
+      const faults = this.options.faults;
+      if (faults?.delayBeforeRequestMs) await abortableDelay(faults.delayBeforeRequestMs, localAbort.signal);
+      if (faults?.httpStatus) throw new TurnStageError('FaultLabHttpStatusError', localize('Fault Lab injected HTTP {status}.', { status: faults.httpStatus }), { status: faults.httpStatus, sawData: false, faultLab: true });
       const response = await fetchWithRedirectPolicy(request, localAbort.signal);
       const contentType = response.headers.get('content-type') ?? ''; sink.onHeaders(Date.now() - startedAt, contentType, response.status, Object.fromEntries(response.headers.entries()));
       if (!response.ok) { const retryAfterMs = parseRetryAfter(response.headers.get('retry-after')); const body = await readResponseBodyPrefix(response, normalizeByteLimit(this.options.maxErrorBodyBytes, DEFAULT_MAX_ERROR_BODY_BYTES)); throw new TurnStageError('HttpStatusError', localize('HTTP {status}: {detail}', { status: response.status, detail: body || response.statusText }), { status: response.status, retryAfterMs, sawData, responseBody: body }); }
@@ -80,10 +83,20 @@ export class HttpStreamTransport {
       if (expected && (typeof expected === 'string' ? !contentType.includes(expected) : !expected.test(contentType))) throw new TurnStageError('UnexpectedContentTypeError', localize('Expected {expected}, received {actual}.', { expected: String(expected), actual: contentType || localize('no content type') }));
       if (!response.body) throw new TurnStageError('NetworkError', localize('The response had no readable body.'));
       reader = response.body.getReader(); const decoder = new TextDecoder(); const maxEventBytes = normalizeByteLimit(this.options.maxEventBytes, DEFAULT_MAX_EVENT_BYTES); const parser = protocol === 'sse' ? new SseParser({ maxEventBytes }) : protocol === 'ndjson' || protocol === 'fixture' ? new NdjsonParser({ maxRecordBytes: maxEventBytes }) : undefined; let jsonBuffer = ''; let jsonBytes = 0; let sequence = 0; let firstChunk = true; resetIdle();
-      const emit = async (event: RawStreamEvent): Promise<boolean> => { sawData = true; return (await sink.onEvent(event)) !== false; };
+      const emit = async (event: RawStreamEvent): Promise<boolean> => {
+        const faultEvent = faults?.corruptEventAt === event.sequence
+          ? { ...event, data: undefined, parseError: localize('Fault Lab injected a malformed event.'), raw: '{fault-lab:malformed}' }
+          : event;
+        sawData = true;
+        const keepReading = (await sink.onEvent(faultEvent)) !== false;
+        if (faults?.disconnectAfterEvents === event.sequence) throw new TurnStageError('FaultLabDisconnectError', localize('Fault Lab disconnected the stream after event {sequence}.', { sequence: event.sequence }), { sawData: true, sequence: event.sequence, faultLab: true });
+        return keepReading;
+      };
       while (true) {
         const { value, done } = await reader.read(); if (done) break;
-        resetIdle(); sink.onChunk(value.byteLength, firstChunk ? Date.now() - startedAt : 0); firstChunk = false;
+        resetIdle();
+        if (faults?.delayPerChunkMs) await abortableDelay(faults.delayPerChunkMs, localAbort.signal);
+        sink.onChunk(value.byteLength, firstChunk ? Date.now() - startedAt : 0); firstChunk = false;
         const text = decoder.decode(value, { stream: true });
         if (protocol === 'text-stream') { assertEventBytes(protocol, value.byteLength, maxEventBytes); if (text && !(await emit(toRawEvent(protocol, text, ++sequence, startedAt)))) { await cancelReader(reader); return { sawData, aborted: false }; } continue; }
         if (protocol === 'json') { jsonBytes += value.byteLength; assertEventBytes(protocol, jsonBytes, maxEventBytes); jsonBuffer += text; continue; }

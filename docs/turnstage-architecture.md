@@ -47,8 +47,10 @@ ProfileRepository / TextDocument
 The custom editor owns one `TextDocument` and creates one controller for the
 profile URI. Text changes trigger a re-parse and diagnostics update. Structured
 UI changes are sent to the host as a patch and applied with `jsonc-parser`
-`modify`/`applyEdits` through `WorkspaceEdit`; only the `name`, `description`,
-and `ui` roots are patchable from the current UI editor.
+`modify` through `WorkspaceEdit`; the host validates every supported patch path
+before editing the document. The Scenario surface replaces only the bounded
+`tests.scenarios` array and participates in VS Code Undo/Redo like other GUI
+configuration changes.
 
 The Profile Tree View discovers at most 500 workspace files using the
 configured glob (default `.vscode/turnstage/profiles/*.turnstage.jsonc`) and
@@ -73,6 +75,7 @@ command activates the extension. Activation registers:
 - `ProfileTreeProvider` for profile discovery and refresh;
 - `TurnStageEditorProvider` for `*.turnstage.jsonc`;
 - a JSONC content provider for built-in demo templates;
+- `ScenarioTestController` for native Test Explorer discovery and execution;
 - the `TurnStage` Output Channel and `turnstage` DiagnosticCollection;
 - commands for initialization, profiles, sessions, environments, secrets,
   replay/export, migration, and output.
@@ -87,6 +90,59 @@ When a profile is opened, the custom editor posts a profile snapshot,
 validation diagnostics, and then session snapshots. A static opening starts
 immediately after a valid controller is created. A request-backed opening stays
 `notStarted` until **Start Session** is invoked.
+
+## Conversation contract tests
+
+`ScenarioTestController` discovers effective Workspace and User profiles and
+publishes a Profile → Scenario → Step tree with `vscode.tests`. Each run creates
+an isolated `SessionController`; it does not depend on an open custom editor and
+disables local-run persistence. Scenario controls are applied in memory and
+cannot set secret-persisted controls.
+
+`runScenario` sends the declared steps in order through the same request,
+transport, parser, mapping, reducer, and finalization pipeline as an interactive
+session. A selected later step still executes prior steps as setup. After each
+settled send, `assertionEvaluator` checks bounded declarative paths and a fixed
+set of lifecycle invariants. Profiles cannot provide executable assertion code.
+Cancellation is wired to `SessionController.abort()` so an active request does
+not continue after the Test run stops.
+
+The last 100 Scenario evidence records are cached only in Extension Host
+memory. A failed `TestMessage` contains a trusted command link whose arguments
+are revalidated by the Host. Opening it loads the captured snapshot into the
+matching profile editor and sends an `inspector.focus` message selecting the
+related Network, Raw Events, or Normalized row. Evidence is not written to
+Recorded Runs or exported. Contract execution is skipped in Restricted Mode.
+
+When a scenario declares `comparison`, `ScenarioTestController` creates two
+independent `SessionController` instances. The baseline runs first without
+profile-specific assertions but with state invariants; the candidate runs the
+full contract. `scenarioComparison` builds a bounded semantic projection and
+returns evidence-linked checks after default and profile-defined dynamic paths
+are removed. `performanceEvaluator` evaluates inclusive candidate thresholds
+and fail-closed absolute/percentage regression limits against the baseline.
+
+`ScenarioReportService` retains only the latest run group in memory. Its JSON
+JUnit, and self-contained HTML serializers consume a dedicated safe projection rather than runtime
+evidence. Configured reports are written below a validated workspace-relative
+directory after trusted Test Explorer runs; manual export uses the native Save
+dialog. Evidence Bundle export writes a new folder with the three projections
+and a privacy manifest; visible visual artifacts are copied only after a second
+explicit choice. Debug evidence remains a separate in-memory path and never
+enters the report serializers.
+
+`ScenarioDefinition.faults` is passed only to scenario-created
+`SessionController` instances and then into `HttpStreamTransport`. Baseline
+comparison sessions omit the fault plan. The transport can inject bounded
+delays, a synthetic status, a deterministic disconnect, or one malformed
+event without replacing `fetch` globally or changing interactive sessions.
+
+`VisualRegressionService` receives a user-triggered PNG of the logical Chat
+viewport, validates its signature/size, stores a viewport-specific baseline,
+and compares decoded RGBA pixels. A failed comparison writes a diff PNG.
+`correlation.ts` passively derives bounded trace/span/request identifiers from
+request and response headers and attaches them to the corresponding
+`NetworkExchange`; it does not export OpenTelemetry data.
 
 Initialization is an explicit command. It creates directories and copies
 templates/fixtures only after the user selects an option. `writeSafe` handles an
@@ -335,13 +391,16 @@ Metrics, Errors, and Runs views. Reducer-owned raw sequence metadata links
 assistant messages with raw/normalized events in both directions.
 
 Network is a bounded, live-session request inspector. It stores no host fetch
-objects: the host emits a serializable redacted summary for Opening, each Stream
-attempt, and Stop, while the Webview renders the list plus Headers, Payload,
-Response, and Timing panels. The list is cleared on session restart and is not
-part of `LocalRun` persistence.
+objects: the host emits a serializable diagnostic summary for Opening, each
+Stream attempt, and Stop, while the Webview renders the list plus Headers,
+Payload, Response, and Timing panels. Request bodies, response data, and
+non-Authorization sensitive headers use the normal redaction boundary; the
+exact outgoing Authorization header is intentionally included only for this
+Trusted-Workspace live inspector. The list is cleared on session restart and is
+not part of `LocalRun` persistence or Output logging.
 
 Each settings child renders only its selected General, Opening & Flow, Request,
-Stream & Mapping, Chat UI, History & Errors, or Security section. Raw and
+Stream & Mapping, Chat UI, Scenarios, History & Errors, or Security section. Raw and
 normalized event lists use a fixed-height virtual list. Except for the custom
 phone preview, the visual UI follows VS Code editor/pane/list/settings patterns
 and theme variables, semantic form elements, keyboard tab navigation, a
