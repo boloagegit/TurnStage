@@ -54,6 +54,17 @@ describe('Profile Configuration surface', () => {
     expect(workspaceStyles).toContain('.assertion-row');
   });
 
+  it('exposes bounded per-case adversarial repetitions and aggregate attempt evidence', () => {
+    expect(workspaceSource).toContain('id={`adversarial-repetitions-${index}`}');
+    expect(workspaceSource).toContain('min={1} max={50}');
+    expect(workspaceSource).toContain("definition.failFast === true");
+    expect(workspaceSource).toContain('Stop remaining turns after an attack succeeds');
+    expect(workspaceSource).toContain('Stop remaining repetitions after an attack succeeds (incomplete sample)');
+    expect(workspaceSource).toContain('result.repetitions.counts.resisted');
+    expect(workspaceSource).toContain('result.repetitions.requestedAttempts');
+    expect(workspaceSource).toContain('result.repetitions.completedAttempts');
+  });
+
   it('configures sanitized reports, baseline comparison, ignore rules, and every supported performance metric', () => {
     expect(workspaceSource).toContain("patch(['tests', 'reporting']");
     expect(workspaceSource).toContain('Run baseline and candidate');

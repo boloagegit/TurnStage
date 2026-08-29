@@ -80,13 +80,15 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
   let abortPromise: Promise<void> | undefined;
   let resolveTimeout: (() => void) | undefined;
   const timeoutSignal = new Promise<void>((resolve) => { resolveTimeout = resolve; });
+  let resolveCancellation: (() => void) | undefined;
+  const cancellationSignal = new Promise<void>((resolve) => { resolveCancellation = resolve; });
   const timeoutHandle = setTimeout(() => {
     timedOut = true;
     abortPromise ??= session.abort();
     resolveTimeout?.();
   }, timeoutMs);
-  const cancellationSubscription = cancellation?.onCancellationRequested?.(() => { abortPromise ??= session.abort(); });
-  if (cancellation?.isCancellationRequested) abortPromise ??= session.abort();
+  const cancellationSubscription = cancellation?.onCancellationRequested?.(() => { abortPromise ??= session.abort(); resolveCancellation?.(); });
+  if (cancellation?.isCancellationRequested) { abortPromise ??= session.abort(); resolveCancellation?.(); }
   if (scenario.controls) session.setEphemeralControls(scenario.controls);
   const stepResults: ScenarioRunResult['steps'] = [];
   const findings: AdversarialFinding[] = [];
@@ -96,7 +98,7 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
   let activeTurn: { step: ScenarioDefinition['steps'][number]; index: number; startedAt: number } | undefined;
   try {
     if (!cancellation?.isCancellationRequested) {
-      const start = await raceWithDeadline(session.startSession(), timeoutSignal);
+      const start = await raceWithTermination(session.startSession(), timeoutSignal, cancellationSignal);
       if (start === 'timeout') timedOut = true;
     }
     for (const [turnIndex, step] of scenario.steps.entries()) {
@@ -106,7 +108,7 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
       activeTurn = { step, index: turnIndex, startedAt: stepStartedAt };
       const beforeNetwork = session.getNetworkEntries();
       const boundary = captureAdversarialBoundary(session.snapshot, beforeNetwork);
-      const send = await raceWithDeadline(session.send(step.input, { kind: 'manual' }), timeoutSignal);
+      const send = await raceWithTermination(session.send(step.input, { kind: 'manual' }), timeoutSignal, cancellationSignal);
       if (send === 'timeout') {
         const location = { kind: 'network' as const, networkId: session.getNetworkEntries().at(-1)?.id };
         const issue: AdversarialIssue = { id: `infrastructure-timeout-${turnIndex + 1}`, kind: 'infrastructure', turnId: step.id, turnIndex, label: localize('The adversarial case timeout elapsed.'), location };
@@ -114,6 +116,7 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
         stepResults.push({ stepId: step.id, name: step.name?.trim() || step.id, durationMs: Date.now() - stepStartedAt, checks: [issueCheck(issue)] });
         break;
       }
+      if (send === 'cancelled') break;
       const evaluation = evaluateAdversarialTurn(definition, step, turnIndex, session.snapshot, session.getNetworkEntries(), boundary);
       findings.push(...evaluation.findings);
       issues.push(...evaluation.issues);
@@ -174,8 +177,12 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
   };
 }
 
-async function raceWithDeadline(promise: Promise<void>, deadline: Promise<void>): Promise<'completed' | 'timeout'> {
-  return Promise.race([promise.then(() => 'completed' as const), deadline.then(() => 'timeout' as const)]);
+async function raceWithTermination(promise: Promise<void>, deadline: Promise<void>, cancellation: Promise<void>): Promise<'completed' | 'timeout' | 'cancelled'> {
+  return Promise.race([
+    promise.then(() => 'completed' as const),
+    deadline.then(() => 'timeout' as const),
+    cancellation.then(() => 'cancelled' as const),
+  ]);
 }
 
 function findingCheck(finding: AdversarialFinding): ScenarioCheckResult {

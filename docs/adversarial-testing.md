@@ -13,6 +13,29 @@ Every case ends in exactly one domain outcome:
 
 A timeout is never Resisted. When `stopOnAttackSucceeded` is enabled (the default), remaining turns are not sent after the first finding.
 
+## Repeated attempts and stability
+
+Adversarial suites may set `runPolicy.defaultRepetitions` (or the compatible
+`defaults.defaultRepetitions`) and a case may override it with
+`runPolicy.repetitions` or `repetitions`. The value is bounded to 50. Every
+attempt gets a new conversation/session, while the ordered turns inside that
+attempt remain unchanged. The default is one attempt, so existing suites keep
+their original behavior.
+
+The aggregate is strict: any **Attack succeeded** fails the case; otherwise an
+infrastructure error or indeterminate attempt prevents a pass. Only a complete
+sample in which every requested attempt is **Resisted** passes. Results retain
+counts for all four attempt outcomes and label the sample as consistently
+resisted, consistently vulnerable, unstable, or inconclusive. Optional
+`failFast` stops after the first successful attack, but marks the sample
+incomplete and never reports it as a passing rate.
+
+Before execution, the shared runner produces a bounded preflight containing
+selected cases, attempts, turns, user-turn requests, per-attempt timeout, and
+the upper-bound duration. Safety caps reject oversized plans rather than
+truncating them. Cancellation is observed between attempts; a cancelled active
+attempt is recorded as indeterminate and resume starts at the next attempt.
+
 ## Inline cases
 
 Use **Configure Profile → Scenarios → Adversarial tests** for individual cases. Each case reuses the Scenario runner but replaces assertions, Compare, Performance, and Fault Lab with an `adversarial` contract:
@@ -66,7 +89,11 @@ Test Explorer runs isolated cases with bounded concurrency. `turnstage.adversari
 
 Latest results appear as a compact list in the Profile GUI and link to available Chat, Network, Raw Events, or Normalized Events evidence. Evidence remains in Extension Host memory and is bounded like existing Scenario evidence.
 
-Evidence Bundle version 2 includes `index.html`, `report.json`, `junit.xml`, `adversarial-summary.csv`, `adversarial-turns.csv`, `adversarial-findings.csv`, `network.csv`, `events.csv`, and `manifest.json`. CSV files contain identifiers and structural metadata only. Prompts, assistant content, URLs, headers, payloads, raw events, response bodies, and secrets are excluded. Optional visual artifacts remain a separate explicit opt-in because screenshots may contain conversation content.
+Evidence Bundle version 3 includes `index.html`, `report.json`, `junit.xml`, `adversarial-summary.csv`, `adversarial-turns.csv`, `adversarial-findings.csv`, `network.csv`, `events.csv`, `manifest.json`, and `provenance.json`. The provenance manifest records canonical SHA-256 digests for every included evidence file and can be checked with `turnstage verify`. CSV files contain identifiers and structural metadata only. Prompts, assistant content, URLs, headers, payloads, raw events, response bodies, and secrets are excluded. Optional visual artifacts remain a separate explicit opt-in because screenshots may contain conversation content.
+
+Suites and cases may declare an explicit `sourceBinding` with bounded `sourceGlobs`, `components`, `endpoints`, and `riskTags`. Changed-file selection is explainable and fail-closed: unbound cases are omitted unless the caller explicitly asks to include them. This is an ownership map, not inferred code coverage.
+
+The VS Code language-model integration exposes five bounded tools for GitHub Copilot: find tests, run selected tests, inspect a redacted failure capsule, validate tests and integrity locks, and draft a regression without writing it. Read-only tools do not consume a model request by themselves; a Copilot chat prompt may consume the account's quota. Network execution always remains behind VS Code's tool confirmation and Workspace Trust.
 
 ## First-version boundary
 

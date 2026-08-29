@@ -142,6 +142,7 @@
             mode: 'multiTurn',
             maxTurns: 2,
             timeoutMs: 60000,
+            repetitions: 5,
             stopOnAttackSucceeded: true,
             forbid: { content: ['sample-protected-marker'], urls: true }
           }
@@ -215,7 +216,7 @@
           dispatch({ type: 'profile.validation', diagnostics: [] });
           dispatch({ type: 'profile.validated', valid: true });
           dispatch({ type: 'session.snapshot', snapshot: JSON.parse(JSON.stringify(snapshot)), runs: JSON.parse(JSON.stringify(runs)), requestPreview: { method: 'POST', url: 'http://localhost/chat' }, networkEntries: JSON.parse(JSON.stringify(networkEntries)) });
-          dispatch({ type: 'test.results', results: [{ profileId: profile.id, scenarioId: 'known-two-turn-probe', scenarioName: 'Known two-turn probe', outcome: 'attackSucceeded', durationMs: 1840, attemptedTurns: 2, completedTurns: 2, plannedTurns: 2, findingCount: 1, issueCount: 0, evidenceId: 'visual-evidence', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'normalizedEvent', sequence: 4 }] }] });
+          dispatch({ type: 'test.results', results: [{ profileId: profile.id, scenarioId: 'known-two-turn-probe', scenarioName: 'Known two-turn probe', outcome: 'attackSucceeded', durationMs: 1840, attemptedTurns: 2, completedTurns: 2, plannedTurns: 2, findingCount: 1, issueCount: 0, evidenceId: 'visual-evidence', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'normalizedEvent', sequence: 4 }], repetitions: { requestedAttempts: 5, completedAttempts: 5, skippedAttempts: 0, sampleComplete: true, stability: 'unstable', counts: { resisted: 3, attackSucceeded: 2, indeterminate: 0, infrastructureError: 0 } } }] });
         }, 0);
       }
     });

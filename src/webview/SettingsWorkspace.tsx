@@ -397,7 +397,10 @@ function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: 
       {!testResults.length ? <p className="settings-empty">{t('No adversarial results in this Extension Host session.')}</p> : <ul className="adversarial-result-list">{testResults.map((result) => <li key={`${result.scenarioId}-${result.evidenceId}`}>
         <div className="adversarial-result-identity"><strong>{result.scenarioName}</strong><code>{result.scenarioId}</code></div>
         <span className={`adversarial-outcome adversarial-outcome--${result.outcome}`}><ProductIcon name={result.outcome === 'resisted' ? 'check' : result.outcome === 'attackSucceeded' ? 'target' : 'warning'} />{t(adversarialOutcomeText(result.outcome))}</span>
-        <span>{t('{completed}/{planned} turns', { completed: formatNumber(result.completedTurns), planned: formatNumber(result.plannedTurns) })}</span>
+        <span className="adversarial-result-sample">{result.repetitions ? <>
+          <span>{t('{resisted}/{requested} resisted · {completed} attempts', { resisted: formatNumber(result.repetitions.counts.resisted), requested: formatNumber(result.repetitions.requestedAttempts), completed: formatNumber(result.repetitions.completedAttempts) })}</span>
+          <small>{t(adversarialStabilityText(result.repetitions.stability))}{result.repetitions.sampleComplete ? '' : ` · ${t('Incomplete sample')}`}</small>
+        </> : t('{completed}/{planned} turns', { completed: formatNumber(result.completedTurns), planned: formatNumber(result.plannedTurns) })}</span>
         <span>{formatNumber(result.durationMs)} ms</span>
         <div className="adversarial-result-actions">{(result.availableLocations.length ? result.availableLocations : [result.primaryLocation]).map((location) => <button key={`${result.evidenceId}-${location.kind}`} type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })}>{t(evidenceLocationText(location.kind))}</button>)}</div>
       </li>)}</ul>}
@@ -464,10 +467,19 @@ function AdversarialCaseEditor({ scenario, index, onChange }: { scenario: Scenar
       <SettingField label={t('Conversation mode')} id={`adversarial-mode-${index}`} hint={t('Turns run in order in one isolated conversation.')}><select id={`adversarial-mode-${index}`} value={definition.mode ?? (scenario.steps.length > 1 ? 'multiTurn' : 'singleTurn')} onChange={(event) => update({ mode: event.target.value as 'singleTurn' | 'multiTurn' })}><option value="singleTurn">{t('Single turn')}</option><option value="multiTurn">{t('Multi-turn')}</option></select></SettingField>
       <NumberSettingField label={t('Maximum turns')} id={`adversarial-max-turns-${index}`} value={definition.maxTurns} placeholder={String(Math.max(1, scenario.steps.length))} min={1} max={10} onCommit={(value) => update({ maxTurns: value })} />
       <NumberSettingField label={t('Case timeout (ms)')} id={`adversarial-timeout-${index}`} value={definition.timeoutMs} placeholder="60000" min={1000} max={300000} onCommit={(value) => update({ timeoutMs: value })} />
-      <SettingCheckbox id={`adversarial-stop-${index}`} label={t('Stop after the first successful attack')} checked={definition.stopOnAttackSucceeded !== false} onChange={(checked) => update({ stopOnAttackSucceeded: checked })} />
+      <NumberSettingField label={t('Repetitions')} id={`adversarial-repetitions-${index}`} value={definition.repetitions} placeholder="1" min={1} max={50} hint={t('Run this case in fresh isolated conversations, from 1 to 50 times.')} onCommit={(value) => update({ repetitions: value })} />
+      <SettingCheckbox id={`adversarial-stop-${index}`} label={t('Stop remaining turns after an attack succeeds')} checked={definition.stopOnAttackSucceeded !== false} onChange={(checked) => update({ stopOnAttackSucceeded: checked })} />
+      <SettingCheckbox id={`adversarial-fail-fast-${index}`} label={t('Stop remaining repetitions after an attack succeeds (incomplete sample)')} checked={definition.failFast === true} onChange={(checked) => update({ failFast: checked || undefined })} />
     </div>
     <AdversarialForbidEditor idPrefix={`adversarial-${index}`} value={definition.forbid} onChange={(forbid) => update({ forbid })} />
   </div>;
+}
+
+function adversarialStabilityText(stability: NonNullable<AdversarialResultSummary['repetitions']>['stability']): string {
+  if (stability === 'stable-pass') return 'Stable resistance';
+  if (stability === 'stable-fail') return 'Stable attack success';
+  if (stability === 'unstable') return 'Unstable result';
+  return 'Inconclusive';
 }
 
 function AdversarialForbidEditor({ idPrefix, value, onChange, additional = false }: { idPrefix: string; value: AdversarialForbidDefinition; onChange: (value: AdversarialForbidDefinition) => void; additional?: boolean }): React.JSX.Element {

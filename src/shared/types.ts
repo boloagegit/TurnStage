@@ -97,12 +97,21 @@ export interface ScenarioPerformanceDefinition {
   regression?: Partial<Record<ScenarioPerformanceMetric, ScenarioRegressionLimit>>;
 }
 
+/** Explicit, explainable links from product code or API surface to behavior tests. */
+export interface ScenarioSourceBinding {
+  sourceGlobs?: string[];
+  components?: string[];
+  endpoints?: string[];
+  riskTags?: string[];
+}
+
 export interface ScenarioDefinition {
   id: string;
   name: string;
   description?: string;
   /** Optional grouping labels used by bulk adversarial suites and reports. */
   tags?: string[];
+  sourceBinding?: ScenarioSourceBinding;
   /** Control values applied before the opening request and first step. */
   controls?: Record<string, unknown>;
   steps: ScenarioStepDefinition[];
@@ -126,6 +135,33 @@ export interface ScenarioStepDefinition {
 }
 
 export type AdversarialOutcome = 'resisted' | 'attackSucceeded' | 'indeterminate' | 'infrastructureError';
+
+/**
+ * Stability is deliberately separate from the four authoritative attempt
+ * outcomes. It describes the sample, not a new outcome for an individual
+ * request.
+ */
+export type AdversarialStability = 'stable-pass' | 'stable-fail' | 'unstable' | 'inconclusive';
+
+export interface AdversarialCaseRunPolicy {
+  /** Number of fresh conversations to run for this case. */
+  repetitions?: number;
+  /** Stop after the first successful attack, leaving the sample explicitly incomplete. */
+  failFast?: boolean;
+}
+
+export interface AdversarialSuiteRunPolicy {
+  /** Default number of fresh conversations for cases that do not override it. */
+  defaultRepetitions?: number;
+  /** Maximum number of cases that may execute in parallel. */
+  maxConcurrency?: number;
+  /** Upper bound for planned user-turn requests in one run. */
+  maxRequests?: number;
+  /** Upper bound for the sum of per-attempt whole-case deadlines. */
+  maxDurationMs?: number;
+  /** Stop individual cases after the first successful attack. */
+  failFast?: boolean;
+}
 
 export interface AdversarialContentRule {
   id?: string;
@@ -151,6 +187,10 @@ export interface ScenarioAdversarialDefinition {
   timeoutMs?: number;
   /** Defaults to true. */
   stopOnAttackSucceeded?: boolean;
+  /** Optional number of fresh conversations for a repeated adversarial run. */
+  repetitions?: number;
+  /** Explicitly stop after the first attack; the aggregate remains incomplete. */
+  failFast?: boolean;
   forbid: AdversarialForbidDefinition;
 }
 
@@ -184,6 +224,29 @@ export interface AdversarialRunEvaluation {
   issues: AdversarialIssue[];
 }
 
+export interface AdversarialAttemptSummary {
+  attempt: number;
+  outcome: AdversarialOutcome;
+  durationMs: number;
+  attemptedTurns: number;
+  completedTurns: number;
+  startedAt: number;
+  completedAt: number;
+  /** Evidence remains in the in-memory run/evidence store by default. */
+  evidenceId?: string;
+}
+
+export interface AdversarialRepetitionSummary {
+  requestedAttempts: number;
+  completedAttempts: number;
+  skippedAttempts: number;
+  sampleComplete: boolean;
+  outcome: AdversarialOutcome;
+  stability: AdversarialStability;
+  counts: Record<AdversarialOutcome, number>;
+  attempts: AdversarialAttemptSummary[];
+}
+
 export interface AdversarialResultSummary {
   profileId: string;
   scenarioId: string;
@@ -200,6 +263,7 @@ export interface AdversarialResultSummary {
   evidenceId: string;
   primaryLocation: ScenarioEvidenceLocation;
   availableLocations: ScenarioEvidenceLocation[];
+  repetitions?: Pick<AdversarialRepetitionSummary, 'requestedAttempts' | 'completedAttempts' | 'skippedAttempts' | 'sampleComplete' | 'stability' | 'counts'>;
 }
 
 export interface AdversarialSuiteDefinition {
@@ -209,7 +273,10 @@ export interface AdversarialSuiteDefinition {
   id: string;
   name: string;
   description?: string;
-  defaults?: Partial<Pick<ScenarioAdversarialDefinition, 'maxTurns' | 'timeoutMs' | 'stopOnAttackSucceeded'>> & { forbid?: AdversarialForbidDefinition };
+  sourceBinding?: ScenarioSourceBinding;
+  /** Existing defaults remain supported; runPolicy is the explicit run-level policy. */
+  defaults?: Partial<Pick<ScenarioAdversarialDefinition, 'maxTurns' | 'timeoutMs' | 'stopOnAttackSucceeded' | 'repetitions' | 'failFast'>> & { defaultRepetitions?: number; maxRequests?: number; maxDurationMs?: number; forbid?: AdversarialForbidDefinition };
+  runPolicy?: AdversarialSuiteRunPolicy;
   cases: AdversarialSuiteCaseDefinition[];
 }
 
@@ -218,14 +285,42 @@ export interface AdversarialSuiteCaseDefinition {
   name: string;
   description?: string;
   tags?: string[];
+  sourceBinding?: ScenarioSourceBinding;
   enabled?: boolean;
   controls?: Record<string, unknown>;
   mode?: 'singleTurn' | 'multiTurn';
   maxTurns?: number;
   timeoutMs?: number;
   stopOnAttackSucceeded?: boolean;
+  /** Shorthand per-case repetition override. */
+  repetitions?: number;
+  /** Shorthand per-case fail-fast override. */
+  failFast?: boolean;
+  runPolicy?: AdversarialCaseRunPolicy;
   forbid?: AdversarialForbidDefinition;
   turns: Array<Omit<ScenarioStepDefinition, 'assertions'>>;
+}
+
+export interface ScenarioRunGroupRecord {
+  format: 'turnstage-run-group';
+  version: 1;
+  id: string;
+  profileId: string;
+  suiteId?: string;
+  scenarioId: string;
+  scenarioName?: string;
+  createdAt: number;
+  updatedAt: number;
+  requestedAttempts: number;
+  completedAttempts: number;
+  plannedTurns: number;
+  plannedRequests: number;
+  maximumDurationMs: number;
+  sampleComplete: boolean;
+  outcome: AdversarialOutcome;
+  stability: AdversarialStability;
+  counts: Record<AdversarialOutcome, number>;
+  attempts: AdversarialAttemptSummary[];
 }
 
 export type ScenarioAssertionOperator =
@@ -293,6 +388,8 @@ export interface ScenarioRunResult {
   checks: ScenarioCheckResult[];
   evidence: ScenarioRunEvidence;
   adversarial?: AdversarialRunEvaluation;
+  /** Present when the result is the aggregate projection of repeated attempts. */
+  repetitions?: AdversarialRepetitionSummary;
   comparison?: {
     baselineLabel: string;
     candidateLabel: string;

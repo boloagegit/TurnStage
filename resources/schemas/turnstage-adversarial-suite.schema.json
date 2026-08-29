@@ -12,7 +12,9 @@
     "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
     "name": { "type": "string", "minLength": 1 },
     "description": { "type": "string" },
+    "sourceBinding": { "$ref": "#/$defs/sourceBinding" },
     "defaults": { "$ref": "#/$defs/defaults" },
+    "runPolicy": { "$ref": "#/$defs/runPolicy" },
     "cases": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/case" } }
   },
   "$defs": {
@@ -23,7 +25,23 @@
         "maxTurns": { "type": "integer", "minimum": 1, "maximum": 10 },
         "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 300000 },
         "stopOnAttackSucceeded": { "type": "boolean" },
+        "repetitions": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "defaultRepetitions": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "failFast": { "type": "boolean" },
+        "maxRequests": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "maxDurationMs": { "type": "integer", "minimum": 1 },
         "forbid": { "$ref": "#/$defs/forbid" }
+      }
+    },
+    "runPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultRepetitions": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "maxRequests": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "maxDurationMs": { "type": "integer", "minimum": 1 },
+        "failFast": { "type": "boolean" }
       }
     },
     "case": {
@@ -35,14 +53,37 @@
         "name": { "type": "string", "minLength": 1 },
         "description": { "type": "string" },
         "tags": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
+        "sourceBinding": { "$ref": "#/$defs/sourceBinding" },
         "enabled": { "type": "boolean" },
         "controls": { "type": "object", "additionalProperties": true },
         "mode": { "enum": ["singleTurn", "multiTurn"] },
         "maxTurns": { "type": "integer", "minimum": 1, "maximum": 10 },
         "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 300000 },
         "stopOnAttackSucceeded": { "type": "boolean" },
+        "repetitions": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "failFast": { "type": "boolean" },
+        "runPolicy": { "$ref": "#/$defs/caseRunPolicy" },
         "forbid": { "$ref": "#/$defs/forbid" },
         "turns": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "$ref": "#/$defs/turn" } }
+      }
+    },
+    "caseRunPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repetitions": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "failFast": { "type": "boolean" }
+      }
+    },
+    "sourceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "sourceGlobs": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
+        "components": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
+        "endpoints": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
+        "riskTags": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
       }
     },
     "turn": {

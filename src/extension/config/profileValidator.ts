@@ -5,7 +5,8 @@ import { isSafeAssertionRegex, isValidAssertionPath } from '../testing/assertion
 import { isValidComparisonPath } from '../testing/scenarioComparison';
 import { isSafeReportDirectory } from '../testing/scenarioConfig';
 import { scenarioPerformanceMetrics } from '../testing/performanceEvaluator';
-import { isSafeAdversarialSuitePath, MAX_ADVERSARIAL_RULES, MAX_ADVERSARIAL_TURNS_PER_CASE } from '../testing/adversarialSuite';
+import { isSafeAdversarialSuitePath, MAX_ADVERSARIAL_REPETITIONS, MAX_ADVERSARIAL_RULES, MAX_ADVERSARIAL_TURNS_PER_CASE } from '../testing/adversarialSuite';
+import { validateSourceBinding } from '../testing/impactMapping';
 
 export interface ValidationIssue { severity: 'error' | 'warning'; message: string; offset: number; length: number }
 
@@ -203,6 +204,9 @@ export class ProfileValidator {
         if (!Array.isArray(scenario.tags) || scenario.tags.length > 20 || scenario.tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.length > 64)) out.push(issue(tree, [...scenarioPath, 'tags'], localize('Scenario tags must contain at most 20 non-empty values of up to 64 characters.')));
         else if (duplicates(scenario.tags).length) out.push(issue(tree, [...scenarioPath, 'tags'], localize('Scenario tags must be unique.')));
       }
+      if (scenario.sourceBinding !== undefined) {
+        for (const bindingIssue of validateSourceBinding(scenario.sourceBinding)) out.push(issue(tree, [...scenarioPath, 'sourceBinding'], localize('Invalid source binding: {message}', { message: bindingIssue.message })));
+      }
       if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) { out.push(issue(tree, [...scenarioPath, 'steps'], localize('A scenario requires at least one step.'))); return; }
       if (scenario.steps.length > 100) out.push(issue(tree, [...scenarioPath, 'steps'], localize('A scenario can define at most 100 steps.')));
       if (scenario.controls !== undefined && (!scenario.controls || typeof scenario.controls !== 'object' || Array.isArray(scenario.controls))) {
@@ -288,7 +292,7 @@ export class ProfileValidator {
         if (!adversarial || typeof adversarial !== 'object' || Array.isArray(adversarial)) out.push(issue(tree, adversarialPath, localize('Adversarial settings must be an object.')));
         else {
           const definition = adversarial as Record<string, unknown>;
-          const allowed = new Set(['mode', 'maxTurns', 'timeoutMs', 'stopOnAttackSucceeded', 'forbid']);
+          const allowed = new Set(['mode', 'maxTurns', 'timeoutMs', 'stopOnAttackSucceeded', 'repetitions', 'failFast', 'forbid']);
           for (const key of Object.keys(definition)) if (!allowed.has(key)) out.push(issue(tree, [...adversarialPath, key], localize('Unsupported adversarial setting: {field}.', { field: key })));
           const mode = definition.mode ?? (scenario.steps.length > 1 ? 'multiTurn' : 'singleTurn');
           if (!['singleTurn', 'multiTurn'].includes(String(mode))) out.push(issue(tree, [...adversarialPath, 'mode'], localize('Adversarial mode must be singleTurn or multiTurn.')));
@@ -299,6 +303,8 @@ export class ProfileValidator {
           const timeoutMs = definition.timeoutMs ?? 60_000;
           if (!Number.isInteger(timeoutMs) || Number(timeoutMs) < 1_000 || Number(timeoutMs) > 300_000) out.push(issue(tree, [...adversarialPath, 'timeoutMs'], localize('Adversarial timeoutMs must be an integer from 1000 to 300000.')));
           if (definition.stopOnAttackSucceeded !== undefined && typeof definition.stopOnAttackSucceeded !== 'boolean') out.push(issue(tree, [...adversarialPath, 'stopOnAttackSucceeded'], localize('stopOnAttackSucceeded must be boolean.')));
+          if (definition.repetitions !== undefined && (!Number.isInteger(definition.repetitions) || Number(definition.repetitions) < 1 || Number(definition.repetitions) > MAX_ADVERSARIAL_REPETITIONS)) out.push(issue(tree, [...adversarialPath, 'repetitions'], localize('Adversarial repetitions must be an integer from 1 to {count}.', { count: String(MAX_ADVERSARIAL_REPETITIONS) })));
+          if (definition.failFast !== undefined && typeof definition.failFast !== 'boolean') out.push(issue(tree, [...adversarialPath, 'failFast'], localize('Adversarial failFast must be boolean.')));
           if (validateAdversarialForbid(definition.forbid, tree, [...adversarialPath, 'forbid'], out)) {
             const forbid = definition.forbid as AdversarialForbidDefinition;
             const emitted = new Set(profile.stream.mappings.map((mapping) => String(mapping.emit.type)));

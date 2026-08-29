@@ -237,6 +237,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
 
 export function EvidenceSummary({ result }: { result: AdversarialResultSummary }): React.JSX.Element {
   const detail = result.primaryFinding ?? result.primaryIssue;
+  const repetitions = result.repetitions;
   const locations = [result.primaryLocation, ...result.availableLocations].filter((location, index, all) => all.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(location)) === index);
   const visibleLocations = locations.slice(0, 3);
   const additionalLocations = locations.slice(3);
@@ -248,6 +249,12 @@ export function EvidenceSummary({ result }: { result: AdversarialResultSummary }
       <h2 id="active-evidence-heading" className="evidence-summary__heading" aria-label={t('{outcome}: {scenario}', { outcome: t(adversarialOutcomeLabel(result.outcome)), scenario: result.scenarioName })}><span className={`adversarial-outcome adversarial-outcome--${result.outcome}`}>{t(adversarialOutcomeLabel(result.outcome))}</span><span aria-hidden="true">·</span><span>{result.scenarioName}</span></h2>
       <p>{detail?.label ?? fallbackDetail}</p>
       <span>{detail?.turnId ? t('Turn {turn}: {turnId}', { turn: formatNumber((detail.turnIndex ?? 0) + 1), turnId: detail.turnId }) : t('{completed}/{planned} turns completed', { completed: formatNumber(result.completedTurns), planned: formatNumber(result.plannedTurns) })}{result.primaryFinding?.ruleId ? ` · ${result.primaryFinding.ruleId}` : ''}</span>
+      {repetitions && <span>{t('{resisted}/{requested} resisted · {completed} attempts · {stability}', {
+        resisted: formatNumber(repetitions.counts.resisted),
+        requested: formatNumber(repetitions.requestedAttempts),
+        completed: formatNumber(repetitions.completedAttempts),
+        stability: t(adversarialStabilityLabel(repetitions.stability)),
+      })}{repetitions.sampleComplete ? '' : ` · ${t('Incomplete sample')}`}</span>}
     </div>
     <div className="evidence-summary__actions" role="group" aria-label={t('Open evidence location')}>
       {visibleLocations.map((location, index) => <button className={index === 0 ? 'primary' : undefined} key={`${result.evidenceId}-${location.kind}-${index}`} type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })}>{index === 0 ? t('Open {location}', { location: t(evidenceLocationLabel(location.kind)) }) : t(evidenceLocationLabel(location.kind))}</button>)}
@@ -257,6 +264,13 @@ export function EvidenceSummary({ result }: { result: AdversarialResultSummary }
       </details>}
     </div>
   </section>;
+}
+
+function adversarialStabilityLabel(stability: NonNullable<AdversarialResultSummary['repetitions']>['stability']): string {
+  if (stability === 'stable-pass') return 'Stable resistance';
+  if (stability === 'stable-fail') return 'Stable attack success';
+  if (stability === 'unstable') return 'Unstable result';
+  return 'Inconclusive';
 }
 
 export function JsonBlock({ value }: { value: unknown }): React.JSX.Element {

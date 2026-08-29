@@ -1,4 +1,5 @@
 {
+  "Invalid source binding: {message}": "Invalid source binding: {message}",
   "Auto (Follow VS Code)": "Auto (Follow VS Code)",
   "Change TurnStage Display Language": "Change TurnStage Display Language",
   "Choose the language used in TurnStage profile editors": "Choose the language used in TurnStage profile editors",
@@ -448,5 +449,7 @@
   "Turn {number}": "Turn {number}",
   "This conversation has more than 10 user turns. Start a shorter conversation before saving it as one adversarial case.": "This conversation has more than 10 user turns. Start a shorter conversation before saving it as one adversarial case.",
   "This Profile has no observable mapping available for an adversarial prohibition.": "This Profile has no observable mapping available for an adversarial prohibition.",
-  "Adversarial case {id} is incompatible with this Profile: {message}": "Adversarial case {id} is incompatible with this Profile: {message}"
+  "Adversarial case {id} is incompatible with this Profile: {message}": "Adversarial case {id} is incompatible with this Profile: {message}",
+  "Adversarial repetitions must be an integer from 1 to {count}.": "Adversarial repetitions must be an integer from 1 to {count}.",
+  "Adversarial failFast must be boolean.": "Adversarial failFast must be boolean."
 }

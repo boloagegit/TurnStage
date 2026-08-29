@@ -34,6 +34,7 @@ export async function run(): Promise<void> {
 
   await assertProfileDiscovery(profileUri);
   await assertConversationContractReports(workspaceRoot);
+  await assertCopilotToolBoundary(workspaceRoot);
   await assertCustomEditorAndTextFallback(profileUri);
   await assertDiagnostics(profileDirectory, profileUri);
   await assertFileDiscoveryAfterCreateAndChange(profileDirectory);
@@ -129,7 +130,7 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
   }
   const json = await waitFor(async () => await exists(jsonUri) ? readText(jsonUri) : undefined, 'the trusted JSON contract report', 15_000);
   const junit = await waitFor(async () => await exists(junitUri) ? readText(junitUri) : undefined, 'the trusted JUnit contract report', 15_000);
-  const parsed = JSON.parse(json) as { format?: string; version?: number; summary?: { total?: number; passed?: number; failed?: number; attackSucceeded?: number }; scenarios?: Array<{ comparison?: { differenceCount?: number }; adversarial?: { outcome?: string; attemptedTurns?: number; completedTurns?: number; plannedTurns?: number } }> };
+  const parsed = JSON.parse(json) as { format?: string; version?: number; summary?: { total?: number; passed?: number; failed?: number; attackSucceeded?: number }; scenarios?: Array<{ comparison?: { differenceCount?: number }; adversarial?: { outcome?: string; attemptedTurns?: number; completedTurns?: number; plannedTurns?: number; repetitions?: { requestedAttempts?: number; completedAttempts?: number; sampleComplete?: boolean; stability?: string; counts?: Record<string, number> } } }> };
   assert.equal(parsed.format, 'turnstage-contract-report');
   assert.equal(parsed.version, 2);
   assert.equal(parsed.summary?.total, 2);
@@ -142,12 +143,59 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
   assert.equal(adversarial?.attemptedTurns, 2);
   assert.equal(adversarial?.completedTurns, 2);
   assert.equal(adversarial?.plannedTurns, 2);
+  assert.equal(adversarial?.repetitions?.requestedAttempts, 3);
+  assert.equal(adversarial?.repetitions?.completedAttempts, 3);
+  assert.equal(adversarial?.repetitions?.sampleComplete, true);
+  assert.equal(adversarial?.repetitions?.stability, 'stable-fail');
+  assert.equal(adversarial?.repetitions?.counts?.attackSucceeded, 3);
   assert.match(junit, /<testsuite[^>]+tests="2"[^>]+failures="1"/);
   assert.match(junit, /Adversarial attack succeeded/);
   for (const forbidden of ['Integration Profile', 'Integration contract', 'Integration adversarial', 'Integration multi-turn attack', 'Integration baseline', 'Integration candidate', 'Hello from Test Explorer', 'Establish context', 'Run the known fixed attack', 'rawEvents', 'requestPreview', 'actual', 'expected']) {
     assert.equal(json.includes(forbidden), false, `JSON contract report must exclude ${forbidden}`);
     assert.equal(junit.includes(forbidden), false, `JUnit contract report must exclude ${forbidden}`);
   }
+}
+
+async function assertCopilotToolBoundary(workspaceRoot: vscode.Uri): Promise<void> {
+  const expectedNames = ['turnstage_find_tests', 'turnstage_run_tests', 'turnstage_inspect_failure', 'turnstage_draft_regression', 'turnstage_validate_tests'];
+  const registered = new Set(vscode.lm.tools.map((tool) => tool.name));
+  for (const name of expectedNames) assert.ok(registered.has(name), `${name} should be registered with the VS Code language model API`);
+
+  const found = await invokeToolJson('turnstage_find_tests', { tag: 'multi-turn', limit: 10 });
+  assert.equal(found.ok, true, JSON.stringify(found));
+  const items = (((found.data as { tests?: { items?: Array<{ id?: string; caseId?: string; tags?: string[] }> } } | undefined)?.tests?.items) ?? []);
+  assert.equal(items.length, 1, JSON.stringify(found));
+  assert.equal(items[0]?.caseId, 'integration-multi-turn-attack');
+  assert.deepEqual(items[0]?.tags, ['integration', 'multi-turn']);
+  const impacted = await invokeToolJson('turnstage_find_tests', { changedFiles: ['src/chat/stream.ts'], limit: 10 });
+  assert.equal(impacted.ok, true, JSON.stringify(impacted));
+  const impactedItems = ((impacted.data as { tests?: { items?: Array<{ caseId?: string; selectionReason?: string }> } } | undefined)?.tests?.items) ?? [];
+  assert.equal(impactedItems.length, 1, JSON.stringify(impacted));
+  assert.equal(impactedItems[0]?.caseId, 'integration-multi-turn-attack');
+  assert.match(impactedItems[0]?.selectionReason ?? '', /src\/chat\/stream\.ts/);
+
+  const validated = await invokeToolJson('turnstage_validate_tests', { profileId: 'integration', caseId: 'integration-multi-turn-attack' });
+  assert.equal(validated.ok, true, JSON.stringify(validated));
+  assert.equal((validated.data as { valid?: boolean } | undefined)?.valid, true, JSON.stringify(validated));
+  const observed = (validated.data as { integrity?: { observed?: { profileFingerprint?: string; suiteFingerprint?: string; caseFingerprints?: Record<string, string> } } } | undefined)?.integrity?.observed;
+  assert.match(observed?.profileFingerprint ?? '', /^[a-f0-9]{64}$/);
+  assert.match(observed?.suiteFingerprint ?? '', /^[a-f0-9]{64}$/);
+  assert.equal(Object.keys(observed?.caseFingerprints ?? {}).length, 1);
+
+  if (!vscode.workspace.isTrusted) {
+    const reportDirectory = vscode.Uri.joinPath(workspaceRoot, '.turnstage', 'reports');
+    const blocked = await invokeToolJson('turnstage_run_tests', { selectors: [items[0]!.id], repetitions: 2 });
+    assert.equal(blocked.ok, false, JSON.stringify(blocked));
+    assert.equal(blocked.error?.code, 'WORKSPACE_UNTRUSTED', JSON.stringify(blocked));
+    assert.equal(await exists(reportDirectory), false, 'Restricted Copilot execution must not write reports');
+  }
+}
+
+async function invokeToolJson(name: string, input: Record<string, unknown>): Promise<{ ok?: boolean; data?: unknown; error?: { code?: string } }> {
+  const result = await vscode.lm.invokeTool(name, { input, toolInvocationToken: undefined });
+  const text = result.content.find((part): part is vscode.LanguageModelTextPart => part instanceof vscode.LanguageModelTextPart)?.value;
+  assert.ok(text, `${name} should return one JSON text part`);
+  return JSON.parse(text) as { ok?: boolean; data?: unknown; error?: { code?: string } };
 }
 
 async function assertCustomEditorAndTextFallback(profileUri: vscode.Uri): Promise<void> {

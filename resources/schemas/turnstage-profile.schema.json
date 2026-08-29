@@ -121,6 +121,7 @@
         "name": { "type": "string", "minLength": 1 },
         "description": { "type": "string" },
         "tags": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
+        "sourceBinding": { "$ref": "#/$defs/sourceBinding" },
         "controls": { "type": "object", "additionalProperties": true },
         "steps": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "$ref": "#/$defs/scenarioStep" } },
         "assertions": { "$ref": "#/$defs/assertions" },
@@ -137,6 +138,17 @@
       "properties": {
         "formats": { "type": "array", "minItems": 1, "maxItems": 3, "uniqueItems": true, "items": { "enum": ["json", "junit", "html"] } },
         "outputDirectory": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?![A-Za-z]:/)(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*\\\\)(?!.*://).+$" }
+      }
+    },
+    "sourceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "sourceGlobs": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
+        "components": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
+        "endpoints": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
+        "riskTags": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
       }
     },
     "scenarioVisual": {
@@ -236,6 +248,8 @@
         "maxTurns": { "type": "integer", "minimum": 1, "maximum": 10 },
         "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 300000 },
         "stopOnAttackSucceeded": { "type": "boolean" },
+        "repetitions": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "failFast": { "type": "boolean" },
         "forbid": { "$ref": "#/$defs/adversarialForbid" }
       }
     },

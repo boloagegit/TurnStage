@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.12.0
+
+- Added bounded repeated adversarial execution for probabilistic models. Suites can set a default repetition count and individual cases can override it from 1–50; each attempt uses a fresh conversation, results retain all four authoritative outcomes, and the aggregate reports stable resistance, stable attack success, instability, or inconclusive evidence. Fail-fast, cancellation, resume, timeout, and request-count limits remain explicit, and incomplete samples never pass.
+- Added five GitHub Copilot language-model tools for explainable impact selection, confirmed test execution, failure inspection, schema-valid regression drafting, and validation. Tools enforce Workspace Trust, cancellation, pagination, bounded output, evidence redaction, and integrity checks; drafting never writes to the workspace and network execution requires confirmation.
+- Added a headless `turnstage` CLI for the same profile and linked-suite contracts, including changed-file, profile, case, and tag selection; repetition and timeout policy overrides; JSON, JUnit, HTML, and evidence output; deterministic CI exit codes; and offline provenance verification. Request-backed, static, and disabled openings are supported with bounded responses, redirect policy, timeouts, and configured fallbacks; secrets come only from process environment variables and `.env` files are not loaded.
+- Upgraded Evidence Bundles with canonical SHA-256 provenance, sanitized environment identity, per-file digests, and tamper verification. HTML evidence now includes repetition counts and stability summaries while continuing to exclude prompts, assistant content, raw payloads, header values, URLs, and secrets.
+- Existing version-1 Profiles, scenarios, and version-1 adversarial suites remain compatible because repetitions, source bindings, and CI options are optional. This release does not add an LLM judge, external classifier, PyRIT integration, adaptive or unbounded attacks, arbitrary executable test scripts, or automatic Copilot changes.
+
 ## 0.11.0
 
 - Added bounded adversarial regression cases to existing Scenarios. Fixed single- or multi-turn scripts can prohibit visible content, URLs, calls to action, tool interactions, and exact normalized events; every run ends as Resisted, Attack succeeded, Indeterminate, or Infrastructure error, and timeout or incomplete evidence never passes.

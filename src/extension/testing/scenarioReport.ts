@@ -36,6 +36,15 @@ export interface ScenarioReport {
       timeoutMs: number;
       findings: Array<{ id: string; category: string; turnId: string; turnIndex: number; ruleId?: string; locations: string[] }>;
       issues: Array<{ id: string; kind: string; turnId?: string; turnIndex?: number; location: string }>;
+      repetitions?: {
+        requestedAttempts: number;
+        completedAttempts: number;
+        skippedAttempts: number;
+        sampleComplete: boolean;
+        outcome: string;
+        stability: string;
+        counts: Record<string, number>;
+      };
     };
     checks: Array<{ id: string; kind: string; passed: boolean; location: string }>;
     steps: Array<{ id: string; durationMs: number; passed: boolean; checks: Array<{ id: string; kind: string; passed: boolean; location: string }> }>;
@@ -71,6 +80,15 @@ export function createScenarioReport(records: readonly ScenarioExecutionRecord[]
       timeoutMs: record.result.adversarial.timeoutMs,
       findings: record.result.adversarial.findings.slice(0, 500).map((finding) => ({ id: finding.id.slice(0, 256), category: finding.category, turnId: finding.turnId.slice(0, 256), turnIndex: finding.turnIndex, ...(finding.ruleId ? { ruleId: finding.ruleId.slice(0, 256) } : {}), locations: finding.locations.map((location) => location.kind) })),
       issues: record.result.adversarial.issues.slice(0, 500).map((issue) => ({ id: issue.id.slice(0, 256), kind: issue.kind, ...(issue.turnId ? { turnId: issue.turnId.slice(0, 256) } : {}), ...(issue.turnIndex !== undefined ? { turnIndex: issue.turnIndex } : {}), location: issue.location.kind })),
+      repetitions: record.result.repetitions ? {
+        requestedAttempts: record.result.repetitions.requestedAttempts,
+        completedAttempts: record.result.repetitions.completedAttempts,
+        skippedAttempts: record.result.repetitions.skippedAttempts,
+        sampleComplete: record.result.repetitions.sampleComplete,
+        outcome: record.result.repetitions.outcome,
+        stability: record.result.repetitions.stability,
+        counts: { ...record.result.repetitions.counts },
+      } : undefined,
     } : undefined,
     checks: (record.result?.checks ?? []).map(summaryCheck),
     steps: (record.result?.steps ?? []).map((step) => ({
@@ -140,8 +158,12 @@ export function serializeScenarioHtml(records: readonly ScenarioExecutionRecord[
 export function serializeAdversarialSummaryCsv(records: readonly ScenarioExecutionRecord[]): string {
   const report = createScenarioReport(records);
   return csv([
-    ['profile_id', 'case_id', 'tags', 'outcome', 'duration_ms', 'attempted_turns', 'completed_turns', 'planned_turns', 'finding_count', 'issue_count'],
-    ...report.scenarios.filter((scenario) => scenario.adversarial).map((scenario) => [scenario.profileId, scenario.scenarioId, JSON.stringify(scenario.tags), scenario.adversarial!.outcome, scenario.durationMs, scenario.adversarial!.attemptedTurns, scenario.adversarial!.completedTurns, scenario.adversarial!.plannedTurns, scenario.adversarial!.findings.length, scenario.adversarial!.issues.length]),
+    ['profile_id', 'case_id', 'tags', 'outcome', 'duration_ms', 'attempted_turns', 'completed_turns', 'planned_turns', 'finding_count', 'issue_count', 'requested_attempts', 'completed_attempts', 'skipped_attempts', 'sample_complete', 'stability', 'resisted_count', 'attack_succeeded_count', 'indeterminate_count', 'infrastructure_error_count'],
+    ...report.scenarios.filter((scenario) => scenario.adversarial).map((scenario) => {
+      const repetitions = scenario.adversarial!.repetitions;
+      const counts = repetitions?.counts ?? {};
+      return [scenario.profileId, scenario.scenarioId, JSON.stringify(scenario.tags), scenario.adversarial!.outcome, scenario.durationMs, scenario.adversarial!.attemptedTurns, scenario.adversarial!.completedTurns, scenario.adversarial!.plannedTurns, scenario.adversarial!.findings.length, scenario.adversarial!.issues.length, repetitions?.requestedAttempts ?? 1, repetitions?.completedAttempts ?? 1, repetitions?.skippedAttempts ?? 0, repetitions?.sampleComplete ?? true, repetitions?.stability ?? (scenario.adversarial!.outcome === 'resisted' ? 'stable-pass' : 'inconclusive'), counts.resisted ?? (scenario.adversarial!.outcome === 'resisted' ? 1 : 0), counts.attackSucceeded ?? (scenario.adversarial!.outcome === 'attackSucceeded' ? 1 : 0), counts.indeterminate ?? (scenario.adversarial!.outcome === 'indeterminate' ? 1 : 0), counts.infrastructureError ?? (scenario.adversarial!.outcome === 'infrastructureError' ? 1 : 0)];
+    }),
   ]);
 }
 

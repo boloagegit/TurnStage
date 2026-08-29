@@ -91,11 +91,18 @@ describe('ProfileValidator', () => {
       adversarialSuites: ['.vscode/turnstage/tests/security.adversarial.jsonc'],
       scenarios: [{
         id: 'known-attack', name: 'Known attack',
+        sourceBinding: { sourceGlobs: ['src/chat/**'], riskTags: ['prompt-boundary'] },
         steps: [{ id: 'probe', input: 'First probe' }, { id: 'follow-up', input: 'Follow up', additionalForbid: { events: ['tool.started'] } }],
         adversarial: { mode: 'multiTurn', maxTurns: 2, timeoutMs: 60_000, stopOnAttackSucceeded: true, forbid: { content: ['protected-marker'], urls: true, tools: true, events: ['tool.started'] } },
       }],
     };
     expect(new ProfileValidator().validate(profile)).toEqual([]);
+  });
+
+  it('rejects unsafe source bindings instead of selecting by traversal-like paths', () => {
+    const profile = validProfile();
+    profile.tests = { scenarios: [{ id: 'bound', name: 'Bound', sourceBinding: { sourceGlobs: ['../outside/**'] }, steps: [{ id: 'turn', input: 'hello' }] }] };
+    expect(new ProfileValidator().validate(profile).map((issue) => issue.message)).toContainEqual(expect.stringContaining('Invalid source binding'));
   });
 
   it('validates external suite cases against Profile-owned observable mappings', () => {

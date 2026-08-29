@@ -207,8 +207,15 @@ try {
   assert.equal(await page.locator('.scenario-step').count(), 3, 'Scenario configuration must keep ordinary and multi-turn steps compact');
   assert.equal(await page.locator('.assertion-row').count(), 3, 'Scenario configuration must render step and final assertions');
   assert.equal(await page.locator('.adversarial-case-editor').count(), 1, 'Adversarial configuration must expose its bounded case editor');
+  assert.equal(await page.getByRole('spinbutton', { name: 'Repetitions' }).inputValue(), '5', 'Adversarial configuration must expose the case repetition count');
+  assert.equal(await page.getByRole('checkbox', { name: 'Stop remaining turns after an attack succeeds' }).isChecked(), true, 'Turn-level stopping must remain distinct from repetition fail-fast');
+  assert.equal(await page.getByRole('checkbox', { name: 'Stop remaining repetitions after an attack succeeds (incomplete sample)' }).isChecked(), false, 'Repetition fail-fast must remain explicit and off unless configured');
+  await page.getByRole('spinbutton', { name: 'Repetitions' }).scrollIntoViewIfNeeded();
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-repetitions-dark.png') });
   assert.equal(await page.getByRole('heading', { name: 'Latest adversarial results' }).count(), 1, 'Scenario configuration must expose the compact latest-result list');
   assert.equal(await page.getByText('Attack succeeded', { exact: true }).count(), 1, 'Latest results must distinguish an attack from resistance');
+  assert.equal(await page.getByText('3/5 resisted · 5 attempts', { exact: true }).count(), 1, 'Latest results must expose the repeated-run sample at a glance');
+  assert.equal(await page.getByText('Unstable result', { exact: true }).count(), 1, 'Latest results must expose whether repeated outcomes are stable');
   const adversarialResults = page.locator('.adversarial-result-list');
   assert.equal(await adversarialResults.getByRole('button', { name: 'Chat' }).count(), 1, 'Latest results must link to Chat evidence when available');
   assert.equal(await adversarialResults.getByRole('button', { name: 'Events' }).count(), 1, 'Latest results must link to Events evidence when available');
@@ -223,6 +230,7 @@ try {
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-results-dark.png') });
   await adversarialResults.getByRole('button', { name: 'Chat' }).click();
   await page.getByRole('heading', { name: 'Attack succeeded: Known two-turn probe' }).waitFor();
+  assert.equal(await page.getByText('3/5 resisted · 5 attempts · Unstable result', { exact: true }).count(), 1, 'Evidence summary must preserve the repeated-run stability context');
   assert.equal(await page.locator('.profile-identity').count(), 0, 'Evidence arrival must not restore the duplicated Profile row');
   assert.equal(await page.getByRole('button', { name: 'Open Chat' }).count(), 1, 'Evidence summary must promote the most relevant location');
   await page.locator('.operation-status').waitFor({ state: 'hidden' });

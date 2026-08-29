@@ -86,12 +86,16 @@ describe('ScenarioReportService', () => {
     const directory = await service.exportEvidenceBundle();
 
     expect(directory?.path).toMatch(/^\/chosen\/turnstage-evidence-/);
-    expect(mock.writes.map((entry) => entry.path.slice(entry.path.lastIndexOf('/') + 1)).sort()).toEqual(['adversarial-findings.csv', 'adversarial-summary.csv', 'adversarial-turns.csv', 'events.csv', 'index.html', 'junit.xml', 'manifest.json', 'network.csv', 'report.json']);
+    expect(mock.writes.map((entry) => entry.path.slice(entry.path.lastIndexOf('/') + 1)).sort()).toEqual(['adversarial-findings.csv', 'adversarial-summary.csv', 'adversarial-turns.csv', 'events.csv', 'index.html', 'junit.xml', 'manifest.json', 'network.csv', 'provenance.json', 'report.json']);
     const html = mock.writes.find((entry) => entry.path.endsWith('/index.html'))?.text ?? '';
     const manifest = mock.writes.find((entry) => entry.path.endsWith('/manifest.json'))?.text ?? '';
     expect(html).toContain('<!doctype html>');
     expect(html).not.toContain('Private Name');
     expect(manifest).toContain('"visualChatContent": false');
-    expect(manifest).toContain('"version": 2');
+    expect(manifest).toContain('"version": 3');
+    const provenance = JSON.parse(mock.writes.find((entry) => entry.path.endsWith('/provenance.json'))?.text ?? '{}') as { format?: string; files?: unknown[]; manifestDigest?: string };
+    expect(provenance).toMatchObject({ format: 'turnstage-provenance-manifest' });
+    expect(provenance.files).toHaveLength(9);
+    expect(provenance.manifestDigest).toMatch(/^[a-f0-9]{64}$/);
   });
 });

@@ -1,4 +1,5 @@
 {
+  "Invalid source binding: {message}": "來源綁定無效：{message}",
   "Auto (Follow VS Code)": "自動（跟隨 VS Code）",
   "Change TurnStage Display Language": "變更 TurnStage 顯示語言",
   "Choose the language used in TurnStage profile editors": "選擇 TurnStage Profile 編輯器使用的語言",
@@ -448,5 +449,7 @@
   "Turn {number}": "回合 {number}",
   "This conversation has more than 10 user turns. Start a shorter conversation before saving it as one adversarial case.": "此對話超過 10 個使用者回合。請先建立較短的對話，再儲存為單一對抗式案例。",
   "This Profile has no observable mapping available for an adversarial prohibition.": "此 Profile 沒有可供對抗式禁止規則使用的可觀察 mapping。",
-  "Adversarial case {id} is incompatible with this Profile: {message}": "對抗式案例 {id} 與此 Profile 不相容：{message}"
+  "Adversarial case {id} is incompatible with this Profile: {message}": "對抗式案例 {id} 與此 Profile 不相容：{message}",
+  "Adversarial repetitions must be an integer from 1 to {count}.": "對抗式 repetitions 必須是 1 到 {count} 的整數。",
+  "Adversarial failFast must be boolean.": "對抗式 failFast 必須是布林值。"
 }

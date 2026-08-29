@@ -54,6 +54,17 @@ renderer and inspector.
   Indeterminate, or Infrastructure error. Bulk JSONC suites and one-row-per-
   turn CSV import/export support large case sets; timeout never counts as a
   pass, and results link back to Chat, Network, and Events evidence.
+- Per-case and suite-default repetitions run in fresh conversations and expose
+  stable resistance, stable attack success, unstable, or inconclusive sample
+  status without converting timeout or incomplete samples into a pass.
+- Five bounded VS Code language-model tools let GitHub Copilot find, validate,
+  run, and inspect TurnStage tests or draft a regression without writing files.
+  Network runs require VS Code confirmation and Workspace Trust; tool output is
+  paginated, redacted, and protected by optional integrity fingerprints.
+- An executable `turnstage` CLI runs the same fixed Scenario contracts in CI,
+  supports changed-file selection through explicit `sourceBinding` metadata,
+  emits deterministic exit codes and sanitized JSON/JUnit/HTML/evidence output,
+  and verifies SHA-256 provenance manifests from Evidence Bundles.
 
 The implementation is intentionally explicit about limitations in the bundled
 `docs/turnstage-architecture.md`, `docs/profile-schema.md`,
@@ -72,7 +83,7 @@ npm run compile
 ```
 
 The extension manifest targets VS Code `^1.106.0`. The Extension Host bundle is
-built for Node 20 and the Webview bundle for ES2022; use a Node runtime
+built for Node 20, the headless CLI targets Node 20, and the Webview bundle for ES2022; use a Node runtime
 compatible with the local esbuild/VS Code toolchain.
 
 For local development, open this folder in VS Code and run the extension from
@@ -84,6 +95,15 @@ npm run package
 
 That command compiles and invokes `vsce package --no-dependencies`, producing
 a VSIX in the project root (VSIX files are ignored by Git).
+
+After compilation, the repository-local CLI can run linked profile tests against
+a configured backend (secrets are resolved only from process environment
+variables; `.env` files are never loaded):
+
+```sh
+./dist/cli.js run --workspace . --changed-file src/chat/client.ts --format junit
+./dist/cli.js verify path/to/evidence/provenance.json
+```
 
 TurnStage currently targets desktop and remote VS Code Extension Hosts. It
 does not declare a `browser` entry and therefore does not claim support for

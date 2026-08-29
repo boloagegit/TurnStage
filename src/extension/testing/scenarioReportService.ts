@@ -4,6 +4,7 @@ import { localize } from '../l10n';
 import { isSafeReportDirectory } from './scenarioConfig';
 import { createScenarioReport, serializeAdversarialEventsCsv, serializeAdversarialFindingsCsv, serializeAdversarialNetworkCsv, serializeAdversarialSummaryCsv, serializeAdversarialTurnsCsv, serializeScenarioHtml, serializeScenarioJson, serializeScenarioJUnit, type ScenarioExecutionRecord } from './scenarioReport';
 import type { VisualRegressionService } from './visualRegression';
+import { createProvenanceManifest, type ProvenanceFileInput } from './provenance';
 
 interface ConfiguredReportGroup {
   profileId: string;
@@ -15,7 +16,7 @@ interface ConfiguredReportGroup {
 export class ScenarioReportService {
   private records: ScenarioExecutionRecord[] = [];
 
-  constructor(private readonly output: vscode.OutputChannel, private readonly visualRegression?: VisualRegressionService) {}
+  constructor(private readonly output: vscode.OutputChannel, private readonly visualRegression?: VisualRegressionService, private readonly runnerVersion = 'unknown') {}
 
   record(records: readonly ScenarioExecutionRecord[]): void { this.records = [...records]; }
   hasRecords(): boolean { return this.records.length > 0; }
@@ -52,7 +53,7 @@ export class ScenarioReportService {
     const generatedAt = new Date().toISOString();
     const fileNames = ['index.html', 'report.json', 'junit.xml', 'adversarial-summary.csv', 'adversarial-turns.csv', 'adversarial-findings.csv', 'network.csv', 'events.csv'];
     if (includeVisual && visual) { fileNames.push('visual-baseline.png'); if (visual.diffUri) fileNames.push('visual-diff.png'); }
-    const files: Array<[string, string]> = [
+    const files: Array<[string, string | Uint8Array]> = [
       ['index.html', serializeScenarioHtml(this.records, generatedAt)],
       ['report.json', serializeScenarioJson(this.records, generatedAt)],
       ['junit.xml', serializeScenarioJUnit(this.records, generatedAt)],
@@ -61,13 +62,28 @@ export class ScenarioReportService {
       ['adversarial-findings.csv', serializeAdversarialFindingsCsv(this.records)],
       ['network.csv', serializeAdversarialNetworkCsv(this.records)],
       ['events.csv', serializeAdversarialEventsCsv(this.records)],
-      ['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 2, generatedAt, files: [...fileNames, 'manifest.json'], privacy: { rawEvents: false, payloads: false, urls: false, headers: false, messageContent: false, secrets: false, visualChatContent: includeVisual }, summary: createScenarioReport(this.records, generatedAt).summary }, null, 2)}\n`],
     ];
-    for (const [name, contents] of files) await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(directory, name), new TextEncoder().encode(contents));
     if (includeVisual && visual) {
-      await vscode.workspace.fs.copy(visual.baselineUri, vscode.Uri.joinPath(directory, 'visual-baseline.png'), { overwrite: false });
-      if (visual.diffUri) await vscode.workspace.fs.copy(visual.diffUri, vscode.Uri.joinPath(directory, 'visual-diff.png'), { overwrite: false });
+      files.push(['visual-baseline.png', await vscode.workspace.fs.readFile(visual.baselineUri)]);
+      if (visual.diffUri) files.push(['visual-diff.png', await vscode.workspace.fs.readFile(visual.diffUri)]);
     }
+    const report = createScenarioReport(this.records, generatedAt);
+    files.push(['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 3, generatedAt, files: [...fileNames, 'manifest.json', 'provenance.json'], privacy: { rawEvents: false, payloads: false, urls: false, headers: false, messageContent: false, secrets: false, visualChatContent: includeVisual }, summary: report.summary }, null, 2)}\n`]);
+    const provenanceFiles: ProvenanceFileInput[] = files.map(([path, contents]) => ({ path, contents }));
+    const provenance = createProvenanceManifest({
+      runId: crypto.randomUUID(),
+      generatedAt,
+      runnerKind: 'extension',
+      runnerVersion: this.runnerVersion,
+      extensionVersion: this.runnerVersion,
+      selectedTestIds: this.records.map((record) => `${record.profileId}/${record.scenarioId}`),
+      policy: { evidenceBundleVersion: 3, visualChatContent: includeVisual },
+      result: report,
+      evidence: { summary: report.summary },
+      evidenceFiles: provenanceFiles,
+    });
+    files.push(['provenance.json', `${JSON.stringify(provenance, null, 2)}\n`]);
+    for (const [name, contents] of files) await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(directory, name), typeof contents === 'string' ? new TextEncoder().encode(contents) : contents);
     this.output.appendLine(`[info] [tests] ${localize('Exported sanitized evidence bundle to {path}.', { path: vscode.workspace.asRelativePath(directory) })}`);
     return directory;
   }

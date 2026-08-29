@@ -628,11 +628,13 @@ describe('Webview DOM behavior', () => {
       attemptedTurns: 2, completedTurns: 2, plannedTurns: 3, findingCount: 1, issueCount: 0, evidenceId: 'evidence-1',
       primaryFinding: { category: 'tool', turnId: 'turn-2', turnIndex: 1, ruleId: 'no-tools', label: 'Tool interaction was observed.' },
       primaryLocation: { kind: 'normalizedEvent', sequence: 4 }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'network', networkId: 'network-1' }, { kind: 'rawEvent', sequence: 4 }],
+      repetitions: { requestedAttempts: 5, completedAttempts: 3, skippedAttempts: 2, sampleComplete: false, stability: 'inconclusive', counts: { resisted: 2, attackSucceeded: 1, indeterminate: 0, infrastructureError: 0 } },
     }} />);
     expect(screen.getByRole('heading', { name: 'Attack succeeded: Known attack' })).toBeTruthy();
     expect(screen.getByText('Attack succeeded')).toBeTruthy();
     expect(screen.getByText('Tool interaction was observed.')).toBeTruthy();
     expect(screen.getByText('Turn 2: turn-2 · no-tools')).toBeTruthy();
+    expect(screen.getByText('2/5 resisted · 3 attempts · Inconclusive · Incomplete sample')).toBeTruthy();
     expect(screen.getByRole('group', { name: 'Open evidence location' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open Normalized Events' }).classList.contains('primary')).toBe(true);
     expect(screen.getByRole('group', { name: 'Open evidence location' }).querySelector('details')).toBeTruthy();

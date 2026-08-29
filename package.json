@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -21,6 +21,9 @@
     "testing"
   ],
   "main": "dist/extension.js",
+  "bin": {
+    "turnstage": "dist/cli.js"
+  },
   "l10n": "./l10n",
   "extensionKind": [
     "workspace",
@@ -620,6 +623,420 @@
         "url": "./resources/schemas/turnstage-environment.schema.json"
       }
     ],
+    "languageModelTools": [
+      {
+        "name": "turnstage_find_tests",
+        "toolReferenceName": "turnstage_find_tests",
+        "displayName": "Find TurnStage tests",
+        "userDescription": "Find bounded TurnStage behavior tests and their estimated work.",
+        "modelDescription": "Find matching TurnStage profiles, suites, cases, or steps. Use this before running tests. Results are bounded and paginated; do not infer that an empty page means no tests without checking the total and nextCursor.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(search)",
+        "tags": [
+          "turnstage",
+          "testing",
+          "read-only"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string",
+              "maxLength": 256,
+              "description": "Optional case-insensitive label or id search."
+            },
+            "profileId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "suiteId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "caseId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "tag": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "changedFiles": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1000,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "description": "Workspace-relative changed paths used with explicit sourceBinding values."
+            },
+            "includeUnbound": {
+              "type": "boolean",
+              "description": "Explicitly include unbound cases when changedFiles are supplied; defaults to false."
+            },
+            "includeSteps": {
+              "type": "boolean",
+              "description": "Include leaf step items; defaults to false."
+            },
+            "cursor": {
+              "type": "string",
+              "pattern": "^[0-9]{1,6}$",
+              "maxLength": 6
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        }
+      },
+      {
+        "name": "turnstage_run_tests",
+        "toolReferenceName": "turnstage_run_tests",
+        "displayName": "Run TurnStage tests",
+        "userDescription": "Run selected TurnStage behavior tests after showing a network preflight.",
+        "modelDescription": "Run TurnStage tests through the shared execution service. This may issue network requests and resolve configured credentials, so always respect the confirmation and preflight. Restricted Mode blocks network execution. Results contain only bounded summaries and a cursor, never full transcripts.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(play)",
+        "tags": [
+          "turnstage",
+          "testing",
+          "network"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "selectors": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "description": "Optional explicit test ids. An empty array is not meaningful."
+            },
+            "repetitions": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "description": "Optional repetition override, capped by the adversarial suite safety limit."
+            },
+            "failFast": {
+              "type": "boolean"
+            },
+            "expectedIntegrity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "profileFingerprint"
+              ],
+              "properties": {
+                "profileFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "suiteFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "caseFingerprints": {
+                  "type": "object",
+                  "maxProperties": 100,
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            },
+            "cursor": {
+              "type": "string",
+              "pattern": "^[0-9]{1,6}$",
+              "maxLength": 6
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        }
+      },
+      {
+        "name": "turnstage_inspect_failure",
+        "toolReferenceName": "turnstage_inspect_failure",
+        "displayName": "Inspect TurnStage failure",
+        "userDescription": "Inspect one bounded, redacted TurnStage evidence capsule.",
+        "modelDescription": "Inspect a TurnStage failure by run id and optionally failure id. Returns EvidenceCapsuleV1 with stable Chat, Network, and Event references, outcome, completeness, fingerprints, and disclosure metadata. Raw prompts, headers, bodies, and secrets are omitted.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(warning)",
+        "tags": [
+          "turnstage",
+          "testing",
+          "evidence",
+          "read-only"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "runId"
+          ],
+          "properties": {
+            "runId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "failureId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "includeEvents": {
+              "type": "boolean",
+              "description": "Request event references only; raw event payloads are never returned."
+            },
+            "cursor": {
+              "type": "string",
+              "pattern": "^[0-9]{1,6}$",
+              "maxLength": 6
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        }
+      },
+      {
+        "name": "turnstage_draft_regression",
+        "toolReferenceName": "turnstage_draft_regression",
+        "displayName": "Draft TurnStage regression",
+        "userDescription": "Validate a proposed regression draft without changing workspace files.",
+        "modelDescription": "Validate and return a declarative TurnStage scenario or adversarial regression draft associated with a prior failure. This tool is draft-only: it never writes or edits workspace files. The draft must use bounded ids, fixed turns, safe assertions, and (for adversarial drafts) at least one prohibited effect.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(diff)",
+        "tags": [
+          "turnstage",
+          "testing",
+          "draft",
+          "read-only"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "runId",
+            "failureId",
+            "draft"
+          ],
+          "properties": {
+            "runId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "failureId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "sourceEvidenceId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "draft": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "steps"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]*$",
+                  "maxLength": 512
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "tags": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "steps": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "input"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9-]*$",
+                        "maxLength": 512
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "input": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      },
+                      "additionalForbid": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                },
+                "assertions": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "adversarial": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "forbid"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "singleTurn",
+                        "multiTurn"
+                      ]
+                    },
+                    "maxTurns": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10
+                    },
+                    "timeoutMs": {
+                      "type": "integer",
+                      "minimum": 1000,
+                      "maximum": 300000
+                    },
+                    "stopOnAttackSucceeded": {
+                      "type": "boolean"
+                    },
+                    "repetitions": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "failFast": {
+                      "type": "boolean"
+                    },
+                    "forbid": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "turnstage_validate_tests",
+        "toolReferenceName": "turnstage_validate_tests",
+        "displayName": "Validate TurnStage tests",
+        "userDescription": "Validate test structure and report test-integrity status.",
+        "modelDescription": "Validate TurnStage profiles, suites, and cases without issuing network requests. Returns bounded diagnostics and fail-closed integrity status when an expected profile or suite fingerprint is supplied.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(check)",
+        "tags": [
+          "turnstage",
+          "testing",
+          "validation",
+          "read-only"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "profileId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "suiteId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "caseId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "expectedIntegrity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "profileFingerprint"
+              ],
+              "properties": {
+                "profileFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "suiteFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "caseFingerprints": {
+                  "type": "object",
+                  "maxProperties": 100,
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            },
+            "cursor": {
+              "type": "string",
+              "pattern": "^[0-9]{1,6}$",
+              "maxLength": 6
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        }
+      }
+    ],
     "configuration": {
       "title": "%configuration.title%",
       "properties": {
@@ -726,7 +1143,7 @@
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
     "test:sse": "vitest run --config vitest.config.ts test/sseTransport.test.ts",
-    "test:integration": "node test/integration/runTest.mjs",
+    "test:integration": "npm run compile && node test/integration/runTest.mjs",
     "test:visual": "npm run compile && node test/visual/profileWorkspace.visual.mjs",
     "benchmark": "vitest bench --config test/benchmark.vitest.config.ts --run",
     "mock-server": "node examples/mock-server/server.mjs",

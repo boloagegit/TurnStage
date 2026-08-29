@@ -25,14 +25,16 @@ import { evaluatePerformance } from './performanceEvaluator';
 import type { ScenarioExecutionRecord } from './scenarioReport';
 import { ScenarioReportService, type ConfiguredReportGroup } from './scenarioReportService';
 import { runScenario } from './scenarioRunner';
+import { runScenarioGroup } from './scenarioExecution';
 import { loadAdversarialSuite } from './adversarialSuiteRepository';
+import { ScenarioRunGroupRepository } from './scenarioRunGroupRepository';
 import type { VisualRegressionService } from './visualRegression';
 
 type TestData =
-  | { type: 'profile'; uri: vscode.Uri }
-  | { type: 'suite'; uri: vscode.Uri; suitePath: string }
-  | { type: 'scenario'; uri: vscode.Uri; scenarioId: string; suitePath?: string }
-  | { type: 'step'; uri: vscode.Uri; scenarioId: string; stepIndex: number; suitePath?: string };
+  | { type: 'profile'; uri: vscode.Uri; profileId: string }
+  | { type: 'suite'; uri: vscode.Uri; profileId: string; suiteId?: string; suitePath: string }
+  | { type: 'scenario'; uri: vscode.Uri; profileId: string; suiteId?: string; scenarioId: string; suitePath?: string; tags?: string[]; sourceBinding?: ScenarioDefinition['sourceBinding']; repetitions?: number; plannedTurns: number }
+  | { type: 'step'; uri: vscode.Uri; profileId: string; suiteId?: string; scenarioId: string; stepIndex: number; suitePath?: string };
 
 export interface TestEvidenceReference {
   evidence: ScenarioRunEvidence;
@@ -55,6 +57,53 @@ interface CompletedScenario {
   evidenceId?: string;
 }
 
+export interface ScenarioRunSelection {
+  itemIds?: readonly string[];
+  repetitions?: number;
+  failFast?: boolean;
+}
+
+export interface ScenarioRunPreview {
+  selectedCount: number;
+  plannedAttempts: number;
+  plannedTurns: number;
+  maximumRequests: number;
+  maximumDurationMs: number;
+  maximumRepetitions: number;
+  environments: string[];
+  warnings: string[];
+}
+
+export interface ScenarioControllerRunSummary {
+  profileId: string;
+  scenarioId: string;
+  scenarioName: string;
+  outcome: AdversarialResultSummary['outcome'] | 'passed' | 'failed' | 'error';
+  stability?: NonNullable<AdversarialResultSummary['repetitions']>['stability'];
+  counts?: NonNullable<AdversarialResultSummary['repetitions']>['counts'];
+  sampleComplete?: boolean;
+  evidenceId?: string;
+}
+
+export interface ScenarioControllerTestDescriptor {
+  id: string;
+  label: string;
+  kind: 'profile' | 'suite' | 'case' | 'step';
+  profileId: string;
+  suiteId?: string;
+  caseId?: string;
+  tags?: string[];
+  plannedTurns?: number;
+  repetitions?: number;
+  sourceBinding?: ScenarioDefinition['sourceBinding'];
+}
+
+export interface ScenarioIntegrityMaterial {
+  profile: unknown;
+  suite?: unknown;
+  cases: Record<string, unknown>;
+}
+
 const MAX_EVIDENCE_ENTRIES = 100;
 const MAX_MESSAGE_EVIDENCE_ENTRIES = 500;
 const MESSAGE_EVIDENCE_PREFIX = 'turnstage.evidence.';
@@ -68,9 +117,11 @@ export class ScenarioTestController implements vscode.Disposable {
   private readonly messageEvidenceByContext = new Map<string, { evidenceId: string; location: ScenarioEvidenceLocation }>();
   private readonly evidence = new Map<string, TestEvidenceReference>();
   private readonly reports: ScenarioReportService;
+  private readonly runGroups: ScenarioRunGroupRepository;
   private readonly resultsEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; results: AdversarialResultSummary[] }>();
   readonly onDidChangeResults = this.resultsEmitter.event;
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
+  private latestRunSummaries: ScenarioControllerRunSummary[] = [];
   private refreshing?: Promise<void>;
 
   constructor(
@@ -80,7 +131,8 @@ export class ScenarioTestController implements vscode.Disposable {
     private readonly output: vscode.OutputChannel,
     visualRegression?: VisualRegressionService,
   ) {
-    this.reports = new ScenarioReportService(output, visualRegression);
+    this.reports = new ScenarioReportService(output, visualRegression, String(context.extension.packageJSON.version ?? 'unknown'));
+    this.runGroups = new ScenarioRunGroupRepository(context);
     this.controller = vscode.tests.createTestController('turnstage.contracts', localize('TurnStage Conversation Contracts'));
     this.controller.resolveHandler = async () => this.refresh();
     this.controller.createRunProfile(localize('Run Conversation Contracts'), vscode.TestRunProfileKind.Run, async (request, token) => this.run(request, token), true);
@@ -106,10 +158,107 @@ export class ScenarioTestController implements vscode.Disposable {
   exportLastReport(format: ScenarioReportFormat): Promise<vscode.Uri | undefined> { return this.reports.exportLast(format); }
   exportEvidenceBundle(): Promise<vscode.Uri | undefined> { return this.reports.exportEvidenceBundle(); }
   getLatestResults(uri: vscode.Uri): AdversarialResultSummary[] { return this.latestResults.get(uri.toString()) ?? []; }
+  getLatestRunSummaries(): readonly ScenarioControllerRunSummary[] { return this.latestRunSummaries.map((summary) => ({ ...summary, counts: summary.counts ? { ...summary.counts } : undefined })); }
   async runAll(): Promise<void> {
     const cancellation = new vscode.CancellationTokenSource();
     try { await this.run(new vscode.TestRunRequest(), cancellation.token); }
     finally { cancellation.dispose(); }
+  }
+
+  async runSelection(selection: ScenarioRunSelection, token: vscode.CancellationToken): Promise<void> {
+    await this.refresh();
+    const include = selection.itemIds?.length ? this.findItems(selection.itemIds) : undefined;
+    if (selection.itemIds?.length && include?.length !== new Set(selection.itemIds).size) throw new Error('One or more selected TurnStage test ids were not found.');
+    await this.run(new vscode.TestRunRequest(include), token, selection);
+  }
+
+  async previewSelection(selection: ScenarioRunSelection): Promise<ScenarioRunPreview> {
+    await this.refresh();
+    const include = selection.itemIds?.length ? this.findItems(selection.itemIds) : undefined;
+    if (selection.itemIds?.length && include?.length !== new Set(selection.itemIds).size) throw new Error('One or more selected TurnStage test ids were not found.');
+    const jobs = this.collectJobs(new vscode.TestRunRequest(include));
+    let plannedAttempts = 0;
+    let plannedTurns = 0;
+    let maximumRequests = 0;
+    let maximumDurationMs = 0;
+    let maximumRepetitions = 1;
+    const environments = new Set<string>();
+    const warnings: string[] = [];
+    for (const job of jobs) {
+      const loaded = await this.loadScenario(job.uri, job.scenarioId, job.suitePath);
+      const base = job.stepIndex === undefined ? loaded.scenario : { ...loaded.scenario, steps: loaded.scenario.steps.slice(0, job.stepIndex + 1), assertions: [] };
+      const scenario = withRunSelection(base, selection);
+      const repetitions = scenario.adversarial?.repetitions ?? 1;
+      const turns = scenario.steps.length;
+      const openingRequests = loaded.profile.opening?.mode === 'request' ? 1 : 0;
+      plannedAttempts += repetitions;
+      plannedTurns += turns * repetitions;
+      maximumRequests += (turns + openingRequests) * repetitions;
+      maximumDurationMs += (scenario.adversarial?.timeoutMs ?? loaded.profile.conversation.send.timeoutMs ?? 60_000) * repetitions;
+      maximumRepetitions = Math.max(maximumRepetitions, repetitions);
+      environments.add(loaded.environment.id);
+    }
+    if (new Set(jobs.map((job) => job.scenarioId)).size !== jobs.length) warnings.push('The selection contains step-level runs; repeated scenario ids are counted separately.');
+    if (maximumRepetitions > 1 && jobs.some((job) => job.stepIndex !== undefined)) warnings.push('A repetition override also repeats selected partial scenarios.');
+    return { selectedCount: jobs.length, plannedAttempts, plannedTurns, maximumRequests, maximumDurationMs, maximumRepetitions, environments: [...environments].sort(), warnings };
+  }
+
+  async describeTests(includeSteps = false): Promise<ScenarioControllerTestDescriptor[]> {
+    await this.refresh();
+    const result: ScenarioControllerTestDescriptor[] = [];
+    const visit = (item: vscode.TestItem): void => {
+      const data = this.metadata.get(item);
+      if (data && (includeSteps || data.type !== 'step')) {
+        result.push({
+          id: item.id,
+          label: String(item.label),
+          kind: data.type === 'scenario' ? 'case' : data.type,
+          profileId: data.profileId,
+          suiteId: 'suiteId' in data ? data.suiteId : undefined,
+          caseId: data.type === 'scenario' || data.type === 'step' ? data.scenarioId : undefined,
+          tags: data.type === 'scenario' ? structuredClone(data.tags) : undefined,
+          plannedTurns: data.type === 'scenario' ? data.plannedTurns : undefined,
+          repetitions: data.type === 'scenario' ? data.repetitions : undefined,
+          sourceBinding: data.type === 'scenario' ? structuredClone(data.sourceBinding) : undefined,
+        });
+      }
+      item.children.forEach(visit);
+    };
+    this.controller.items.forEach(visit);
+    return result;
+  }
+
+  async getIntegrityMaterial(selection: ScenarioRunSelection & { profileId?: string; suiteId?: string; caseId?: string } = {}): Promise<ScenarioIntegrityMaterial> {
+    await this.refresh();
+    const descriptors = (await this.describeTests(false)).filter((item) => item.kind === 'case'
+      && (!selection.profileId || item.profileId === selection.profileId)
+      && (!selection.suiteId || item.suiteId === selection.suiteId)
+      && (!selection.caseId || item.caseId === selection.caseId));
+    const include = selection.itemIds?.length ? this.findItems(selection.itemIds) : this.findItems(descriptors.map((item) => item.id));
+    if (selection.itemIds?.length && include.length !== new Set(selection.itemIds).size) throw new Error('One or more selected TurnStage test ids were not found.');
+    const jobs = this.collectJobs(new vscode.TestRunRequest(include));
+    const profiles = new Map<string, TurnStageProfile>();
+    const suites = new Map<string, { id: string; profileId: string; cases: ScenarioDefinition[] }>();
+    const cases: Record<string, unknown> = {};
+    for (const job of jobs) {
+      const loaded = await this.loadScenario(job.uri, job.scenarioId, job.suitePath);
+      profiles.set(loaded.profile.id, structuredClone(loaded.profile));
+      const data = this.metadata.get(job.item);
+      const suiteId = data && 'suiteId' in data ? data.suiteId : undefined;
+      const caseKey = `${loaded.profile.id}/${suiteId ?? 'inline'}/${loaded.scenario.id}`;
+      cases[caseKey] = structuredClone(loaded.scenario);
+      if (suiteId) {
+        const suiteKey = `${loaded.profile.id}/${suiteId}`;
+        const group = suites.get(suiteKey) ?? { id: suiteId, profileId: loaded.profile.id, cases: [] };
+        if (!group.cases.some((item) => item.id === loaded.scenario.id)) group.cases.push(structuredClone(loaded.scenario));
+        suites.set(suiteKey, group);
+      }
+    }
+    const profile = [...profiles.values()].sort((a, b) => a.id.localeCompare(b.id));
+    const suite = [...suites.values()]
+      .map((item) => ({ ...item, cases: [...item.cases].sort((a, b) => a.id.localeCompare(b.id)) }))
+      .sort((a, b) => `${a.profileId}/${a.id}`.localeCompare(`${b.profileId}/${b.id}`));
+    return { profile, ...(suite.length ? { suite } : {}), cases: Object.fromEntries(Object.entries(cases).sort(([a], [b]) => a.localeCompare(b))) };
   }
 
   getMessageEvidence(argument: unknown): (TestEvidenceReference & { evidenceId: string }) | undefined {
@@ -132,17 +281,17 @@ export class ScenarioTestController implements vscode.Disposable {
       const parsed = this.codec.parse(document.getText());
       const profileItem = this.controller.createTestItem(entry.uri.toString(), entry.profile.name, entry.uri);
       profileItem.description = entry.scope === 'workspace' ? localize('Workspace profile') : localize('User profile');
-      this.metadata.set(profileItem, { type: 'profile', uri: entry.uri });
+      this.metadata.set(profileItem, { type: 'profile', uri: entry.uri, profileId: entry.profile.id });
       for (const [scenarioIndex, scenario] of (entry.profile.tests?.scenarios ?? []).entries()) {
         const scenarioItem = this.controller.createTestItem(`${entry.uri.toString()}::scenario::${scenario.id}`, scenario.name || scenario.id, entry.uri);
         scenarioItem.description = scenario.id;
         scenarioItem.range = nodeRange(document, parsed.tree, ['tests', 'scenarios', scenarioIndex]);
-        this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, scenarioId: scenario.id });
+        this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, profileId: entry.profile.id, scenarioId: scenario.id, tags: scenario.tags, sourceBinding: scenario.sourceBinding, repetitions: scenario.adversarial?.repetitions, plannedTurns: scenario.steps.length });
         for (const [stepIndex, step] of scenario.steps.entries()) {
           const stepItem = this.controller.createTestItem(`${scenarioItem.id}::step::${step.id}`, step.name?.trim() || step.id, entry.uri);
           stepItem.description = step.input.length > 80 ? `${step.input.slice(0, 77)}…` : step.input;
           stepItem.range = nodeRange(document, parsed.tree, ['tests', 'scenarios', scenarioIndex, 'steps', stepIndex]);
-          this.metadata.set(stepItem, { type: 'step', uri: entry.uri, scenarioId: scenario.id, stepIndex });
+          this.metadata.set(stepItem, { type: 'step', uri: entry.uri, profileId: entry.profile.id, scenarioId: scenario.id, stepIndex });
           scenarioItem.children.add(stepItem);
         }
         profileItem.children.add(scenarioItem);
@@ -154,15 +303,15 @@ export class ScenarioTestController implements vscode.Disposable {
           if (compatibilityError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
           const suiteItem = this.controller.createTestItem(`${entry.uri.toString()}::suite::${loaded.suite.id}`, loaded.suite.name, loaded.uri);
           suiteItem.description = `${loaded.scenarios.length} ${localize('adversarial cases')}`;
-          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, suitePath });
+          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, suitePath });
           for (const scenario of loaded.scenarios) {
             const scenarioItem = this.controller.createTestItem(`${suiteItem.id}::scenario::${scenario.id}`, scenario.name || scenario.id, loaded.uri);
             scenarioItem.description = scenario.id;
-            this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, scenarioId: scenario.id, suitePath });
+            this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, suitePath, tags: scenario.tags, sourceBinding: scenario.sourceBinding, repetitions: scenario.adversarial?.repetitions, plannedTurns: scenario.steps.length });
             for (const [stepIndex, step] of scenario.steps.entries()) {
               const stepItem = this.controller.createTestItem(`${scenarioItem.id}::step::${step.id}`, step.name?.trim() || step.id, loaded.uri);
               stepItem.description = step.input.length > 80 ? `${step.input.slice(0, 77)}…` : step.input;
-              this.metadata.set(stepItem, { type: 'step', uri: entry.uri, scenarioId: scenario.id, stepIndex, suitePath });
+              this.metadata.set(stepItem, { type: 'step', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, stepIndex, suitePath });
               scenarioItem.children.add(stepItem);
             }
             suiteItem.children.add(scenarioItem);
@@ -171,7 +320,7 @@ export class ScenarioTestController implements vscode.Disposable {
         } catch (error) {
           const suiteItem = this.controller.createTestItem(`${entry.uri.toString()}::suite-error::${suitePath}`, suitePath, entry.uri);
           suiteItem.description = error instanceof Error ? error.message.split('\n')[0] : String(error);
-          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, suitePath });
+          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, profileId: entry.profile.id, suitePath });
           profileItem.children.add(suiteItem);
         }
       }
@@ -180,7 +329,7 @@ export class ScenarioTestController implements vscode.Disposable {
     this.controller.items.replace(roots);
   }
 
-  private async run(request: vscode.TestRunRequest, token: vscode.CancellationToken): Promise<void> {
+  private async run(request: vscode.TestRunRequest, token: vscode.CancellationToken, selection: ScenarioRunSelection = {}): Promise<void> {
     await this.refresh();
     const run = this.controller.createTestRun(request);
     const completed: CompletedScenario[] = [];
@@ -205,12 +354,22 @@ export class ScenarioTestController implements vscode.Disposable {
             const index = cursor++;
             const job = jobs[index];
             if (!job) return;
-            const result = await this.runJob(job, run, token);
+            const result = await this.runJob(job, run, token, selection);
             if (result) completed.push(result);
           }
         }));
       }
       completed.sort((a, b) => `${a.record.profileId}/${a.record.scenarioId}`.localeCompare(`${b.record.profileId}/${b.record.scenarioId}`));
+      this.latestRunSummaries = completed.map((item) => ({
+        profileId: item.record.profileId,
+        scenarioId: item.record.scenarioId,
+        scenarioName: item.record.scenarioName,
+        outcome: item.record.result?.adversarial?.outcome ?? (item.record.status === 'passed' ? 'passed' : item.record.status === 'failed' ? 'failed' : 'error'),
+        stability: item.record.result?.repetitions?.stability,
+        counts: item.record.result?.repetitions?.counts,
+        sampleComplete: item.record.result?.repetitions?.sampleComplete,
+        evidenceId: item.evidenceId,
+      }));
       this.reports.record(completed.map((item) => item.record));
       await this.reports.writeConfigured(reportGroups(completed));
       const completedByProfile = new Map<string, CompletedScenario[]>();
@@ -255,6 +414,14 @@ export class ScenarioTestController implements vscode.Disposable {
             evidenceId: item.evidenceId,
             primaryLocation: evaluation.findings[0]?.locations[0] ?? evaluation.issues[0]?.location ?? { kind: 'profile', path: 'tests.scenarios' },
             availableLocations,
+            ...(item.record.result?.repetitions ? { repetitions: {
+              requestedAttempts: item.record.result.repetitions.requestedAttempts,
+              completedAttempts: item.record.result.repetitions.completedAttempts,
+              skippedAttempts: item.record.result.repetitions.skippedAttempts,
+              sampleComplete: item.record.result.repetitions.sampleComplete,
+              stability: item.record.result.repetitions.stability,
+              counts: item.record.result.repetitions.counts,
+            } } : {}),
           }];
         });
         const uri = vscode.Uri.parse(uriKey);
@@ -281,14 +448,27 @@ export class ScenarioTestController implements vscode.Disposable {
     return [...jobs.values()];
   }
 
-  private async runJob(job: ScenarioJob, run: vscode.TestRun, token: vscode.CancellationToken): Promise<CompletedScenario | undefined> {
+  private findItems(ids: readonly string[]): vscode.TestItem[] {
+    const wanted = new Set(ids);
+    const found = new Map<string, vscode.TestItem>();
+    const visit = (item: vscode.TestItem): void => {
+      if (wanted.has(item.id)) found.set(item.id, item);
+      item.children.forEach(visit);
+    };
+    this.controller.items.forEach(visit);
+    return [...new Set(ids)].flatMap((id) => found.get(id) ? [found.get(id)!] : []);
+  }
+
+  private async runJob(job: ScenarioJob, run: vscode.TestRun, token: vscode.CancellationToken, selection: ScenarioRunSelection): Promise<CompletedScenario | undefined> {
     const startedAt = Date.now();
     run.started(job.item);
     let session: SessionController | undefined;
     try {
       const loaded = await this.loadScenario(job.uri, job.scenarioId, job.suitePath);
-      const scenario = job.stepIndex === undefined ? loaded.scenario : { ...loaded.scenario, steps: loaded.scenario.steps.slice(0, job.stepIndex + 1), assertions: [] };
+      const baseScenario = job.stepIndex === undefined ? loaded.scenario : { ...loaded.scenario, steps: loaded.scenario.steps.slice(0, job.stepIndex + 1), assertions: [] };
+      const scenario = withRunSelection(baseScenario, selection);
       let result: ScenarioRunResult;
+      let persistedEvidenceId: string | undefined;
       if (scenario.comparison) {
         const baselineScenario = withoutAssertions(withTargetControls(scenario, scenario.comparison.baseline.controls));
         const baselineSession = await this.createSession(job.uri, loaded.profile, selectEnvironment(loaded.environments, scenario.comparison.baseline.environment ?? loaded.profile.environment));
@@ -325,13 +505,36 @@ export class ScenarioTestController implements vscode.Disposable {
           },
         };
       } else {
-        session = await this.createSession(job.uri, loaded.profile, loaded.environment, scenario.faults);
-        const single = await runScenario(loaded.profile.id, scenario, session, token);
-        const checks = [...single.checks, ...evaluatePerformance(scenario.performance, single)];
-        result = { ...single, checks, passed: single.passed && checks.every((check) => check.passed) };
+        if (scenario.adversarial) {
+          const group = await runScenarioGroup(loaded.profile.id, scenario, async () => ({
+            session: await this.createSession(job.uri, loaded.profile, loaded.environment, scenario.faults),
+          }), {
+            cancellation: token,
+            openingRequestsPerAttempt: loaded.profile.opening?.mode === 'request' ? 1 : 0,
+            onAttemptComplete: async (record, attempt) => {
+              if (attempt.result) {
+                const evidenceId = this.storeEvidence({ evidence: attempt.result.evidence, location: { kind: 'profile', path: 'tests' }, uri: job.uri });
+                attempt.summary.evidenceId = evidenceId;
+                record.attempts = record.attempts.map((item) => item.attempt === attempt.summary.attempt ? { ...item, evidenceId } : item);
+              }
+              const retention = loaded.profile.history?.localRuns?.maxRuns ?? vscode.workspace.getConfiguration('turnstage').get('runRetention', 20);
+              await this.runGroups.save(record, retention);
+            },
+          });
+          result = group.result;
+          persistedEvidenceId = group.result.repetitions?.attempts.find((attempt) => attempt.outcome === group.outcome)?.evidenceId
+            ?? group.result.repetitions?.attempts.at(-1)?.evidenceId;
+          const retention = loaded.profile.history?.localRuns?.maxRuns ?? vscode.workspace.getConfiguration('turnstage').get('runRetention', 20);
+          await this.runGroups.save(group.record, retention);
+        } else {
+          session = await this.createSession(job.uri, loaded.profile, loaded.environment, scenario.faults);
+          const single = await runScenario(loaded.profile.id, scenario, session, token);
+          const checks = [...single.checks, ...evaluatePerformance(scenario.performance, single)];
+          result = { ...single, checks, passed: single.passed && checks.every((check) => check.passed) };
+        }
       }
       if (token.isCancellationRequested) { run.skipped(job.item); return; }
-      const evidenceId = this.storeEvidence({ evidence: result.evidence, location: { kind: 'profile', path: 'tests' }, uri: job.uri });
+      const evidenceId = persistedEvidenceId ?? this.storeEvidence({ evidence: result.evidence, location: { kind: 'profile', path: 'tests' }, uri: job.uri });
       const targetSteps = job.stepIndex === undefined ? result.steps : result.steps.slice(job.stepIndex, job.stepIndex + 1);
       for (const stepResult of targetSteps) {
         const stepItem = job.stepIndex === undefined ? findStepItem(job.item, stepResult.stepId) : job.item;
@@ -427,6 +630,17 @@ export class ScenarioTestController implements vscode.Disposable {
 function collectionValues(collection: vscode.TestItemCollection): vscode.TestItem[] { const values: vscode.TestItem[] = []; collection.forEach((item) => values.push(item)); return values; }
 function withTargetControls(scenario: ScenarioDefinition, controls: Record<string, unknown> | undefined): ScenarioDefinition { return { ...scenario, controls: { ...(scenario.controls ?? {}), ...(controls ?? {}) } }; }
 function withoutAssertions(scenario: ScenarioDefinition): ScenarioDefinition { return { ...scenario, assertions: [], steps: scenario.steps.map((step) => ({ ...step, assertions: [] })) }; }
+function withRunSelection(scenario: ScenarioDefinition, selection: ScenarioRunSelection): ScenarioDefinition {
+  if (!scenario.adversarial || (selection.repetitions === undefined && selection.failFast === undefined)) return scenario;
+  return {
+    ...scenario,
+    adversarial: {
+      ...scenario.adversarial,
+      ...(selection.repetitions === undefined ? {} : { repetitions: selection.repetitions }),
+      ...(selection.failFast === undefined ? {} : { failFast: selection.failFast }),
+    },
+  };
+}
 function selectEnvironment(environments: readonly TurnStageEnvironment[], id: string | undefined): TurnStageEnvironment {
   const builtIn = builtInEnvironment();
   if (!id) return builtIn;

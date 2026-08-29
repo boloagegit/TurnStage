@@ -1,5 +1,5 @@
 import type { AdversarialContentRule, AdversarialForbidDefinition, ScenarioDefinition } from '../../shared/types';
-import { createAdversarialSuite, MAX_ADVERSARIAL_CASES_PER_SUITE, MAX_ADVERSARIAL_TURNS_PER_CASE, MAX_ADVERSARIAL_TURNS_PER_SUITE, validateAdversarialSuite } from './adversarialSuite';
+import { createAdversarialSuite, MAX_ADVERSARIAL_CASES_PER_SUITE, MAX_ADVERSARIAL_REPETITIONS, MAX_ADVERSARIAL_TURNS_PER_CASE, MAX_ADVERSARIAL_TURNS_PER_SUITE, validateAdversarialSuite } from './adversarialSuite';
 
 export const ADVERSARIAL_CSV_COLUMNS = [
   'case_id', 'case_name', 'description', 'tags', 'enabled', 'turn_index', 'turn_id', 'turn_name', 'user_message',
@@ -7,6 +7,7 @@ export const ADVERSARIAL_CSV_COLUMNS = [
   'additional_forbidden_content_json', 'additional_forbid_urls', 'additional_forbid_ctas', 'additional_forbid_tools', 'additional_forbidden_events_json',
   'max_turns', 'timeout_ms', 'stop_on_attack_succeeded',
 ] as const;
+export const ADVERSARIAL_CSV_OPTIONAL_COLUMNS = ['repetitions', 'fail_fast'] as const;
 
 export interface AdversarialCsvIssue { row: number; column?: string; message: string }
 export interface ParsedAdversarialCsv { scenarios: ScenarioDefinition[]; issues: AdversarialCsvIssue[]; rowCount: number }
@@ -33,7 +34,7 @@ export function parseAdversarialCsv(text: string): ParsedAdversarialCsv {
   if (groups.size > MAX_ADVERSARIAL_CASES_PER_SUITE) return { scenarios: [], issues: [{ row: 1, message: `CSV can contain at most ${MAX_ADVERSARIAL_CASES_PER_SUITE} cases.` }], rowCount: records.length };
   for (const [caseId, entries] of groups) {
     const first = entries[0]!;
-    validateConsistent(entries, ['case_name', 'description', 'tags', 'enabled', 'forbidden_content_json', 'forbid_urls', 'forbid_ctas', 'forbid_tools', 'forbidden_events_json', 'max_turns', 'timeout_ms', 'stop_on_attack_succeeded'], issues);
+    validateConsistent(entries, ['case_name', 'description', 'tags', 'enabled', 'forbidden_content_json', 'forbid_urls', 'forbid_ctas', 'forbid_tools', 'forbidden_events_json', 'max_turns', 'timeout_ms', 'stop_on_attack_succeeded', 'repetitions', 'fail_fast'], issues);
     const name = field(first.value, 'case_name').trim();
     const enabled = boolean(field(first.value, 'enabled'), true, first.row, 'enabled', issues);
     if (!/^[a-z0-9][a-z0-9-]*$/.test(caseId)) issues.push({ row: first.row, column: 'case_id', message: 'case_id must use lowercase letters, numbers, and hyphens.' });
@@ -58,6 +59,9 @@ export function parseAdversarialCsv(text: string): ParsedAdversarialCsv {
     if (new Set(turns.map((turn) => turn.step.id)).size !== turns.length) issues.push({ row: first.row, column: 'turn_id', message: 'turn_id values must be unique within a case.' });
     const maxTurns = integer(field(first.value, 'max_turns'), first.row, 'max_turns', issues, turns.length || 1);
     const timeoutMs = integer(field(first.value, 'timeout_ms'), first.row, 'timeout_ms', issues, 60_000);
+    const repetitionValue = field(first.value, 'repetitions');
+    const repetitions = integer(repetitionValue, first.row, 'repetitions', issues, 1);
+    if (repetitions < 1 || repetitions > MAX_ADVERSARIAL_REPETITIONS) issues.push({ row: first.row, column: 'repetitions', message: `repetitions must be an integer from 1 to ${MAX_ADVERSARIAL_REPETITIONS}.` });
     if (maxTurns < turns.length || maxTurns > MAX_ADVERSARIAL_TURNS_PER_CASE) issues.push({ row: first.row, column: 'max_turns', message: `max_turns must cover all turns and cannot exceed ${MAX_ADVERSARIAL_TURNS_PER_CASE}.` });
     const forbid = parseForbid(first.value, first.row, issues);
     if (!hasForbid(forbid)) issues.push({ row: first.row, message: 'At least one prohibited effect is required.' });
@@ -73,6 +77,8 @@ export function parseAdversarialCsv(text: string): ParsedAdversarialCsv {
         maxTurns,
         timeoutMs,
         stopOnAttackSucceeded: boolean(field(first.value, 'stop_on_attack_succeeded'), true, first.row, 'stop_on_attack_succeeded', issues),
+        ...(header.includes('repetitions') ? { repetitions } : {}),
+        ...(header.includes('fail_fast') ? { failFast: boolean(field(first.value, 'fail_fast'), false, first.row, 'fail_fast', issues) } : {}),
         forbid,
       },
     });
@@ -82,7 +88,7 @@ export function parseAdversarialCsv(text: string): ParsedAdversarialCsv {
 }
 
 export function serializeAdversarialCsv(scenarios: readonly ScenarioDefinition[]): string {
-  const rows: string[][] = [[...ADVERSARIAL_CSV_COLUMNS]];
+  const rows: string[][] = [[...ADVERSARIAL_CSV_COLUMNS, ...ADVERSARIAL_CSV_OPTIONAL_COLUMNS]];
   for (const scenario of scenarios.filter((value) => value.adversarial)) {
     const definition = scenario.adversarial!;
     scenario.steps.forEach((step, index) => rows.push([
@@ -108,6 +114,8 @@ export function serializeAdversarialCsv(scenarios: readonly ScenarioDefinition[]
       String(definition.maxTurns ?? scenario.steps.length),
       String(definition.timeoutMs ?? 60_000),
       String(definition.stopOnAttackSucceeded !== false),
+      String(definition.repetitions ?? ''),
+      String(definition.failFast ?? false),
     ]));
   }
   return `\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}\r\n`;

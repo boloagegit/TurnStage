@@ -29,8 +29,9 @@ describe('scenario profile JSON Schema', () => {
   it('exposes closed adversarial case and linked-suite definitions', () => {
     expect(schema.$defs.tests!.properties).toMatchObject({ adversarialSuites: expect.any(Object) });
     expect(schema.$defs.scenario!.properties).toMatchObject({ adversarial: { $ref: '#/$defs/scenarioAdversarial' } });
+    expect(schema.$defs.scenario!.properties).toMatchObject({ sourceBinding: { $ref: '#/$defs/sourceBinding' } });
     expect(schema.$defs.scenarioStep!.properties).toMatchObject({ additionalForbid: { $ref: '#/$defs/adversarialForbid' } });
-    for (const name of ['scenarioAdversarial', 'adversarialForbid', 'adversarialContentRule']) expect(schema.$defs[name]?.additionalProperties).toBe(false);
+    for (const name of ['scenarioAdversarial', 'adversarialForbid', 'adversarialContentRule', 'sourceBinding']) expect(schema.$defs[name]?.additionalProperties).toBe(false);
   });
 
   it('lists all supported performance metrics in threshold and regression maps', () => {
