@@ -56,6 +56,17 @@ try {
 
   await page.goto(url);
   await waitForProfile();
+  const iconButtons = page.locator('.icon-button');
+  for (let index = 0; index < await iconButtons.count(); index += 1) {
+    const button = iconButtons.nth(index);
+    const accessibleName = await button.getAttribute('aria-label');
+    assert.ok(accessibleName?.trim(), `Icon button ${index + 1} must have an accessible name`);
+    assert.equal(await button.getAttribute('title'), accessibleName, `Icon button ${index + 1} tooltip must match its accessible name`);
+  }
+  const sessionTools = page.getByRole('group', { name: 'Session status and actions' });
+  assert.ok((await sessionTools.innerText()).includes('Ready'), 'Idle session diagnostics must report Ready instead of the previous turn result');
+  assert.equal(await page.locator('.mobile-chat-preview__app-header').getByRole('button').count(), 0, 'Harness actions must stay outside the simulated Chat header');
+  assert.equal(await sessionTools.getByRole('button', { name: 'Restart session' }).locator('.codicon-debug-restart').count(), 1, 'Restart session must use the specific VS Code restart Codicon');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Debug is the default right-panel mode');
   assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'false', 'Configure remains directly available beside Debug');
   await page.getByRole('tab', { name: 'Debug' }).focus();
@@ -139,8 +150,24 @@ try {
   await page.getByRole('button', { name: 'Compare visual baseline' }).click();
   await page.locator('.mobile-chat-preview__status').filter({ hasText: 'Visual comparison passed (0%).' }).waitFor();
   await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'visual-regression-toolbar-dark.png') });
-  assert.equal(await page.getByRole('region', { name: 'Opening' }).getByRole('heading', { name: 'Opening' }).count(), 1, 'Opening content must be explicitly labelled');
+  const openingRegion = page.getByRole('region', { name: 'Opening' });
+  assert.equal(await openingRegion.getByRole('heading', { name: 'Opening' }).count(), 1, 'Opening content must be explicitly labelled');
+  const openingAlignment = await Promise.all([
+    openingRegion.locator('.mobile-chat-preview__opening-avatar'),
+    openingRegion.locator('.mobile-chat-preview__opening-label'),
+  ].map((locator) => locator.boundingBox()));
+  assert.ok(openingAlignment.every(Boolean), 'Opening avatar and label must be rendered');
+  const openingAvatarCenter = openingAlignment[0].y + openingAlignment[0].height / 2;
+  const openingLabelCenter = openingAlignment[1].y + openingAlignment[1].height / 2;
+  assert.ok(Math.abs(openingAvatarCenter - openingLabelCenter) <= 1, `Opening avatar and label must share a vertical center; observed ${openingAvatarCenter} and ${openingLabelCenter}`);
   const assistantMessage = page.locator('[data-message-id="assistant-1"]');
+  const assistantAvatar = assistantMessage.locator('.mobile-chat-preview__message-avatar');
+  const assistantHeading = assistantMessage.locator('.mobile-chat-preview__message-heading');
+  const assistantAlignment = await Promise.all([assistantAvatar, assistantHeading].map((locator) => locator.boundingBox()));
+  assert.ok(assistantAlignment.every(Boolean), 'Assistant avatar and heading must be rendered');
+  const avatarCenter = assistantAlignment[0].y + assistantAlignment[0].height / 2;
+  const headingCenter = assistantAlignment[1].y + assistantAlignment[1].height / 2;
+  assert.ok(Math.abs(avatarCenter - headingCenter) <= 1, `Assistant avatar and name must share a vertical center; observed ${avatarCenter} and ${headingCenter}`);
   assert.equal(await assistantMessage.getByRole('group', { name: 'Message actions' }).evaluate((element) => getComputedStyle(element).opacity), '1', 'Message actions must be visible by default');
   const messageMetricText = await assistantMessage.getByLabel('Message metrics').innerText();
   assert.ok(messageMetricText.includes('TTFT') && messageMetricText.includes('1,808 ms'), 'Per-message TTFT must be visible');
@@ -170,9 +197,11 @@ try {
   await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
   assert.equal(await page.locator('.preview-pane').count(), 1, 'Opening Configure must keep the Chat preview mounted');
   assert.equal(await page.locator('.settings-workspace--embedded').count(), 1, 'Configure uses the compact right-pane settings layout');
+  assert.equal(await page.getByRole('navigation', { name: 'Profile configuration sections' }).count(), 0, 'Embedded Configure must not add another navigation rail');
+  assert.equal(await page.getByRole('combobox', { name: 'Profile configuration sections' }).inputValue(), 'general', 'Embedded Configure uses one compact section picker');
   assert.equal(await page.locator('[data-message-id="assistant-1"][data-selected="true"]').count(), 0, 'Configure must hide Debug message selection styling');
   await page.screenshot({ path: resolve(artifactDirectory, 'profile-config-right-pane-dark.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Scenarios', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('scenario-tests');
   await page.getByRole('heading', { level: 1, name: 'Scenarios' }).waitFor();
   assert.equal(await page.locator('.scenario-editor').count(), 1, 'Scenario configuration must render the profile contract');
   assert.equal(await page.locator('.scenario-step').count(), 1, 'Scenario configuration must keep its steps compact');
@@ -188,7 +217,7 @@ try {
   assert.equal(await page.locator('.scenario-target-grid fieldset').count(), 2, 'Baseline and candidate targets must both render in the GUI');
   assert.equal(await page.locator('.scenario-budget').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Performance budgets must not overflow the embedded settings pane');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'scenario-comparison-performance-dark.png') });
-  await page.getByRole('button', { name: 'General', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('general');
   await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
   const displayName = page.getByLabel('Display name');
   await displayName.fill('GUI Edited Profile');
@@ -217,14 +246,14 @@ try {
   assert.equal(await page.locator('.mobile-chat-preview__device').evaluate((element) => getComputedStyle(element).transform), 'none', 'Responsive Chat must never scale the rendered UI');
   assert.equal(await page.getByRole('combobox', { name: 'Viewport preset' }).inputValue(), 'responsive', 'Device toolbar defaults to Responsive');
   assert.equal(await page.locator('[data-viewport-mode="responsive"]').count(), 1, 'Responsive mode must fill the Chat pane');
-  assert.notEqual(await page.locator('.mobile-chat-preview__app-heading span').evaluate((element) => getComputedStyle(element).display), 'none', 'Wide Chat keeps secondary header context');
+  assert.ok((await page.getByRole('group', { name: 'Session status and actions' }).innerText()).includes('Ready'), 'Wide Chat keeps session context in the preview toolbar');
   await page.screenshot({ path: resolve(artifactDirectory, 'responsive-wide-chat-dark.png'), fullPage: true });
 
   await page.goto(`${url}?split=25`);
   await waitForProfile();
   const narrowChatWidth = await page.locator('.preview-pane').evaluate((element) => element.getBoundingClientRect().width);
   assert.ok(narrowChatWidth <= 430, 'Narrow Chat must be driven by pane width');
-  assert.equal(await page.locator('.mobile-chat-preview__app-heading span').evaluate((element) => getComputedStyle(element).display), 'none', 'Narrow Chat progressively hides secondary header context');
+  assert.ok((await page.getByRole('group', { name: 'Session status and actions' }).innerText()).includes('Ready'), 'Narrow Chat keeps session context available in the horizontally scrollable toolbar');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, 'Narrow Chat and Debug split must not overflow horizontally');
   await page.screenshot({ path: resolve(artifactDirectory, 'responsive-narrow-chat-dark.png'), fullPage: true });
 

@@ -40,6 +40,19 @@ describe('VS Code contribution UX', () => {
     ]));
   });
 
+  it('backs every native menu action and icon with a command title tooltip', () => {
+    const commands = new Map(manifest.contributes.commands.map((command) => [command.command, command]));
+    for (const items of Object.values(manifest.contributes.menus)) {
+      for (const item of items) {
+        if (!item.command) continue;
+        expect(commands.get(item.command)?.title, `${item.command} must resolve to a titled command`).toBeTruthy();
+      }
+    }
+    for (const command of manifest.contributes.commands.filter((item) => item.icon)) {
+      expect(command.title, `${command.command} icon must have a tooltip title`).toBeTruthy();
+    }
+  });
+
   it('uses native custom-editor title actions for document commands', () => {
     const titleActions = manifest.contributes.menus['editor/title'] ?? [];
     expect(titleActions).toEqual([

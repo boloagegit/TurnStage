@@ -25,17 +25,22 @@ describe('Profile Configuration surface', () => {
     expect(workspaceStyles).not.toContain('.settings-help');
   });
 
-  it('provides compact local navigation for every profile section', () => {
+  it('provides local navigation for a full editor and a compact picker when embedded', () => {
     for (const section of ['general', 'opening-flow', 'request', 'stream-mapping', 'chat-ui', 'scenario-tests', 'history-errors', 'security']) {
       expect(workspaceSource).toContain(`id: '${section}'`);
     }
     expect(workspaceSource).toContain('onSectionChange: (section: SettingsSectionId) => void');
     expect(workspaceSource).toContain('settings-section-nav');
+    expect(workspaceSource).toContain('!embedded && <nav');
+    expect(workspaceSource).toContain('settings-section-picker');
+    expect(workspaceSource).toContain('event.target.value as SettingsSectionId');
     expect(workspaceSource).toContain('SETTINGS_SECTIONS.map');
     expect(workspaceSource).toContain('onSectionChange(item.id)');
     expect(workspaceSource).toContain("aria-current={active.id === item.id ? 'page' : undefined}");
     expect(workspaceStyles).toContain('.settings-content-layout');
     expect(workspaceStyles).toContain('.settings-section-nav button.is-active');
+    expect(workspaceStyles).toContain('var(--vscode-dropdown-background');
+    expect(workspaceStyles).toContain('var(--vscode-dropdown-listBackground');
     expect(workspaceStyles).toContain('grid-template-columns: 1fr');
   });
 

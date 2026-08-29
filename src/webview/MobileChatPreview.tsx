@@ -123,6 +123,7 @@ export function MobileChatPreview({
   const trusted = snapshot?.trusted === true;
   const opening = snapshot?.opening ?? staticOpening(profile);
   const statusText = previewStatus(snapshot, active, continuationBlocked);
+  const sessionState = active ? snapshot?.turnState ?? 'streaming' : snapshot?.sessionState ?? 'notStarted';
   const previewId = useId();
   const presetId = CHAT_VIEWPORT_PRESETS.some((preset) => preset.id === viewport.preset) ? viewport.preset : viewport.preset === 'responsive' ? 'responsive' : 'custom';
   const responsive = presetId === 'responsive';
@@ -275,7 +276,7 @@ export function MobileChatPreview({
   const rootClassName = ['mobile-chat-preview', className].filter(Boolean).join(' ');
 
   return <section className={rootClassName} aria-label={t('Responsive chat preview')}>
-    <header className="mobile-chat-preview__viewport-toolbar" aria-label={t('Viewport controls')}>
+    <header className="mobile-chat-preview__viewport-toolbar" aria-label={t('Chat preview controls')}>
       <span className="mobile-chat-preview__viewport-icon" aria-hidden="true"><ProductIcon name={responsive ? 'screen-full' : logicalWidth >= 900 ? 'device-desktop' : 'device-mobile'} /></span>
       <label className="mobile-chat-preview__preset-control">
         <span className="mobile-chat-preview__sr-only">{t('Viewport preset')}</span>
@@ -301,6 +302,15 @@ export function MobileChatPreview({
         </select>
       </label>
       {!responsive && viewport.zoom === 'fit' && <span className="mobile-chat-preview__fit-scale" aria-label={t('Preview scale')}>{formatNumber(Math.round(previewScale * 100))}%</span>}
+      <div className="mobile-chat-preview__session-tools" role="group" aria-label={t('Session status and actions')}>
+        <span className="mobile-chat-preview__environment">{profile.environment ?? t('No environment')}</span>
+        <span aria-hidden="true">·</span>
+        <span className={`mobile-chat-preview__session-state mobile-chat-preview__session-state--${sessionState}`} aria-label={t('Conversation status: {status}', { status: humanize(sessionState) })}>
+          <ProductIcon name="circle-filled" />
+          <span>{humanize(sessionState)}</span>
+        </span>
+        {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon="debug-restart" label={t('Restart session')} type="button" disabled={!trusted || active} onClick={() => post({ type: 'conversation.new' })} />}
+      </div>
       <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
       <IconButton icon="save" label={t(capturingVisual === 'baseline' ? 'Capturing visual baseline…' : 'Save visual baseline')} type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'baseline'} onClick={() => void runVisual('baseline')} />
       <IconButton icon="diff" label={t(capturingVisual === 'compare' ? 'Comparing visual baseline…' : 'Compare visual baseline')} type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'compare'} onClick={() => void runVisual('compare')} />
@@ -308,7 +318,7 @@ export function MobileChatPreview({
     <div ref={stageRef} className="mobile-chat-preview__stage">
       <div className={`mobile-chat-preview__viewport-shell mobile-chat-preview__viewport-shell--${responsive ? 'responsive' : 'fixed'}`} data-viewport-mode={responsive ? 'responsive' : 'fixed'} style={viewportStyle}>
       <div ref={deviceRef} className="mobile-chat-preview__device" data-layout="responsive" data-viewport-width={logicalWidth}>
-        <MobileAppHeader profile={profile} snapshot={snapshot} active={active} trusted={trusted} post={post} />
+        <MobileAppHeader profile={profile} />
 
         <div className="mobile-chat-preview__content">
           {profile.controls && profile.controls.length > 0 && <MobileControls profile={profile} snapshot={snapshot} active={active} trusted={trusted} post={post} />}
@@ -348,16 +358,12 @@ function ViewportDimensionInput({ value, minimum, maximum, label, onCommit }: { 
   return <input type="number" min={minimum} max={maximum} value={draft} aria-label={label} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />;
 }
 
-function MobileAppHeader({ profile, snapshot, active, trusted, post }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; active: boolean; trusted: boolean; post: PostMessage }): React.JSX.Element {
-  const state = active ? snapshot?.turnState ?? 'streaming' : snapshot?.turnState ?? snapshot?.sessionState ?? 'notStarted';
+function MobileAppHeader({ profile }: { profile: TurnStageProfile }): React.JSX.Element {
   return <header className="mobile-chat-preview__app-header">
     <div className="mobile-chat-preview__app-avatar" aria-hidden="true">{profile.name.trim().charAt(0).toUpperCase() || 'T'}</div>
     <div className="mobile-chat-preview__app-heading">
       <strong>{profile.name}</strong>
-      <span>{profile.environment ?? t('No environment')} · {humanize(state)}</span>
     </div>
-    {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon="refresh" label={t('Restart session')} type="button" disabled={!trusted || active} onClick={() => post({ type: 'conversation.new' })} />}
-    <span className={`mobile-chat-preview__state mobile-chat-preview__state--${state}`} role="img" aria-label={t('Conversation status: {status}', { status: humanize(state) })}><ProductIcon name="circle-filled" /></span>
   </header>;
 }
 
@@ -566,8 +572,8 @@ function MobileMessage({ profile, message, post, send, setDraft, trusted, select
 function MessageMetrics({ message, metrics, showTtft, showTotalDuration }: { message: ChatMessage; metrics: MessageMetric[]; showTtft: boolean; showTotalDuration: boolean }): React.JSX.Element {
   const terminal = ['completed', 'failed', 'aborted'].includes(message.status);
   return <dl className="mobile-chat-preview__message-metrics" aria-label={t('Message metrics')}>
-    {showTtft && <div title="ttft"><dt>TTFT</dt><dd>{message.timing?.ttft === undefined ? t(terminal ? 'Not available' : 'Waiting') : formatDuration(message.timing.ttft)}</dd></div>}
-    {showTotalDuration && <div title="totalDuration"><dt>{t('Total')}</dt><dd>{message.timing?.totalDuration === undefined ? t(terminal ? 'Not available' : 'Streaming') : formatDuration(message.timing.totalDuration)}</dd></div>}
+    {showTtft && <div title={t('Time to first token')}><dt>TTFT</dt><dd>{message.timing?.ttft === undefined ? t(terminal ? 'Not available' : 'Waiting') : formatDuration(message.timing.ttft)}</dd></div>}
+    {showTotalDuration && <div title={t('Total duration')}><dt>{t('Total')}</dt><dd>{message.timing?.totalDuration === undefined ? t(terminal ? 'Not available' : 'Streaming') : formatDuration(message.timing.totalDuration)}</dd></div>}
     {metrics.map((metric) => <div key={metric.id} title={metric.id}><dt>{metric.label?.trim() || metric.id}</dt><dd>{formatMessageMetric(metric)}</dd></div>)}
   </dl>;
 }

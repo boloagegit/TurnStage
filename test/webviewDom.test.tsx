@@ -42,6 +42,7 @@ describe('Webview DOM behavior', () => {
     expect(identity.textContent).toContain('dom-test');
     expect(identity.textContent).toContain('local');
     expect(identity.textContent).not.toContain('.jsonc');
+    expect(identity.querySelector('.codicon-target')).toBeNull();
   });
 
   it('switches viewport presets, accepts custom dimensions, rotates, and changes zoom', async () => {
@@ -100,6 +101,29 @@ describe('Webview DOM behavior', () => {
 
     await user.click(screen.getByRole('button', { name: 'Restart session' }));
     expect(post).toHaveBeenCalledWith({ type: 'conversation.new' });
+  });
+
+  it('keeps session diagnostics outside the simulated chat header', () => {
+    render(<MobileChatPreview {...mobileProps()} />);
+
+    const chatHeader = document.querySelector('.mobile-chat-preview__app-header');
+    const sessionTools = screen.getByRole('group', { name: 'Session status and actions' });
+    expect(chatHeader?.querySelector('strong')?.textContent).toBe('DOM Test');
+    expect(chatHeader?.querySelectorAll('button')).toHaveLength(0);
+    expect(within(sessionTools).getByText('Ready')).toBeTruthy();
+    expect(within(sessionTools).queryByText('Completed')).toBeNull();
+    expect(within(sessionTools).getByRole('button', { name: 'Restart session' }).querySelector('.codicon-debug-restart')).toBeTruthy();
+  });
+
+  it('gives every icon-only chat control an accessible name and matching tooltip', () => {
+    render(<MobileChatPreview {...mobileProps({ draft: 'Ready to send' })} />);
+
+    const iconButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.mobile-chat-preview .icon-button, .mobile-chat-preview__send'));
+    expect(iconButtons.length).toBeGreaterThan(0);
+    for (const button of iconButtons) {
+      expect(button.getAttribute('aria-label')?.trim()).toBeTruthy();
+      expect(button.getAttribute('title')).toBe(button.getAttribute('aria-label'));
+    }
   });
 
   it('supports interaction-only message actions while keeping them keyboard reachable', () => {
@@ -196,6 +220,8 @@ describe('Webview DOM behavior', () => {
     expect(metrics.textContent).toContain('125 ms');
     expect(metrics.textContent).toContain('Total');
     expect(metrics.textContent).toContain('480 ms');
+    expect(within(metrics).getByTitle('Time to first token')).toBeTruthy();
+    expect(within(metrics).getByTitle('Total duration')).toBeTruthy();
   });
 
   it('does not report a zero TTFT when a terminal response produced no text', () => {
@@ -521,6 +547,17 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByRole('button', { name: 'Security' }).getAttribute('aria-current')).toBe('page');
   });
 
+  it('uses one compact section picker instead of another navigation rail when embedded', async () => {
+    const user = userEvent.setup();
+    render(<EmbeddedSettingsHarness />);
+
+    expect(screen.queryByRole('navigation', { name: 'Profile configuration sections' })).toBeNull();
+    const picker = screen.getByRole('combobox', { name: 'Profile configuration sections' });
+    await user.selectOptions(picker, 'security');
+    expect(screen.getByRole('heading', { level: 1, name: 'Security' })).toBeTruthy();
+    expect((picker as HTMLSelectElement).value).toBe('security');
+  });
+
   it('patches Assistant streaming effect parameters from Chat UI settings', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
@@ -645,7 +682,7 @@ describe('Webview DOM behavior', () => {
     render(<MobileChatPreview {...mobileProps({ post, snapshot: { ...snapshot, messages: [message] } })} />);
 
     expect(screen.getByRole('heading', { level: 2, name: 'Result' })).toBeTruthy();
-    expect(screen.getByText('Ready').closest('strong')).toBeTruthy();
+    expect(within(screen.getByRole('heading', { level: 2, name: 'Result' }).parentElement!).getByText('Ready').closest('strong')).toBeTruthy();
     await userEvent.setup().click(screen.getByRole('link', { name: 'Docs' }));
     expect(post).toHaveBeenCalledWith({ type: 'uri.open', uri: 'https://example.test/docs' });
   });
@@ -700,6 +737,11 @@ describe('Webview DOM behavior', () => {
 function SettingsHarness(): React.JSX.Element {
   const [section, setSection] = useState<SettingsSectionId>('general');
   return <SettingsWorkspace section={section} onSectionChange={setSection} profile={profile} post={vi.fn()} />;
+}
+
+function EmbeddedSettingsHarness(): React.JSX.Element {
+  const [section, setSection] = useState<SettingsSectionId>('general');
+  return <SettingsWorkspace embedded section={section} onSectionChange={setSection} profile={profile} post={vi.fn()} />;
 }
 
 function mobileProps(overrides: Partial<React.ComponentProps<typeof MobileChatPreview>> = {}): React.ComponentProps<typeof MobileChatPreview> {

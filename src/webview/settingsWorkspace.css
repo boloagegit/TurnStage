@@ -19,6 +19,9 @@
 .settings-subtitle { margin-top: 1px; overflow: hidden; color: var(--vscode-descriptionForeground); font-size: .769em; white-space: nowrap; }
 .settings-subtitle code, .settings-section-count code { font-family: var(--vscode-editor-font-family); }
 .settings-header-actions, .settings-actions { display: flex; align-items: center; gap: var(--ts-space-1); }.settings-header-actions button { min-height: var(--ts-control-height); }
+.settings-section-picker { flex: 1 1 auto; min-width: 0; max-width: 18em; }
+.settings-section-picker select { border-color: var(--vscode-dropdown-border, var(--vscode-input-border, transparent)); background: var(--vscode-dropdown-background, var(--vscode-input-background)); color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); }
+.settings-section-picker option { background: var(--vscode-dropdown-listBackground, var(--vscode-dropdown-background, var(--vscode-input-background))); color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); }
 .settings-main { min-height: 0; overflow: auto; }
 .settings-content-layout { display: grid; grid-template-columns: minmax(11em, 16em) minmax(0, 1fr); align-items: start; min-height: 100%; }
 .settings-section-nav { position: sticky; top: 0; min-width: 0; border-inline-end: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-editorGroup-border)); background: var(--vscode-sideBar-background); }
@@ -85,14 +88,10 @@
 .assertion-row label { display: grid; gap: var(--ts-space-1); min-width: 0; }.assertion-row label > span { color: var(--vscode-descriptionForeground); font-size: .769em; }.assertion-row input, .assertion-row select { width: 100%; min-width: 0; }
 .scenario-editor button { transition-property: transform; transition-duration: 80ms; }.scenario-editor button:active:not(:disabled) { transform: scale(.96); }
 .settings-trust-card { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 10px; border-inline-start: 1px solid var(--vscode-testing-iconPassed); background: var(--vscode-textBlockQuote-background); }.settings-trust-card.is-restricted { border-inline-start-color: var(--vscode-editorWarning-foreground); }.settings-trust-icon { color: var(--vscode-testing-iconPassed); font-weight: 600; }.settings-trust-card.is-restricted .settings-trust-icon { color: var(--vscode-editorWarning-foreground); }
-.settings-workspace--embedded .settings-header { padding-inline: var(--ts-space-2); }
+.settings-header--embedded { padding-inline: var(--ts-space-2); }
 .settings-workspace--embedded .settings-subtitle,
 .settings-workspace--embedded .settings-section-count { display: none; }
 .settings-workspace--embedded .settings-content-layout { grid-template-columns: 1fr; }
-.settings-workspace--embedded .settings-section-nav { position: sticky; z-index: 1; top: 0; overflow-x: auto; border-inline-end: 0; border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-editorGroup-border)); }
-.settings-workspace--embedded .settings-section-nav-list { display: flex; gap: 1px; min-width: max-content; padding: var(--ts-space-1) var(--ts-space-2); }
-.settings-workspace--embedded .settings-section-nav button { width: auto; min-width: max-content; }
-.settings-workspace--embedded .settings-section-nav button.is-active { box-shadow: inset 0 -2px var(--vscode-list-focusAndSelectionOutline, var(--vscode-focusBorder)); }
 .settings-workspace--embedded .settings-panel { width: 100%; padding: var(--ts-space-4) var(--ts-space-4) calc(var(--ts-space-5) + var(--ts-space-3)); }
 .settings-workspace--embedded .settings-panel-heading { gap: var(--ts-space-3); padding-bottom: var(--ts-space-3); }
 .settings-workspace--embedded .settings-panel-heading h1 { font-size: 1.231em; }

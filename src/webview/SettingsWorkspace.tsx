@@ -60,11 +60,18 @@ export function SettingsWorkspace({
   const sectionTitleId = `profile-configuration-section-title-${active.id}`;
   const sectionDescriptionId = `profile-configuration-section-description-${active.id}`;
   return <div className={`settings-workspace ${embedded ? 'settings-workspace--embedded' : ''}`}>
-    <header className="settings-header" aria-label={t('Profile configuration toolbar')}>
-      <div className="settings-title-block">
-        <p id="profile-configuration-title" className="settings-surface-title">{t('Profile Configuration')}</p>
-        <p className="settings-subtitle"><span>{profile.name || t('Untitled profile')}</span><span aria-hidden="true">·</span><code>{profile.id}</code><span aria-hidden="true">·</span><span>{profile.environment || t('No environment selected')}</span></p>
-      </div>
+    <header className={`settings-header ${embedded ? 'settings-header--embedded' : ''}`} aria-label={t('Profile configuration toolbar')}>
+      {embedded
+        ? <label className="settings-section-picker">
+          <span className="sr-only">{t('Profile configuration sections')}</span>
+          <select value={active.id} aria-label={t('Profile configuration sections')} onChange={(event) => onSectionChange(event.target.value as SettingsSectionId)}>
+            {SETTINGS_SECTIONS.map((item) => <option key={item.id} value={item.id}>{t(item.label)}</option>)}
+          </select>
+        </label>
+        : <div className="settings-title-block">
+          <p id="profile-configuration-title" className="settings-surface-title">{t('Profile Configuration')}</p>
+          <p className="settings-subtitle"><span>{profile.name || t('Untitled profile')}</span><span aria-hidden="true">·</span><code>{profile.id}</code><span aria-hidden="true">·</span><span>{profile.environment || t('No environment selected')}</span></p>
+        </div>}
       <div className="settings-header-actions" aria-label={t('Profile configuration actions')}>
         <IconButton icon="file-code" label={t('Open JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
         <IconButton icon="check" label={t('Validate')} type="button" className="settings-primary-action" onClick={() => post({ type: 'profile.validate' })} />
@@ -73,11 +80,11 @@ export function SettingsWorkspace({
 
     <div className="settings-main" id="settings-content">
       <div className="settings-content-layout">
-        <nav className="settings-section-nav" aria-label={t('Profile configuration sections')}>
+        {!embedded && <nav className="settings-section-nav" aria-label={t('Profile configuration sections')}>
           <div className="settings-section-nav-list">
             {SETTINGS_SECTIONS.map((item) => <button key={item.id} type="button" className={active.id === item.id ? 'is-active' : ''} aria-current={active.id === item.id ? 'page' : undefined} onClick={() => onSectionChange(item.id)}>{t(item.label)}</button>)}
           </div>
-        </nav>
+        </nav>}
         <section
           id={`settings-panel-${active.id}`}
           className="settings-panel"
