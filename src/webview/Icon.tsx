@@ -6,6 +6,7 @@ export type ProductIconName =
   | 'arrow-down'
   | 'arrow-up'
   | 'arrow-swap'
+  | 'beaker'
   | 'check'
   | 'chevron-down'
   | 'chevron-right'
@@ -18,6 +19,7 @@ export type ProductIconName =
   | 'device-desktop'
   | 'device-mobile'
   | 'edit'
+  | 'ellipsis'
   | 'diff'
   | 'file-code'
   | 'info'
@@ -36,6 +38,7 @@ const codicons: Record<ProductIconName, string> = {
   'arrow-down': 'arrow-down',
   'arrow-up': 'arrow-up',
   'arrow-swap': 'arrow-swap',
+  beaker: 'beaker',
   check: 'check',
   'chevron-down': 'chevron-down',
   'chevron-right': 'chevron-right',
@@ -48,6 +51,7 @@ const codicons: Record<ProductIconName, string> = {
   'device-desktop': 'device-desktop',
   'device-mobile': 'device-mobile',
   edit: 'edit',
+  ellipsis: 'ellipsis',
   diff: 'diff',
   'file-code': 'file-code',
   info: 'info',

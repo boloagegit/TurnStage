@@ -73,6 +73,7 @@ export interface MobileChatPreviewProps {
   onSelectMessage?: (messageId: string) => void;
   viewport?: ChatViewportState;
   onViewportChange?: (viewport: ChatViewportState) => void;
+  onConfigure?: () => void;
   /** Form instances acknowledged by the Extension Host for this editor lifetime. */
   acceptedForms?: ReadonlySet<string>;
   messageActionFeedback?: MessageActionFeedback;
@@ -100,6 +101,7 @@ export function MobileChatPreview({
   onSelectMessage,
   viewport: controlledViewport,
   onViewportChange,
+  onConfigure,
   acceptedForms,
   messageActionFeedback,
   visualFeedback,
@@ -312,8 +314,10 @@ export function MobileChatPreview({
         {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon="debug-restart" label={t('Restart session')} type="button" disabled={!trusted || active} onClick={() => post({ type: 'conversation.new' })} />}
       </div>
       <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
+      <IconButton icon="beaker" label={t('Save conversation as adversarial test')} type="button" disabled={!trusted || active || !snapshot?.messages.some((message) => message.role === 'user')} onClick={() => post({ type: 'adversarial.capture' })} />
       <IconButton icon="save" label={t(capturingVisual === 'baseline' ? 'Capturing visual baseline…' : 'Save visual baseline')} type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'baseline'} onClick={() => void runVisual('baseline')} />
       <IconButton icon="diff" label={t(capturingVisual === 'compare' ? 'Comparing visual baseline…' : 'Compare visual baseline')} type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'compare'} onClick={() => void runVisual('compare')} />
+      {onConfigure && <IconButton icon="settings-gear" label={t('Configure profile')} type="button" onClick={onConfigure} />}
     </header>
     <div ref={stageRef} className="mobile-chat-preview__stage">
       <div className={`mobile-chat-preview__viewport-shell mobile-chat-preview__viewport-shell--${responsive ? 'responsive' : 'fixed'}`} data-viewport-mode={responsive ? 'responsive' : 'fixed'} style={viewportStyle}>

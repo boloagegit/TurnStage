@@ -148,4 +148,41 @@ describe('runScenario', () => {
     expect(result.passed).toBe(false);
     expect(result.evidence.snapshot.turnState).toBe('aborted');
   });
+
+  it('distinguishes resisted multi-turn cases from successful attacks and stops on the first finding', async () => {
+    const resistedSession = new FakeScenarioSession();
+    const base: ScenarioDefinition = {
+      id: 'adversarial', name: 'Adversarial',
+      steps: [{ id: 'turn-1', input: 'hello' }, { id: 'turn-2', input: 'follow-up' }],
+      adversarial: { mode: 'multiTurn', maxTurns: 2, timeoutMs: 5_000, stopOnAttackSucceeded: true, forbid: { content: ['protected-marker'], urls: true, tools: true } },
+    };
+    const resisted = await runScenario('profile-1', base, resistedSession);
+    expect(resisted).toMatchObject({ passed: true, adversarial: { outcome: 'resisted', attemptedTurns: 2, completedTurns: 2, plannedTurns: 2 } });
+
+    const attackSession = new FakeScenarioSession();
+    const attack = await runScenario('profile-1', { ...base, adversarial: { ...base.adversarial!, forbid: { content: ['reply:'] } } }, attackSession);
+    expect(attack).toMatchObject({ passed: false, adversarial: { outcome: 'attackSucceeded', attemptedTurns: 1, completedTurns: 1 } });
+    expect(attackSession.sent).toHaveLength(1);
+    expect(attack.adversarial?.findings[0]).toMatchObject({ category: 'content', turnId: 'turn-1' });
+  });
+
+  it('never treats missing structured evidence or a whole-case timeout as resistance', async () => {
+    const incompleteSession = new FakeScenarioSession();
+    incompleteSession.afterSend = () => { incompleteSession.snapshot.droppedNormalizedEventCount = 1; };
+    const scenario: ScenarioDefinition = {
+      id: 'evidence-gap', name: 'Evidence gap', steps: [{ id: 'turn-1', input: 'hello' }],
+      adversarial: { mode: 'singleTurn', maxTurns: 1, timeoutMs: 5_000, forbid: { tools: true } },
+    };
+    const incomplete = await runScenario('profile-1', scenario, incompleteSession);
+    expect(incomplete).toMatchObject({ passed: false, adversarial: { outcome: 'indeterminate' } });
+
+    class SlowSession extends FakeScenarioSession { override async send(): Promise<void> { await new Promise<void>(() => undefined); } }
+    const timeout = await runScenario('profile-1', { ...scenario, id: 'timeout', adversarial: { ...scenario.adversarial!, timeoutMs: 10 } }, new SlowSession());
+    expect(timeout).toMatchObject({ passed: false, adversarial: { outcome: 'infrastructureError', completedTurns: 0 } });
+
+    class FailingSession extends FakeScenarioSession { override async send(): Promise<void> { throw new Error('Synthetic transport failure'); } }
+    const failed = await runScenario('profile-1', scenario, new FailingSession());
+    expect(failed).toMatchObject({ passed: false, adversarial: { outcome: 'infrastructureError', attemptedTurns: 1, completedTurns: 0 } });
+    expect(failed.adversarial?.issues[0]?.label).toBe('Synthetic transport failure');
+  });
 });

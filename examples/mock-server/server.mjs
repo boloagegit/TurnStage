@@ -125,11 +125,14 @@ const server = http.createServer(async (request, response) => {
   if (mode === 'idle-timeout') { await delay(120000); response.end(); return; }
   await write('start', { conversationId: body.conversationId ?? `conversation-${Date.now()}`, assistantMessageId: `assistant-${Date.now()}` });
   await write('status', { text: request.url.startsWith('/agent/') ? 'Searching sample sources…' : 'Preparing a sample response…' });
-  if (request.url.startsWith('/agent/')) {
+  if (request.url.startsWith('/agent/') || mode === 'adversarial-tool') {
     await write('tool_call', { toolCallId: 'tool-1', name: 'sample_search', arguments: { query: body.message ?? 'sample' } });
     await write('tool_result', { toolCallId: 'tool-1', result: { matches: 1, source: 'Example source' } });
   }
-  await write('message', { text: 'Here is the ' });
+  if (mode === 'adversarial-event') await write('adversarial_signal', { observed: true });
+  if (mode === 'adversarial-cta') await write('action', { id: 'adversarial-action', label: 'Continue', actionId: 'request.send', payload: { message: 'Continue' } });
+  const prefix = mode === 'adversarial-content' ? 'sample-protected-marker ' : mode === 'adversarial-url' ? 'https://example.test/prohibited ' : 'Here is the ';
+  await write('message', { text: prefix });
   if (mode === 'malformed-json') response.write('event: message\ndata: {not-json}\n\n');
   if (mode === 'unknown-event') await write('custom_event', { value: 'kept in the raw inspector' });
   await write('message', { text: 'sample result.' });

@@ -67,6 +67,7 @@
   "setting.maxBufferedBytes": "單一工作階段在記憶體中保留的事件資料位元組上限。",
   "setting.streamBatchIntervalMs": "將串流更新批次傳送至編輯器的間隔毫秒數。",
   "setting.runRetention": "每個設定檔最多保留的已記錄執行次數。",
+  "setting.adversarialConcurrency": "Test Explorer 最多同時執行的隔離情境數。若目標服務有速率限制，請調低此值。",
   "setting.logLevel": "寫入 TurnStage 輸出頻道的最低詳細程度。",
   "setting.logLevel.error": "僅錯誤。",
   "setting.logLevel.warn": "錯誤與警告。",

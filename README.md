@@ -49,11 +49,16 @@ renderer and inspector.
 - A localhost-only synthetic mock server and three starter profiles, including
   an enterprise first-turn/multi-turn contract example with no real identity or
   credentials.
+- Bounded adversarial regression cases that replay fixed single- or multi-turn
+  attack scripts and classify them as Resisted, Attack succeeded,
+  Indeterminate, or Infrastructure error. Bulk JSONC suites and one-row-per-
+  turn CSV import/export support large case sets; timeout never counts as a
+  pass, and results link back to Chat, Network, and Events evidence.
 
 The implementation is intentionally explicit about limitations in the bundled
 `docs/turnstage-architecture.md`, `docs/profile-schema.md`,
 `docs/event-mapping.md`, `docs/security.md`, `docs/performance.md`, and
-`docs/edge-case-hardening.md`
+`docs/edge-case-hardening.md`, and `docs/adversarial-testing.md`
 documents.
 
 ## Requirements and installation
@@ -102,6 +107,10 @@ does not declare a `browser` entry and therefore does not claim support for
    **Configure Profile → Scenarios**, or edit the same fields in JSONC. Run
    **TurnStage: Export Contract Test Report** to save the latest sanitized
    results manually.
+8. Add known red-team regressions under **Configure Profile → Scenarios →
+   Adversarial tests**. Use JSONC suites for Git-managed bulk cases or CSV for
+   spreadsheet exchange, then triage the four outcomes in Test Explorer or the
+   Profile's latest-results list.
 
 Initialization is explicit. Merely installing the extension, opening a
 workspace, or opening the sidebar does not create profile files. Existing

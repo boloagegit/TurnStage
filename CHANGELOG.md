@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.11.0
+
+- Added bounded adversarial regression cases to existing Scenarios. Fixed single- or multi-turn scripts can prohibit visible content, URLs, calls to action, tool interactions, and exact normalized events; every run ends as Resisted, Attack succeeded, Indeterminate, or Infrastructure error, and timeout or incomplete evidence never passes.
+- Added Profile GUI authoring, save-current-conversation capture, Git-manageable versioned JSONC suites, and one-row-per-turn CSV import/export with explicit duplicate handling, strict validation, spreadsheet-formula protection, and practical 100-case coverage. Suites are capped at 500 cases, 2,000 turns, and 10 turns per case; execution concurrency is configurable from 1–8 and defaults to 3.
+- Added compact latest results and a domain-first failure summary with a primary Chat, Network, Raw Events, or Normalized Events evidence action. Distinct adversarial-capture and visual-baseline icons, transient operation feedback, recoverable local deletion, accessible Network attempt labels, and responsive theme-aware layouts reduce ambiguity during triage. Evidence Bundle version 2 now includes sanitized adversarial summary, turn, finding, network, and event CSVs; prompts, assistant content, URLs, headers, payloads, raw events, response bodies, and secrets remain excluded.
+- Existing version-1 Profiles remain compatible because adversarial fields and suite links are optional. Consumers of TurnStage contract reports must accept report version 2 and its additional adversarial summary fields. This release does not add an LLM judge, external classifier, PyRIT integration, adaptive attack generation, arbitrary scripts, or unbounded execution.
+
 ## 0.10.0
 
 - Added profile-defined multi-turn conversation contracts with a VS Code-native Test Explorer hierarchy, declarative bounded assertions, automatic terminal-state invariants, isolated non-secret scenario controls, and clickable failure evidence that reopens the related Network or Event row. Scenario evidence is memory-only, contract requests require Workspace Trust, and existing version-1 profiles remain compatible because `tests` is optional.

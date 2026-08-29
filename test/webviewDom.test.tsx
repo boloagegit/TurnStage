@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 import { MobileChatPreview, resizeComposerTextarea } from '../src/webview/MobileChatPreview';
-import { ACCESSIBLE_EVENT_WINDOW_SIZE, DEFAULT_EVENT_FILTERS, eventMatchesFilters, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, ProfileIdentityBar, Replay, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
+import { ACCESSIBLE_EVENT_WINDOW_SIZE, DEFAULT_EVENT_FILTERS, eventMatchesFilters, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
 import { SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
 
@@ -32,17 +32,6 @@ describe('Webview DOM behavior', () => {
     expect(within(opening).getByRole('heading', { name: 'Opening' })).toBeTruthy();
     expect(within(opening).getByText('Welcome to the fixture.')).toBeTruthy();
     expect(within(opening).queryByText('Assistant')).toBeNull();
-  });
-
-  it('identifies the profile workspace without presenting it as a JSONC editor', () => {
-    render(<ProfileIdentityBar profile={{ ...profile, environment: 'local' }} />);
-    const identity = screen.getByRole('banner', { name: 'TurnStage profile identity' });
-    expect(identity.textContent).toContain('DOM Test');
-    expect(identity.textContent).toContain('TurnStage Profile');
-    expect(identity.textContent).toContain('dom-test');
-    expect(identity.textContent).toContain('local');
-    expect(identity.textContent).not.toContain('.jsonc');
-    expect(identity.querySelector('.codicon-target')).toBeNull();
   });
 
   it('switches viewport presets, accepts custom dimensions, rotates, and changes zoom', async () => {
@@ -115,6 +104,16 @@ describe('Webview DOM behavior', () => {
     expect(within(sessionTools).getByRole('button', { name: 'Restart session' }).querySelector('.codicon-debug-restart')).toBeTruthy();
   });
 
+  it('keeps Profile configuration accessible without a duplicated identity row', async () => {
+    const user = userEvent.setup();
+    const onConfigure = vi.fn();
+    render(<MobileChatPreview {...mobileProps({ onConfigure })} />);
+
+    await user.click(screen.getByRole('button', { name: 'Configure profile' }));
+    expect(onConfigure).toHaveBeenCalledOnce();
+    expect(document.querySelector('.profile-identity')).toBeNull();
+  });
+
   it('gives every icon-only chat control an accessible name and matching tooltip', () => {
     render(<MobileChatPreview {...mobileProps({ draft: 'Ready to send' })} />);
 
@@ -124,6 +123,21 @@ describe('Webview DOM behavior', () => {
       expect(button.getAttribute('aria-label')?.trim()).toBeTruthy();
       expect(button.getAttribute('title')).toBe(button.getAttribute('aria-label'));
     }
+  });
+
+  it('captures a conversation as an adversarial test from the preview toolbar', async () => {
+    const post = vi.fn();
+    const userMessage: ChatMessage = { id: 'user-1', role: 'user', status: 'completed', createdAt: 0, completedAt: 1, parts: [{ type: 'text', text: 'Probe' }], citations: [], actions: [], followups: [] };
+    render(<MobileChatPreview {...mobileProps({ post, snapshot: { ...snapshot, messages: [userMessage, ...snapshot.messages] } })} />);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Save conversation as adversarial test' }));
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.capture' });
+  });
+
+  it('uses distinct visual symbols for adversarial capture and visual baselines', () => {
+    render(<MobileChatPreview {...mobileProps()} />);
+    expect(screen.getByRole('button', { name: 'Save conversation as adversarial test' }).querySelector('.codicon-beaker')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save visual baseline' }).querySelector('.codicon-save')).toBeTruthy();
   });
 
   it('supports interaction-only message actions while keeping them keyboard reachable', () => {
@@ -586,6 +600,54 @@ describe('Webview DOM behavior', () => {
       path: ['tests', 'scenarios'],
       value: [expect.objectContaining({ id: 'scenario-1', steps: [expect.objectContaining({ id: 'step-1' })] })],
     }));
+  });
+
+  it('authors, bulk-transfers, and opens evidence for adversarial cases', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={profile} post={post} testResults={[{
+      profileId: profile.id, scenarioId: 'known-attack', scenarioName: 'Known attack', outcome: 'attackSucceeded', durationMs: 420,
+      attemptedTurns: 1, completedTurns: 1, plannedTurns: 2, findingCount: 1, issueCount: 0, evidenceId: 'evidence-1',
+      primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'network', networkId: 'network-1' }, { kind: 'normalizedEvent', sequence: 3 }],
+    }]} />);
+
+    await user.click(screen.getByRole('button', { name: 'Import CSV' }));
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'importCsv' });
+    await user.click(screen.getByRole('button', { name: 'Link JSONC suite' }));
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'linkJsonc' });
+    await user.click(screen.getAllByRole('button', { name: 'Add case' })[0]!);
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['tests', 'scenarios'], value: [expect.objectContaining({ id: 'adversarial-1', adversarial: expect.objectContaining({ mode: 'singleTurn', timeoutMs: 60000 }) })] }));
+    expect(screen.getByText('Attack succeeded')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Network' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } });
+  });
+
+  it('summarizes the active adversarial failure before its evidence locations', () => {
+    render(<EvidenceSummary result={{
+      profileId: profile.id, scenarioId: 'known-attack', scenarioName: 'Known attack', outcome: 'attackSucceeded', durationMs: 420,
+      attemptedTurns: 2, completedTurns: 2, plannedTurns: 3, findingCount: 1, issueCount: 0, evidenceId: 'evidence-1',
+      primaryFinding: { category: 'tool', turnId: 'turn-2', turnIndex: 1, ruleId: 'no-tools', label: 'Tool interaction was observed.' },
+      primaryLocation: { kind: 'normalizedEvent', sequence: 4 }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'network', networkId: 'network-1' }, { kind: 'rawEvent', sequence: 4 }],
+    }} />);
+    expect(screen.getByRole('heading', { name: 'Attack succeeded: Known attack' })).toBeTruthy();
+    expect(screen.getByText('Attack succeeded')).toBeTruthy();
+    expect(screen.getByText('Tool interaction was observed.')).toBeTruthy();
+    expect(screen.getByText('Turn 2: turn-2 · no-tools')).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Open evidence location' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open Normalized Events' }).classList.contains('primary')).toBe(true);
+    expect(screen.getByRole('group', { name: 'Open evidence location' }).querySelector('details')).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Open evidence location' })).getByText('Raw Events')).toBeTruthy();
+  });
+
+  it('offers local undo after deleting a scenario', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured = { ...profile, tests: { scenarios: [{ id: 'case-1', name: 'Delete me', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } }] } } as TurnStageProfile;
+    render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={configured} post={post} />);
+    await user.click(screen.getByRole('button', { name: 'Delete scenario Delete me' }));
+    expect(screen.getByRole('status').textContent).toContain('Deleted case Delete me.');
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(post).toHaveBeenLastCalledWith({ type: 'profile.patch', path: ['tests', 'scenarios'], value: configured.tests!.scenarios });
   });
 
   it('patches CI reporting and comparison performance settings from the Scenarios GUI', async () => {

@@ -129,14 +129,22 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
   }
   const json = await waitFor(async () => await exists(jsonUri) ? readText(jsonUri) : undefined, 'the trusted JSON contract report', 15_000);
   const junit = await waitFor(async () => await exists(junitUri) ? readText(junitUri) : undefined, 'the trusted JUnit contract report', 15_000);
-  const parsed = JSON.parse(json) as { format?: string; version?: number; summary?: { total?: number; passed?: number }; scenarios?: Array<{ comparison?: { differenceCount?: number } }> };
+  const parsed = JSON.parse(json) as { format?: string; version?: number; summary?: { total?: number; passed?: number; failed?: number; attackSucceeded?: number }; scenarios?: Array<{ comparison?: { differenceCount?: number }; adversarial?: { outcome?: string; attemptedTurns?: number; completedTurns?: number; plannedTurns?: number } }> };
   assert.equal(parsed.format, 'turnstage-contract-report');
-  assert.equal(parsed.version, 1);
-  assert.equal(parsed.summary?.total, 1);
+  assert.equal(parsed.version, 2);
+  assert.equal(parsed.summary?.total, 2);
   assert.equal(parsed.summary?.passed, 1, json);
-  assert.equal(parsed.scenarios?.[0]?.comparison?.differenceCount, 0);
-  assert.match(junit, /<testsuite[^>]+tests="1"[^>]+failures="0"/);
-  for (const forbidden of ['Integration Profile', 'Integration contract', 'Integration baseline', 'Integration candidate', 'Hello from Test Explorer', 'rawEvents', 'requestPreview', 'actual', 'expected']) {
+  assert.equal(parsed.summary?.failed, 1, json);
+  assert.equal(parsed.summary?.attackSucceeded, 1, json);
+  assert.equal(parsed.scenarios?.find((scenario) => scenario.comparison)?.comparison?.differenceCount, 0);
+  const adversarial = parsed.scenarios?.find((scenario) => scenario.adversarial)?.adversarial;
+  assert.equal(adversarial?.outcome, 'attackSucceeded');
+  assert.equal(adversarial?.attemptedTurns, 2);
+  assert.equal(adversarial?.completedTurns, 2);
+  assert.equal(adversarial?.plannedTurns, 2);
+  assert.match(junit, /<testsuite[^>]+tests="2"[^>]+failures="1"/);
+  assert.match(junit, /Adversarial attack succeeded/);
+  for (const forbidden of ['Integration Profile', 'Integration contract', 'Integration adversarial', 'Integration multi-turn attack', 'Integration baseline', 'Integration candidate', 'Hello from Test Explorer', 'Establish context', 'Run the known fixed attack', 'rawEvents', 'requestPreview', 'actual', 'expected']) {
     assert.equal(json.includes(forbidden), false, `JSON contract report must exclude ${forbidden}`);
     assert.equal(junit.includes(forbidden), false, `JUnit contract report must exclude ${forbidden}`);
   }

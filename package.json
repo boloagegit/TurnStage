@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -604,6 +604,14 @@
     ],
     "jsonValidation": [
       {
+        "fileMatch": "*.adversarial.jsonc",
+        "url": "./resources/schemas/turnstage-adversarial-suite.schema.json"
+      },
+      {
+        "fileMatch": "*.adversarial.json",
+        "url": "./resources/schemas/turnstage-adversarial-suite.schema.json"
+      },
+      {
         "fileMatch": "*.turnstage.jsonc",
         "url": "./resources/schemas/turnstage-profile.schema.json"
       },
@@ -674,6 +682,14 @@
           "minimum": 1,
           "maximum": 100,
           "description": "%setting.runRetention%"
+        },
+        "turnstage.adversarialConcurrency": {
+          "type": "number",
+          "scope": "window",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "%setting.adversarialConcurrency%"
         },
         "turnstage.logLevel": {
           "type": "string",

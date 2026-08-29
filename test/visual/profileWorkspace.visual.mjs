@@ -48,10 +48,10 @@ try {
   });
   const url = `http://127.0.0.1:${address.port}/test/visual/profileWorkspaceHarness.html`;
   const waitForProfile = async () => {
-    await page.locator('.profile-identity').waitFor();
+    await page.locator('.mobile-chat-preview__app-header strong').waitFor();
     assert.equal(await page.getByText('Loading profile…').count(), 0, 'The recreated Webview must not remain on Loading profile…');
-    assert.ok((await page.locator('.profile-identity').innerText()).includes('Slow SSE Visual Proof'));
-    assert.ok(!(await page.locator('.profile-identity').innerText()).includes('.jsonc'));
+    assert.equal(await page.locator('.mobile-chat-preview__app-header strong').innerText(), 'Slow SSE Visual Proof');
+    assert.equal(await page.locator('.profile-identity').count(), 0, 'The duplicated full-width Profile identity row must stay removed');
   };
 
   await page.goto(url);
@@ -67,13 +67,13 @@ try {
   assert.ok((await sessionTools.innerText()).includes('Ready'), 'Idle session diagnostics must report Ready instead of the previous turn result');
   assert.equal(await page.locator('.mobile-chat-preview__app-header').getByRole('button').count(), 0, 'Harness actions must stay outside the simulated Chat header');
   assert.equal(await sessionTools.getByRole('button', { name: 'Restart session' }).locator('.codicon-debug-restart').count(), 1, 'Restart session must use the specific VS Code restart Codicon');
-  assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Debug is the default right-panel mode');
-  assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'false', 'Configure remains directly available beside Debug');
-  await page.getByRole('tab', { name: 'Debug' }).focus();
+  assert.equal(await page.getByRole('tab', { name: 'Evidence' }).getAttribute('aria-selected'), 'true', 'Evidence is the default right-panel mode');
+  assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'false', 'Configure remains directly available beside Evidence');
+  await page.getByRole('tab', { name: 'Evidence' }).focus();
   await page.keyboard.press('ArrowRight');
   assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'true', 'Right Arrow switches to Configure');
   await page.keyboard.press('ArrowLeft');
-  assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Debug');
+  assert.equal(await page.getByRole('tab', { name: 'Evidence' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Evidence');
   await page.screenshot({ path: resolve(artifactDirectory, 'wide-dark.png'), fullPage: true });
   await page.getByRole('tab', { name: 'Network' }).click();
   const networkList = page.getByRole('listbox', { name: 'Network requests' });
@@ -177,7 +177,7 @@ try {
   await page.getByRole('tab', { name: 'Configure' }).click();
   const inspectMessage = assistantMessage.getByRole('button', { name: 'Inspect message' });
   await inspectMessage.click();
-  assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Inspect message must switch the right pane from Configure to Debug');
+  assert.equal(await page.getByRole('tab', { name: 'Evidence' }).getAttribute('aria-selected'), 'true', 'Inspect message must switch the right pane from Configure to Evidence');
   assert.equal(await page.getByRole('tab', { name: 'Raw Events' }).getAttribute('aria-selected'), 'true', 'Inspect message must open Raw Events');
   await page.locator('#inspector-event-6').waitFor();
   assert.equal(await page.locator('#inspector-event-6').getAttribute('aria-selected'), 'true', 'Inspect message must select the last linked raw event');
@@ -203,9 +203,15 @@ try {
   await page.screenshot({ path: resolve(artifactDirectory, 'profile-config-right-pane-dark.png'), fullPage: true });
   await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('scenario-tests');
   await page.getByRole('heading', { level: 1, name: 'Scenarios' }).waitFor();
-  assert.equal(await page.locator('.scenario-editor').count(), 1, 'Scenario configuration must render the profile contract');
-  assert.equal(await page.locator('.scenario-step').count(), 1, 'Scenario configuration must keep its steps compact');
+  assert.equal(await page.locator('.scenario-editor').count(), 2, 'Scenario configuration must render the contract and adversarial case');
+  assert.equal(await page.locator('.scenario-step').count(), 3, 'Scenario configuration must keep ordinary and multi-turn steps compact');
   assert.equal(await page.locator('.assertion-row').count(), 3, 'Scenario configuration must render step and final assertions');
+  assert.equal(await page.locator('.adversarial-case-editor').count(), 1, 'Adversarial configuration must expose its bounded case editor');
+  assert.equal(await page.getByRole('heading', { name: 'Latest adversarial results' }).count(), 1, 'Scenario configuration must expose the compact latest-result list');
+  assert.equal(await page.getByText('Attack succeeded', { exact: true }).count(), 1, 'Latest results must distinguish an attack from resistance');
+  const adversarialResults = page.locator('.adversarial-result-list');
+  assert.equal(await adversarialResults.getByRole('button', { name: 'Chat' }).count(), 1, 'Latest results must link to Chat evidence when available');
+  assert.equal(await adversarialResults.getByRole('button', { name: 'Events' }).count(), 1, 'Latest results must link to Events evidence when available');
   assert.equal(await page.getByRole('heading', { name: 'CI reports' }).count(), 1, 'Scenario configuration must expose CI report settings');
   assert.equal(await page.getByRole('heading', { name: 'Visual regression' }).count(), 1, 'Scenario configuration must expose visual baseline settings');
   assert.equal(await page.getByLabel('HTML').isChecked(), true, 'Scenario reports must expose HTML output');
@@ -213,6 +219,16 @@ try {
   assert.equal(await page.locator('.scenario-budget__row').count(), 9, 'Every supported performance metric must be configurable');
   assert.equal(await page.locator('.debug-pane').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Scenario configuration must not overflow the right pane horizontally');
   await page.screenshot({ path: resolve(artifactDirectory, 'scenario-contract-settings-dark.png'), fullPage: true });
+  await adversarialResults.scrollIntoViewIfNeeded();
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-results-dark.png') });
+  await adversarialResults.getByRole('button', { name: 'Chat' }).click();
+  await page.getByRole('heading', { name: 'Attack succeeded: Known two-turn probe' }).waitFor();
+  assert.equal(await page.locator('.profile-identity').count(), 0, 'Evidence arrival must not restore the duplicated Profile row');
+  assert.equal(await page.getByRole('button', { name: 'Open Chat' }).count(), 1, 'Evidence summary must promote the most relevant location');
+  await page.locator('.operation-status').waitFor({ state: 'hidden' });
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-summary-dark.png'), fullPage: true });
+  await page.getByRole('tab', { name: 'Configure' }).click();
+  await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('scenario-tests');
   await page.locator('.scenario-advanced').filter({ hasText: 'Compare & performance' }).scrollIntoViewIfNeeded();
   assert.equal(await page.locator('.scenario-target-grid fieldset').count(), 2, 'Baseline and candidate targets must both render in the GUI');
   assert.equal(await page.locator('.scenario-budget').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Performance budgets must not overflow the embedded settings pane');
@@ -222,15 +238,15 @@ try {
   const displayName = page.getByLabel('Display name');
   await displayName.fill('GUI Edited Profile');
   await displayName.blur();
-  await page.locator('.profile-identity__primary strong').filter({ hasText: 'GUI Edited Profile' }).waitFor();
+  await page.locator('.mobile-chat-preview__app-header strong').filter({ hasText: 'GUI Edited Profile' }).waitFor();
   assert.deepEqual(await latestProfilePatch(page, 'name'), { path: ['name'], value: 'GUI Edited Profile' }, 'General settings must emit a structured name patch and rehydrate the live Chat surface');
   await displayName.fill('Slow SSE Visual Proof');
   await displayName.blur();
   await page.getByRole('button', { name: 'Open JSONC' }).click();
   await page.getByRole('button', { name: 'Validate' }).click();
   assert.deepEqual(await page.evaluate(() => globalThis.__turnstageMessages.slice(-2).map((message) => message.type)), ['profile.openAsText', 'profile.validate'], 'Configuration toolbar actions must reach the host protocol');
-  await page.locator('.sr-status').filter({ hasText: 'Profile is valid.' }).waitFor();
-  await page.getByRole('tab', { name: 'Debug' }).click();
+  await page.locator('.operation-status').filter({ hasText: 'Profile is valid.' }).waitFor();
+  await page.getByRole('tab', { name: 'Evidence' }).click();
   await page.getByRole('tab', { name: 'Raw Events' }).waitFor();
   assert.equal(await page.locator('[data-message-id="assistant-1"][data-selected="true"]').count(), 1, 'Returning to Debug restores the linked message selection');
 
@@ -327,7 +343,7 @@ try {
   await page.setViewportSize({ width: 760, height: 900 });
   await page.reload();
   await waitForProfile();
-  assert.equal(await page.locator('.profile-identity__meta').evaluate((element) => getComputedStyle(element).display), 'none');
+  assert.equal(await page.locator('.profile-identity').count(), 0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, 'Narrow layout must not overflow horizontally');
   await page.screenshot({ path: resolve(artifactDirectory, 'narrow-dark.png'), fullPage: true });
 
@@ -412,7 +428,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, rightPaneConfiguration: true, scenarioSettings: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: true, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, rightPaneConfiguration: true, scenarioSettings: true, adversarialSettings: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: true, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

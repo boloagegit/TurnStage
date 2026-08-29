@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ScenarioAssertionDefinition, TurnStageEnvironment, TurnStageProfile } from '../src/shared/types';
 import { ProfileCodec } from '../src/extension/config/profileCodec';
-import { ProfileValidator } from '../src/extension/config/profileValidator';
+import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../src/extension/config/profileValidator';
 
 function validProfile(): TurnStageProfile {
   return {
@@ -82,6 +82,55 @@ describe('ProfileValidator', () => {
     };
 
     expect(new ProfileValidator().validate(profile)).toEqual([]);
+  });
+
+  it('accepts bounded multi-turn adversarial cases and safe linked suite paths', () => {
+    const profile = validProfile();
+    profile.stream.mappings.push({ id: 'tool', match: { event: 'tool' }, emit: { type: 'tool.started', toolCallId: { path: '$.id' }, name: { path: '$.name' } } });
+    profile.tests = {
+      adversarialSuites: ['.vscode/turnstage/tests/security.adversarial.jsonc'],
+      scenarios: [{
+        id: 'known-attack', name: 'Known attack',
+        steps: [{ id: 'probe', input: 'First probe' }, { id: 'follow-up', input: 'Follow up', additionalForbid: { events: ['tool.started'] } }],
+        adversarial: { mode: 'multiTurn', maxTurns: 2, timeoutMs: 60_000, stopOnAttackSucceeded: true, forbid: { content: ['protected-marker'], urls: true, tools: true, events: ['tool.started'] } },
+      }],
+    };
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
+  });
+
+  it('validates external suite cases against Profile-owned observable mappings', () => {
+    const issues = validateAdversarialScenariosAgainstProfile(validProfile(), [{
+      id: 'tool-attack', name: 'Tool attack', steps: [{ id: 'probe', input: 'Use a tool' }],
+      adversarial: { mode: 'singleTurn', maxTurns: 1, timeoutMs: 60_000, forbid: { tools: true } },
+    }]);
+
+    expect(issues).toContainEqual(expect.objectContaining({
+      scenarioId: 'tool-attack',
+      message: 'This Profile has no mapping that can expose tool interactions.',
+    }));
+  });
+
+  it('rejects unsafe suites, empty prohibitions, truncated multi-turn cases, and contract-only features', () => {
+    const profile = validProfile();
+    profile.tests = {
+      adversarialSuites: ['../outside.adversarial.jsonc', '../outside.adversarial.jsonc'],
+      scenarios: [{
+        id: 'invalid-attack', name: 'Invalid attack', comparison: { baseline: {}, candidate: {} },
+        steps: [{ id: 'one', input: 'one', assertions: [{ path: 'turn.state', operator: 'exists' }] }, { id: 'two', input: 'two' }],
+        adversarial: { mode: 'singleTurn', maxTurns: 1, timeoutMs: 500, forbid: {} },
+      }],
+    };
+    const messages = new ProfileValidator().validate(profile).map((entry) => entry.message);
+    expect(messages).toEqual(expect.arrayContaining([
+      'Adversarial suite path must be a safe workspace-relative .adversarial.jsonc or .json path.',
+      'Adversarial suite paths must be unique.',
+      'A single-turn adversarial case must contain exactly one step.',
+      'Adversarial steps exceed maxTurns and will not be truncated.',
+      'Adversarial timeoutMs must be an integer from 1000 to 300000.',
+      'An adversarial case requires at least one prohibited effect.',
+      'Adversarial cases cannot use conversation-contract assertions in the first version.',
+      'Adversarial cases cannot combine with comparison, performance, or Fault Lab in the first version.',
+    ]));
   });
 
   it('accepts baseline comparison, performance budgets, ignore paths, and CI reporting', () => {

@@ -84,10 +84,10 @@ describe('Inspector keyboard helpers', () => {
     expect(mobileStyles).toContain('var(--vscode-dropdown-foreground');
     expect(mobileStyles).toContain('var(--vscode-dropdown-border');
     expect(mobileStyles).toContain('var(--vscode-dropdown-listBackground');
-    expect(mobileStyles).toContain('outline: 1px solid var(--mcp-focus);');
-    expect(mobileStyles).toContain('outline-offset: -1px;');
-    expect(baseStyles).toContain('outline: 1px solid var(--vscode-focusBorder);');
-    expect(baseStyles).toContain('outline-offset: -1px;');
+    expect(mobileStyles).toContain('outline: 2px solid var(--mcp-focus);');
+    expect(mobileStyles).toContain('outline-offset: -2px;');
+    expect(baseStyles).toContain('outline: 2px solid var(--vscode-focusBorder);');
+    expect(baseStyles).toContain('outline-offset: -2px;');
   });
 
   it('uses logical directional CSS and keeps long-script content breakable', () => {

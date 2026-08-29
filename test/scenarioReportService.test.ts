@@ -86,11 +86,12 @@ describe('ScenarioReportService', () => {
     const directory = await service.exportEvidenceBundle();
 
     expect(directory?.path).toMatch(/^\/chosen\/turnstage-evidence-/);
-    expect(mock.writes.map((entry) => entry.path.slice(entry.path.lastIndexOf('/') + 1)).sort()).toEqual(['index.html', 'junit.xml', 'manifest.json', 'report.json']);
+    expect(mock.writes.map((entry) => entry.path.slice(entry.path.lastIndexOf('/') + 1)).sort()).toEqual(['adversarial-findings.csv', 'adversarial-summary.csv', 'adversarial-turns.csv', 'events.csv', 'index.html', 'junit.xml', 'manifest.json', 'network.csv', 'report.json']);
     const html = mock.writes.find((entry) => entry.path.endsWith('/index.html'))?.text ?? '';
     const manifest = mock.writes.find((entry) => entry.path.endsWith('/manifest.json'))?.text ?? '';
     expect(html).toContain('<!doctype html>');
     expect(html).not.toContain('Private Name');
     expect(manifest).toContain('"visualChatContent": false');
+    expect(manifest).toContain('"version": 2');
   });
 });

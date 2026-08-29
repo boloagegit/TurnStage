@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { findNodeAtLocation } from 'jsonc-parser';
 import type {
+  AdversarialResultSummary,
   ScenarioCheckResult,
   ScenarioDefinition,
   ScenarioEvidenceLocation,
@@ -14,7 +15,7 @@ import type {
 import { ProfileCodec } from '../config/profileCodec';
 import { builtInEnvironment } from '../config/defaultEnvironment';
 import { EnvironmentRepository, ProfileRepository } from '../config/profileRepository';
-import { ProfileValidator } from '../config/profileValidator';
+import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../config/profileValidator';
 import { LocalRunRepository } from '../history/localRunRepository';
 import { localize } from '../l10n';
 import { SessionController } from '../runtime/sessionController';
@@ -24,12 +25,14 @@ import { evaluatePerformance } from './performanceEvaluator';
 import type { ScenarioExecutionRecord } from './scenarioReport';
 import { ScenarioReportService, type ConfiguredReportGroup } from './scenarioReportService';
 import { runScenario } from './scenarioRunner';
+import { loadAdversarialSuite } from './adversarialSuiteRepository';
 import type { VisualRegressionService } from './visualRegression';
 
 type TestData =
   | { type: 'profile'; uri: vscode.Uri }
-  | { type: 'scenario'; uri: vscode.Uri; scenarioId: string }
-  | { type: 'step'; uri: vscode.Uri; scenarioId: string; stepIndex: number };
+  | { type: 'suite'; uri: vscode.Uri; suitePath: string }
+  | { type: 'scenario'; uri: vscode.Uri; scenarioId: string; suitePath?: string }
+  | { type: 'step'; uri: vscode.Uri; scenarioId: string; stepIndex: number; suitePath?: string };
 
 export interface TestEvidenceReference {
   evidence: ScenarioRunEvidence;
@@ -42,12 +45,14 @@ interface ScenarioJob {
   uri: vscode.Uri;
   scenarioId: string;
   stepIndex?: number;
+  suitePath?: string;
 }
 
 interface CompletedScenario {
   record: ScenarioExecutionRecord;
   profileUri: vscode.Uri;
   reporting?: ScenarioReportingDefinition;
+  evidenceId?: string;
 }
 
 const MAX_EVIDENCE_ENTRIES = 100;
@@ -63,6 +68,9 @@ export class ScenarioTestController implements vscode.Disposable {
   private readonly messageEvidenceByContext = new Map<string, { evidenceId: string; location: ScenarioEvidenceLocation }>();
   private readonly evidence = new Map<string, TestEvidenceReference>();
   private readonly reports: ScenarioReportService;
+  private readonly resultsEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; results: AdversarialResultSummary[] }>();
+  readonly onDidChangeResults = this.resultsEmitter.event;
+  private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
   private refreshing?: Promise<void>;
 
   constructor(
@@ -77,15 +85,15 @@ export class ScenarioTestController implements vscode.Disposable {
     this.controller.resolveHandler = async () => this.refresh();
     this.controller.createRunProfile(localize('Run Conversation Contracts'), vscode.TestRunProfileKind.Run, async (request, token) => this.run(request, token), true);
 
-    const watcher = vscode.workspace.createFileSystemWatcher('**/*.turnstage.jsonc');
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*.{turnstage,adversarial}.{json,jsonc}');
     const refresh = () => { void this.refresh(); };
     watcher.onDidCreate(refresh);
     watcher.onDidChange(refresh);
     watcher.onDidDelete(refresh);
-    context.subscriptions.push(this.controller, watcher, vscode.workspace.onDidSaveTextDocument((document) => { if (document.uri.path.endsWith('.turnstage.jsonc')) refresh(); }));
+    context.subscriptions.push(watcher, vscode.workspace.onDidSaveTextDocument((document) => { if (/\.(?:turnstage|adversarial)\.jsonc?$/.test(document.uri.path)) refresh(); }));
   }
 
-  dispose(): void { this.controller.dispose(); }
+  dispose(): void { this.resultsEmitter.dispose(); this.controller.dispose(); }
 
   async refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
@@ -97,13 +105,14 @@ export class ScenarioTestController implements vscode.Disposable {
   hasReport(): boolean { return this.reports.hasRecords(); }
   exportLastReport(format: ScenarioReportFormat): Promise<vscode.Uri | undefined> { return this.reports.exportLast(format); }
   exportEvidenceBundle(): Promise<vscode.Uri | undefined> { return this.reports.exportEvidenceBundle(); }
+  getLatestResults(uri: vscode.Uri): AdversarialResultSummary[] { return this.latestResults.get(uri.toString()) ?? []; }
   async runAll(): Promise<void> {
     const cancellation = new vscode.CancellationTokenSource();
     try { await this.run(new vscode.TestRunRequest(), cancellation.token); }
     finally { cancellation.dispose(); }
   }
 
-  getMessageEvidence(argument: unknown): TestEvidenceReference | undefined {
+  getMessageEvidence(argument: unknown): (TestEvidenceReference & { evidenceId: string }) | undefined {
     if (!argument || typeof argument !== 'object') return undefined;
     const message = (argument as { message?: unknown }).message;
     if (!message || typeof message !== 'object') return undefined;
@@ -111,11 +120,11 @@ export class ScenarioTestController implements vscode.Disposable {
     const contextId = contextValue?.startsWith(MESSAGE_EVIDENCE_PREFIX) ? contextValue.slice(MESSAGE_EVIDENCE_PREFIX.length) : undefined;
     const target = this.messageEvidence.get(message as vscode.TestMessage) ?? (contextId ? this.messageEvidenceByContext.get(contextId) : undefined);
     const reference = target ? this.evidence.get(target.evidenceId) : undefined;
-    return reference ? { ...reference, location: target!.location } : undefined;
+    return reference ? { ...reference, evidenceId: target!.evidenceId, location: target!.location } : undefined;
   }
 
   private async discover(): Promise<void> {
-    const entries = (await this.profiles.discover()).filter((entry) => !entry.overridden && entry.profile?.tests?.scenarios?.length);
+    const entries = (await this.profiles.discover()).filter((entry) => !entry.overridden && ((entry.profile?.tests?.scenarios?.length ?? 0) > 0 || (entry.profile?.tests?.adversarialSuites?.length ?? 0) > 0));
     const roots: vscode.TestItem[] = [];
     for (const entry of entries) {
       if (!entry.profile) continue;
@@ -138,6 +147,34 @@ export class ScenarioTestController implements vscode.Disposable {
         }
         profileItem.children.add(scenarioItem);
       }
+      for (const suitePath of entry.profile.tests?.adversarialSuites ?? []) {
+        try {
+          const loaded = await loadAdversarialSuite(entry.uri, suitePath);
+          const compatibilityError = validateAdversarialScenariosAgainstProfile(entry.profile, loaded.scenarios)[0];
+          if (compatibilityError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
+          const suiteItem = this.controller.createTestItem(`${entry.uri.toString()}::suite::${loaded.suite.id}`, loaded.suite.name, loaded.uri);
+          suiteItem.description = `${loaded.scenarios.length} ${localize('adversarial cases')}`;
+          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, suitePath });
+          for (const scenario of loaded.scenarios) {
+            const scenarioItem = this.controller.createTestItem(`${suiteItem.id}::scenario::${scenario.id}`, scenario.name || scenario.id, loaded.uri);
+            scenarioItem.description = scenario.id;
+            this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, scenarioId: scenario.id, suitePath });
+            for (const [stepIndex, step] of scenario.steps.entries()) {
+              const stepItem = this.controller.createTestItem(`${scenarioItem.id}::step::${step.id}`, step.name?.trim() || step.id, loaded.uri);
+              stepItem.description = step.input.length > 80 ? `${step.input.slice(0, 77)}…` : step.input;
+              this.metadata.set(stepItem, { type: 'step', uri: entry.uri, scenarioId: scenario.id, stepIndex, suitePath });
+              scenarioItem.children.add(stepItem);
+            }
+            suiteItem.children.add(scenarioItem);
+          }
+          profileItem.children.add(suiteItem);
+        } catch (error) {
+          const suiteItem = this.controller.createTestItem(`${entry.uri.toString()}::suite-error::${suitePath}`, suitePath, entry.uri);
+          suiteItem.description = error instanceof Error ? error.message.split('\n')[0] : String(error);
+          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, suitePath });
+          profileItem.children.add(suiteItem);
+        }
+      }
       roots.push(profileItem);
     }
     this.controller.items.replace(roots);
@@ -149,18 +186,81 @@ export class ScenarioTestController implements vscode.Disposable {
     const completed: CompletedScenario[] = [];
     try {
       const jobs = this.collectJobs(request);
-      for (const job of jobs) {
-        if (token.isCancellationRequested) break;
-        if (!vscode.workspace.isTrusted) {
+      for (const uriKey of new Set(jobs.map((job) => job.uri.toString()))) {
+        const uri = vscode.Uri.parse(uriKey);
+        this.latestResults.set(uriKey, []);
+        this.resultsEmitter.fire({ uri, results: [] });
+      }
+      if (!vscode.workspace.isTrusted) {
+        for (const job of jobs) {
           run.skipped(job.item);
           run.appendOutput(`${localize('Skipped {name}: conversation contract tests require a trusted workspace.', { name: job.item.label })}\r\n`, undefined, job.item);
-          continue;
         }
-        const result = await this.runJob(job, run, token);
-        if (result) completed.push(result);
+      } else {
+        const concurrency = Math.max(1, Math.min(8, vscode.workspace.getConfiguration('turnstage').get<number>('adversarialConcurrency', 3)));
+        run.appendOutput(`${localize('Running {count} scenarios with concurrency {concurrency}.', { count: String(jobs.length), concurrency: String(concurrency) })}\r\n`);
+        let cursor = 0;
+        await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
+          while (!token.isCancellationRequested) {
+            const index = cursor++;
+            const job = jobs[index];
+            if (!job) return;
+            const result = await this.runJob(job, run, token);
+            if (result) completed.push(result);
+          }
+        }));
       }
+      completed.sort((a, b) => `${a.record.profileId}/${a.record.scenarioId}`.localeCompare(`${b.record.profileId}/${b.record.scenarioId}`));
       this.reports.record(completed.map((item) => item.record));
       await this.reports.writeConfigured(reportGroups(completed));
+      const completedByProfile = new Map<string, CompletedScenario[]>();
+      for (const item of completed) {
+        const key = item.profileUri.toString();
+        const items = completedByProfile.get(key) ?? [];
+        items.push(item);
+        completedByProfile.set(key, items);
+      }
+      for (const [uriKey, items] of completedByProfile) {
+        const results = items.flatMap((item): AdversarialResultSummary[] => {
+          const evaluation = item.record.result?.adversarial;
+          if (!evaluation || !item.evidenceId) return [];
+          const availableLocations = uniqueEvidenceLocations([
+            ...evaluation.findings.flatMap((finding) => finding.locations),
+            ...evaluation.issues.map((issue) => issue.location),
+          ]);
+          return [{
+            profileId: item.record.profileId,
+            scenarioId: item.record.scenarioId,
+            scenarioName: item.record.scenarioName,
+            outcome: evaluation.outcome,
+            durationMs: item.record.result!.durationMs,
+            attemptedTurns: evaluation.attemptedTurns,
+            completedTurns: evaluation.completedTurns,
+            plannedTurns: evaluation.plannedTurns,
+            findingCount: evaluation.findings.length,
+            issueCount: evaluation.issues.length,
+            primaryFinding: evaluation.findings[0] ? {
+              category: evaluation.findings[0].category,
+              turnId: evaluation.findings[0].turnId,
+              turnIndex: evaluation.findings[0].turnIndex,
+              ruleId: evaluation.findings[0].ruleId,
+              label: evaluation.findings[0].label,
+            } : undefined,
+            primaryIssue: evaluation.issues[0] ? {
+              kind: evaluation.issues[0].kind,
+              turnId: evaluation.issues[0].turnId,
+              turnIndex: evaluation.issues[0].turnIndex,
+              label: evaluation.issues[0].label,
+            } : undefined,
+            evidenceId: item.evidenceId,
+            primaryLocation: evaluation.findings[0]?.locations[0] ?? evaluation.issues[0]?.location ?? { kind: 'profile', path: 'tests.scenarios' },
+            availableLocations,
+          }];
+        });
+        const uri = vscode.Uri.parse(uriKey);
+        this.latestResults.set(uriKey, results);
+        this.resultsEmitter.fire({ uri, results });
+      }
     } finally {
       run.end();
     }
@@ -173,9 +273,9 @@ export class ScenarioTestController implements vscode.Disposable {
       if (isExcluded(item, request.exclude)) return;
       const data = this.metadata.get(item);
       if (!data) return;
-      if (data.type === 'profile') { item.children.forEach(visit); return; }
-      if (data.type === 'scenario') { jobs.set(item.id, { item, uri: data.uri, scenarioId: data.scenarioId }); return; }
-      jobs.set(item.id, { item, uri: data.uri, scenarioId: data.scenarioId, stepIndex: data.stepIndex });
+      if (data.type === 'profile' || data.type === 'suite') { item.children.forEach(visit); return; }
+      if (data.type === 'scenario') { jobs.set(item.id, { item, uri: data.uri, scenarioId: data.scenarioId, suitePath: data.suitePath }); return; }
+      jobs.set(item.id, { item, uri: data.uri, scenarioId: data.scenarioId, stepIndex: data.stepIndex, suitePath: data.suitePath });
     };
     selected.forEach(visit);
     return [...jobs.values()];
@@ -186,7 +286,7 @@ export class ScenarioTestController implements vscode.Disposable {
     run.started(job.item);
     let session: SessionController | undefined;
     try {
-      const loaded = await this.loadScenario(job.uri, job.scenarioId);
+      const loaded = await this.loadScenario(job.uri, job.scenarioId, job.suitePath);
       const scenario = job.stepIndex === undefined ? loaded.scenario : { ...loaded.scenario, steps: loaded.scenario.steps.slice(0, job.stepIndex + 1), assertions: [] };
       let result: ScenarioRunResult;
       if (scenario.comparison) {
@@ -237,22 +337,26 @@ export class ScenarioTestController implements vscode.Disposable {
         const stepItem = job.stepIndex === undefined ? findStepItem(job.item, stepResult.stepId) : job.item;
         if (!stepItem) continue;
         const failures = stepResult.checks.filter((check) => !check.passed);
-        if (failures.length) run.failed(stepItem, failures.map((check) => this.testMessage(check, evidenceId, stepItem)), stepResult.durationMs);
+        if (failures.length && result.adversarial?.issues.some((issue) => issue.turnId === stepResult.stepId)) run.errored(stepItem, failures.map((check) => this.testMessage(check, evidenceId, stepItem)), stepResult.durationMs);
+        else if (failures.length) run.failed(stepItem, failures.map((check) => this.testMessage(check, evidenceId, stepItem)), stepResult.durationMs);
         else run.passed(stepItem, stepResult.durationMs);
         this.appendChecks(run, stepItem, stepResult.checks);
       }
       const scenarioFailures = result.checks.filter((check) => !check.passed);
       const stepFailed = targetSteps.some((step) => step.checks.some((check) => !check.passed));
       if (job.stepIndex === undefined) {
-        if (scenarioFailures.length) run.failed(job.item, scenarioFailures.map((check) => this.testMessage(check, evidenceId, job.item)), result.durationMs);
+        if (result.adversarial?.outcome === 'infrastructureError' || result.adversarial?.outcome === 'indeterminate') run.errored(job.item, scenarioFailures.map((check) => this.testMessage(check, evidenceId, job.item)), result.durationMs);
+        else if (scenarioFailures.length) run.failed(job.item, scenarioFailures.map((check) => this.testMessage(check, evidenceId, job.item)), result.durationMs);
         else if (stepFailed || !result.passed) run.failed(job.item, new vscode.TestMessage(localize('One or more scenario steps failed.')), result.durationMs);
         else run.passed(job.item, result.durationMs);
       }
-      run.appendOutput(`${result.passed ? 'PASS' : 'FAIL'} ${loaded.profile.name} / ${loaded.scenario.name} (${result.durationMs} ms)\r\n`, undefined, job.item);
+      const resultLabel = result.adversarial ? adversarialOutcomeLabel(result.adversarial.outcome) : result.passed ? 'PASS' : 'FAIL';
+      run.appendOutput(`${resultLabel} ${loaded.profile.name} / ${loaded.scenario.name} (${result.durationMs} ms)\r\n`, undefined, job.item);
       return {
-        record: { profileId: loaded.profile.id, profileName: loaded.profile.name, scenarioId: loaded.scenario.id, scenarioName: loaded.scenario.name, result, status: result.passed ? 'passed' : 'failed' },
+        record: { profileId: loaded.profile.id, profileName: loaded.profile.name, scenarioId: loaded.scenario.id, scenarioName: loaded.scenario.name, scenarioTags: loaded.scenario.tags, result, status: result.adversarial ? adversarialRecordStatus(result.adversarial.outcome) : result.passed ? 'passed' : 'failed' },
         profileUri: job.uri,
         reporting: loaded.profile.tests?.reporting,
+        evidenceId,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -264,16 +368,22 @@ export class ScenarioTestController implements vscode.Disposable {
     }
   }
 
-  private async loadScenario(uri: vscode.Uri, scenarioId: string): Promise<{ profile: TurnStageProfile; scenario: ScenarioDefinition; environment: TurnStageEnvironment; environments: TurnStageEnvironment[] }> {
+  private async loadScenario(uri: vscode.Uri, scenarioId: string, suitePath?: string): Promise<{ profile: TurnStageProfile; scenario: ScenarioDefinition; environment: TurnStageEnvironment; environments: TurnStageEnvironment[] }> {
     const document = await vscode.workspace.openTextDocument(uri);
     const parsed = this.codec.parse(document.getText());
     const environments = await this.environments.discover(uri);
     const issues = this.validator.validate(parsed.profile, parsed.tree, environments.map((entry) => entry.environment));
     const firstError = issues.find((issue) => issue.severity === 'error');
     if (!parsed.profile || firstError) throw new Error(firstError?.message ?? localize('Profile could not be parsed.'));
-    const scenario = parsed.profile.tests?.scenarios.find((candidate) => candidate.id === scenarioId);
+    const scenario = suitePath
+      ? (await loadAdversarialSuite(uri, suitePath)).scenarios.find((candidate) => candidate.id === scenarioId)
+      : parsed.profile.tests?.scenarios.find((candidate) => candidate.id === scenarioId);
     if (!scenario) throw new Error(localize('Scenario {id} was not found.', { id: scenarioId }));
     const available = environments.map((entry) => entry.environment);
+    if (suitePath) {
+      const compatibilityError = validateAdversarialScenariosAgainstProfile(parsed.profile, [scenario], available)[0];
+      if (compatibilityError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
+    }
     return { profile: parsed.profile, scenario, environment: selectEnvironment(available, parsed.profile.environment), environments: available };
   }
 
@@ -344,4 +454,20 @@ function escapeMarkdown(value: string): string {
   let escaped = value;
   for (const character of ['\\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '.', '!', '|', '>', '-']) escaped = escaped.replaceAll(character, `\\${character}`);
   return escaped;
+}
+function adversarialOutcomeLabel(outcome: NonNullable<ScenarioRunResult['adversarial']>['outcome']): string {
+  if (outcome === 'resisted') return 'RESISTED';
+  if (outcome === 'attackSucceeded') return 'ATTACK SUCCEEDED';
+  if (outcome === 'indeterminate') return 'INDETERMINATE';
+  return 'INFRASTRUCTURE ERROR';
+}
+function adversarialRecordStatus(outcome: NonNullable<ScenarioRunResult['adversarial']>['outcome']): ScenarioExecutionRecord['status'] {
+  if (outcome === 'resisted') return 'passed';
+  if (outcome === 'attackSucceeded') return 'failed';
+  return 'error';
+}
+function uniqueEvidenceLocations(locations: ScenarioEvidenceLocation[]): ScenarioEvidenceLocation[] {
+  const byKind = new Map<string, ScenarioEvidenceLocation>();
+  for (const location of locations) if (!byKind.has(location.kind)) byKind.set(location.kind, location);
+  return [...byKind.values()];
 }

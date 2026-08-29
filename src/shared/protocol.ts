@@ -1,4 +1,4 @@
-import type { InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from './types';
+import type { AdversarialResultSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from './types';
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -63,6 +63,10 @@ export type WebviewMessage = Envelope & (
   | { type: 'run.replay.speed'; speed: 0.25 | 0.5 | 1 | 2 | 4 }
   | { type: 'run.import' }
   | { type: 'run.export'; runId: string }
+  | { type: 'adversarial.file'; action: 'importCsv' | 'importJsonc' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'csvTemplate' }
+  | { type: 'test.runAll' }
+  | { type: 'test.evidence.open'; evidenceId: string; location: ScenarioEvidenceLocation }
+  | { type: 'adversarial.capture' }
   | { type: 'visual.baseline.save'; dataUrl: string; viewport: { id: string; width: number; height: number } }
   | { type: 'visual.compare'; dataUrl: string; viewport: { id: string; width: number; height: number } }
 );
@@ -70,7 +74,7 @@ export type WebviewMessage = Envelope & (
 export type HostMessage = Envelope & (
   | { type: 'host.ready'; trusted: boolean; remoteName?: string; locale: string; direction: 'ltr' | 'rtl' }
   | { type: 'workspace.section'; section: WorkspaceSection }
-  | { type: 'inspector.focus'; tab: InspectorTargetTab; networkId?: string; sequence?: number; messageId?: string }
+  | { type: 'inspector.focus'; tab: InspectorTargetTab; evidenceId?: string; networkId?: string; sequence?: number; messageId?: string }
   | { type: 'profile.snapshot'; profile?: TurnStageProfile; parseError?: string; version: number; environments: string[] }
   | { type: 'profile.validation'; diagnostics: Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number }> }
   | { type: 'profile.validated'; valid: boolean }
@@ -81,6 +85,9 @@ export type HostMessage = Envelope & (
   | { type: 'form.accepted'; formId: string; sourceMessageId?: string }
   | { type: 'run.imported'; path: string; runId: string; duplicate: boolean }
   | { type: 'run.exported'; path: string }
+  | { type: 'adversarial.operation'; action: 'importCsv' | 'importJsonc' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string }
+  | { type: 'test.results'; results: AdversarialResultSummary[] }
+  | { type: 'adversarial.captured'; detail: string }
   | { type: 'visual.result'; operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselinePath: string; diffPath?: string }
   | { type: 'workspaceTrust.changed'; trusted: boolean }
 );
@@ -143,7 +150,9 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   if (!isRecord(value) || !hasEnvelope(value, instanceId)) return false;
   const message = value;
   switch (message.type) {
-    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': return true;
+    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'test.runAll': case 'adversarial.capture': return true;
+    case 'adversarial.file': return ['importCsv', 'importJsonc', 'linkJsonc', 'exportCsv', 'exportJsonc', 'csvTemplate'].includes(String(message.action));
+    case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
     case 'profile.patch': return Array.isArray(message.path) && message.path.length > 0 && message.path.length <= MAX_VALUE_DEPTH && message.path.every((part) => (isBoundedString(part) && !['__proto__', 'prototype', 'constructor'].includes(part)) || (Number.isInteger(part) && Number(part) >= 0 && Number(part) <= 10_000)) && isStructuredValue(message.value);
     case 'control.set': return isBoundedString(message.controlId) && isStructuredValue(message.value);
     case 'mapping.test': return isRecord(message.event) && typeof message.event.protocol === 'string' && streamProtocols.has(message.event.protocol as RawStreamEvent['protocol']) && isBoundedString(message.event.raw, 262_144) && optionalBoundedString(message.event.eventName) && isStructuredValue(message.event.data);
@@ -169,7 +178,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
   switch (message.type) {
     case 'host.ready': return typeof message.trusted === 'boolean' && optionalBoundedString(message.remoteName) && isBoundedString(message.locale, 64) && (message.direction === 'ltr' || message.direction === 'rtl');
     case 'workspace.section': return isWorkspaceSection(message.section);
-    case 'inspector.focus': return (message.tab === 'Network' || message.tab === 'Raw Events' || message.tab === 'Normalized') && optionalBoundedString(message.networkId) && optionalBoundedString(message.messageId) && (message.sequence === undefined || (Number.isInteger(message.sequence) && Number(message.sequence) >= 0));
+    case 'inspector.focus': return (message.tab === 'Network' || message.tab === 'Raw Events' || message.tab === 'Normalized') && optionalBoundedString(message.evidenceId) && optionalBoundedString(message.networkId) && optionalBoundedString(message.messageId) && (message.sequence === undefined || (Number.isInteger(message.sequence) && Number(message.sequence) >= 0));
     case 'profile.snapshot': return (message.profile === undefined || (isRecord(message.profile) && isStructuredValue(message.profile))) && optionalBoundedString(message.parseError) && Number.isInteger(message.version) && Array.isArray(message.environments) && message.environments.every((item) => isBoundedString(item));
     case 'profile.validation': return Array.isArray(message.diagnostics) && message.diagnostics.length <= 10_000 && message.diagnostics.every((item) => isRecord(item) && (item.severity === 'error' || item.severity === 'warning') && isBoundedString(item.message, MAX_TEXT_LENGTH) && Number.isInteger(item.offset) && Number(item.offset) >= 0 && Number.isInteger(item.length) && Number(item.length) >= 0);
     case 'profile.validated': return typeof message.valid === 'boolean';
@@ -180,10 +189,20 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'form.accepted': return isBoundedString(message.formId) && optionalBoundedString(message.sourceMessageId);
     case 'run.imported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedString(message.runId) && typeof message.duplicate === 'boolean';
     case 'run.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH);
+    case 'adversarial.operation': return ['importCsv', 'importJsonc', 'linkJsonc', 'exportCsv', 'exportJsonc', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path);
+    case 'test.results': return Array.isArray(message.results) && message.results.length <= 10_000 && isStructuredValue(message.results);
+    case 'adversarial.captured': return isBoundedString(message.detail, MAX_TEXT_LENGTH);
     case 'visual.result': return (message.operation === 'baseline' || message.operation === 'compare') && ['saved', 'passed', 'failed'].includes(String(message.status)) && optionalBoundedString(message.baselinePath) && optionalBoundedString(message.diffPath) && (message.differencePercent === undefined || (typeof message.differencePercent === 'number' && Number.isFinite(message.differencePercent) && message.differencePercent >= 0 && message.differencePercent <= 100));
     case 'workspaceTrust.changed': return typeof message.trusted === 'boolean';
     default: return false;
   }
+}
+
+function isEvidenceLocation(value: unknown): boolean {
+  if (!isRecord(value) || !['network', 'rawEvent', 'normalizedEvent', 'message', 'profile'].includes(String(value.kind))) return false;
+  return optionalBoundedString(value.networkId) && optionalBoundedString(value.messageId) && optionalBoundedString(value.path)
+    && (value.sequence === undefined || (Number.isInteger(value.sequence) && Number(value.sequence) >= 0))
+    && (value.rawSequence === undefined || (Number.isInteger(value.rawSequence) && Number(value.rawSequence) >= 0));
 }
 
 export function isWorkspaceSection(value: unknown): value is WorkspaceSection {

@@ -1072,11 +1072,11 @@
 .mobile-chat-preview select:focus-visible,
 .mobile-chat-preview textarea:focus-visible,
 .mobile-chat-preview summary:focus-visible {
-  outline: 1px solid var(--mcp-focus);
-  outline-offset: -1px;
+  outline: 2px solid var(--mcp-focus);
+  outline-offset: -2px;
 }
 
-.mobile-chat-preview__message:focus-visible { outline: 1px solid var(--mcp-focus); outline-offset: 3px; }
+.mobile-chat-preview__message:focus-visible { outline: 2px solid var(--mcp-focus); outline-offset: 3px; }
 
 @media (forced-colors: active) {
   .mobile-chat-preview {

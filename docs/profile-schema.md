@@ -115,6 +115,24 @@ Event row. Evidence is held in memory for the current Extension Host only; it
 is not added to Recorded Runs or exports. Network scenarios are skipped in
 Restricted Mode.
 
+### Adversarial regression cases
+
+An inline scenario becomes an adversarial case when it declares
+`scenario.adversarial`. Its ordered `steps` are the attack turns; each step can
+add `additionalForbid` rules. Adversarial cases cannot combine with ordinary
+assertions, comparison, performance budgets, or Fault Lab in the first
+version. `maxTurns` is a hard bound rather than a truncation request, and
+`timeoutMs` covers the entire case. Results are Resisted, Attack succeeded,
+Indeterminate, or Infrastructure error; incomplete evidence and timeout never
+pass.
+
+Profiles can also list workspace-relative `tests.adversarialSuites` paths.
+Files must end in `.adversarial.jsonc` or `.adversarial.json`, remain inside the
+same workspace folder, and use the versioned `turnstage-adversarial-suite`
+format. Linked discovery adds a Suite level to Test Explorer. JSONC is the
+lossless format; CSV import/export uses one row per turn. See
+`docs/adversarial-testing.md` for limits, examples, and the bulk workflow.
+
 ### Baseline comparison and performance budgets
 
 An optional `comparison` runs the same scenario in two isolated sessions. Each
@@ -203,9 +221,10 @@ These actions require Workspace Trust and explicit user input. Baseline PNGs
 may contain visible conversation content and should be reviewed before commit.
 
 **TurnStage: Export Evidence Bundle** creates a new folder containing
-`index.html`, `report.json`, `junit.xml`, and `manifest.json`. The HTML is a
+`index.html`, `report.json`, `junit.xml`, adversarial summary/turn/finding CSVs,
+sanitized `network.csv` and `events.csv`, and `manifest.json`. The HTML is a
 self-contained, offline-readable summary with no external scripts or assets.
-Raw events, headers, payloads, message content, and secrets are excluded. If a
+Raw events, URLs, headers, payloads, message content, and secrets are excluded. If a
 visual result exists, a second explicit choice can include its baseline/diff
 PNGs; that choice warns that the images may contain visible chat content.
 

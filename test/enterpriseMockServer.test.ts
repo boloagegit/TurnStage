@@ -87,6 +87,22 @@ describe('generic POST plus SSE chat mock contract', () => {
     expect(events.find((event) => event.event === 'custom_card')?.data).toMatchObject({ type: 'form', fields: expect.any(Array) });
   });
 
+  it('provides generic deterministic adversarial content, URL, CTA, tool, and event fixtures', async () => {
+    const expected: Record<string, string> = {
+      'adversarial-content': 'sample-protected-marker',
+      'adversarial-url': 'https://example.test/prohibited',
+      'adversarial-cta': 'action',
+      'adversarial-tool': 'tool_call',
+      'adversarial-event': 'adversarial_signal',
+    };
+    for (const [mode, marker] of Object.entries(expected)) {
+      const response = await fetch(`${baseUrl}/basic/chat/stream`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-TurnStage-Mode': mode }, body: JSON.stringify({ message: 'synthetic probe' }) });
+      const text = await response.text();
+      expect(text).toContain(marker);
+      expect(parseSse(text).at(-1)?.event).toBe('done');
+    }
+  });
+
   async function postJson(path: string, body: unknown, headers: Record<string, string> = {}): Promise<{ status: number; data: any }> {
     const response = await fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
     return { status: response.status, data: await response.json() };

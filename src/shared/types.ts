@@ -25,6 +25,8 @@ export interface TurnStageProfile {
 /** Declarative, profile-owned conversation tests. No field is executable code. */
 export interface ProfileTestsDefinition {
   scenarios: ScenarioDefinition[];
+  /** Workspace-relative, Git-friendly adversarial suite files. */
+  adversarialSuites?: string[];
   /** Optional explicit, workspace-relative CI report output. */
   reporting?: ScenarioReportingDefinition;
   visual?: ScenarioVisualDefinition;
@@ -99,6 +101,8 @@ export interface ScenarioDefinition {
   id: string;
   name: string;
   description?: string;
+  /** Optional grouping labels used by bulk adversarial suites and reports. */
+  tags?: string[];
   /** Control values applied before the opening request and first step. */
   controls?: Record<string, unknown>;
   steps: ScenarioStepDefinition[];
@@ -108,6 +112,8 @@ export interface ScenarioDefinition {
   performance?: ScenarioPerformanceDefinition;
   /** Candidate-only for comparisons; applies to the sole run otherwise. */
   faults?: ScenarioFaultDefinition;
+  /** Optional bounded red-team regression contract. Existing scenarios remain conversation contracts. */
+  adversarial?: ScenarioAdversarialDefinition;
 }
 
 export interface ScenarioStepDefinition {
@@ -115,6 +121,111 @@ export interface ScenarioStepDefinition {
   name?: string;
   input: string;
   assertions?: ScenarioAssertionDefinition[];
+  /** Additional prohibitions for this turn; case-level prohibitions always remain active. */
+  additionalForbid?: AdversarialForbidDefinition;
+}
+
+export type AdversarialOutcome = 'resisted' | 'attackSucceeded' | 'indeterminate' | 'infrastructureError';
+
+export interface AdversarialContentRule {
+  id?: string;
+  match: 'contains' | 'regex';
+  value: string;
+  caseSensitive?: boolean;
+}
+
+export interface AdversarialForbidDefinition {
+  content?: Array<string | AdversarialContentRule>;
+  urls?: boolean;
+  ctas?: boolean;
+  tools?: boolean;
+  /** Exact normalized event types. */
+  events?: string[];
+}
+
+export interface ScenarioAdversarialDefinition {
+  mode?: 'singleTurn' | 'multiTurn';
+  /** Hard safety bound. Imported cases exceeding it are invalid rather than truncated. */
+  maxTurns?: number;
+  /** Whole-case wall-clock deadline, separate from request and idle timeouts. */
+  timeoutMs?: number;
+  /** Defaults to true. */
+  stopOnAttackSucceeded?: boolean;
+  forbid: AdversarialForbidDefinition;
+}
+
+export interface AdversarialFinding {
+  id: string;
+  category: 'content' | 'url' | 'cta' | 'tool' | 'event';
+  turnId: string;
+  turnIndex: number;
+  ruleId?: string;
+  label: string;
+  locations: ScenarioEvidenceLocation[];
+}
+
+export interface AdversarialIssue {
+  id: string;
+  kind: 'indeterminate' | 'infrastructure';
+  turnId?: string;
+  turnIndex?: number;
+  label: string;
+  location: ScenarioEvidenceLocation;
+}
+
+export interface AdversarialRunEvaluation {
+  outcome: AdversarialOutcome;
+  attemptedTurns: number;
+  completedTurns: number;
+  plannedTurns: number;
+  maxTurns: number;
+  timeoutMs: number;
+  findings: AdversarialFinding[];
+  issues: AdversarialIssue[];
+}
+
+export interface AdversarialResultSummary {
+  profileId: string;
+  scenarioId: string;
+  scenarioName: string;
+  outcome: AdversarialOutcome;
+  durationMs: number;
+  attemptedTurns: number;
+  completedTurns: number;
+  plannedTurns: number;
+  findingCount: number;
+  issueCount: number;
+  primaryFinding?: Pick<AdversarialFinding, 'category' | 'turnId' | 'turnIndex' | 'ruleId' | 'label'>;
+  primaryIssue?: Pick<AdversarialIssue, 'kind' | 'turnId' | 'turnIndex' | 'label'>;
+  evidenceId: string;
+  primaryLocation: ScenarioEvidenceLocation;
+  availableLocations: ScenarioEvidenceLocation[];
+}
+
+export interface AdversarialSuiteDefinition {
+  $schema?: string;
+  format: 'turnstage-adversarial-suite';
+  version: 1;
+  id: string;
+  name: string;
+  description?: string;
+  defaults?: Partial<Pick<ScenarioAdversarialDefinition, 'maxTurns' | 'timeoutMs' | 'stopOnAttackSucceeded'>> & { forbid?: AdversarialForbidDefinition };
+  cases: AdversarialSuiteCaseDefinition[];
+}
+
+export interface AdversarialSuiteCaseDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  tags?: string[];
+  enabled?: boolean;
+  controls?: Record<string, unknown>;
+  mode?: 'singleTurn' | 'multiTurn';
+  maxTurns?: number;
+  timeoutMs?: number;
+  stopOnAttackSucceeded?: boolean;
+  forbid?: AdversarialForbidDefinition;
+  turns: Array<Omit<ScenarioStepDefinition, 'assertions'>>;
 }
 
 export type ScenarioAssertionOperator =
@@ -152,7 +263,7 @@ export interface ScenarioCheckResult {
   id: string;
   label: string;
   passed: boolean;
-  kind: 'assertion' | 'invariant' | 'comparison' | 'performance';
+  kind: 'assertion' | 'invariant' | 'comparison' | 'performance' | 'adversarial';
   actual?: unknown;
   expected?: unknown;
   location: ScenarioEvidenceLocation;
@@ -181,6 +292,7 @@ export interface ScenarioRunResult {
   steps: ScenarioStepResult[];
   checks: ScenarioCheckResult[];
   evidence: ScenarioRunEvidence;
+  adversarial?: AdversarialRunEvaluation;
   comparison?: {
     baselineLabel: string;
     candidateLabel: string;

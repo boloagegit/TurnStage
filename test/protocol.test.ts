@@ -25,6 +25,9 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'run.replay.speed', speed: 99 }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'run.import' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'uri.open', uri: 'https://example.test/docs' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'adversarial.file', action: 'importCsv' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'rawEvent', sequence: -1 } }, 'editor-1')).toBe(false);
   });
 
   it('bounds cyclic, deep, oversized, and wrong-instance messages', () => {
@@ -51,10 +54,11 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'run.imported', path: 'file:///run.json', runId: 'run-1', duplicate: 'no' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'form.accepted', formId: 'form-1', sourceMessageId: 'message-1' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'workspaceTrust.changed', trusted: 'yes' }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'test.results', results: [] }, 'editor-1')).toBe(true);
   });
 
   it('accepts bounded inspector focus targets and rejects invalid selections', () => {
-    expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Network', networkId: 'network-2' }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Network', evidenceId: 'evidence-1', networkId: 'network-2' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Raw Events', sequence: 12 }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Normalized', sequence: 3, messageId: 'assistant-1' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Events', sequence: 1 }, 'editor-1')).toBe(false);
@@ -62,5 +66,6 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Raw Events', sequence: 1.5 }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Raw Events', sequence: '1' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Network', networkId: 'x'.repeat(1025) }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Network', evidenceId: 'x'.repeat(1025) }, 'editor-1')).toBe(false);
   });
 });

@@ -279,6 +279,18 @@ bounded printable request IDs. `tracestate`, `baggage`, arbitrary headers, and
 payloads are not retained as correlation metadata. TurnStage does not install
 an OpenTelemetry SDK, create spans, or send background telemetry.
 
+Adversarial execution uses fixed Profile/Suite messages and deterministic
+observable-effect checks. It does not execute imported code, invoke an LLM
+judge, load an external classifier, or generate adaptive attacks. Suite paths,
+case/turn/rule counts, regular expressions, file size, concurrency, maximum
+turns, and whole-case timeout are bounded. A missing mapping, dropped evidence,
+unexpected stream end, cancellation, or timeout fails closed as Indeterminate
+or Infrastructure error. CSV import validates the full file before applying a
+Profile edit and spreadsheet-leading formula characters are escaped on export.
+Evidence Bundle CSVs contain structural metadata only; they exclude prompts,
+assistant content, request/response payloads, URLs, headers, raw events, and
+secrets.
+
 The host should continue rejecting unknown protocol versions and untrusted
 payloads. Avoid broadening `allowedPatchRoots`, URI schemes, command allowlists,
 or Webview resource roots without a corresponding policy review.

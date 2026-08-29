@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import type { MappingTestResult, WebviewPayload } from '../shared/protocol';
-import type { ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TurnStageProfile } from '../shared/types';
+import type { AdversarialForbidDefinition, AdversarialResultSummary, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
@@ -33,6 +33,7 @@ export interface SettingsWorkspaceProps {
   snapshot?: SessionSnapshot;
   requestPreview?: unknown;
   remoteName?: string;
+  testResults?: AdversarialResultSummary[];
   /** The section selected by the host tree/editor. */
   section: SettingsSectionId;
   onSectionChange: (section: SettingsSectionId) => void;
@@ -50,6 +51,7 @@ export function SettingsWorkspace({
   snapshot,
   requestPreview,
   remoteName,
+  testResults = [],
   section,
   onSectionChange,
   embedded = false
@@ -72,7 +74,7 @@ export function SettingsWorkspace({
           <p id="profile-configuration-title" className="settings-surface-title">{t('Profile Configuration')}</p>
           <p className="settings-subtitle"><span>{profile.name || t('Untitled profile')}</span><span aria-hidden="true">·</span><code>{profile.id}</code><span aria-hidden="true">·</span><span>{profile.environment || t('No environment selected')}</span></p>
         </div>}
-      <div className="settings-header-actions" aria-label={t('Profile configuration actions')}>
+      <div className="settings-header-actions" role="group" aria-label={t('Profile configuration actions')}>
         <IconButton icon="file-code" label={t('Open JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
         <IconButton icon="check" label={t('Validate')} type="button" className="settings-primary-action" onClick={() => post({ type: 'profile.validate' })} />
       </div>
@@ -104,7 +106,7 @@ export function SettingsWorkspace({
           {active.id === 'request' && <RequestSection profile={profile} requestPreview={requestPreview} remoteName={remoteName} patch={patch} />}
           {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
           {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
-          {active.id === 'scenario-tests' && <ScenarioTestsSection profile={profile} patch={patch} />}
+          {active.id === 'scenario-tests' && <ScenarioTestsSection profile={profile} patch={patch} post={post} testResults={testResults} />}
           {active.id === 'history-errors' && <HistoryErrorsSection profile={profile} snapshot={snapshot} patch={patch} />}
           {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} />}
         </section>
@@ -337,9 +339,16 @@ const performanceMetricOptions: Array<{ id: ScenarioPerformanceMetric; label: st
   { id: 'metrics.maxEventGap', label: 'Maximum event gap' },
 ];
 
-function ScenarioTestsSection({ profile, patch }: { profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void }): React.JSX.Element {
+function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[] }): React.JSX.Element {
   const scenarios = profile.tests?.scenarios ?? [];
+  const [undo, setUndo] = useState<{ label: string; scenarios: ScenarioDefinition[] }>();
+  const adversarialEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => scenario.adversarial);
+  const contractEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => !scenario.adversarial);
   const save = (next: ScenarioDefinition[]) => patch(['tests', 'scenarios'], next);
+  const saveDestructive = (label: string, next: ScenarioDefinition[]) => {
+    setUndo({ label, scenarios: structuredClone(scenarios) });
+    save(next);
+  };
   const setReportFormat = (format: ScenarioReportFormat, checked: boolean) => {
     const reporting = profile.tests?.reporting;
     if (!reporting) return;
@@ -351,7 +360,48 @@ function ScenarioTestsSection({ profile, patch }: { profile: TurnStageProfile; p
     const id = uniqueId(new Set(scenarios.map((scenario) => scenario.id)), `scenario-${ordinal}`);
     save([...scenarios, { id, name: t('Scenario {number}', { number: formatNumber(ordinal) }), steps: [{ id: 'step-1', name: t('First message'), input: '', assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }] }] }]);
   };
+  const addAdversarial = () => {
+    const ordinal = adversarialEntries.length + 1;
+    const id = uniqueId(new Set(scenarios.map((scenario) => scenario.id)), `adversarial-${ordinal}`);
+    save([...scenarios, {
+      id,
+      name: t('Adversarial case {number}', { number: formatNumber(ordinal) }),
+      steps: [{ id: 'turn-1', name: t('First message'), input: '' }],
+      adversarial: { mode: 'singleTurn', maxTurns: 1, timeoutMs: 60_000, stopOnAttackSucceeded: true, forbid: { content: ['forbidden-marker'] } },
+    }]);
+  };
   return <div className="settings-section-stack">
+    <section className="settings-card" aria-labelledby="adversarial-tests-heading">
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-tests-heading">{t('Adversarial tests')}</h2><p className="settings-card-description">{t('Replay known attack messages and record whether observable prohibited effects occurred. Timeout and incomplete evidence never count as resistance.')}</p></div><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div>
+      <div className="adversarial-file-actions" role="group" aria-label={t('Bulk adversarial test files')}>
+        <details><summary>{t('Import')}</summary><div>
+          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'importJsonc' })}>{t('Import JSONC copy')}</button>
+          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'importCsv' })}>{t('Import CSV')}</button>
+        </div></details>
+        <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'linkJsonc' })}>{t('Link JSONC suite')}</button>
+        <details><summary>{t('Export')}</summary><div>
+          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'exportJsonc' })}>{t('Export JSONC')}</button>
+          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'exportCsv' })}>{t('Export CSV')}</button>
+          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'csvTemplate' })}>{t('CSV template')}</button>
+        </div></details>
+      </div>
+      {undo && <div className="settings-undo" role="status"><span>{undo.label}</span><button type="button" onClick={() => { save(undo.scenarios); setUndo(undefined); }}>{t('Undo')}</button><IconButton type="button" icon="clear-all" label={t('Dismiss undo')} onClick={() => setUndo(undefined)} /></div>}
+      {(profile.tests?.adversarialSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.adversarialSuites!.map((path, index) => <li key={`${path}-${index}`}><code>{path}</code><IconButton type="button" icon="trash" label={t('Unlink suite {path}', { path })} onClick={() => patch(['tests', 'adversarialSuites'], profile.tests!.adversarialSuites!.filter((_, itemIndex) => itemIndex !== index))} /></li>)}</ul></div>}
+      {!adversarialEntries.length ? <div className="settings-empty settings-empty--action"><span>{t('No inline adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <div className="scenario-list adversarial-case-list">
+        {adversarialEntries.map(({ scenario, index }) => <ScenarioEditor key={`${scenario.id}-${index}`} scenario={scenario} index={index} onChange={(value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={() => saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index))} />)}
+      </div>}
+      <p className="settings-footnote">{t('CSV uses one row per turn. JSONC suites preserve the full multi-turn structure and are the recommended Git-managed format.')}</p>
+    </section>
+    <section className="settings-card" aria-labelledby="adversarial-results-heading">
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-results-heading">{t('Latest adversarial results')}</h2><p className="settings-card-description">{t('Run from Test Explorer, then open the exact Chat, Network, or Events evidence for a result.')}</p></div><button type="button" onClick={() => post({ type: 'test.runAll' })}>{t('Run all tests')}</button></div>
+      {!testResults.length ? <p className="settings-empty">{t('No adversarial results in this Extension Host session.')}</p> : <ul className="adversarial-result-list">{testResults.map((result) => <li key={`${result.scenarioId}-${result.evidenceId}`}>
+        <div className="adversarial-result-identity"><strong>{result.scenarioName}</strong><code>{result.scenarioId}</code></div>
+        <span className={`adversarial-outcome adversarial-outcome--${result.outcome}`}><ProductIcon name={result.outcome === 'resisted' ? 'check' : result.outcome === 'attackSucceeded' ? 'target' : 'warning'} />{t(adversarialOutcomeText(result.outcome))}</span>
+        <span>{t('{completed}/{planned} turns', { completed: formatNumber(result.completedTurns), planned: formatNumber(result.plannedTurns) })}</span>
+        <span>{formatNumber(result.durationMs)} ms</span>
+        <div className="adversarial-result-actions">{(result.availableLocations.length ? result.availableLocations : [result.primaryLocation]).map((location) => <button key={`${result.evidenceId}-${location.kind}`} type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })}>{t(evidenceLocationText(location.kind))}</button>)}</div>
+      </li>)}</ul>}
+    </section>
     <section className="settings-card" aria-labelledby="scenario-reporting-heading">
       <SectionHeading id="scenario-reporting-heading" title={t('CI reports')} description={t('Write sanitized contract summaries after Test Explorer runs.')} />
       <SettingCheckbox id="settings-test-reporting-enabled" label={t('Write reports to the workspace')} checked={Boolean(profile.tests?.reporting)} onChange={(enabled) => patch(['tests', 'reporting'], enabled ? { formats: ['json'], outputDirectory: '.turnstage/reports' } : undefined)} />
@@ -375,19 +425,19 @@ function ScenarioTestsSection({ profile, patch }: { profile: TurnStageProfile; p
     </section>
     <section className="settings-card" aria-labelledby="scenario-contract-heading">
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="scenario-contract-heading">{t('Conversation contracts')}</h2><p className="settings-card-description">{t('Each scenario runs in an isolated host session. Assertions inspect bounded runtime evidence and never execute JavaScript.')}</p></div><IconButton type="button" icon="add" label={t('Add scenario')} onClick={addScenario} /></div>
-      {!scenarios.length ? <div className="settings-empty settings-empty--action"><span>{t('No scenarios configured.')}</span><button type="button" onClick={addScenario}>{t('Add scenario')}</button></div> : <div className="scenario-list">
-        {scenarios.map((scenario, scenarioIndex) => <ScenarioEditor key={`${scenario.id}-${scenarioIndex}`} scenario={scenario} index={scenarioIndex} onChange={(value) => save(replaceAt(scenarios, scenarioIndex, value))} onDelete={() => save(scenarios.filter((_, index) => index !== scenarioIndex))} />)}
+      {!contractEntries.length ? <div className="settings-empty settings-empty--action"><span>{t('No scenarios configured.')}</span><button type="button" onClick={addScenario}>{t('Add scenario')}</button></div> : <div className="scenario-list">
+        {contractEntries.map(({ scenario, index }) => <ScenarioEditor key={`${scenario.id}-${index}`} scenario={scenario} index={index} onChange={(value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={() => saveDestructive(t('Deleted scenario {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index))} />)}
       </div>}
     </section>
     <p className="settings-footnote">{t('Run these scenarios from VS Code Test Explorer. Every completed step also receives TurnStage state-invariant checks.')}</p>
   </div>;
 }
 
-function ScenarioEditor({ scenario, index, onChange, onDelete }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void; onDelete: () => void }): React.JSX.Element {
+function ScenarioEditor({ scenario, index, onChange, onDestructiveChange, onDelete }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void; onDestructiveChange: (value: ScenarioDefinition, label: string) => void; onDelete: () => void }): React.JSX.Element {
   const addStep = () => {
     const ordinal = scenario.steps.length + 1;
     const id = uniqueId(new Set(scenario.steps.map((step) => step.id)), `step-${ordinal}`);
-    onChange({ ...scenario, steps: [...scenario.steps, { id, name: t('Message {number}', { number: formatNumber(ordinal) }), input: '', assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }] }] });
+    onChange({ ...scenario, steps: [...scenario.steps, { id, name: t('Message {number}', { number: formatNumber(ordinal) }), input: '', ...(scenario.adversarial ? {} : { assertions: [{ path: 'turn.state', operator: 'equals' as const, value: 'completed' }] }) }], ...(scenario.adversarial ? { adversarial: { ...scenario.adversarial, mode: 'multiTurn', maxTurns: Math.max(scenario.adversarial.maxTurns ?? 1, ordinal) } } : {}) });
   };
   return <article className="scenario-editor" aria-labelledby={`scenario-editor-title-${index}`}>
     <header className="scenario-editor__header"><div><strong id={`scenario-editor-title-${index}`}>{scenario.name || scenario.id}</strong><code>{scenario.id}</code></div><div><IconButton type="button" icon="add" label={t('Add step to {name}', { name: scenario.name || scenario.id })} onClick={addStep} /><IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={onDelete} /></div></header>
@@ -395,15 +445,41 @@ function ScenarioEditor({ scenario, index, onChange, onDelete }: { scenario: Sce
       <SettingField label={t('Scenario name')} id={`scenario-name-${index}`}><PatchInput id={`scenario-name-${index}`} value={scenario.name} onCommit={(value) => onChange({ ...scenario, name: value })} required /></SettingField>
       <SettingField label={t('Scenario ID')} id={`scenario-id-${index}`} hint={t('Lowercase letters, numbers, and hyphens.')}><PatchInput id={`scenario-id-${index}`} value={scenario.id} onCommit={(value) => onChange({ ...scenario, id: value })} required spellCheck={false} /></SettingField>
       <SettingField label={t('Description')} id={`scenario-description-${index}`} wide><PatchInput id={`scenario-description-${index}`} value={scenario.description ?? ''} onCommit={(value) => onChange({ ...scenario, description: value || undefined })} multiline rows={2} /></SettingField>
+      {scenario.adversarial && <ListPatchField label={t('Tags')} id={`scenario-tags-${index}`} value={scenario.tags ?? []} placeholder={t('One tag per line')} onCommit={(tags) => onChange({ ...scenario, tags: tags.length ? tags : undefined })} wide />}
       <JsonPatchField label={t('Scenario controls (JSON)')} id={`scenario-controls-${index}`} value={scenario.controls ?? {}} hint={t('Applied only to this test run. Secret controls are not accepted.')} onCommit={(value) => onChange({ ...scenario, controls: isRecord(value) && Object.keys(value).length ? value : undefined })} />
     </div>
-    <ScenarioComparisonEditor scenario={scenario} index={index} onChange={onChange} />
-    <ScenarioFaultEditor scenario={scenario} index={index} onChange={onChange} />
+    {scenario.adversarial ? <AdversarialCaseEditor scenario={scenario} index={index} onChange={onChange} /> : <><ScenarioComparisonEditor scenario={scenario} index={index} onChange={onChange} /><ScenarioFaultEditor scenario={scenario} index={index} onChange={onChange} /></>}
     <div className="scenario-steps">
-      {scenario.steps.map((step, stepIndex) => <ScenarioStepEditor key={`${step.id}-${stepIndex}`} step={step} scenarioIndex={index} stepIndex={stepIndex} onChange={(value) => onChange({ ...scenario, steps: replaceAt(scenario.steps, stepIndex, value) })} onDelete={() => onChange({ ...scenario, steps: scenario.steps.filter((_, itemIndex) => itemIndex !== stepIndex) })} canDelete={scenario.steps.length > 1} />)}
+      {scenario.steps.map((step, stepIndex) => <ScenarioStepEditor key={`${step.id}-${stepIndex}`} step={step} scenarioIndex={index} stepIndex={stepIndex} adversarial={Boolean(scenario.adversarial)} onChange={(value) => onChange({ ...scenario, steps: replaceAt(scenario.steps, stepIndex, value) })} onDestructiveChange={(value, label) => onDestructiveChange({ ...scenario, steps: replaceAt(scenario.steps, stepIndex, value) }, label)} onDelete={() => onDestructiveChange({ ...scenario, steps: scenario.steps.filter((_, itemIndex) => itemIndex !== stepIndex) }, t('Deleted step {name}.', { name: step.name?.trim() || step.id }))} canDelete={scenario.steps.length > 1} />)}
     </div>
-    <AssertionsEditor idPrefix={`scenario-${index}-final`} title={t('Final assertions')} assertions={scenario.assertions ?? []} onChange={(value) => onChange({ ...scenario, assertions: value.length ? value : undefined })} />
+    {!scenario.adversarial && <AssertionsEditor idPrefix={`scenario-${index}-final`} title={t('Final assertions')} assertions={scenario.assertions ?? []} onChange={(value) => onChange({ ...scenario, assertions: value.length ? value : undefined })} onDeleteAt={(assertionIndex) => onDestructiveChange({ ...scenario, assertions: scenario.assertions?.filter((_, itemIndex) => itemIndex !== assertionIndex) }, t('Deleted assertion.'))} />}
   </article>;
+}
+
+function AdversarialCaseEditor({ scenario, index, onChange }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void }): React.JSX.Element {
+  const definition = scenario.adversarial!;
+  const update = (value: Partial<typeof definition>) => onChange({ ...scenario, adversarial: { ...definition, ...value } });
+  return <div className="adversarial-case-editor">
+    <div className="settings-form-grid">
+      <SettingField label={t('Conversation mode')} id={`adversarial-mode-${index}`} hint={t('Turns run in order in one isolated conversation.')}><select id={`adversarial-mode-${index}`} value={definition.mode ?? (scenario.steps.length > 1 ? 'multiTurn' : 'singleTurn')} onChange={(event) => update({ mode: event.target.value as 'singleTurn' | 'multiTurn' })}><option value="singleTurn">{t('Single turn')}</option><option value="multiTurn">{t('Multi-turn')}</option></select></SettingField>
+      <NumberSettingField label={t('Maximum turns')} id={`adversarial-max-turns-${index}`} value={definition.maxTurns} placeholder={String(Math.max(1, scenario.steps.length))} min={1} max={10} onCommit={(value) => update({ maxTurns: value })} />
+      <NumberSettingField label={t('Case timeout (ms)')} id={`adversarial-timeout-${index}`} value={definition.timeoutMs} placeholder="60000" min={1000} max={300000} onCommit={(value) => update({ timeoutMs: value })} />
+      <SettingCheckbox id={`adversarial-stop-${index}`} label={t('Stop after the first successful attack')} checked={definition.stopOnAttackSucceeded !== false} onChange={(checked) => update({ stopOnAttackSucceeded: checked })} />
+    </div>
+    <AdversarialForbidEditor idPrefix={`adversarial-${index}`} value={definition.forbid} onChange={(forbid) => update({ forbid })} />
+  </div>;
+}
+
+function AdversarialForbidEditor({ idPrefix, value, onChange, additional = false }: { idPrefix: string; value: AdversarialForbidDefinition; onChange: (value: AdversarialForbidDefinition) => void; additional?: boolean }): React.JSX.Element {
+  return <fieldset className="adversarial-forbid"><legend>{t(additional ? 'Additional prohibitions for this turn' : 'Prohibited observable effects')}</legend>
+    <ListPatchField label={t('Forbidden content')} id={`${idPrefix}-content`} value={(value.content ?? []).flatMap((rule) => typeof rule === 'string' ? [rule] : [])} placeholder={t('One phrase per line')} hint={t('Literal phrase matching. Regex rules remain available in JSONC.')} onCommit={(content) => onChange({ ...value, content: content.length ? content : undefined })} wide />
+    <ListPatchField label={t('Forbidden normalized events')} id={`${idPrefix}-events`} value={value.events ?? []} placeholder="tool.started" hint={t('Exact normalized event types, one per line.')} onCommit={(events) => onChange({ ...value, events: events.length ? events : undefined })} wide />
+    <div className="adversarial-forbid__checks">
+      <SettingCheckbox id={`${idPrefix}-urls`} label={t('Forbid URLs')} checked={Boolean(value.urls)} onChange={(urls) => onChange({ ...value, urls: urls || undefined })} />
+      <SettingCheckbox id={`${idPrefix}-ctas`} label={t('Forbid calls to action')} checked={Boolean(value.ctas)} onChange={(ctas) => onChange({ ...value, ctas: ctas || undefined })} />
+      <SettingCheckbox id={`${idPrefix}-tools`} label={t('Forbid tool interactions')} checked={Boolean(value.tools)} onChange={(tools) => onChange({ ...value, tools: tools || undefined })} />
+    </div>
+  </fieldset>;
 }
 
 function ScenarioFaultEditor({ scenario, index, onChange }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void }): React.JSX.Element {
@@ -480,7 +556,7 @@ function ScenarioComparisonEditor({ scenario, index, onChange }: { scenario: Sce
   </details>;
 }
 
-function ScenarioStepEditor({ step, scenarioIndex, stepIndex, onChange, onDelete, canDelete }: { step: ScenarioStepDefinition; scenarioIndex: number; stepIndex: number; onChange: (value: ScenarioStepDefinition) => void; onDelete: () => void; canDelete: boolean }): React.JSX.Element {
+function ScenarioStepEditor({ step, scenarioIndex, stepIndex, adversarial, onChange, onDestructiveChange, onDelete, canDelete }: { step: ScenarioStepDefinition; scenarioIndex: number; stepIndex: number; adversarial: boolean; onChange: (value: ScenarioStepDefinition) => void; onDestructiveChange: (value: ScenarioStepDefinition, label: string) => void; onDelete: () => void; canDelete: boolean }): React.JSX.Element {
   const prefix = `scenario-${scenarioIndex}-step-${stepIndex}`;
   return <section className="scenario-step" aria-labelledby={`${prefix}-title`}>
     <header><div><span className="scenario-step__index">{formatNumber(stepIndex + 1)}</span><strong id={`${prefix}-title`}>{step.name?.trim() || step.id}</strong></div><IconButton type="button" icon="trash" label={t('Delete step {name}', { name: step.name?.trim() || step.id })} onClick={onDelete} disabled={!canDelete} /></header>
@@ -489,14 +565,14 @@ function ScenarioStepEditor({ step, scenarioIndex, stepIndex, onChange, onDelete
       <SettingField label={t('Step ID')} id={`${prefix}-id`}><PatchInput id={`${prefix}-id`} value={step.id} onCommit={(value) => onChange({ ...step, id: value })} required spellCheck={false} /></SettingField>
       <SettingField label={t('User message')} id={`${prefix}-input`} wide><PatchInput id={`${prefix}-input`} value={step.input} onCommit={(value) => onChange({ ...step, input: value })} multiline rows={3} required /></SettingField>
     </div>
-    <AssertionsEditor idPrefix={prefix} title={t('Step assertions')} assertions={step.assertions ?? []} onChange={(value) => onChange({ ...step, assertions: value.length ? value : undefined })} />
+    {adversarial ? <AdversarialForbidEditor idPrefix={`${prefix}-additional`} value={step.additionalForbid ?? {}} additional onChange={(additionalForbid) => onChange({ ...step, additionalForbid: hasAdversarialForbid(additionalForbid) ? additionalForbid : undefined })} /> : <AssertionsEditor idPrefix={prefix} title={t('Step assertions')} assertions={step.assertions ?? []} onChange={(value) => onChange({ ...step, assertions: value.length ? value : undefined })} onDeleteAt={(assertionIndex) => onDestructiveChange({ ...step, assertions: step.assertions?.filter((_, itemIndex) => itemIndex !== assertionIndex) }, t('Deleted assertion.'))} />}
   </section>;
 }
 
-function AssertionsEditor({ idPrefix, title, assertions, onChange }: { idPrefix: string; title: string; assertions: ScenarioAssertionDefinition[]; onChange: (value: ScenarioAssertionDefinition[]) => void }): React.JSX.Element {
+function AssertionsEditor({ idPrefix, title, assertions, onChange, onDeleteAt }: { idPrefix: string; title: string; assertions: ScenarioAssertionDefinition[]; onChange: (value: ScenarioAssertionDefinition[]) => void; onDeleteAt?: (index: number) => void }): React.JSX.Element {
   const add = () => onChange([...assertions, { path: 'assistant.text', operator: 'exists' }]);
   return <div className="assertion-editor"><div className="assertion-editor__heading"><strong>{title}</strong><IconButton type="button" icon="add" label={t('Add assertion')} onClick={add} /></div>
-    {!assertions.length ? <p className="settings-muted">{t('No explicit assertions. Built-in state invariants still run.')}</p> : <div className="assertion-list">{assertions.map((assertion, index) => <AssertionRow key={`${assertion.id ?? assertion.path}-${index}`} assertion={assertion} idPrefix={`${idPrefix}-assertion-${index}`} onChange={(value) => onChange(replaceAt(assertions, index, value))} onDelete={() => onChange(assertions.filter((_, itemIndex) => itemIndex !== index))} />)}</div>}
+    {!assertions.length ? <p className="settings-muted">{t('No explicit assertions. Built-in state invariants still run.')}</p> : <div className="assertion-list">{assertions.map((assertion, index) => <AssertionRow key={`${assertion.id ?? assertion.path}-${index}`} assertion={assertion} idPrefix={`${idPrefix}-assertion-${index}`} onChange={(value) => onChange(replaceAt(assertions, index, value))} onDelete={() => onDeleteAt ? onDeleteAt(index) : onChange(assertions.filter((_, itemIndex) => itemIndex !== index))} />)}</div>}
   </div>;
 }
 
@@ -523,6 +599,9 @@ function JsonValuePatchInput({ id, value, disabled, onCommit }: { id: string; va
 }
 
 function replaceAt<T>(values: readonly T[], index: number, value: T): T[] { return values.map((item, itemIndex) => itemIndex === index ? value : item); }
+function hasAdversarialForbid(value: AdversarialForbidDefinition): boolean { return Boolean(value.content?.length || value.events?.length || value.urls || value.ctas || value.tools); }
+function adversarialOutcomeText(outcome: AdversarialResultSummary['outcome']): string { if (outcome === 'attackSucceeded') return 'Attack succeeded'; if (outcome === 'infrastructureError') return 'Infrastructure error'; return outcome === 'resisted' ? 'Resisted' : 'Indeterminate'; }
+function evidenceLocationText(kind: AdversarialResultSummary['primaryLocation']['kind']): string { if (kind === 'message') return 'Chat'; if (kind === 'network') return 'Network'; if (kind === 'normalizedEvent') return 'Normalized events'; if (kind === 'rawEvent') return 'Raw events'; return 'Profile'; }
 function uniqueId(values: ReadonlySet<string>, preferred: string): string { if (!values.has(preferred)) return preferred; for (let index = 2; index < 10_000; index++) if (!values.has(`${preferred}-${index}`)) return `${preferred}-${index}`; return `${preferred}-${Date.now()}`; }
 
 function SectionHeading({ id, title, description }: { id: string; title: string; description: string }): React.JSX.Element {

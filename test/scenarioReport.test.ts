@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSnapshot } from '../src/extension/runtime/reducer';
-import { createScenarioReport, serializeScenarioJson, serializeScenarioJUnit, type ScenarioExecutionRecord } from '../src/extension/testing/scenarioReport';
+import { createScenarioReport, serializeAdversarialEventsCsv, serializeAdversarialFindingsCsv, serializeAdversarialNetworkCsv, serializeAdversarialSummaryCsv, serializeAdversarialTurnsCsv, serializeScenarioJson, serializeScenarioJUnit, type ScenarioExecutionRecord } from '../src/extension/testing/scenarioReport';
 import type { ScenarioRunResult } from '../src/shared/types';
 
 function record(status: ScenarioExecutionRecord['status'] = 'failed'): ScenarioExecutionRecord {
@@ -18,7 +18,7 @@ function record(status: ScenarioExecutionRecord['status'] = 'failed'): ScenarioE
 describe('scenario CI reports', () => {
   it('creates a versioned summary projection without raw evidence or assertion values', () => {
     const report = createScenarioReport([record()], '2026-08-28T00:00:00.000Z');
-    expect(report).toMatchObject({ format: 'turnstage-contract-report', version: 1, summary: { total: 1, failed: 1, durationMs: 123 } });
+    expect(report).toMatchObject({ format: 'turnstage-contract-report', version: 2, summary: { total: 1, failed: 1, durationMs: 123, resisted: 0, attackSucceeded: 0, indeterminate: 0, infrastructureErrors: 0 } });
     expect(report.scenarios[0]?.comparison).toEqual({ baselineDurationMs: 100, candidateDurationMs: 123, differenceCount: 1, differencePaths: ['messages[0].parts[0].text'] });
 
     const json = serializeScenarioJson([record()], '2026-08-28T00:00:00.000Z');
@@ -32,5 +32,21 @@ describe('scenario CI reports', () => {
     expect(xml).toContain('assertion.safe-id');
     expect(xml).not.toContain('CI_SECRET_SHOULD_NOT_LEAK');
     expect(xml).not.toContain('<system-out>');
+  });
+
+  it('exports adversarial outcomes and detailed structural CSVs without raw content or URLs', () => {
+    const attack = record('failed');
+    attack.result!.adversarial = {
+      outcome: 'attackSucceeded', attemptedTurns: 1, completedTurns: 1, plannedTurns: 2, maxTurns: 2, timeoutMs: 60_000,
+      findings: [{ id: 'content-1', category: 'content', turnId: 'turn-1', turnIndex: 0, ruleId: 'protected-marker', label: 'CI_SECRET_SHOULD_NOT_LEAK', locations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'network', networkId: 'network-1' }] }],
+      issues: [],
+    };
+    attack.result!.steps = [{ stepId: 'turn-1', name: 'private prompt', durationMs: 40, checks: [{ id: 'content-1', label: 'CI_SECRET_SHOULD_NOT_LEAK', passed: false, kind: 'adversarial', location: { kind: 'message', messageId: 'assistant-1' } }] }];
+    attack.result!.evidence.snapshot.normalizedEvents = [{ version: 1, type: 'content.text.delta', sequence: 1, receivedAt: 1, rawSequence: 1, text: 'CI_SECRET_SHOULD_NOT_LEAK' }];
+    const outputs = [serializeAdversarialSummaryCsv([attack]), serializeAdversarialTurnsCsv([attack]), serializeAdversarialFindingsCsv([attack]), serializeAdversarialNetworkCsv([attack]), serializeAdversarialEventsCsv([attack])];
+    expect(outputs.join('\n')).toContain('attackSucceeded');
+    expect(outputs.join('\n')).toContain('content.text.delta');
+    for (const forbidden of ['CI_SECRET_SHOULD_NOT_LEAK', 'secret.test', 'private prompt', 'authorization']) expect(outputs.join('\n')).not.toContain(forbidden);
+    expect(serializeScenarioJUnit([attack])).toContain('Adversarial attack succeeded');
   });
 });

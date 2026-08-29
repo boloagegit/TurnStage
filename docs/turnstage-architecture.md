@@ -107,6 +107,14 @@ set of lifecycle invariants. Profiles cannot provide executable assertion code.
 Cancellation is wired to `SessionController.abort()` so an active request does
 not continue after the Test run stops.
 
+An adversarial Scenario switches `runScenario` to a bounded fixed-script
+runner. It captures a per-turn evidence boundary, evaluates only newly observed
+assistant messages, Network exchanges, and normalized events, and assigns one
+of four domain outcomes. Suite discovery resolves validated workspace-relative
+JSONC files and publishes Profile → Suite → Case → Turn. Batch workers are
+limited by `turnstage.adversarialConcurrency` (1–8, default 3); each case still
+owns an isolated `SessionController` and whole-case timeout.
+
 The last 100 Scenario evidence records are cached only in Extension Host
 memory. A failed `TestMessage` contains a trusted command link whose arguments
 are revalidated by the Host. Opening it loads the captured snapshot into the
@@ -126,8 +134,9 @@ and fail-closed absolute/percentage regression limits against the baseline.
 JUnit, and self-contained HTML serializers consume a dedicated safe projection rather than runtime
 evidence. Configured reports are written below a validated workspace-relative
 directory after trusted Test Explorer runs; manual export uses the native Save
-dialog. Evidence Bundle export writes a new folder with the three projections
-and a privacy manifest; visible visual artifacts are copied only after a second
+dialog. Evidence Bundle export writes a new folder with the report projections,
+sanitized adversarial summary, turn, finding, Network, and Event CSVs, and a
+privacy manifest; visible visual artifacts are copied only after a second
 explicit choice. Debug evidence remains a separate in-memory path and never
 enters the report serializers.
 

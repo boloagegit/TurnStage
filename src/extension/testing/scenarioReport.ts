@@ -1,13 +1,14 @@
 import type { ScenarioRunResult } from '../../shared/types';
 
 export const SCENARIO_REPORT_FORMAT = 'turnstage-contract-report' as const;
-export const SCENARIO_REPORT_VERSION = 1 as const;
+export const SCENARIO_REPORT_VERSION = 2 as const;
 
 export interface ScenarioExecutionRecord {
   profileId: string;
   profileName: string;
   scenarioId: string;
   scenarioName: string;
+  scenarioTags?: string[];
   result?: ScenarioRunResult;
   status: 'passed' | 'failed' | 'error' | 'skipped';
 }
@@ -16,15 +17,26 @@ export interface ScenarioReport {
   format: typeof SCENARIO_REPORT_FORMAT;
   version: typeof SCENARIO_REPORT_VERSION;
   generatedAt: string;
-  summary: { total: number; passed: number; failed: number; errors: number; skipped: number; durationMs: number };
+  summary: { total: number; passed: number; failed: number; errors: number; skipped: number; durationMs: number; resisted: number; attackSucceeded: number; indeterminate: number; infrastructureErrors: number };
   scenarios: Array<{
     profileId: string;
     scenarioId: string;
+    tags: string[];
     status: ScenarioExecutionRecord['status'];
     durationMs: number;
     faults?: Record<string, number>;
     correlations: Array<{ networkKind: string; traceId?: string; spanId?: string; requestId?: string }>;
     comparison?: { baselineDurationMs: number; candidateDurationMs: number; differenceCount: number; differencePaths: string[] };
+    adversarial?: {
+      outcome: NonNullable<ScenarioRunResult['adversarial']>['outcome'];
+      attemptedTurns: number;
+      completedTurns: number;
+      plannedTurns: number;
+      maxTurns: number;
+      timeoutMs: number;
+      findings: Array<{ id: string; category: string; turnId: string; turnIndex: number; ruleId?: string; locations: string[] }>;
+      issues: Array<{ id: string; kind: string; turnId?: string; turnIndex?: number; location: string }>;
+    };
     checks: Array<{ id: string; kind: string; passed: boolean; location: string }>;
     steps: Array<{ id: string; durationMs: number; passed: boolean; checks: Array<{ id: string; kind: string; passed: boolean; location: string }> }>;
   }>;
@@ -34,6 +46,7 @@ export function createScenarioReport(records: readonly ScenarioExecutionRecord[]
   const scenarios = records.map((record) => ({
     profileId: record.profileId,
     scenarioId: record.scenarioId,
+    tags: (record.scenarioTags ?? []).slice(0, 20).map((tag) => tag.slice(0, 64)),
     status: record.status,
     durationMs: record.result?.durationMs ?? 0,
     faults: record.result?.evidence.faults ? boundedFaults(record.result.evidence.faults) : undefined,
@@ -48,6 +61,16 @@ export function createScenarioReport(records: readonly ScenarioExecutionRecord[]
       candidateDurationMs: record.result.comparison.candidateDurationMs,
       differenceCount: record.result.comparison.differenceCount,
       differencePaths: record.result.comparison.differencePaths.slice(0, 100).map((path) => path.slice(0, 512)),
+    } : undefined,
+    adversarial: record.result?.adversarial ? {
+      outcome: record.result.adversarial.outcome,
+      attemptedTurns: record.result.adversarial.attemptedTurns,
+      completedTurns: record.result.adversarial.completedTurns,
+      plannedTurns: record.result.adversarial.plannedTurns,
+      maxTurns: record.result.adversarial.maxTurns,
+      timeoutMs: record.result.adversarial.timeoutMs,
+      findings: record.result.adversarial.findings.slice(0, 500).map((finding) => ({ id: finding.id.slice(0, 256), category: finding.category, turnId: finding.turnId.slice(0, 256), turnIndex: finding.turnIndex, ...(finding.ruleId ? { ruleId: finding.ruleId.slice(0, 256) } : {}), locations: finding.locations.map((location) => location.kind) })),
+      issues: record.result.adversarial.issues.slice(0, 500).map((issue) => ({ id: issue.id.slice(0, 256), kind: issue.kind, ...(issue.turnId ? { turnId: issue.turnId.slice(0, 256) } : {}), ...(issue.turnIndex !== undefined ? { turnIndex: issue.turnIndex } : {}), location: issue.location.kind })),
     } : undefined,
     checks: (record.result?.checks ?? []).map(summaryCheck),
     steps: (record.result?.steps ?? []).map((step) => ({
@@ -68,6 +91,10 @@ export function createScenarioReport(records: readonly ScenarioExecutionRecord[]
       errors: scenarios.filter((scenario) => scenario.status === 'error').length,
       skipped: scenarios.filter((scenario) => scenario.status === 'skipped').length,
       durationMs: scenarios.reduce((sum, scenario) => sum + scenario.durationMs, 0),
+      resisted: scenarios.filter((scenario) => scenario.adversarial?.outcome === 'resisted').length,
+      attackSucceeded: scenarios.filter((scenario) => scenario.adversarial?.outcome === 'attackSucceeded').length,
+      indeterminate: scenarios.filter((scenario) => scenario.adversarial?.outcome === 'indeterminate').length,
+      infrastructureErrors: scenarios.filter((scenario) => scenario.adversarial?.outcome === 'infrastructureError').length,
     },
     scenarios,
   };
@@ -86,7 +113,10 @@ export function serializeScenarioJUnit(records: readonly ScenarioExecutionRecord
     const className = escapeXml(`turnstage.${record.profileId}`);
     const failures = record.result ? [...record.result.steps.flatMap((step) => step.checks), ...record.result.checks].filter((check) => !check.passed).map((check) => check.id) : [];
     let outcome = '';
-    if (record.status === 'failed') outcome = `<failure message="Conversation contract failed">${escapeXml(failures.join('\n'))}</failure>`;
+    if (record.result?.adversarial?.outcome === 'attackSucceeded') outcome = `<failure message="Adversarial attack succeeded">${escapeXml(failures.join('\n'))}</failure>`;
+    else if (record.result?.adversarial?.outcome === 'indeterminate') outcome = `<error message="Adversarial result indeterminate">${escapeXml(failures.join('\n'))}</error>`;
+    else if (record.result?.adversarial?.outcome === 'infrastructureError') outcome = `<error message="Adversarial infrastructure error">${escapeXml(failures.join('\n'))}</error>`;
+    else if (record.status === 'failed') outcome = `<failure message="Conversation contract failed">${escapeXml(failures.join('\n'))}</failure>`;
     else if (record.status === 'error') outcome = '<error message="Conversation contract execution error" />';
     else if (record.status === 'skipped') outcome = '<skipped />';
     return `  <testcase classname="${className}" name="${name}" time="${duration}">${outcome}</testcase>`;
@@ -101,9 +131,34 @@ export function serializeScenarioHtml(records: readonly ScenarioExecutionRecord[
     const failed = checks.filter((check) => !check.passed).map((check) => check.id).join(', ') || '—';
     const correlations = scenario.correlations.map((item) => item.traceId ?? item.requestId).filter(Boolean).join(', ') || '—';
     const faults = scenario.faults ? Object.entries(scenario.faults).map(([name, value]) => `${name}=${value}`).join(', ') : '—';
-    return `<tr><td><code>${escapeHtml(scenario.profileId)}</code></td><td><code>${escapeHtml(scenario.scenarioId)}</code></td><td><span class="status status-${scenario.status}">${escapeHtml(scenario.status)}</span></td><td>${scenario.durationMs} ms</td><td>${escapeHtml(failed)}</td><td>${escapeHtml(faults)}</td><td>${escapeHtml(correlations)}</td></tr>`;
+    const outcome = scenario.adversarial ? adversarialOutcomeText(scenario.adversarial.outcome) : scenario.status;
+    return `<tr><td><code>${escapeHtml(scenario.profileId)}</code></td><td><code>${escapeHtml(scenario.scenarioId)}</code></td><td><span class="status status-${scenario.status}">${escapeHtml(outcome)}</span></td><td>${scenario.durationMs} ms</td><td>${escapeHtml(failed)}</td><td>${escapeHtml(faults)}</td><td>${escapeHtml(correlations)}</td></tr>`;
   }).join('\n');
-  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>TurnStage Evidence</title><style>${htmlStyles()}</style></head><body><main><header><div><p class="eyebrow">TurnStage evidence</p><h1>Conversation contract report</h1><p>Generated ${escapeHtml(report.generatedAt)}</p></div><div class="summary" aria-label="Result summary"><strong>${report.summary.passed}/${report.summary.total}</strong><span>passed</span></div></header><section class="stats"><article><strong>${report.summary.passed}</strong><span>Passed</span></article><article><strong>${report.summary.failed}</strong><span>Failed</span></article><article><strong>${report.summary.errors}</strong><span>Errors</span></article><article><strong>${report.summary.skipped}</strong><span>Skipped</span></article><article><strong>${report.summary.durationMs} ms</strong><span>Duration</span></article></section><section><h2>Scenarios</h2><div class="table-wrap"><table><thead><tr><th>Profile</th><th>Scenario</th><th>Status</th><th>Duration</th><th>Failed checks</th><th>Fault Lab</th><th>Correlation</th></tr></thead><tbody>${rows}</tbody></table></div></section><footer>Sanitized summary only. Raw events, request bodies, response bodies, message content, headers, and secrets are excluded.</footer></main></body></html>\n`;
+  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>TurnStage Evidence</title><style>${htmlStyles()}</style></head><body><main><header><div><h1>TurnStage test evidence</h1><p>Generated ${escapeHtml(report.generatedAt)}</p></div><div class="summary" aria-label="Result summary"><strong>${report.summary.passed}/${report.summary.total}</strong><span>passed</span></div></header><section class="stats"><article><strong>${report.summary.resisted}</strong><span>Resisted</span></article><article><strong>${report.summary.attackSucceeded}</strong><span>Attack succeeded</span></article><article><strong>${report.summary.indeterminate}</strong><span>Indeterminate</span></article><article><strong>${report.summary.infrastructureErrors}</strong><span>Infrastructure error</span></article><article><strong>${report.summary.durationMs} ms</strong><span>Duration</span></article></section><section><h2>Scenarios</h2><div class="table-wrap"><table><thead><tr><th>Profile</th><th>Scenario</th><th>Outcome</th><th>Duration</th><th>Failed checks</th><th>Fault Lab</th><th>Correlation</th></tr></thead><tbody>${rows}</tbody></table></div></section><footer>Sanitized metadata only. Raw events, request and response bodies, URLs, message content, headers, and secrets are excluded.</footer></main></body></html>\n`;
+}
+
+export function serializeAdversarialSummaryCsv(records: readonly ScenarioExecutionRecord[]): string {
+  const report = createScenarioReport(records);
+  return csv([
+    ['profile_id', 'case_id', 'tags', 'outcome', 'duration_ms', 'attempted_turns', 'completed_turns', 'planned_turns', 'finding_count', 'issue_count'],
+    ...report.scenarios.filter((scenario) => scenario.adversarial).map((scenario) => [scenario.profileId, scenario.scenarioId, JSON.stringify(scenario.tags), scenario.adversarial!.outcome, scenario.durationMs, scenario.adversarial!.attemptedTurns, scenario.adversarial!.completedTurns, scenario.adversarial!.plannedTurns, scenario.adversarial!.findings.length, scenario.adversarial!.issues.length]),
+  ]);
+}
+
+export function serializeAdversarialTurnsCsv(records: readonly ScenarioExecutionRecord[]): string {
+  return csv([['profile_id', 'case_id', 'turn_id', 'turn_index', 'duration_ms', 'passed'], ...records.flatMap((record) => record.result?.adversarial ? record.result.steps.map((step, index) => [record.profileId, record.scenarioId, step.stepId, index + 1, step.durationMs, step.checks.every((check) => check.passed)]) : [])]);
+}
+
+export function serializeAdversarialFindingsCsv(records: readonly ScenarioExecutionRecord[]): string {
+  return csv([['profile_id', 'case_id', 'finding_id', 'category', 'turn_id', 'turn_index', 'rule_id', 'location_kinds'], ...records.flatMap((record) => record.result?.adversarial?.findings.map((finding) => [record.profileId, record.scenarioId, finding.id, finding.category, finding.turnId, finding.turnIndex + 1, finding.ruleId ?? '', [...new Set(finding.locations.map((location) => location.kind))].join('|')]) ?? [])]);
+}
+
+export function serializeAdversarialNetworkCsv(records: readonly ScenarioExecutionRecord[]): string {
+  return csv([['profile_id', 'case_id', 'network_id', 'kind', 'attempt', 'state', 'status_code', 'event_count', 'transferred_bytes'], ...records.flatMap((record) => record.result?.adversarial ? record.result.evidence.networkEntries.map((entry) => [record.profileId, record.scenarioId, entry.id, entry.kind, entry.attempt, entry.state, entry.status ?? '', entry.eventCount, entry.transferredBytes]) : [])]);
+}
+
+export function serializeAdversarialEventsCsv(records: readonly ScenarioExecutionRecord[]): string {
+  return csv([['profile_id', 'case_id', 'sequence', 'type', 'raw_sequence', 'mapping_rule_id'], ...records.flatMap((record) => record.result?.adversarial ? record.result.evidence.snapshot.normalizedEvents.map((event) => [record.profileId, record.scenarioId, event.sequence, event.type, event.rawSequence ?? '', event.mappingRuleId ?? '']) : [])]);
 }
 
 function summaryCheck(check: ScenarioRunResult['checks'][number]): { id: string; kind: string; passed: boolean; location: string } {
@@ -115,6 +170,21 @@ function escapeXml(value: string): string {
 }
 
 function escapeHtml(value: string): string { return escapeXml(value); }
+
+function adversarialOutcomeText(outcome: NonNullable<ScenarioRunResult['adversarial']>['outcome']): string {
+  if (outcome === 'attackSucceeded') return 'Attack succeeded';
+  if (outcome === 'infrastructureError') return 'Infrastructure error';
+  return outcome === 'resisted' ? 'Resisted' : 'Indeterminate';
+}
+
+function csv(rows: readonly (readonly unknown[])[]): string {
+  return `\uFEFF${rows.map((row) => row.map((value) => csvCell(String(value))).join(',')).join('\r\n')}\r\n`;
+}
+
+function csvCell(value: string): string {
+  const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+}
 
 function boundedFaults(value: object): Record<string, number> {
   const allowed = new Set(['delayBeforeRequestMs', 'delayPerChunkMs', 'httpStatus', 'disconnectAfterEvents', 'corruptEventAt']);

@@ -26,6 +26,13 @@ describe('scenario profile JSON Schema', () => {
     expect(schema.$defs.scenarioFaults?.additionalProperties).toBe(false);
   });
 
+  it('exposes closed adversarial case and linked-suite definitions', () => {
+    expect(schema.$defs.tests!.properties).toMatchObject({ adversarialSuites: expect.any(Object) });
+    expect(schema.$defs.scenario!.properties).toMatchObject({ adversarial: { $ref: '#/$defs/scenarioAdversarial' } });
+    expect(schema.$defs.scenarioStep!.properties).toMatchObject({ additionalForbid: { $ref: '#/$defs/adversarialForbid' } });
+    for (const name of ['scenarioAdversarial', 'adversarialForbid', 'adversarialContentRule']) expect(schema.$defs[name]?.additionalProperties).toBe(false);
+  });
+
   it('lists all supported performance metrics in threshold and regression maps', () => {
     const expected = ['scenario.durationMs', 'metrics.headersLatency', 'metrics.firstChunkLatency', 'metrics.firstEventLatency', 'metrics.ttft', 'metrics.streamDuration', 'metrics.totalDuration', 'metrics.averageEventGap', 'metrics.maxEventGap'];
     expect(Object.keys(schema.$defs.scenarioPerformanceThresholds?.properties ?? {})).toEqual(expected);

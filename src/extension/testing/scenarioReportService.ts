@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { ScenarioReportFormat, ScenarioReportingDefinition } from '../../shared/types';
 import { localize } from '../l10n';
 import { isSafeReportDirectory } from './scenarioConfig';
-import { createScenarioReport, serializeScenarioHtml, serializeScenarioJson, serializeScenarioJUnit, type ScenarioExecutionRecord } from './scenarioReport';
+import { createScenarioReport, serializeAdversarialEventsCsv, serializeAdversarialFindingsCsv, serializeAdversarialNetworkCsv, serializeAdversarialSummaryCsv, serializeAdversarialTurnsCsv, serializeScenarioHtml, serializeScenarioJson, serializeScenarioJUnit, type ScenarioExecutionRecord } from './scenarioReport';
 import type { VisualRegressionService } from './visualRegression';
 
 interface ConfiguredReportGroup {
@@ -50,13 +50,18 @@ export class ScenarioReportService {
     const directory = vscode.Uri.joinPath(selected[0], `turnstage-evidence-${stamp}-${crypto.randomUUID().slice(0, 8)}`);
     await vscode.workspace.fs.createDirectory(directory);
     const generatedAt = new Date().toISOString();
-    const fileNames = ['index.html', 'report.json', 'junit.xml'];
+    const fileNames = ['index.html', 'report.json', 'junit.xml', 'adversarial-summary.csv', 'adversarial-turns.csv', 'adversarial-findings.csv', 'network.csv', 'events.csv'];
     if (includeVisual && visual) { fileNames.push('visual-baseline.png'); if (visual.diffUri) fileNames.push('visual-diff.png'); }
     const files: Array<[string, string]> = [
       ['index.html', serializeScenarioHtml(this.records, generatedAt)],
       ['report.json', serializeScenarioJson(this.records, generatedAt)],
       ['junit.xml', serializeScenarioJUnit(this.records, generatedAt)],
-      ['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 1, generatedAt, files: [...fileNames, 'manifest.json'], privacy: { rawEvents: false, payloads: false, headers: false, messageContent: false, secrets: false, visualChatContent: includeVisual }, summary: createScenarioReport(this.records, generatedAt).summary }, null, 2)}\n`],
+      ['adversarial-summary.csv', serializeAdversarialSummaryCsv(this.records)],
+      ['adversarial-turns.csv', serializeAdversarialTurnsCsv(this.records)],
+      ['adversarial-findings.csv', serializeAdversarialFindingsCsv(this.records)],
+      ['network.csv', serializeAdversarialNetworkCsv(this.records)],
+      ['events.csv', serializeAdversarialEventsCsv(this.records)],
+      ['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 2, generatedAt, files: [...fileNames, 'manifest.json'], privacy: { rawEvents: false, payloads: false, urls: false, headers: false, messageContent: false, secrets: false, visualChatContent: includeVisual }, summary: createScenarioReport(this.records, generatedAt).summary }, null, 2)}\n`],
     ];
     for (const [name, contents] of files) await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(directory, name), new TextEncoder().encode(contents));
     if (includeVisual && visual) {

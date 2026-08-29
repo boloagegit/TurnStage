@@ -62,10 +62,34 @@
 .scenario-editor__header > div { display: flex; align-items: center; gap: var(--ts-space-2); min-width: 0; }.scenario-editor__header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.scenario-editor__header code { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: .846em; }
 .scenario-editor__identity { padding: var(--ts-space-3); }
 .scenario-reporting-fields { margin-top: var(--ts-space-3); }
+.adversarial-file-actions { display: flex; flex-wrap: wrap; gap: var(--ts-space-1); margin-bottom: var(--ts-space-3); }
+.adversarial-file-actions button { min-height: var(--ts-control-height); }
+.adversarial-file-actions details { position: relative; }
+.adversarial-file-actions summary { display: flex; align-items: center; min-height: var(--ts-control-height); padding: var(--ts-space-1) calc(var(--ts-space-2) + 2px); border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; background: var(--vscode-button-secondaryBackground, var(--vscode-button-background)); color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground)); list-style-position: inside; cursor: pointer; }
+.adversarial-file-actions details > div { position: absolute; z-index: 5; inset-block-start: calc(100% + 2px); inset-inline-start: 0; display: grid; min-width: max-content; gap: 1px; padding: var(--ts-space-1); border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border)); background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); box-shadow: 0 3px 10px var(--vscode-widget-shadow, rgba(0, 0, 0, .35)); }
+.adversarial-file-actions details > div button { width: 100%; text-align: start; }
+.settings-undo { display: flex; align-items: center; gap: var(--ts-space-2); min-height: calc(var(--ts-control-height) + var(--ts-space-1)); margin-bottom: var(--ts-space-3); padding: var(--ts-space-1) var(--ts-space-2); border-inline-start: 2px solid var(--vscode-editorInfo-foreground); background: var(--vscode-textBlockQuote-background); }
+.settings-undo > span { flex: 1 1 auto; }
+.settings-undo > button:not(.icon-button) { color: var(--vscode-textLink-foreground); background: transparent; border-color: transparent; }
+.adversarial-linked-suites { display: grid; gap: var(--ts-space-1); margin: var(--ts-space-2) 0 var(--ts-space-3); }
+.adversarial-linked-suites > strong { font-size: .846em; }
+.adversarial-linked-suites ul { display: grid; gap: 1px; margin: 0; padding: 0; background: var(--vscode-editorWidget-border); list-style: none; }
+.adversarial-linked-suites li { display: flex; align-items: center; justify-content: space-between; gap: var(--ts-space-2); min-height: var(--ts-control-height); padding: var(--ts-space-1) var(--ts-space-2); background: var(--vscode-editor-background); }
+.adversarial-linked-suites code { overflow: hidden; font-family: var(--vscode-editor-font-family); font-size: .846em; text-overflow: ellipsis; white-space: nowrap; }
+.adversarial-case-list { margin-top: var(--ts-space-3); }
+.adversarial-case-editor { display: grid; gap: var(--ts-space-3); padding: var(--ts-space-3); border-top: 1px solid var(--vscode-editorWidget-border); }
+.adversarial-forbid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ts-space-3); min-width: 0; margin: 0; padding: var(--ts-space-3); border: 1px solid var(--vscode-editorWidget-border); }
+.adversarial-forbid legend { padding-inline: var(--ts-space-1); font-weight: 600; }
+.adversarial-forbid__checks { display: flex; flex-wrap: wrap; grid-column: 1 / -1; gap: var(--ts-space-2) var(--ts-space-4); }
+.adversarial-result-list { display: grid; gap: 1px; margin: 0; padding: 0; border: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-editorWidget-border); list-style: none; }
+.adversarial-result-list li { display: grid; grid-template-columns: minmax(12em, 1fr) minmax(9em, auto) minmax(7em, auto) minmax(6em, auto) auto; align-items: center; gap: var(--ts-space-2); min-height: calc(var(--ts-control-height) + var(--ts-space-2)); padding: var(--ts-space-1) var(--ts-space-2); background: var(--vscode-editor-background); font-variant-numeric: tabular-nums; }
+.adversarial-result-identity { display: grid; min-width: 0; }.adversarial-result-identity strong, .adversarial-result-identity code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.adversarial-result-identity code { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: .769em; }
+.adversarial-outcome { display: inline-flex; align-items: center; gap: var(--ts-space-1); font-weight: 600; }.adversarial-outcome .product-icon { width: 1em; height: 1em; font-size: 1em; }.adversarial-outcome--resisted { color: var(--vscode-testing-iconPassed); }.adversarial-outcome--attackSucceeded { color: var(--vscode-testing-iconFailed); }.adversarial-outcome--indeterminate, .adversarial-outcome--infrastructureError { color: var(--vscode-testing-iconErrored, var(--vscode-editorWarning-foreground)); }
+.adversarial-result-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ts-space-1); }
 .scenario-advanced { border-top: 1px solid var(--vscode-editorWidget-border); }
 .scenario-advanced > summary { min-height: var(--ts-control-height); padding: var(--ts-space-2) var(--ts-space-3); color: var(--vscode-foreground); background: var(--vscode-editorWidget-background); cursor: pointer; font-weight: 600; }
 .scenario-advanced > summary:hover { background: var(--vscode-list-hoverBackground); color: var(--vscode-list-hoverForeground, var(--vscode-foreground)); }
-.scenario-advanced > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.scenario-advanced > summary:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
 .scenario-advanced__content { display: grid; gap: var(--ts-space-3); padding: var(--ts-space-3); }
 .scenario-target-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ts-space-3); }
 .scenario-target-grid fieldset { display: grid; align-content: start; gap: var(--ts-space-3); min-width: 0; margin: 0; padding: var(--ts-space-3); border: 1px solid var(--vscode-editorWidget-border); }
@@ -98,6 +122,10 @@
 .settings-workspace--embedded .settings-form-grid,
 .settings-workspace--embedded .form-grid { grid-template-columns: 1fr; }
 .settings-workspace--embedded .scenario-target-grid { grid-template-columns: 1fr; }
+.settings-workspace--embedded .adversarial-result-list li { grid-template-columns: auto auto minmax(6em, 1fr); }
+.settings-workspace--embedded .adversarial-result-identity,
+.settings-workspace--embedded .adversarial-result-actions { grid-column: 1 / -1; }
+.settings-workspace--embedded .adversarial-result-list li > span:last-of-type { justify-self: end; }
 .settings-workspace--embedded .scenario-budget__header { display: none; }
 .settings-workspace--embedded .scenario-budget__row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .settings-workspace--embedded .scenario-budget__row > span { grid-column: 1 / -1; }
@@ -106,5 +134,8 @@
 .settings-workspace--embedded .settings-field-wide,
 .settings-workspace--embedded .field-wide { grid-column: auto; }
 @media (max-width: 46em) { .assertion-row { grid-template-columns: 1fr; align-items: stretch; }.assertion-row > button { justify-self: end; }.settings-empty--action { align-items: flex-start; flex-direction: column; }.scenario-target-grid { grid-template-columns: 1fr; }.scenario-budget__header { display: none; }.scenario-budget__row { grid-template-columns: repeat(3, minmax(0, 1fr)); }.scenario-budget__row > span { grid-column: 1 / -1; }.scenario-budget__cell { gap: 2px; }.scenario-budget__cell-label { display: block; } }
+@media (max-width: 46em) { .adversarial-forbid { grid-template-columns: 1fr; }.adversarial-forbid__checks { grid-column: auto; } }
+@media (max-width: 46em) { .adversarial-file-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; }.adversarial-file-actions > button, .adversarial-file-actions summary { width: 100%; justify-content: center; }.adversarial-file-actions details > div { position: fixed; inset-inline: var(--ts-space-2); inset-block-start: auto; min-width: 0; } }
+@media (max-width: 46em) { .adversarial-result-list li { grid-template-columns: auto auto minmax(6em, 1fr); }.adversarial-result-identity, .adversarial-result-actions { grid-column: 1 / -1; }.adversarial-result-list li > span:last-of-type { justify-self: end; } }
 @media (max-width: 58em) { .settings-content-layout { grid-template-columns: 1fr; }.settings-section-nav { position: relative; border-inline-end: 0; border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-editorGroup-border)); overflow-x: auto; }.settings-section-nav-list { display: flex; gap: 1px; min-width: max-content; padding: var(--ts-space-1) var(--ts-space-2); }.settings-section-nav button { width: auto; min-width: max-content; }.settings-section-nav button.is-active { box-shadow: inset 0 -2px var(--vscode-list-focusAndSelectionOutline, var(--vscode-focusBorder)); }.settings-panel { padding: var(--ts-space-4) var(--ts-space-4) calc(var(--ts-space-5) + var(--ts-space-5)); }.settings-form-grid { grid-template-columns: 1fr; }.settings-field-wide { grid-column: auto; }.settings-subtitle, .settings-section-count { display: none; } }
 @media (forced-colors: active) { .settings-card, .settings-editor-frame, .settings-preview, .scenario-editor { border-color: ButtonText; } }

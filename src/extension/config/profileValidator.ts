@@ -1,10 +1,11 @@
 import { findNodeAtLocation, type Node } from 'jsonc-parser';
-import type { MatchCondition, RequestDefinition, ScenarioAssertionDefinition, ScenarioComparisonTargetDefinition, ScenarioPerformanceMetric, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
+import type { AdversarialForbidDefinition, MatchCondition, RequestDefinition, ScenarioAssertionDefinition, ScenarioComparisonTargetDefinition, ScenarioDefinition, ScenarioPerformanceMetric, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
 import { localize } from '../l10n';
 import { isSafeAssertionRegex, isValidAssertionPath } from '../testing/assertionEvaluator';
 import { isValidComparisonPath } from '../testing/scenarioComparison';
 import { isSafeReportDirectory } from '../testing/scenarioConfig';
 import { scenarioPerformanceMetrics } from '../testing/performanceEvaluator';
+import { isSafeAdversarialSuitePath, MAX_ADVERSARIAL_RULES, MAX_ADVERSARIAL_TURNS_PER_CASE } from '../testing/adversarialSuite';
 
 export interface ValidationIssue { severity: 'error' | 'warning'; message: string; offset: number; length: number }
 
@@ -92,6 +93,33 @@ function validatePerformanceMap(
   }
 }
 
+function validateAdversarialForbid(value: unknown, tree: Node | undefined, path: Array<string | number>, out: ValidationIssue[], allowEmpty = false): value is AdversarialForbidDefinition {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) { out.push(issue(tree, path, localize('Adversarial prohibited effects must be an object.'))); return false; }
+  const definition = value as Record<string, unknown>;
+  const allowed = new Set(['content', 'urls', 'ctas', 'tools', 'events']);
+  for (const key of Object.keys(definition)) if (!allowed.has(key)) out.push(issue(tree, [...path, key], localize('Unsupported adversarial prohibited effect: {field}.', { field: key })));
+  const content = definition.content;
+  if (content !== undefined) {
+    if (!Array.isArray(content) || content.length > MAX_ADVERSARIAL_RULES) out.push(issue(tree, [...path, 'content'], localize('Forbidden content can contain at most {count} rules.', { count: String(MAX_ADVERSARIAL_RULES) })));
+    else content.forEach((rawRule, index) => {
+      if (typeof rawRule === 'string') { if (!rawRule.length || rawRule.length > 256) out.push(issue(tree, [...path, 'content', index], localize('Forbidden content must contain 1 to 256 characters.'))); return; }
+      if (!rawRule || typeof rawRule !== 'object' || Array.isArray(rawRule)) { out.push(issue(tree, [...path, 'content', index], localize('Forbidden content rule must be a string or object.'))); return; }
+      const rule = rawRule as Record<string, unknown>;
+      if (!['contains', 'regex'].includes(String(rule.match))) out.push(issue(tree, [...path, 'content', index, 'match'], localize('Forbidden content match must be contains or regex.')));
+      if (typeof rule.value !== 'string' || !rule.value.length || rule.value.length > 256) out.push(issue(tree, [...path, 'content', index, 'value'], localize('Forbidden content value must contain 1 to 256 characters.')));
+      if (rule.match === 'regex' && !isSafeAssertionRegex(rule.value)) out.push(issue(tree, [...path, 'content', index, 'value'], localize('Forbidden content regex must be valid, safe, and no longer than 256 characters.')));
+      if (rule.caseSensitive !== undefined && typeof rule.caseSensitive !== 'boolean') out.push(issue(tree, [...path, 'content', index, 'caseSensitive'], localize('caseSensitive must be boolean.')));
+    });
+  }
+  for (const key of ['urls', 'ctas', 'tools'] as const) if (definition[key] !== undefined && typeof definition[key] !== 'boolean') out.push(issue(tree, [...path, key], localize('{field} must be boolean.', { field: key })));
+  const events = definition.events;
+  if (events !== undefined && (!Array.isArray(events) || events.length > MAX_ADVERSARIAL_RULES || events.some((event) => typeof event !== 'string' || !event.trim() || event.length > 256))) out.push(issue(tree, [...path, 'events'], localize('Forbidden events must contain at most {count} non-empty event names.', { count: String(MAX_ADVERSARIAL_RULES) })));
+  if (!allowEmpty && !hasAdversarialForbid(value as AdversarialForbidDefinition)) out.push(issue(tree, path, localize('An adversarial case requires at least one prohibited effect.')));
+  return true;
+}
+
+function hasAdversarialForbid(value: AdversarialForbidDefinition): boolean { return Boolean(value.urls || value.ctas || value.tools || value.content?.length || value.events?.length); }
+
 export class ProfileValidator {
   validate(profile: TurnStageProfile | undefined, tree?: Node, environments: TurnStageEnvironment[] = []): ValidationIssue[] {
     if (!profile) return [issue(tree, [], localize('Profile could not be parsed.'))];
@@ -132,6 +160,14 @@ export class ProfileValidator {
     for (const duplicate of duplicates((profile.controls ?? []).map((control) => control.id))) out.push(issue(tree, ['controls'], localize('Duplicate control id: {id}.', { id: duplicate })));
     for (const duplicate of duplicates((profile.stream?.mappings ?? []).map((mapping) => mapping.id))) out.push(issue(tree, ['stream', 'mappings'], localize('Duplicate mapping id: {id}.', { id: duplicate })));
     const scenarios = profile.tests?.scenarios ?? [];
+    const adversarialSuites = profile.tests?.adversarialSuites;
+    if (adversarialSuites !== undefined) {
+      if (!Array.isArray(adversarialSuites) || adversarialSuites.length > 100) out.push(issue(tree, ['tests', 'adversarialSuites'], localize('Adversarial suites must be an array with at most 100 workspace-relative paths.')));
+      else {
+        adversarialSuites.forEach((path, index) => { if (!isSafeAdversarialSuitePath(path)) out.push(issue(tree, ['tests', 'adversarialSuites', index], localize('Adversarial suite path must be a safe workspace-relative .adversarial.jsonc or .json path.'))); });
+        if (duplicates(adversarialSuites).length) out.push(issue(tree, ['tests', 'adversarialSuites'], localize('Adversarial suite paths must be unique.')));
+      }
+    }
     const reporting = profile.tests?.reporting as unknown;
     if (reporting !== undefined) {
       const reportingPath = ['tests', 'reporting'];
@@ -163,6 +199,10 @@ export class ProfileValidator {
       if (!scenario || typeof scenario !== 'object' || Array.isArray(scenario)) { out.push(issue(tree, scenarioPath, localize('Scenario must be an object.'))); return; }
       if (typeof scenario.id !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(scenario.id)) out.push(issue(tree, [...scenarioPath, 'id'], localize('Scenario id must use lowercase letters, numbers, and hyphens.')));
       if (typeof scenario.name !== 'string' || !scenario.name.trim()) out.push(issue(tree, [...scenarioPath, 'name'], localize('Scenario name is required.')));
+      if (scenario.tags !== undefined) {
+        if (!Array.isArray(scenario.tags) || scenario.tags.length > 20 || scenario.tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.length > 64)) out.push(issue(tree, [...scenarioPath, 'tags'], localize('Scenario tags must contain at most 20 non-empty values of up to 64 characters.')));
+        else if (duplicates(scenario.tags).length) out.push(issue(tree, [...scenarioPath, 'tags'], localize('Scenario tags must be unique.')));
+      }
       if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) { out.push(issue(tree, [...scenarioPath, 'steps'], localize('A scenario requires at least one step.'))); return; }
       if (scenario.steps.length > 100) out.push(issue(tree, [...scenarioPath, 'steps'], localize('A scenario can define at most 100 steps.')));
       if (scenario.controls !== undefined && (!scenario.controls || typeof scenario.controls !== 'object' || Array.isArray(scenario.controls))) {
@@ -242,12 +282,46 @@ export class ProfileValidator {
           if (!Object.keys(definition).length) out.push(issue(tree, faultPath, localize('Fault Lab requires at least one fault setting.')));
         }
       }
+      const adversarial = scenario.adversarial as unknown;
+      if (adversarial !== undefined) {
+        const adversarialPath = [...scenarioPath, 'adversarial'];
+        if (!adversarial || typeof adversarial !== 'object' || Array.isArray(adversarial)) out.push(issue(tree, adversarialPath, localize('Adversarial settings must be an object.')));
+        else {
+          const definition = adversarial as Record<string, unknown>;
+          const allowed = new Set(['mode', 'maxTurns', 'timeoutMs', 'stopOnAttackSucceeded', 'forbid']);
+          for (const key of Object.keys(definition)) if (!allowed.has(key)) out.push(issue(tree, [...adversarialPath, key], localize('Unsupported adversarial setting: {field}.', { field: key })));
+          const mode = definition.mode ?? (scenario.steps.length > 1 ? 'multiTurn' : 'singleTurn');
+          if (!['singleTurn', 'multiTurn'].includes(String(mode))) out.push(issue(tree, [...adversarialPath, 'mode'], localize('Adversarial mode must be singleTurn or multiTurn.')));
+          if (mode === 'singleTurn' && scenario.steps.length !== 1) out.push(issue(tree, [...scenarioPath, 'steps'], localize('A single-turn adversarial case must contain exactly one step.')));
+          const maxTurns = definition.maxTurns ?? (mode === 'multiTurn' ? scenario.steps.length : 1);
+          if (!Number.isInteger(maxTurns) || Number(maxTurns) < 1 || Number(maxTurns) > MAX_ADVERSARIAL_TURNS_PER_CASE) out.push(issue(tree, [...adversarialPath, 'maxTurns'], localize('Adversarial maxTurns must be an integer from 1 to {count}.', { count: String(MAX_ADVERSARIAL_TURNS_PER_CASE) })));
+          else if (scenario.steps.length > Number(maxTurns)) out.push(issue(tree, [...scenarioPath, 'steps'], localize('Adversarial steps exceed maxTurns and will not be truncated.')));
+          const timeoutMs = definition.timeoutMs ?? 60_000;
+          if (!Number.isInteger(timeoutMs) || Number(timeoutMs) < 1_000 || Number(timeoutMs) > 300_000) out.push(issue(tree, [...adversarialPath, 'timeoutMs'], localize('Adversarial timeoutMs must be an integer from 1000 to 300000.')));
+          if (definition.stopOnAttackSucceeded !== undefined && typeof definition.stopOnAttackSucceeded !== 'boolean') out.push(issue(tree, [...adversarialPath, 'stopOnAttackSucceeded'], localize('stopOnAttackSucceeded must be boolean.')));
+          if (validateAdversarialForbid(definition.forbid, tree, [...adversarialPath, 'forbid'], out)) {
+            const forbid = definition.forbid as AdversarialForbidDefinition;
+            const emitted = new Set(profile.stream.mappings.map((mapping) => String(mapping.emit.type)));
+            const visible = [...emitted].some((type) => ['content.text.delta', 'content.markdown.delta', 'citation.upsert', 'citation.attach', 'action.upsert', 'followup.upsert', 'form.upsert'].includes(type));
+            if ((forbid.content?.length || forbid.urls) && !visible) out.push(issue(tree, [...adversarialPath, 'forbid'], localize('This Profile has no mapping that can expose visible assistant content or URLs for adversarial evaluation.')));
+            if (forbid.ctas && ![...emitted].some((type) => ['action.upsert', 'followup.upsert', 'form.upsert'].includes(type))) out.push(issue(tree, [...adversarialPath, 'forbid', 'ctas'], localize('This Profile has no mapping that can expose calls to action.')));
+            if (forbid.tools && ![...emitted].some((type) => type.startsWith('tool.'))) out.push(issue(tree, [...adversarialPath, 'forbid', 'tools'], localize('This Profile has no mapping that can expose tool interactions.')));
+            for (const event of forbid.events ?? []) if (!emitted.has(event)) out.push(issue(tree, [...adversarialPath, 'forbid', 'events'], localize('This Profile has no mapping that emits forbidden event {event}.', { event })));
+          }
+          if (scenario.assertions?.length || scenario.steps.some((step) => step.assertions?.length)) out.push(issue(tree, scenarioPath, localize('Adversarial cases cannot use conversation-contract assertions in the first version.')));
+          if (scenario.comparison || scenario.performance || scenario.faults) out.push(issue(tree, scenarioPath, localize('Adversarial cases cannot combine with comparison, performance, or Fault Lab in the first version.')));
+        }
+      }
       for (const duplicate of duplicates(scenario.steps.flatMap((step) => step && typeof step === 'object' && !Array.isArray(step) && typeof step.id === 'string' ? [step.id] : []))) out.push(issue(tree, [...scenarioPath, 'steps'], localize('Duplicate scenario step id: {id}.', { id: duplicate })));
       scenario.steps.forEach((step, stepIndex) => {
         const stepPath = [...scenarioPath, 'steps', stepIndex];
         if (!step || typeof step !== 'object' || Array.isArray(step)) { out.push(issue(tree, stepPath, localize('Scenario step must be an object.'))); return; }
         if (typeof step.id !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(step.id)) out.push(issue(tree, [...stepPath, 'id'], localize('Scenario step id must use lowercase letters, numbers, and hyphens.')));
         if (typeof step.input !== 'string' || !step.input.trim()) out.push(issue(tree, [...stepPath, 'input'], localize('Scenario step input is required.')));
+        if (step.additionalForbid !== undefined) {
+          if (!scenario.adversarial) out.push(issue(tree, [...stepPath, 'additionalForbid'], localize('additionalForbid is available only in adversarial cases.')));
+          validateAdversarialForbid(step.additionalForbid, tree, [...stepPath, 'additionalForbid'], out, true);
+        }
         validateAssertions(step.assertions, tree, [...stepPath, 'assertions'], out);
       });
       validateAssertions(scenario.assertions, tree, [...scenarioPath, 'assertions'], out);
@@ -326,4 +400,26 @@ export class ProfileValidator {
     if (/\b(?:sk|token|bearer)[-_][A-Za-z0-9]{16,}\b/i.test(source)) out.push(issue(tree, [], localize('The profile may contain a secret value. Move secrets to SecretStorage.'), 'warning'));
     return out;
   }
+}
+
+/**
+ * Validates external adversarial cases against the Profile that will execute them.
+ * Suite syntax is validated separately; this check covers Profile-owned mappings,
+ * controls, and other execution constraints without mixing in unrelated inline cases.
+ */
+export function validateAdversarialScenariosAgainstProfile(
+  profile: TurnStageProfile,
+  scenarios: readonly ScenarioDefinition[],
+  environments: TurnStageEnvironment[] = [],
+): Array<ValidationIssue & { scenarioId: string }> {
+  const validator = new ProfileValidator();
+  return scenarios.flatMap((scenario) => {
+    const candidate: TurnStageProfile = {
+      ...profile,
+      tests: { ...(profile.tests ?? { scenarios: [] }), scenarios: [scenario], adversarialSuites: undefined },
+    };
+    return validator.validate(candidate, undefined, environments)
+      .filter((entry) => entry.severity === 'error')
+      .map((entry) => ({ ...entry, scenarioId: scenario.id }));
+  });
 }
