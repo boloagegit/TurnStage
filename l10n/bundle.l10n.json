@@ -1,4 +1,7 @@
 {
+  "Apply Profile Changes": "Apply Profile Changes",
+  "Apply {count} safe TurnStage profile setting change(s)?": "Apply {count} safe TurnStage profile setting change(s)?",
+  "Invalid advisory quality rubrics: {message}": "Invalid advisory quality rubrics: {message}",
   "Invalid source binding: {message}": "Invalid source binding: {message}",
   "Auto (Follow VS Code)": "Auto (Follow VS Code)",
   "Change TurnStage Display Language": "Change TurnStage Display Language",

@@ -103,6 +103,12 @@
       },
       metrics: { messageEnabled: ['ttft', 'totalDuration'] },
       tests: {
+        qualityRubrics: [{
+          id: 'support-quality',
+          name: 'Support response quality',
+          description: 'Advisory review of the explicitly disclosed assistant response.',
+          criteria: [{ id: 'relevance', label: 'Relevance', description: 'The response directly addresses the requested task without unrelated content.' }]
+        }],
         reporting: { formats: ['json', 'junit', 'html'], outputDirectory: '.turnstage/reports' },
         visual: { baselineDirectory: '.turnstage/baselines', maxDifferencePercent: 0.1, channelTolerance: 16 },
         scenarios: [{

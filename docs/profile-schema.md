@@ -190,6 +190,39 @@ Supported performance keys are `scenario.durationMs`,
 Regression rules require `comparison` and can set an absolute increase, a
 percentage increase, or both. Missing baseline metrics fail closed.
 
+### Advisory response-quality rubrics
+
+`tests.qualityRubrics` optionally defines 1–20 declarative rubrics for an
+explicit GitHub Copilot Advisory review. Each rubric has a stable `id`, a
+display `name`, an optional description, and 1–20 criteria with `id`, `label`,
+and evaluation guidance. The Profile Configuration GUI edits the same fields.
+
+```jsonc
+{
+  "tests": {
+    "qualityRubrics": [{
+      "id": "support-quality",
+      "name": "Support quality",
+      "criteria": [{
+        "id": "grounded",
+        "label": "Grounded",
+        "description": "Claims stay within the disclosed response evidence."
+      }]
+    }],
+    "scenarios": []
+  }
+}
+```
+
+Rubrics do not execute code and are not formal assertions. The review begins
+only after the user selects 1–10 attempts and approves disclosure of Assistant
+response text. Disclosure is capped at 8,000 characters per response and
+32,000 total; prompts, headers, payloads, full URLs, and known secret-like
+values are excluded. The resulting advisory record has no outcome field and
+cannot affect Test Explorer status, reports, or CLI exit codes. If this field
+is absent, TurnStage offers a built-in relevance, clarity, completeness, and
+grounding rubric.
+
 `tests.reporting` writes one sanitized report per profile after a trusted Test
 Explorer run. `formats` accepts `json`, `junit`, `html`, or a unique combination. `outputDirectory`
 must be workspace-relative with no traversal, URI scheme, backslash, drive
@@ -222,7 +255,10 @@ may contain visible conversation content and should be reviewed before commit.
 
 **TurnStage: Export Evidence Bundle** creates a new folder containing
 `index.html`, `report.json`, `junit.xml`, adversarial summary/turn/finding CSVs,
-sanitized `network.csv` and `events.csv`, and `manifest.json`. The HTML is a
+sanitized `network.csv`, `events.csv`, `diagnostics.json`, `manifest.json`, and
+`provenance.json`. Version 4 diagnostic artifacts retain bounded timing,
+categories, evidence IDs, Profile patch digests/paths, and Advisory ratings,
+but never Profile edit content or disclosed Assistant text. The HTML is a
 self-contained, offline-readable summary with no external scripts or assets.
 Raw events, URLs, headers, payloads, message content, and secrets are excluded. If a
 visual result exists, a second explicit choice can include its baseline/diff

@@ -15,6 +15,7 @@ const readBody = async (request) => {
 const sse = (event, data) => `event: ${event}\ndata: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const contractSessions = new Map();
+const intermittentAttempts = new Map();
 const requiredString = (body, key) => typeof body[key] === 'string' && Boolean(body[key].trim());
 const invalidFields = (response, fields) => json(response, 400, { code: 'INVALID_REQUEST', fields });
 
@@ -96,6 +97,7 @@ const server = http.createServer(async (request, response) => {
   if (request.url === '/v1/chat/stream') return handleContractStream(request, response, body, mode);
   if (request.url === '/v1/chat/stop') return handleContractStop(response, body);
   if (request.url === '/agent/opening') {
+    if (mode === 'opening-timeout') { await delay(450); return json(response, 504, { code: 'OPENING_TIMEOUT_FIXTURE' }); }
     if (mode === 'fallback') return json(response, 404, { code: 'OPENING_NOT_FOUND' });
     if (mode === 'network-error') { request.socket.destroy(); return; }
     return json(response, 200, { message: 'Hello, I am a test assistant. What would you like to explore?', options: [{ id: 'starter-search', label: 'Search sample information', prompt: 'Please search for sample information.', behavior: 'send' }, { id: 'starter-prepare', label: 'Prepare a test request', prompt: 'Please help me prepare a test request.', behavior: 'fill' }] });
@@ -117,20 +119,41 @@ const server = http.createServer(async (request, response) => {
   }
   if (request.url === '/transport/wrong-content-type') return json(response, 200, { value: 'not an event stream' });
   if (!request.url?.endsWith('/stream')) return json(response, 404, { code: 'NOT_FOUND' });
+  if (mode === 'delayed-headers') await delay(450);
   if (mode === 'http-401') return json(response, 401, { code: 'AUTH_REQUIRED' });
+  if (mode === 'http-403') return json(response, 403, { code: 'AUTH_FORBIDDEN' });
   if (mode === 'http-500') return json(response, 500, { code: 'SAMPLE_FAILURE' });
+  if (mode === 'intermittent') {
+    const key = String(body.caseId ?? body.message ?? 'default').slice(0, 100);
+    const attempt = (intermittentAttempts.get(key) ?? 0) + 1;
+    intermittentAttempts.set(key, attempt);
+    if (attempt % 2 === 1) return json(response, 503, { code: 'SYNTHETIC_INTERMITTENT_FAILURE', attempt });
+  }
   response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-request-id': 'mock-basic-stream' });
   response.flushHeaders();
+  if (mode === 'delayed-first-chunk' || mode === 'proxy-buffer') await delay(450);
   const write = async (event, data, wait = mode === 'slow' ? 600 : 55) => { await delay(wait); if (response.destroyed) return; const payload = sse(event, data); if (mode === 'chunk-split') { const point = Math.max(1, Math.floor(payload.length / 2)); response.write(payload.slice(0, point)); await delay(20); response.write(payload.slice(point)); } else response.write(payload); };
-  if (mode === 'idle-timeout') { await delay(120000); response.end(); return; }
+  if (mode === 'idle-timeout') { await delay(2_000); response.end(); return; }
+  if (mode === 'proxy-buffer') {
+    response.end([
+      sse('start', { conversationId: body.conversationId ?? `conversation-${Date.now()}`, assistantMessageId: `assistant-${Date.now()}` }),
+      sse('status', { text: 'Buffered by a synthetic proxy.' }),
+      sse('message', { text: 'Buffered response.' }),
+      sse('done', { ok: true }),
+    ].join(''));
+    return;
+  }
   await write('start', { conversationId: body.conversationId ?? `conversation-${Date.now()}`, assistantMessageId: `assistant-${Date.now()}` });
   await write('status', { text: request.url.startsWith('/agent/') ? 'Searching sample sources…' : 'Preparing a sample response…' });
+  if (mode === 'delayed-first-event') await delay(450);
   if (request.url.startsWith('/agent/') || mode === 'adversarial-tool') {
     await write('tool_call', { toolCallId: 'tool-1', name: 'sample_search', arguments: { query: body.message ?? 'sample' } });
     await write('tool_result', { toolCallId: 'tool-1', result: { matches: 1, source: 'Example source' } });
   }
   if (mode === 'adversarial-event') await write('adversarial_signal', { observed: true });
+  if (mode === 'mapping-drift') await write('renamed_message_delta', { fragment: 'The configured mapping no longer matches this event.' });
   if (mode === 'adversarial-cta') await write('action', { id: 'adversarial-action', label: 'Continue', actionId: 'request.send', payload: { message: 'Continue' } });
+  if (mode === 'slow-second-turn' && body.conversationId) await delay(450);
   const prefix = mode === 'adversarial-content' ? 'sample-protected-marker ' : mode === 'adversarial-url' ? 'https://example.test/prohibited ' : 'Here is the ';
   await write('message', { text: prefix });
   if (mode === 'malformed-json') response.write('event: message\ndata: {not-json}\n\n');
@@ -148,6 +171,7 @@ const server = http.createServer(async (request, response) => {
   await write('title', { title: 'Sample conversation' });
   if (mode === 'partial-error') { await write('error', { code: 'SAMPLE_STREAM_ERROR', message: 'A sample partial failure occurred.' }); response.end(); return; }
   if (mode === 'disconnect') { response.destroy(); return; }
+  if (mode === 'missing-terminal') { response.end(); return; }
   await write('done', { ok: true }); response.end();
 });
 

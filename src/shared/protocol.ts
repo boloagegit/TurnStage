@@ -66,6 +66,9 @@ export type WebviewMessage = Envelope & (
   | { type: 'adversarial.file'; action: 'importCsv' | 'importJsonc' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'csvTemplate' }
   | { type: 'test.runAll' }
   | { type: 'test.evidence.open'; evidenceId: string; location: ScenarioEvidenceLocation }
+  | { type: 'copilot.diagnose'; evidenceId: string; mode: 'failure' | 'performance' | 'stability' | 'comparison' }
+  | { type: 'copilot.qualityReview'; evidenceIds: string[] }
+  | { type: 'copilot.profileDoctor' }
   | { type: 'adversarial.capture' }
   | { type: 'visual.baseline.save'; dataUrl: string; viewport: { id: string; width: number; height: number } }
   | { type: 'visual.compare'; dataUrl: string; viewport: { id: string; width: number; height: number } }
@@ -150,9 +153,11 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   if (!isRecord(value) || !hasEnvelope(value, instanceId)) return false;
   const message = value;
   switch (message.type) {
-    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'test.runAll': case 'adversarial.capture': return true;
+    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'test.runAll': case 'adversarial.capture': case 'copilot.profileDoctor': return true;
     case 'adversarial.file': return ['importCsv', 'importJsonc', 'linkJsonc', 'exportCsv', 'exportJsonc', 'csvTemplate'].includes(String(message.action));
     case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
+    case 'copilot.diagnose': return isBoundedString(message.evidenceId) && ['failure', 'performance', 'stability', 'comparison'].includes(String(message.mode));
+    case 'copilot.qualityReview': return Array.isArray(message.evidenceIds) && message.evidenceIds.length >= 1 && message.evidenceIds.length <= 10 && message.evidenceIds.every((id) => isBoundedString(id)) && new Set(message.evidenceIds).size === message.evidenceIds.length;
     case 'profile.patch': return Array.isArray(message.path) && message.path.length > 0 && message.path.length <= MAX_VALUE_DEPTH && message.path.every((part) => (isBoundedString(part) && !['__proto__', 'prototype', 'constructor'].includes(part)) || (Number.isInteger(part) && Number(part) >= 0 && Number(part) <= 10_000)) && isStructuredValue(message.value);
     case 'control.set': return isBoundedString(message.controlId) && isStructuredValue(message.value);
     case 'mapping.test': return isRecord(message.event) && typeof message.event.protocol === 'string' && streamProtocols.has(message.event.protocol as RawStreamEvent['protocol']) && isBoundedString(message.event.raw, 262_144) && optionalBoundedString(message.event.eventName) && isStructuredValue(message.event.data);

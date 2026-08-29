@@ -83,6 +83,7 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
 
   it('surfaces HTTP status and idle-timeout failures with stable error types', async () => {
     await expect(collect('http-401')).rejects.toMatchObject({ type: 'HttpStatusError', details: { status: 401 } });
+    await expect(collect('http-403')).rejects.toMatchObject({ type: 'HttpStatusError', details: { status: 403 } });
     await expect(collect('http-500')).rejects.toMatchObject({ type: 'HttpStatusError', details: { status: 500 } });
     const diagnostics: Array<{ type: string; [key: string]: unknown }> = [];
     await expect(new HttpStreamTransport({ onDiagnostic: (event) => diagnostics.push(event) }).start({ ...request('idle-timeout'), idleTimeoutMs: 100 }, 'sse', {
@@ -92,6 +93,31 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
     }, new AbortController().signal)).rejects.toMatchObject({ type: 'IdleTimeoutError' });
     expect(diagnostics).toContainEqual(expect.objectContaining({ type: 'timeout.fired', kind: 'idle', attempt: 1, sawData: false }));
   });
+
+  it('exercises the diagnostic timing, mapping, terminal, and intermittent fixtures over real HTTP', async () => {
+    const delayedHeaders = await collect('delayed-headers');
+    expect(delayedHeaders.headersLatency).toBeGreaterThanOrEqual(400);
+
+    const delayedChunk = await collect('delayed-first-chunk');
+    expect(delayedChunk.headersLatency).toBeLessThan(200);
+    expect(delayedChunk.chunkTimes[0]).toBeGreaterThanOrEqual(400);
+
+    const delayedEvent = await collect('delayed-first-event');
+    expect(delayedEvent.events.map(eventName)).toEqual(['start', 'status', 'message', 'message', 'title', 'done']);
+    expect(delayedEvent.eventTimes[2]! - delayedEvent.eventTimes[1]!).toBeGreaterThanOrEqual(450);
+
+    const buffered = await collect('proxy-buffer');
+    expect(buffered.chunkTimes[0]).toBeGreaterThanOrEqual(400);
+    expect(buffered.eventTimes.at(-1)! - buffered.eventTimes[0]!).toBeLessThan(100);
+
+    const drift = await collect('mapping-drift');
+    expect(drift.events.map(eventName)).toContain('renamed_message_delta');
+    const incomplete = await collect('missing-terminal');
+    expect(incomplete.events.map(eventName)).not.toContain('done');
+
+    await expect(collect('intermittent')).rejects.toMatchObject({ type: 'HttpStatusError', details: { status: 503 } });
+    await expect(collect('intermittent')).resolves.toMatchObject({ events: expect.arrayContaining([expect.objectContaining({ sse: expect.objectContaining({ event: 'done' }) })]) });
+  }, 10_000);
 
   it('retries bounded pre-data 429 responses while honoring the configured status policy', async () => {
     const originalFetch = globalThis.fetch;
@@ -414,15 +440,17 @@ async function collect(mode: string, overrides: Partial<PreparedRequest> = {}, p
   const events: RawStreamEvent[] = [];
   const eventTimes: number[] = [];
   const chunkSizes: number[] = [];
+  const chunkTimes: number[] = [];
   let contentType = '';
+  let headersLatency: number | undefined;
   const startedAt = Date.now();
   const sink: StreamSink = {
-    onHeaders: (_latency, value) => { contentType = value; },
-    onChunk: (bytes) => { chunkSizes.push(bytes); },
+    onHeaders: (latency, value) => { headersLatency = latency; contentType = value; },
+    onChunk: (bytes) => { chunkSizes.push(bytes); chunkTimes.push(Date.now() - startedAt); },
     onEvent: (event) => { events.push(event); eventTimes.push(Date.now() - startedAt); },
   };
   const result = await new HttpStreamTransport().start({ ...request(mode, path), ...overrides }, 'sse', sink, new AbortController().signal);
-  return { result, contentType, events, eventTimes, chunkSizes };
+  return { result, contentType, events, eventTimes, chunkSizes, chunkTimes, headersLatency };
 }
 
 async function collectProtocol(protocol: RawStreamEvent['protocol'], path: string) {

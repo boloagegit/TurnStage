@@ -1,6 +1,9 @@
 import type * as vscode from 'vscode';
 import type { AdversarialOutcome, AdversarialStability } from '../../shared/types';
 import { MAX_ADVERSARIAL_REPETITIONS } from '../testing/adversarialSuite';
+import type { DiagnosisResultV1 } from './diagnostics/contracts';
+import type { ProfilePatchDraftV1, ProfilePatchOperationV1 } from './remediation/contracts';
+import type { QualityDisclosureGrantV1, QualityReviewRecordV1, QualityReviewSubmission } from './quality/contracts';
 
 /** The names are part of the public Copilot contract. Keep them stable. */
 export const COPILOT_TOOL_NAMES = {
@@ -9,6 +12,10 @@ export const COPILOT_TOOL_NAMES = {
   inspectFailure: 'turnstage_inspect_failure',
   draftRegression: 'turnstage_draft_regression',
   validateTests: 'turnstage_validate_tests',
+  analyzeRun: 'turnstage_analyze_run',
+  draftProfilePatch: 'turnstage_draft_profile_patch',
+  applyProfilePatch: 'turnstage_apply_profile_patch',
+  reviewResponseQuality: 'turnstage_review_response_quality',
 } as const;
 
 export type CopilotToolName = typeof COPILOT_TOOL_NAMES[keyof typeof COPILOT_TOOL_NAMES];
@@ -21,7 +28,7 @@ export const COPILOT_LIMITS = {
   maxPageSize: 100,
   defaultPageSize: 25,
   maxOutputItems: 100,
-  maxResultCharacters: 24_000,
+  maxResultCharacters: 64_000,
   maxValidationIssues: 100,
   maxDraftTurns: 100,
   maxDraftAssertions: 100,
@@ -73,6 +80,42 @@ export interface ValidateTestsInput extends PageInput {
   caseId?: string;
   expectedIntegrity?: IntegrityLock;
 }
+
+export type AnalyzeRunMode = 'failure' | 'performance' | 'stability' | 'comparison' | 'configuration';
+
+export interface AnalyzeRunInput {
+  runId?: string;
+  evidenceId?: string;
+  profile?: string;
+  mode: AnalyzeRunMode;
+}
+
+export interface DraftProfilePatchInput {
+  profile: string;
+  expectedProfileDigest?: string;
+  operations: ProfilePatchOperationV1[];
+}
+
+export interface ApplyProfilePatchInput {
+  profile: string;
+  draft: ProfilePatchDraftV1;
+}
+
+export type ReviewResponseQualityInput =
+  | { action: 'disclose'; evidenceIds: string[]; rubricIds?: string[] }
+  | { action: 'record'; grantId: string; review: QualityReviewSubmission };
+
+export interface ApplyProfilePatchResult {
+  applied: boolean;
+  profile: string;
+  profileDigest: string;
+  validation: ValidateTestsRuntimeResult;
+  undoAvailable: boolean;
+}
+
+export type ReviewResponseQualityResult =
+  | { action: 'disclose'; grant: QualityDisclosureGrantV1; advisoryOnly: true }
+  | { action: 'record'; review: QualityReviewRecordV1; advisoryOnly: true };
 
 /**
  * A draft accepted by the Copilot boundary. It intentionally models only the
@@ -133,12 +176,19 @@ export interface TestDescriptor {
 export interface FindTestsRuntimeResult {
   tests: readonly TestDescriptor[];
   total?: number;
+  coverage?: {
+    changedFiles: readonly string[];
+    matchedFiles: readonly string[];
+    unmatchedFiles: readonly string[];
+    diagnostics: readonly string[];
+  };
 }
 
 export interface RunPreflight {
   requiresNetwork: boolean;
   workspaceTrusted: boolean;
   selectedCount: number;
+  plannedAttempts?: number;
   plannedTurns: number;
   maxRequests: number;
   timeoutMs: number;
@@ -150,6 +200,8 @@ export interface RunPreflight {
 
 export interface RunCaseResult {
   id: string;
+  profileId?: string;
+  suiteId?: string;
   label: string;
   outcome: SafeOutcome;
   stability?: AdversarialStability;
@@ -195,6 +247,8 @@ export interface EvidenceSource {
 export interface FailureRecord {
   id: string;
   caseId: string;
+  profileId?: string;
+  suiteId?: string;
   caseLabel?: string;
   outcome: SafeOutcome;
   label?: string;
@@ -254,6 +308,10 @@ export interface CopilotRuntime {
   inspectFailure(input: InspectFailureInput, token: CopilotCancellationToken): Promise<InspectFailureRuntimeResult>;
   draftRegression(input: DraftRegressionInput & { draft: RegressionDraft }, token: CopilotCancellationToken): Promise<DraftRegressionRuntimeResult>;
   validateTests(input: ValidateTestsInput, token: CopilotCancellationToken): Promise<ValidateTestsRuntimeResult>;
+  analyzeRun(input: AnalyzeRunInput, token: CopilotCancellationToken): Promise<DiagnosisResultV1>;
+  draftProfilePatch(input: DraftProfilePatchInput, token: CopilotCancellationToken): Promise<ProfilePatchDraftV1>;
+  applyProfilePatch(input: ApplyProfilePatchInput, token: CopilotCancellationToken): Promise<ApplyProfilePatchResult>;
+  reviewResponseQuality(input: ReviewResponseQualityInput, token: CopilotCancellationToken): Promise<ReviewResponseQualityResult>;
 }
 
 export class CopilotRuntimeError extends Error {

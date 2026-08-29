@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { InteractionContext, NetworkExchange, ScenarioDefinition, SessionSnapshot } from '../src/shared/types';
 import { createSnapshot } from '../src/extension/runtime/reducer';
-import { aggregateAttempts, createAdversarialRunPlan, createScenarioRunPlan, runScenarioGroup, type ScenarioSession } from '../src/extension/testing/scenarioExecution';
+import { aggregateAttempts, createAdversarialRunPlan, createScenarioRunPlan, MAX_COPILOT_RUN_ATTEMPTS, MAX_COPILOT_RUN_REQUESTS, runScenarioGroup, type ScenarioSession } from '../src/extension/testing/scenarioExecution';
 
 class RepetitionSession implements ScenarioSession {
   readonly snapshot: SessionSnapshot = createSnapshot(true);
@@ -41,6 +41,16 @@ function adversarial(id: string, repetitions?: number, overrides: Partial<NonNul
 }
 
 describe('shared scenario execution and repetition planning', () => {
+  it('keeps one Copilot action bounded while allowing 100 cases at five attempts', () => {
+    expect(MAX_COPILOT_RUN_ATTEMPTS).toBe(500);
+    expect(MAX_COPILOT_RUN_REQUESTS).toBe(5_000);
+    const plan = createScenarioRunPlan(Array.from({ length: 100 }, (_, index) => ({
+      ...adversarial(`case-${index + 1}`, 5),
+      steps: Array.from({ length: 10 }, (__, turn) => ({ id: `turn-${turn + 1}`, input: 'probe' })),
+    })));
+    expect(plan).toMatchObject({ valid: true, plannedAttempts: 500, maximumRequests: 5_000 });
+  });
+
   it('plans a 100-case suite with mixed per-case repetition overrides without expanding transcripts', () => {
     const scenarios = Array.from({ length: 100 }, (_, index) => adversarial(`case-${index + 1}`, index === 41 ? 10 : undefined));
     const plan = createScenarioRunPlan(scenarios, { defaultRepetitions: 3, maxConcurrency: 4 });

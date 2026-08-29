@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -1034,6 +1034,397 @@
               "default": 25
             }
           }
+        }
+      },
+      {
+        "name": "turnstage_analyze_run",
+        "toolReferenceName": "turnstage_analyze_run",
+        "displayName": "Analyze TurnStage run",
+        "userDescription": "Explain failure, timing, stability, comparison, or profile configuration from bounded TurnStage evidence.",
+        "modelDescription": "Run TurnStage's deterministic diagnostic rules over sanitized evidence. The result distinguishes facts from bounded hypotheses using strong, moderate, or limited evidence. Raw prompts, response text, headers, bodies, secrets, and full URLs are excluded.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(pulse)",
+        "tags": [
+          "turnstage",
+          "diagnostics",
+          "read-only"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "runId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "evidenceId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "profile": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "mode": {
+              "enum": [
+                "failure",
+                "performance",
+                "stability",
+                "comparison",
+                "configuration"
+              ]
+            }
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "configuration"
+                  ]
+                }
+              },
+              "required": [
+                "mode",
+                "profile"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "runId"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "evidenceId"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "failure",
+                    "performance",
+                    "stability",
+                    "comparison"
+                  ]
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "oneOf": [
+                {
+                  "required": [
+                    "runId"
+                  ],
+                  "not": {
+                    "required": [
+                      "evidenceId"
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "evidenceId"
+                  ],
+                  "not": {
+                    "required": [
+                      "runId"
+                    ]
+                  }
+                }
+              ],
+              "not": {
+                "required": [
+                  "profile"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "turnstage_draft_profile_patch",
+        "toolReferenceName": "turnstage_draft_profile_patch",
+        "displayName": "Draft TurnStage profile patch",
+        "userDescription": "Draft allowlisted profile setting changes without editing files.",
+        "modelDescription": "Create a digest-locked JSONC-preserving patch for allowlisted TurnStage timing, retry, parser, or mapping settings. This tool is draft-only. Secret, auth, proxy, VPN, certificate, URL, header, and arbitrary payload changes are rejected.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(diff-added)",
+        "tags": [
+          "turnstage",
+          "diagnostics",
+          "draft",
+          "read-only"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profile",
+            "operations"
+          ],
+          "properties": {
+            "profile": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "expectedProfileDigest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "operations": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 12,
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000
+                        }
+                      ]
+                    }
+                  },
+                  "operation": {
+                    "enum": [
+                      "set",
+                      "remove"
+                    ],
+                    "default": "set"
+                  },
+                  "value": {},
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "category": {
+                    "enum": [
+                      "request-timing",
+                      "retry-timing",
+                      "stream-parser",
+                      "mapping"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "turnstage_apply_profile_patch",
+        "toolReferenceName": "turnstage_apply_profile_patch",
+        "displayName": "Apply TurnStage profile patch",
+        "userDescription": "Preview and apply a previously drafted safe profile patch after confirmation.",
+        "modelDescription": "Apply an unchanged, allowlisted TurnStage profile patch. TurnStage verifies both source and profile SHA-256 digests, opens a native VS Code diff, asks for explicit confirmation, applies one WorkspaceEdit, validates and saves, and rolls back on verification failure. This tool never runs tests automatically.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(diff-modified)",
+        "tags": [
+          "turnstage",
+          "diagnostics",
+          "write",
+          "confirmation"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profile",
+            "draft"
+          ],
+          "properties": {
+            "profile": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "draft": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "format",
+                "version",
+                "profileDigest",
+                "sourceDigest",
+                "updatedProfileDigest",
+                "sourceLength",
+                "updatedSourceLength",
+                "summary",
+                "changes",
+                "edits",
+                "inverseEdits",
+                "safety"
+              ],
+              "properties": {
+                "format": {
+                  "const": "turnstage-profile-patch-draft"
+                },
+                "version": {
+                  "const": 1
+                },
+                "profileDigest": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "sourceDigest": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "updatedProfileDigest": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "sourceLength": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 2097152
+                },
+                "updatedSourceLength": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 2097152
+                },
+                "summary": {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                "changes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "edits": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "inverseEdits": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "safety": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "turnstage_review_response_quality",
+        "toolReferenceName": "turnstage_review_response_quality",
+        "displayName": "Review TurnStage response quality",
+        "userDescription": "Run an explicit, bounded Advisory AI review that cannot change test outcomes.",
+        "modelDescription": "Two-step advisory workflow. First disclose 1-10 manually selected response attempts after confirmation, capped at 8,000 characters each and 32,000 total. Then record fixed-rubric findings with the returned grantId. Prompts, headers, raw payloads, full URLs, and secrets are excluded. Findings never change formal TurnStage outcomes or CLI exit codes.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(comment-discussion)",
+        "tags": [
+          "turnstage",
+          "quality",
+          "advisory",
+          "confirmation"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action"
+          ],
+          "properties": {
+            "action": {
+              "enum": [
+                "disclose",
+                "record"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "rubricIds": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 20,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 256
+              }
+            },
+            "grantId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "review": {
+              "type": "object"
+            }
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "action": {
+                  "const": "disclose"
+                }
+              },
+              "required": [
+                "action",
+                "evidenceIds"
+              ]
+            },
+            {
+              "properties": {
+                "action": {
+                  "const": "record"
+                }
+              },
+              "required": [
+                "action",
+                "grantId",
+                "review"
+              ]
+            }
+          ]
         }
       }
     ],

@@ -9,13 +9,20 @@ const MAX_PNG_BYTES = 24 * 1024 * 1024;
 const DEFAULT_VISUAL: ScenarioVisualDefinition = { baselineDirectory: '.turnstage/baselines', maxDifferencePercent: 0.1, channelTolerance: 16 };
 
 export interface VisualViewport { id: string; width: number; height: number }
-export interface VisualRegressionResult { operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselineUri: vscode.Uri; diffUri?: vscode.Uri }
+export interface VisualRegressionResult { operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselineUri: vscode.Uri; diffUri?: vscode.Uri; profileId: string }
+
+export interface VisualRegressionScope { runId?: string; profileIds?: readonly string[] }
 
 export class VisualRegressionService {
   private latest?: VisualRegressionResult;
   constructor(private readonly context: vscode.ExtensionContext) {}
 
-  getLatest(): VisualRegressionResult | undefined { return this.latest; }
+  getLatest(scope: VisualRegressionScope = {}): VisualRegressionResult | undefined {
+    if (!this.latest) return undefined;
+    if (scope.runId) return undefined;
+    if (scope.profileIds?.length && !scope.profileIds.includes(this.latest.profileId)) return undefined;
+    return this.latest;
+  }
 
   async saveBaseline(profile: TurnStageProfile, profileUri: vscode.Uri, viewport: VisualViewport, dataUrl: string): Promise<VisualRegressionResult | undefined> {
     const bytes = decodePng(dataUrl);
@@ -27,7 +34,7 @@ export class VisualRegressionService {
     }
     await vscode.workspace.fs.createDirectory(baselineUri.with({ path: baselineUri.path.slice(0, baselineUri.path.lastIndexOf('/')) }));
     await vscode.workspace.fs.writeFile(baselineUri, bytes);
-    this.latest = { operation: 'baseline', status: 'saved', baselineUri };
+    this.latest = { operation: 'baseline', status: 'saved', baselineUri, profileId: profile.id };
     return this.latest;
   }
 
@@ -45,7 +52,7 @@ export class VisualRegressionService {
       diffUri = baselineUri.with({ path: baselineUri.path.replace(/\.png$/, '.diff.png') });
       await vscode.workspace.fs.writeFile(diffUri, compared.diff);
     }
-    this.latest = { operation: 'compare', status: passed ? 'passed' : 'failed', differencePercent: compared.differencePercent, baselineUri, diffUri };
+    this.latest = { operation: 'compare', status: passed ? 'passed' : 'failed', differencePercent: compared.differencePercent, baselineUri, diffUri, profileId: profile.id };
     return this.latest;
   }
 

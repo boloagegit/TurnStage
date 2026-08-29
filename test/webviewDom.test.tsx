@@ -618,8 +618,35 @@ describe('Webview DOM behavior', () => {
     await user.click(screen.getAllByRole('button', { name: 'Add case' })[0]!);
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['tests', 'scenarios'], value: [expect.objectContaining({ id: 'adversarial-1', adversarial: expect.objectContaining({ mode: 'singleTurn', timeoutMs: 60000 }) })] }));
     expect(screen.getByText('Attack succeeded')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Open evidence' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'message', messageId: 'assistant-1' } });
+    await user.click(screen.getByRole('button', { name: 'Diagnose with Copilot' }));
+    expect(post).toHaveBeenCalledWith({ type: 'copilot.diagnose', evidenceId: 'evidence-1', mode: 'failure' });
+    await user.click(screen.getByRole('button', { name: 'Advisory quality review' }));
+    expect(post).toHaveBeenCalledWith({ type: 'copilot.qualityReview', evidenceIds: ['evidence-1'] });
     await user.click(screen.getByRole('button', { name: 'Network' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } });
+    await user.click(screen.getByRole('button', { name: 'Diagnose profile with Copilot' }));
+    expect(post).toHaveBeenCalledWith({ type: 'copilot.profileDoctor' });
+  });
+
+  it('authors optional advisory quality rubrics without changing test outcomes', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const { rerender } = render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={profile} post={post} />);
+    await user.click(screen.getByRole('checkbox', { name: 'Use custom quality rubrics' }));
+    expect(post).toHaveBeenCalledWith({
+      type: 'profile.patch', path: ['tests', 'qualityRubrics'],
+      value: [expect.objectContaining({ id: 'quality-1', criteria: [expect.objectContaining({ id: 'criterion-1' })] })],
+    });
+
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [], qualityRubrics: [{ id: 'support-quality', name: 'Support quality', criteria: [{ id: 'accuracy', label: 'Accuracy', description: 'Claims match the disclosed response.' }] }] } };
+    rerender(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={configured} post={post} />);
+    expect(screen.getByText(/Findings never change formal test outcomes/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Add criterion' }));
+    expect(post).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['tests', 'qualityRubrics'], value: [expect.objectContaining({ criteria: [expect.objectContaining({ id: 'accuracy' }), expect.objectContaining({ id: 'criterion-2' })] })] }));
+    expect(screen.getByRole('button', { name: 'Delete rubric' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Delete criterion' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('summarizes the active adversarial failure before its evidence locations', () => {

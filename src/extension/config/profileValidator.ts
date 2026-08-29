@@ -7,6 +7,7 @@ import { isSafeReportDirectory } from '../testing/scenarioConfig';
 import { scenarioPerformanceMetrics } from '../testing/performanceEvaluator';
 import { isSafeAdversarialSuitePath, MAX_ADVERSARIAL_REPETITIONS, MAX_ADVERSARIAL_RULES, MAX_ADVERSARIAL_TURNS_PER_CASE } from '../testing/adversarialSuite';
 import { validateSourceBinding } from '../testing/impactMapping';
+import { validateQualityRubrics } from '../copilot/quality/policy';
 
 export interface ValidationIssue { severity: 'error' | 'warning'; message: string; offset: number; length: number }
 
@@ -192,6 +193,10 @@ export class ProfileValidator {
         if (definition.maxDifferencePercent !== undefined && (typeof definition.maxDifferencePercent !== 'number' || !Number.isFinite(definition.maxDifferencePercent) || definition.maxDifferencePercent < 0 || definition.maxDifferencePercent > 100)) out.push(issue(tree, [...visualPath, 'maxDifferencePercent'], localize('Visual maximum difference must be a finite percentage from 0 to 100.')));
         if (definition.channelTolerance !== undefined && (!Number.isInteger(definition.channelTolerance) || Number(definition.channelTolerance) < 0 || Number(definition.channelTolerance) > 255)) out.push(issue(tree, [...visualPath, 'channelTolerance'], localize('Visual channel tolerance must be an integer from 0 to 255.')));
       }
+    }
+    if (profile.tests?.qualityRubrics !== undefined) {
+      try { validateQualityRubrics(profile.tests.qualityRubrics); }
+      catch (error) { out.push(issue(tree, ['tests', 'qualityRubrics'], localize('Invalid advisory quality rubrics: {message}', { message: error instanceof Error ? error.message : String(error) }))); }
     }
     if (scenarios.length > 100) out.push(issue(tree, ['tests', 'scenarios'], localize('A profile can define at most 100 scenarios.')));
     for (const duplicate of duplicates(scenarios.flatMap((scenario) => scenario && typeof scenario === 'object' && !Array.isArray(scenario) && typeof scenario.id === 'string' ? [scenario.id] : []))) out.push(issue(tree, ['tests', 'scenarios'], localize('Duplicate scenario id: {id}.', { id: duplicate })));

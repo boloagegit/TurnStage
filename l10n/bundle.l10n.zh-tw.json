@@ -1,4 +1,7 @@
 {
+  "Apply Profile Changes": "套用 Profile 變更",
+  "Apply {count} safe TurnStage profile setting change(s)?": "要套用 {count} 項安全的 TurnStage Profile 設定變更嗎？",
+  "Invalid advisory quality rubrics: {message}": "諮詢式品質評分規則無效：{message}",
   "Invalid source binding: {message}": "來源綁定無效：{message}",
   "Auto (Follow VS Code)": "自動（跟隨 VS Code）",
   "Change TurnStage Display Language": "變更 TurnStage 顯示語言",

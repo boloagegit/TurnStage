@@ -20,15 +20,16 @@ import type { ScenarioEvidenceLocation } from '../shared/types';
 import { VisualRegressionService } from './testing/visualRegression';
 import { registerCopilotTools } from './copilot/tools';
 import { ScenarioCopilotRuntime } from './copilot/scenarioRuntime';
+import { createCopilotArtifactRepository } from './copilot/artifacts';
 
 let activeEditor: TurnStageEditorProvider | undefined;
 export const TURNSTAGE_WALKTHROUGH_ID = 'turnstage.turnstage#gettingStarted';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   configureL10n((message, values) => vscode.l10n.t(message, values ?? {}));
-  const output = vscode.window.createOutputChannel(vscode.l10n.t('TurnStage')); const diagnostics = vscode.languages.createDiagnosticCollection('turnstage'); const repository = new ProfileRepository(context.globalStorageUri); const environments = new EnvironmentRepository(context.globalStorageUri); const duplicateDiagnostics = new ProfileDuplicateDiagnostics(repository, diagnostics); const tree = new ProfileTreeProvider(repository, (entries) => duplicateDiagnostics.refresh(entries)); const visualRegression = new VisualRegressionService(context); const editor = new TurnStageEditorProvider(context, diagnostics, output, environments, visualRegression); activeEditor = editor; const secrets = new SecretService(context); const scenarioTests = new ScenarioTestController(context, repository, environments, output, visualRegression);
+  const output = vscode.window.createOutputChannel(vscode.l10n.t('TurnStage')); const diagnostics = vscode.languages.createDiagnosticCollection('turnstage'); const repository = new ProfileRepository(context.globalStorageUri); const environments = new EnvironmentRepository(context.globalStorageUri); const duplicateDiagnostics = new ProfileDuplicateDiagnostics(repository, diagnostics); const tree = new ProfileTreeProvider(repository, (entries) => duplicateDiagnostics.refresh(entries)); const visualRegression = new VisualRegressionService(context); const editor = new TurnStageEditorProvider(context, diagnostics, output, environments, visualRegression); activeEditor = editor; const secrets = new SecretService(context); const copilotArtifacts = createCopilotArtifactRepository(); const scenarioTests = new ScenarioTestController(context, repository, environments, output, visualRegression, copilotArtifacts);
   const demoProvider = vscode.workspace.registerTextDocumentContentProvider('turnstage-demo', { provideTextDocumentContent: async (uri) => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(context.extensionUri, 'resources', 'templates', uri.path.split('/').pop()!))) });
-  const copilotTools = registerCopilotTools(new ScenarioCopilotRuntime(scenarioTests), { onError: (name, error) => output.appendLine(`[error] [copilot:${name}] ${error instanceof Error ? error.message : String(error)}`) });
+  const copilotTools = registerCopilotTools(new ScenarioCopilotRuntime(scenarioTests, repository, environments, copilotArtifacts), { onError: (name, error) => output.appendLine(`[error] [copilot:${name}] ${error instanceof Error ? error.message : String(error)}`) });
   context.subscriptions.push(output, diagnostics, tree, duplicateDiagnostics, demoProvider, scenarioTests, ...copilotTools, scenarioTests.onDidChangeResults(({ uri, results }) => { void editor.publishTestResults(uri, results); }));
   context.subscriptions.push(vscode.window.registerTreeDataProvider('turnstage.profiles', tree), vscode.window.registerCustomEditorProvider('turnstage.profileEditor', editor, { webviewOptions: { retainContextWhenHidden: false }, supportsMultipleEditorsPerDocument: false }));
 

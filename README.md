@@ -57,10 +57,15 @@ renderer and inspector.
 - Per-case and suite-default repetitions run in fresh conversations and expose
   stable resistance, stable attack success, unstable, or inconclusive sample
   status without converting timeout or incomplete samples into a pass.
-- Five bounded VS Code language-model tools let GitHub Copilot find, validate,
-  run, and inspect TurnStage tests or draft a regression without writing files.
-  Network runs require VS Code confirmation and Workspace Trust; tool output is
-  paginated, redacted, and protected by optional integrity fingerprints.
+- Nine bounded VS Code language-model tools let GitHub Copilot find, validate,
+  run, inspect, and diagnose TurnStage evidence, draft a regression, or prepare
+  an allowlisted Profile repair. Applying a repair opens a native diff, checks
+  the Profile and source digests again, requires explicit confirmation, and
+  validates or rolls back the edit; it never runs tests automatically. Optional
+  response-quality review is clearly Advisory AI output, requires explicit
+  response disclosure, and cannot change a test outcome or CLI exit code.
+  Network runs and content disclosure require confirmation and Workspace Trust;
+  tool output is bounded, redacted, and protected by integrity fingerprints.
 - An executable `turnstage` CLI runs the same fixed Scenario contracts in CI,
   supports changed-file selection through explicit `sourceBinding` metadata,
   emits deterministic exit codes and sanitized JSON/JUnit/HTML/evidence output,
@@ -131,6 +136,11 @@ does not declare a `browser` entry and therefore does not claim support for
    Adversarial tests**. Use JSONC suites for Git-managed bulk cases or CSV for
    spreadsheet exchange, then triage the four outcomes in Test Explorer or the
    Profile's latest-results list.
+9. From a latest result, choose **Diagnose with Copilot** to explain timeout,
+   TTFT, stream, mapping, assertion, comparison, or repeat-stability evidence.
+   Use **Profile Doctor** for configuration-only diagnosis. Response-quality
+   review is a separate, explicit Advisory action and never replaces the four
+   deterministic adversarial outcomes.
 
 Initialization is explicit. Merely installing the extension, opening a
 workspace, or opening the sidebar does not create profile files. Existing

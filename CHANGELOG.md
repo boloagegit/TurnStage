@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.13.0
+
+- Added deterministic Copilot-assisted diagnosis for failed, slow, unstable, comparison, and configuration scenarios. Diagnostics separate measured evidence from bounded hypotheses, retain run/profile scope, and link back to available Chat, Network, and Event evidence without exposing prompts, response text, headers, bodies, full URLs, or secrets.
+- Added digest-locked Profile remediation for a narrow allowlist of timing, retry, parser, and mapping settings. TurnStage opens a native diff, requires explicit confirmation, rechecks Workspace Trust and source integrity, validates the result, and performs a verified rollback when saving or post-apply validation fails; tests are never rerun automatically.
+- Added optional Advisory response-quality rubrics. Only explicitly selected Assistant responses are disclosed through a bounded two-step grant, common secret and URL forms are rejected, advisory findings cannot change formal test outcomes or CI exit codes, and sanitized run/profile-scoped metadata is available in Evidence Bundle version 4.
+- Added Copilot run safety and traceability boundaries: one tool invocation is capped at 500 attempts and 5,000 requests, aggregate evidence is invocation-scoped with bounded retention, active requests are cancelled if Workspace Trust is lost, and Copilot-triggered runs never write configured CI reports or Recorded Runs. Existing Profiles, scenarios, adversarial suites, CLI behavior, and five existing Copilot tools remain compatible; the four new tools and optional quality-rubric fields require no migration.
+
 ## 0.12.0
 
 - Added bounded repeated adversarial execution for probabilistic models. Suites can set a default repetition count and individual cases can override it from 1–50; each attempt uses a fresh conversation, results retain all four authoritative outcomes, and the aggregate reports stable resistance, stable attack success, instability, or inconclusive evidence. Fail-fast, cancellation, resume, timeout, and request-count limits remain explicit, and incomplete samples never pass.

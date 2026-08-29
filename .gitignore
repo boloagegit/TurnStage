@@ -9,6 +9,9 @@ coverage/
 
 # Generated review and benchmark artifacts
 artifacts/
+# The Copilot artifact repository is production source, not generated output.
+!src/extension/copilot/artifacts/
+!src/extension/copilot/artifacts/*.ts
 docs/performance-results.json
 test-results/
 .turnstage/reports/

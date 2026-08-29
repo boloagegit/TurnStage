@@ -13,12 +13,28 @@ interface ConfiguredReportGroup {
   records: ScenarioExecutionRecord[];
 }
 
+export interface ScenarioReportScope {
+  runId?: string;
+  profileIds?: readonly string[];
+}
+
+export interface CopilotArtifactProvider {
+  snapshot(): unknown;
+}
+
 export class ScenarioReportService {
   private records: ScenarioExecutionRecord[] = [];
+  private scope: ScenarioReportScope = {};
 
-  constructor(private readonly output: vscode.OutputChannel, private readonly visualRegression?: VisualRegressionService, private readonly runnerVersion = 'unknown') {}
+  constructor(private readonly output: vscode.OutputChannel, private readonly visualRegression?: VisualRegressionService, private readonly runnerVersion = 'unknown', private readonly copilotArtifacts?: CopilotArtifactProvider) {}
 
-  record(records: readonly ScenarioExecutionRecord[]): void { this.records = [...records]; }
+  record(records: readonly ScenarioExecutionRecord[], scope: ScenarioReportScope = {}): void {
+    this.records = [...records];
+    this.scope = {
+      ...(scope.runId ? { runId: scope.runId } : {}),
+      profileIds: [...new Set(scope.profileIds ?? records.map((record) => record.profileId))],
+    };
+  }
   hasRecords(): boolean { return this.records.length > 0; }
 
   async exportLast(format: ScenarioReportFormat): Promise<vscode.Uri | undefined> {
@@ -35,7 +51,7 @@ export class ScenarioReportService {
 
   async exportEvidenceBundle(): Promise<vscode.Uri | undefined> {
     if (!this.records.length) return undefined;
-    const visual = this.visualRegression?.getLatest();
+    const visual = this.visualRegression?.getLatest(this.scope);
     let includeVisual = false;
     if (visual) {
       const choice = await vscode.window.showQuickPick([
@@ -51,7 +67,7 @@ export class ScenarioReportService {
     const directory = vscode.Uri.joinPath(selected[0], `turnstage-evidence-${stamp}-${crypto.randomUUID().slice(0, 8)}`);
     await vscode.workspace.fs.createDirectory(directory);
     const generatedAt = new Date().toISOString();
-    const fileNames = ['index.html', 'report.json', 'junit.xml', 'adversarial-summary.csv', 'adversarial-turns.csv', 'adversarial-findings.csv', 'network.csv', 'events.csv'];
+    const fileNames = ['index.html', 'report.json', 'junit.xml', 'adversarial-summary.csv', 'adversarial-turns.csv', 'adversarial-findings.csv', 'network.csv', 'events.csv', 'diagnostics.json'];
     if (includeVisual && visual) { fileNames.push('visual-baseline.png'); if (visual.diffUri) fileNames.push('visual-diff.png'); }
     const files: Array<[string, string | Uint8Array]> = [
       ['index.html', serializeScenarioHtml(this.records, generatedAt)],
@@ -62,22 +78,23 @@ export class ScenarioReportService {
       ['adversarial-findings.csv', serializeAdversarialFindingsCsv(this.records)],
       ['network.csv', serializeAdversarialNetworkCsv(this.records)],
       ['events.csv', serializeAdversarialEventsCsv(this.records)],
+      ['diagnostics.json', `${JSON.stringify(scopeCopilotArtifacts(this.copilotArtifacts?.snapshot(), this.scope), null, 2)}\n`],
     ];
     if (includeVisual && visual) {
       files.push(['visual-baseline.png', await vscode.workspace.fs.readFile(visual.baselineUri)]);
       if (visual.diffUri) files.push(['visual-diff.png', await vscode.workspace.fs.readFile(visual.diffUri)]);
     }
     const report = createScenarioReport(this.records, generatedAt);
-    files.push(['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 3, generatedAt, files: [...fileNames, 'manifest.json', 'provenance.json'], privacy: { rawEvents: false, payloads: false, urls: false, headers: false, messageContent: false, secrets: false, visualChatContent: includeVisual }, summary: report.summary }, null, 2)}\n`]);
+    files.push(['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 4, generatedAt, files: [...fileNames, 'manifest.json', 'provenance.json'], privacy: { rawEvents: false, payloads: false, urls: false, headers: false, messageContent: false, secrets: false, profileEditContent: false, advisoryResponseContent: false, visualChatContent: includeVisual }, summary: report.summary }, null, 2)}\n`]);
     const provenanceFiles: ProvenanceFileInput[] = files.map(([path, contents]) => ({ path, contents }));
     const provenance = createProvenanceManifest({
-      runId: crypto.randomUUID(),
+      runId: this.scope.runId ?? crypto.randomUUID(),
       generatedAt,
       runnerKind: 'extension',
       runnerVersion: this.runnerVersion,
       extensionVersion: this.runnerVersion,
       selectedTestIds: this.records.map((record) => `${record.profileId}/${record.scenarioId}`),
-      policy: { evidenceBundleVersion: 3, visualChatContent: includeVisual },
+      policy: { evidenceBundleVersion: 4, visualChatContent: includeVisual },
       result: report,
       evidence: { summary: report.summary },
       evidenceFiles: provenanceFiles,
@@ -117,3 +134,43 @@ function reportExtension(format: ScenarioReportFormat): string { return format =
 function safeFilePart(value: string): string { return value.replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 100) || 'profile'; }
 
 export type { ConfiguredReportGroup };
+
+function scopeCopilotArtifacts(value: unknown, scope: ScenarioReportScope): Record<string, unknown> {
+  if (!isRecord(value) || value.sanitized !== true) {
+    return { version: 'CopilotArtifactSnapshotV1', sanitized: true, diagnoses: [], profilePatches: [], qualityReviews: [] };
+  }
+  const profileIds = new Set((scope.profileIds ?? []).filter((profileId): profileId is string => typeof profileId === 'string' && profileId.length > 0));
+  const diagnoses = Array.isArray(value.diagnoses)
+    ? value.diagnoses.filter((item): item is Record<string, unknown> => {
+      if (!isRecord(item)) return false;
+      if (scope.runId && item.runId !== scope.runId) return false;
+      if (profileIds.size && (typeof item.profileId !== 'string' || !profileIds.has(item.profileId))) return false;
+      return true;
+    })
+    : [];
+  const profilePatches = Array.isArray(value.profilePatches)
+    ? value.profilePatches.filter((item): item is Record<string, unknown> => matchesCopilotArtifactScope(item, scope.runId, profileIds))
+    : [];
+  const qualityReviews = Array.isArray(value.qualityReviews)
+    ? value.qualityReviews.filter((item): item is Record<string, unknown> => matchesCopilotArtifactScope(item, scope.runId, profileIds))
+    : [];
+  return {
+    version: typeof value.version === 'string' ? value.version : 'CopilotArtifactSnapshotV1',
+    sanitized: true,
+    diagnoses,
+    profilePatches,
+    qualityReviews,
+  };
+}
+
+function matchesCopilotArtifactScope(item: unknown, runId: string | undefined, profileIds: Set<string>): item is Record<string, unknown> {
+  if (!isRecord(item)) return false;
+  // A run-scoped bundle must never claim an artifact without a trusted run id.
+  if (runId && (typeof item.runId !== 'string' || item.runId !== runId)) return false;
+  if (profileIds.size && (typeof item.profileId !== 'string' || !profileIds.has(item.profileId))) return false;
+  return true;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}

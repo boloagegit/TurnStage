@@ -262,6 +262,12 @@ Automatic report output is trusted-workspace-only and accepts only a validated
 workspace-relative directory. Restricted Mode performs no contract network
 request and writes no configured report.
 
+Copilot-triggered contract runs are advisory and never write configured CI
+reports or Recorded Runs, even in a Trusted Workspace. They retain only a
+bounded in-memory aggregate evidence capsule per selected case. If Workspace
+Trust is lost while a Copilot run is active, TurnStage cancels the active
+session and discards the invocation evidence before returning a result.
+
 Fault Lab settings are fixed numeric fields with strict bounds and are passed
 only to isolated contract-test sessions. They cannot execute code, rewrite a
 URL, alter global `fetch`, or affect an interactive Chat session. The clean
@@ -290,6 +296,32 @@ Profile edit and spreadsheet-leading formula characters are escaped on export.
 Evidence Bundle CSVs contain structural metadata only; they exclude prompts,
 assistant content, request/response payloads, URLs, headers, raw events, and
 secrets.
+
+## Copilot diagnosis and remediation boundary
+
+TurnStage's run diagnosis is deterministic host logic over bounded timing,
+outcome, error category, and evidence references. Copilot explains that result;
+it is not the source of truth and cannot relabel a formal outcome. Profile
+Doctor uses only a discovered Profile's validation/configuration metadata.
+
+Profile repair is split into draft and apply tools. Drafting never writes. The
+planner permits only bounded timeout, retry, parser, and mapping paths and
+rejects credentials, headers, URLs, proxy/VPN/certificate settings, arbitrary
+payload changes, suspicious strings, conflicts, no-ops, and oversized edits.
+Apply rechecks canonical Profile and source SHA-256 digests, opens a native VS
+Code diff, asks for explicit confirmation, applies one WorkspaceEdit, validates
+and saves, and verifies rollback when post-apply validation fails. Running a
+test after a repair is always a separate confirmed action.
+
+Advisory quality review is a separate two-step disclosure flow. It requires a
+trusted workspace, explicit selection of at most 10 evidence attempts, and a
+VS Code confirmation before response content is returned to Copilot. Each
+response is capped at 8,000 characters and the selection at 32,000 characters.
+Prompts, headers, raw payloads, full URLs, and secret-like values are excluded.
+The single-use disclosure grant expires after 10 minutes. Stored/exported
+review records contain digests, rubric IDs, ratings, short rationales, attempt
+IDs, model label, timestamp, and disclosure metadata—not original response
+text—and cannot alter formal results or CLI exit codes.
 
 The host should continue rejecting unknown protocol versions and untrusted
 payloads. Avoid broadening `allowedPatchRoots`, URI schemes, command allowlists,

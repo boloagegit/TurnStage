@@ -86,5 +86,8 @@ describe('PNG visual regression comparison', () => {
     expect(compared).toMatchObject({ status: 'failed', differencePercent: 100 });
     expect(compared.diffUri?.path).toBe('/workspace/.turnstage/baselines/visual-profile.mobile-m.375x667.diff.png');
     expect(mock.files.has(compared.diffUri!.path)).toBe(true);
+    expect(service.getLatest({ profileIds: ['visual-profile'] })).toMatchObject({ profileId: 'visual-profile' });
+    expect(service.getLatest({ profileIds: ['other-profile'] })).toBeUndefined();
+    expect(service.getLatest({ runId: 'copilot-run' })).toBeUndefined();
   });
 });

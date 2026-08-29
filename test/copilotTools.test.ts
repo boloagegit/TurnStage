@@ -23,12 +23,16 @@ function runtime(overrides: Partial<CopilotRuntime> = {}): CopilotRuntime {
     inspectFailure: async () => ({ runId: 'run-1', failures: [] }),
     draftRegression: async (input) => ({ runId: input.runId, failureId: input.failureId, draft: input.draft }),
     validateTests: async () => ({ valid: true, issues: [] }),
+    analyzeRun: async () => ({ version: 'DiagnosisResultV1', sanitized: true, runId: 'run-1', focus: 'failure', status: 'complete', evidenceLevel: 'strong', summary: 'Deterministic diagnosis.', capsule: { version: 'DiagnosticCapsuleV1', sanitized: true, runId: 'run-1', outcome: 'failed', timing: { stages: [], missingStages: [], orderingValid: true, anomalies: [] }, metrics: {}, transport: {}, errors: [], evidence: [], configIssues: [] }, findings: [], nextActions: [] }),
+    draftProfilePatch: async () => ({ format: 'turnstage-profile-patch-draft', version: 1, profileDigest: 'a'.repeat(64), sourceDigest: 'b'.repeat(64), updatedProfileDigest: 'c'.repeat(64), sourceLength: 10, updatedSourceLength: 12, summary: 'Update timeout.', changes: [], edits: [], inverseEdits: [], safety: { allowlisted: true, networkSettingsChanged: false, secretSettingsChanged: false, requiresConfirmation: true, contentRedacted: true } }),
+    applyProfilePatch: async () => ({ applied: true, profile: 'profile', profileDigest: 'c'.repeat(64), validation: { valid: true, issues: [] }, undoAvailable: true }),
+    reviewResponseQuality: async () => ({ action: 'record', advisoryOnly: true, review: { version: 'QualityReviewRecordV1', advisoryOnly: true, grantId: 'grant-1', evidenceIds: ['evidence-1'], attemptIds: ['attempt-1'], createdAt: 1, rubricDigest: 'a'.repeat(64), disclosureDigest: 'b'.repeat(64), evidenceCompleteness: 'complete', summary: 'Advisory only.', findings: [], disclosure: { manualSelection: true, responseContent: true, prompts: false, rawPayloads: false, headers: false, fullUrls: false, secrets: false, disclosedCharacters: 10 } } }),
     ...overrides,
   };
 }
 
 describe('Copilot tool contract', () => {
-  it('declares the five bounded language model tools in the extension manifest', () => {
+  it('declares all bounded language model tools in the extension manifest', () => {
     const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')) as { contributes?: { languageModelTools?: Array<Record<string, unknown>> } };
     const tools = manifest.contributes?.languageModelTools ?? [];
     expect(tools.map((tool) => tool.name)).toEqual(Object.values(COPILOT_TOOL_NAMES));
@@ -49,6 +53,21 @@ describe('Copilot tool contract', () => {
     expect(invalid).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
   });
 
+  it('preserves bounded changed-file coverage gaps even when no tests match', async () => {
+    const result = await executeCopilotTool(COPILOT_TOOL_NAMES.findTests, { changedFiles: ['src/unbound.ts'] }, runtime({
+      findTests: async () => ({ tests: [], total: 0, coverage: { changedFiles: ['src/unbound.ts'], matchedFiles: [], unmatchedFiles: ['src/unbound.ts'], diagnostics: ['No explicit source binding matched.'] } }),
+    }), token());
+    expect(result).toMatchObject({ ok: true, data: { total: 0, coverage: { unmatchedFiles: ['src/unbound.ts'], diagnostics: ['No explicit source binding matched.'] } } });
+  });
+
+  it('serializes optional undefined diagnostic fields instead of treating them as oversized output', async () => {
+    const sharedRepetition = { requestedAttempts: 2, completedAttempts: 2, skippedAttempts: 0, sampleComplete: true, counts: { resisted: 2, attackSucceeded: 0, indeterminate: 0, infrastructureError: 0, passed: 0, failed: 0, error: 0, cancelled: 0 }, status: 'stable' as const, dominantOutcome: 'resisted' as const, evidenceLevel: 'strong' as const, explanation: 'Stable.' };
+    const result = await executeCopilotTool(COPILOT_TOOL_NAMES.analyzeRun, { runId: 'run-1', mode: 'failure' }, runtime({
+      analyzeRun: async () => ({ version: 'DiagnosisResultV1', sanitized: true, runId: 'run-1', focus: 'failure', status: 'partial', evidenceLevel: 'limited', summary: 'Bounded.', capsule: { version: 'DiagnosticCapsuleV1', sanitized: true, runId: 'run-1', outcome: 'indeterminate', timing: { stages: [], missingStages: [], orderingValid: true, anomalies: [] }, metrics: {}, transport: { status: undefined }, errors: [], evidence: [], configIssues: [], repetition: sharedRepetition }, findings: [], nextActions: [], primaryFinding: undefined, repetition: sharedRepetition }),
+    }), token());
+    expect(result).toMatchObject({ ok: true, data: { version: 'DiagnosisResultV1', runId: 'run-1' } });
+  });
+
   it('requires a truthful network confirmation with preflight counts', async () => {
     const preview = await prepareInvocation(COPILOT_TOOL_NAMES.runTests, {}, runtime(), token());
     expect(preview?.confirmationMessages?.title).toContain('network');
@@ -57,6 +76,35 @@ describe('Copilot tool contract', () => {
     expect(String(preview?.confirmationMessages?.message)).toContain('6 request(s)');
     expect(String(preview?.confirmationMessages?.message)).toContain('3 repetition(s)');
     expect(String(preview?.confirmationMessages?.message)).toContain('credentials');
+  });
+
+  it('keeps analyze-run selectors aligned with the selected mode', async () => {
+    const configurationWithRun = await executeCopilotTool(COPILOT_TOOL_NAMES.analyzeRun, { mode: 'configuration', profile: 'profile-1', runId: 'run-1' }, runtime(), token());
+    expect(configurationWithRun).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    const failureWithProfile = await executeCopilotTool(COPILOT_TOOL_NAMES.analyzeRun, { mode: 'failure', profile: 'profile-1' }, runtime(), token());
+    expect(failureWithProfile).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    const missingSelector = await executeCopilotTool(COPILOT_TOOL_NAMES.analyzeRun, { mode: 'performance' }, runtime(), token());
+    expect(missingSelector).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+  });
+
+  it('requires distinct confirmations for Profile mutation and response disclosure', async () => {
+    const patchDraft = {
+      format: 'turnstage-profile-patch-draft', version: 1,
+      profileDigest: 'a'.repeat(64), sourceDigest: 'b'.repeat(64), updatedProfileDigest: 'c'.repeat(64),
+      sourceLength: 10, updatedSourceLength: 12, summary: 'Increase request timeout.',
+      changes: [{ path: ['conversation', 'send', 'timeoutMs'], pathLabel: 'conversation.send.timeoutMs', operation: 'set', category: 'request-timing', before: { kind: 'missing' }, after: { kind: 'number', value: 5000 }, reason: 'Bound the request.' }],
+      edits: [{ offset: 8, length: 0, content: 'x' }], inverseEdits: [{ offset: 8, length: 1, content: '' }],
+      safety: { allowlisted: true, networkSettingsChanged: false, secretSettingsChanged: false, requiresConfirmation: true, contentRedacted: true },
+    };
+    const apply = await prepareInvocation(COPILOT_TOOL_NAMES.applyProfilePatch, { profile: 'profile', draft: patchDraft }, runtime(), token());
+    expect(apply?.confirmationMessages?.title).toContain('profile');
+    expect(String(apply?.confirmationMessages?.message)).toContain('conversation.send.timeoutMs');
+    expect(String(apply?.confirmationMessages?.message)).toContain('VS Code Undo');
+
+    const disclose = await prepareInvocation(COPILOT_TOOL_NAMES.reviewResponseQuality, { action: 'disclose', evidenceIds: ['evidence-1', 'evidence-2'] }, runtime(), token());
+    expect(disclose?.confirmationMessages?.title).toContain('response text');
+    expect(String(disclose?.confirmationMessages?.message)).toContain('2 explicitly selected');
+    expect(String(disclose?.confirmationMessages?.message)).toContain('cannot change the formal test outcome');
   });
 
   it('fails closed for untrusted network execution and cancellation', async () => {

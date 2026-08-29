@@ -11,6 +11,7 @@ import {
   type CopilotToolResponse,
   type CopilotToolSuccess,
   type DraftRegressionInput,
+  type DraftProfilePatchInput,
   type FindTestsInput,
   type InspectFailureInput,
   type IntegrityLock,
@@ -19,7 +20,12 @@ import {
   type RunTestsInput,
   type SafeOutcome,
   type ValidateTestsInput,
+  type AnalyzeRunInput,
+  type ApplyProfilePatchInput,
+  type ReviewResponseQualityInput,
 } from './types';
+import type { ProfilePatchDraftV1, ProfilePatchOperationV1 } from './remediation/contracts';
+import type { QualityReviewSubmission } from './quality/contracts';
 import type { AdversarialContentRule, AdversarialForbidDefinition, ScenarioAssertionDefinition } from '../../shared/types';
 import { isSafeAssertionRegex, isValidAssertionPath } from '../testing/assertionEvaluator';
 import { MAX_ADVERSARIAL_RULES, MAX_ADVERSARIAL_TURNS_PER_CASE } from '../testing/adversarialSuite';
@@ -34,12 +40,20 @@ const ERROR_CODES = {
   invalidDraft: 'INVALID_DRAFT',
   integrityMismatch: 'INTEGRITY_MISMATCH',
   outputLimit: 'OUTPUT_LIMIT',
+  runBudgetExceeded: 'RUN_BUDGET_EXCEEDED',
   selectionUnsupported: 'SELECTION_UNSUPPORTED',
+  unsafeOperation: 'UNSAFE_OPERATION',
 } as const;
+const TRUSTED_ONLY_TOOLS = new Set<CopilotToolName>([
+  COPILOT_TOOL_NAMES.runTests,
+  COPILOT_TOOL_NAMES.draftProfilePatch,
+  COPILOT_TOOL_NAMES.applyProfilePatch,
+  COPILOT_TOOL_NAMES.reviewResponseQuality,
+]);
 
 export { ERROR_CODES as COPILOT_ERROR_CODES };
 
-type ToolInput = FindTestsInput | RunTestsInput | InspectFailureInput | DraftRegressionInput | ValidateTestsInput;
+type ToolInput = FindTestsInput | RunTestsInput | InspectFailureInput | DraftRegressionInput | ValidateTestsInput | AnalyzeRunInput | DraftProfilePatchInput | ApplyProfilePatchInput | ReviewResponseQualityInput;
 
 const INVOCATION_MESSAGES: Record<CopilotToolName, string> = {
   [COPILOT_TOOL_NAMES.findTests]: 'Find matching TurnStage tests',
@@ -47,6 +61,10 @@ const INVOCATION_MESSAGES: Record<CopilotToolName, string> = {
   [COPILOT_TOOL_NAMES.inspectFailure]: 'Inspect a bounded TurnStage failure capsule',
   [COPILOT_TOOL_NAMES.draftRegression]: 'Draft a schema-validated TurnStage regression (no files will be changed)',
   [COPILOT_TOOL_NAMES.validateTests]: 'Validate TurnStage tests and their integrity lock',
+  [COPILOT_TOOL_NAMES.analyzeRun]: 'Analyze bounded TurnStage diagnostic evidence',
+  [COPILOT_TOOL_NAMES.draftProfilePatch]: 'Draft a safe TurnStage profile patch (no files will be changed)',
+  [COPILOT_TOOL_NAMES.applyProfilePatch]: 'Apply confirmed TurnStage profile settings',
+  [COPILOT_TOOL_NAMES.reviewResponseQuality]: 'Run an Advisory AI response-quality review',
 };
 
 const ALLOWED_KEYS: Record<CopilotToolName, readonly string[]> = {
@@ -55,6 +73,10 @@ const ALLOWED_KEYS: Record<CopilotToolName, readonly string[]> = {
   [COPILOT_TOOL_NAMES.inspectFailure]: ['runId', 'failureId', 'includeEvents', 'cursor', 'limit'],
   [COPILOT_TOOL_NAMES.draftRegression]: ['runId', 'failureId', 'draft', 'sourceEvidenceId'],
   [COPILOT_TOOL_NAMES.validateTests]: ['profileId', 'suiteId', 'caseId', 'expectedIntegrity', 'cursor', 'limit'],
+  [COPILOT_TOOL_NAMES.analyzeRun]: ['runId', 'evidenceId', 'profile', 'mode'],
+  [COPILOT_TOOL_NAMES.draftProfilePatch]: ['profile', 'expectedProfileDigest', 'operations'],
+  [COPILOT_TOOL_NAMES.applyProfilePatch]: ['profile', 'draft'],
+  [COPILOT_TOOL_NAMES.reviewResponseQuality]: ['action', 'evidenceIds', 'rubricIds', 'grantId', 'review'],
 };
 
 export interface ToolRegistrationOptions {
@@ -62,7 +84,7 @@ export interface ToolRegistrationOptions {
   onError?: (tool: CopilotToolName, error: unknown) => void;
 }
 
-/** Register the five static manifest tools against the injected runtime. */
+/** Register every static manifest tool against the injected runtime. */
 export function registerCopilotTools(runtime: CopilotRuntime, options: ToolRegistrationOptions = {}): vscode.Disposable[] {
   const languageModel = vscode.lm;
   if (!languageModel || typeof languageModel.registerTool !== 'function') return [];
@@ -96,8 +118,8 @@ export async function executeCopilotTool(
   try {
     if (token.isCancellationRequested) return failure(name, ERROR_CODES.cancelled, 'The tool invocation was cancelled.', true);
     const input = parseInput(name, rawInput);
-    if (name === COPILOT_TOOL_NAMES.runTests && !runtime.isWorkspaceTrusted()) {
-      return failure(name, ERROR_CODES.workspaceUntrusted, 'Network execution is disabled in Restricted Mode. Trust the workspace before running tests.', false);
+    if (!runtime.isWorkspaceTrusted() && TRUSTED_ONLY_TOOLS.has(name)) {
+      return failure(name, ERROR_CODES.workspaceUntrusted, 'This Copilot operation is disabled in Restricted Mode. Sanitized diagnosis remains available.', false);
     }
     const result = await invokeRuntime(name, input, runtime, token);
     if (token.isCancellationRequested) return failure(name, ERROR_CODES.cancelled, 'The tool invocation was cancelled before the result was complete.', true);
@@ -118,6 +140,19 @@ export async function prepareInvocation(
   runtime: CopilotRuntime,
   token: CopilotCancellationToken,
 ): Promise<vscode.PreparedToolInvocation | undefined> {
+  if (name === COPILOT_TOOL_NAMES.applyProfilePatch) {
+    try {
+      const input = parseInput(name, rawInput) as ApplyProfilePatchInput;
+      const detail = input.draft.changes.slice(0, 12).map((change) => `${change.pathLabel}: ${summarizePatchValue(change.before)} → ${summarizePatchValue(change.after)} — ${change.reason}`).join('\n');
+      return { invocationMessage: `Apply ${input.draft.changes.length} confirmed TurnStage profile setting change(s)`, confirmationMessages: { title: 'Apply safe TurnStage profile changes?', message: `${detail}${input.draft.changes.length > 12 ? '\nAdditional bounded changes are included in the draft.' : ''}\nThe current profile digest must still match. VS Code Undo remains available.` } };
+    } catch { return { invocationMessage: 'Validate TurnStage profile patch' }; }
+  }
+  if (name === COPILOT_TOOL_NAMES.reviewResponseQuality) {
+    try {
+      const input = parseInput(name, rawInput) as ReviewResponseQualityInput;
+      if (input.action === 'disclose') return { invocationMessage: 'Disclose selected responses for Advisory AI review', confirmationMessages: { title: 'Share selected response text with Copilot?', message: `TurnStage will disclose ${input.evidenceIds.length} explicitly selected response attempt(s), capped at 8,000 characters each and 32,000 total. Prompts, headers, raw payloads, full URLs, and secrets are excluded. This advisory review cannot change the formal test outcome.` } };
+    } catch { return { invocationMessage: 'Validate advisory quality review input' }; }
+  }
   if (name !== COPILOT_TOOL_NAMES.runTests) {
     return { invocationMessage: INVOCATION_MESSAGES[name] };
   }
@@ -156,6 +191,10 @@ function invokeRuntime(name: CopilotToolName, input: ToolInput, runtime: Copilot
     case COPILOT_TOOL_NAMES.inspectFailure: return runtime.inspectFailure(input as InspectFailureInput, token);
     case COPILOT_TOOL_NAMES.draftRegression: return runtime.draftRegression(input as DraftRegressionInput & { draft: RegressionDraft }, token);
     case COPILOT_TOOL_NAMES.validateTests: return runtime.validateTests(input as ValidateTestsInput, token);
+    case COPILOT_TOOL_NAMES.analyzeRun: return runtime.analyzeRun(input as AnalyzeRunInput, token);
+    case COPILOT_TOOL_NAMES.draftProfilePatch: return runtime.draftProfilePatch(input as DraftProfilePatchInput, token);
+    case COPILOT_TOOL_NAMES.applyProfilePatch: return runtime.applyProfilePatch(input as ApplyProfilePatchInput, token);
+    case COPILOT_TOOL_NAMES.reviewResponseQuality: return runtime.reviewResponseQuality(input as ReviewResponseQualityInput, token);
   }
 }
 
@@ -163,9 +202,9 @@ function normalizeResult(name: CopilotToolName, result: unknown, input: ToolInpu
   if (!result || typeof result !== 'object' || Array.isArray(result)) throw new CopilotRuntimeError(ERROR_CODES.runtimeFailed, 'TurnStage returned an invalid result.');
   const pageInput = ('cursor' in input || 'limit' in input) ? input as { cursor?: string; limit?: number } : {};
   if (name === COPILOT_TOOL_NAMES.findTests) {
-    const value = result as { tests?: unknown; total?: unknown };
+    const value = result as { tests?: unknown; total?: unknown; coverage?: unknown };
     const tests = Array.isArray(value.tests) ? value.tests.filter(isTestDescriptor).slice(0, 10_000) : [];
-    return { tests: page(tests, pageInput.cursor, pageInput.limit, value.total), total: safeCount(value.total, tests.length) };
+    return { tests: page(tests, pageInput.cursor, pageInput.limit, value.total), total: safeCount(value.total, tests.length), coverage: normalizeCoverage(value.coverage) };
   }
   if (name === COPILOT_TOOL_NAMES.runTests) {
     const value = result as Record<string, unknown>;
@@ -190,6 +229,8 @@ function normalizeResult(name: CopilotToolName, result: unknown, input: ToolInpu
     const items = failures.map((failure) => ({
       id: safeId(failure.id, 'failureId'),
       caseId: safeId(failure.caseId, 'caseId'),
+      profileId: failure.profileId === undefined ? undefined : safeId(failure.profileId, 'profileId'),
+      suiteId: failure.suiteId === undefined ? undefined : safeId(failure.suiteId, 'suiteId'),
       outcome: safeOutcome(failure.outcome),
       capsule: createEvidenceCapsule({ runId: safeId(value.runId, 'runId'), failureId: safeId(failure.id, 'failureId'), source: failure.evidence ?? { failedContract: { id: failure.id, label: failure.label ?? 'TurnStage failure', outcome: safeOutcome(failure.outcome) }, completeness: 'missing' } }),
     }));
@@ -207,6 +248,10 @@ function normalizeResult(name: CopilotToolName, result: unknown, input: ToolInpu
       draftOnly: true,
     };
   }
+  if (name === COPILOT_TOOL_NAMES.analyzeRun || name === COPILOT_TOOL_NAMES.draftProfilePatch || name === COPILOT_TOOL_NAMES.applyProfilePatch || name === COPILOT_TOOL_NAMES.reviewResponseQuality) {
+    if (!isBoundedValue(result, 0, new WeakSet<object>(), { count: 0 }, 100_000, 16)) throw new CopilotRuntimeError(ERROR_CODES.outputLimit, 'TurnStage returned oversized diagnostic or advisory output.');
+    return result;
+  }
   const value = result as { valid?: unknown; issues?: unknown; total?: unknown; integrity?: unknown };
   const issues = Array.isArray(value.issues) ? value.issues.filter(isValidationIssue).slice(0, COPILOT_LIMITS.maxValidationIssues) : [];
   return {
@@ -215,6 +260,14 @@ function normalizeResult(name: CopilotToolName, result: unknown, input: ToolInpu
     total: safeCount(value.total, issues.length),
     integrity: normalizeIntegrity(value.integrity),
   };
+}
+
+function normalizeCoverage(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new CopilotRuntimeError(ERROR_CODES.runtimeFailed, 'TurnStage returned invalid source-impact coverage.');
+  const paths = (input: unknown) => Array.isArray(input) ? input.filter((item): item is string => typeof item === 'string' && item.length <= 4_096).slice(0, 10_000) : [];
+  const diagnostics = Array.isArray(value.diagnostics) ? value.diagnostics.filter((item): item is string => typeof item === 'string' && item.length <= 512).slice(0, 100) : [];
+  return { changedFiles: paths(value.changedFiles), matchedFiles: paths(value.matchedFiles), unmatchedFiles: paths(value.unmatchedFiles), diagnostics };
 }
 
 function parseInput(name: CopilotToolName, raw: unknown): ToolInput {
@@ -247,7 +300,59 @@ function parseInput(name: CopilotToolName, raw: unknown): ToolInput {
       return { runId: requiredId(raw.runId, 'runId'), failureId: requiredId(raw.failureId, 'failureId'), sourceEvidenceId: optionalId(raw.sourceEvidenceId), draft: parseRegressionDraft(raw.draft) };
     case COPILOT_TOOL_NAMES.validateTests:
       return { ...pageInput, profileId: optionalId(raw.profileId), suiteId: optionalId(raw.suiteId), caseId: optionalId(raw.caseId), expectedIntegrity: raw.expectedIntegrity === undefined ? undefined : parseIntegrityLock(raw.expectedIntegrity) };
+    case COPILOT_TOOL_NAMES.analyzeRun: {
+      const mode = raw.mode;
+      if (!['failure', 'performance', 'stability', 'comparison', 'configuration'].includes(String(mode))) throw new InputError('mode must be failure, performance, stability, comparison, or configuration.');
+      const result: AnalyzeRunInput = { mode: mode as AnalyzeRunInput['mode'], runId: optionalId(raw.runId), evidenceId: optionalId(raw.evidenceId), profile: optionalText(raw.profile, COPILOT_LIMITS.maxInputString) };
+      const selectors = [result.runId, result.evidenceId, result.profile].filter((value): value is string => typeof value === 'string' && value.length > 0);
+      if (result.mode === 'configuration') {
+        if (selectors.length !== 1 || !result.profile) throw new InputError('configuration mode requires exactly one profile selector.');
+      } else if (selectors.length !== 1 || (!result.runId && !result.evidenceId)) {
+        throw new InputError('failure, performance, stability, and comparison modes require exactly one runId or evidenceId selector.');
+      }
+      return result;
+    }
+    case COPILOT_TOOL_NAMES.draftProfilePatch: {
+      if (!Array.isArray(raw.operations) || raw.operations.length < 1 || raw.operations.length > 64) throw new InputError('operations must contain 1 to 64 safe profile changes.');
+      return { profile: requiredText(raw.profile, 'profile', COPILOT_LIMITS.maxInputString), expectedProfileDigest: raw.expectedProfileDigest === undefined ? undefined : requiredFingerprint(raw.expectedProfileDigest, 'expectedProfileDigest'), operations: raw.operations.map(parseProfilePatchOperation) };
+    }
+    case COPILOT_TOOL_NAMES.applyProfilePatch:
+      return { profile: requiredText(raw.profile, 'profile', COPILOT_LIMITS.maxInputString), draft: parseProfilePatchDraft(raw.draft) };
+    case COPILOT_TOOL_NAMES.reviewResponseQuality: {
+      if (raw.action === 'disclose') return { action: 'disclose', evidenceIds: parseStringArray(raw.evidenceIds, 10, 'evidence id'), rubricIds: raw.rubricIds === undefined ? undefined : parseStringArray(raw.rubricIds, 20, 'rubric id', 256) };
+      if (raw.action === 'record') {
+        if (!isBoundedValue(raw.review)) throw new InputError('review must be a bounded advisory review object.');
+        return { action: 'record', grantId: requiredId(raw.grantId, 'grantId'), review: raw.review as QualityReviewSubmission };
+      }
+      throw new InputError('action must be disclose or record.');
+    }
   }
+}
+
+function parseProfilePatchOperation(value: unknown, index: number): ProfilePatchOperationV1 {
+  if (!isRecord(value)) throw new InputError(`operations[${index}] must be an object.`);
+  const allowed = new Set(['path', 'operation', 'value', 'reason', 'category']);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw new InputError(`operations[${index}] contains an unsupported property.`);
+  if (!Array.isArray(value.path) || value.path.length < 1 || value.path.length > 12 || value.path.some((part) => typeof part !== 'string' && !Number.isInteger(part))) throw new InputError(`operations[${index}].path is invalid.`);
+  if (value.operation !== undefined && value.operation !== 'set' && value.operation !== 'remove') throw new InputError(`operations[${index}].operation is invalid.`);
+  if (value.operation !== 'remove' && !Object.prototype.hasOwnProperty.call(value, 'value')) throw new InputError(`operations[${index}].value is required.`);
+  if (value.value !== undefined && !isBoundedValue(value.value)) throw new InputError(`operations[${index}].value is too large.`);
+  if (value.category !== undefined && !['request-timing', 'retry-timing', 'stream-parser', 'mapping'].includes(String(value.category))) throw new InputError(`operations[${index}].category is invalid.`);
+  return { path: value.path as Array<string | number>, operation: value.operation as ProfilePatchOperationV1['operation'], value: value.value, reason: value.reason === undefined ? undefined : requiredText(value.reason, `operations[${index}].reason`, 256), category: value.category as ProfilePatchOperationV1['category'] };
+}
+
+function parseProfilePatchDraft(value: unknown): ProfilePatchDraftV1 {
+  if (!isRecord(value) || value.format !== 'turnstage-profile-patch-draft' || value.version !== 1 || !Array.isArray(value.changes) || !Array.isArray(value.edits) || !Array.isArray(value.inverseEdits) || !isRecord(value.safety)) throw new InputError('draft must be a valid TurnStage profile patch draft.');
+  if (!isBoundedValue(value, 0, new WeakSet<object>(), { count: 0 }, 20_000)) throw new InputError('draft is oversized.');
+  for (const field of ['profileDigest', 'sourceDigest', 'updatedProfileDigest']) requiredFingerprint(value[field], field);
+  return value as unknown as ProfilePatchDraftV1;
+}
+
+function summarizePatchValue(value: { kind: string; value?: unknown; length?: number; keys?: number }): string {
+  if (Object.prototype.hasOwnProperty.call(value, 'value')) return JSON.stringify(value.value);
+  if (value.length !== undefined) return `${value.kind} (${value.length})`;
+  if (value.keys !== undefined) return `${value.kind} (${value.keys} keys)`;
+  return value.kind;
 }
 
 function parsePage(raw: Record<string, unknown>): { cursor?: string; limit: number } {
@@ -372,7 +477,8 @@ function preflightMessage(preflight: RunPreflight): string {
   const environment = preflight.selectedEnvironment ? ` Target/environment: ${preflight.selectedEnvironment}.` : '';
   const credentialText = preflight.credentialsResolved === 'yes' ? ' Configured credentials will be resolved.' : preflight.credentialsResolved === 'no' ? ' No credentials will be resolved.' : ' Credential resolution is runtime-dependent.';
   const warnings = preflight.warnings?.length ? ` Warnings: ${preflight.warnings.slice(0, 3).join(' ')}` : '';
-  return `Run ${preflight.selectedCount} case(s), ${preflight.plannedTurns} planned turn(s), up to ${preflight.maxRequests} request(s), timeout ${preflight.timeoutMs} ms, ${preflight.repetitions} repetition(s).${environment}${credentialText}${warnings}`;
+  const attempts = preflight.plannedAttempts === undefined ? '' : `, ${preflight.plannedAttempts} attempt(s)`;
+  return `Run ${preflight.selectedCount} case(s), ${preflight.plannedTurns} planned turn(s), up to ${preflight.maxRequests} request(s)${attempts}, timeout ${preflight.timeoutMs} ms, ${preflight.repetitions} repetition(s).${environment}${credentialText}${warnings}`;
 }
 
 function page<T>(items: readonly T[], cursor: string | undefined, requestedLimit: number | undefined, reportedTotal?: unknown): { items: T[]; nextCursor?: string; total: number; limit: number; offset: number } {
@@ -388,6 +494,7 @@ function normalizePreflight(value: unknown): RunPreflight {
     requiresNetwork: value.requiresNetwork === true,
     workspaceTrusted: value.workspaceTrusted === true,
     selectedCount: safeCount(value.selectedCount, 0),
+    plannedAttempts: value.plannedAttempts === undefined ? undefined : safeCount(value.plannedAttempts, 0),
     plannedTurns: safeCount(value.plannedTurns, 0),
     maxRequests: safeCount(value.maxRequests, 0),
     timeoutMs: boundedDuration(value.timeoutMs),
@@ -399,7 +506,7 @@ function normalizePreflight(value: unknown): RunPreflight {
 }
 
 function normalizeRunCase(value: Record<string, unknown>): Record<string, unknown> {
-  return { id: safeId(value.id, 'caseId'), label: safeText(value.label), outcome: safeOutcome(value.outcome), stability: value.stability === undefined ? undefined : value.stability, counts: value.counts && isRecord(value.counts) ? Object.fromEntries(Object.entries(value.counts).slice(0, 4).map(([key, count]) => [key, boundedNumber(count)])) : undefined, evidenceId: value.evidenceId === undefined ? undefined : safeId(value.evidenceId, 'evidenceId'), failureId: value.failureId === undefined ? undefined : safeId(value.failureId, 'failureId') };
+  return { id: safeId(value.id, 'caseId'), profileId: value.profileId === undefined ? undefined : safeId(value.profileId, 'profileId'), suiteId: value.suiteId === undefined ? undefined : safeId(value.suiteId, 'suiteId'), label: safeText(value.label), outcome: safeOutcome(value.outcome), stability: value.stability === undefined ? undefined : value.stability, counts: value.counts && isRecord(value.counts) ? Object.fromEntries(Object.entries(value.counts).slice(0, 4).map(([key, count]) => [key, boundedNumber(count)])) : undefined, evidenceId: value.evidenceId === undefined ? undefined : safeId(value.evidenceId, 'evidenceId'), failureId: value.failureId === undefined ? undefined : safeId(value.failureId, 'failureId') };
 }
 
 function normalizeIntegrity(value: unknown): unknown {
@@ -431,7 +538,7 @@ function sanitizeDraft(draft: RegressionDraft): RegressionDraft {
 
 function isTestDescriptor(value: unknown): value is Record<string, unknown> { return isRecord(value) && typeof value.id === 'string' && typeof value.label === 'string'; }
 function isRunCase(value: unknown): value is Record<string, unknown> { return isRecord(value) && typeof value.id === 'string' && typeof value.label === 'string' && typeof value.outcome === 'string'; }
-function isFailureRecord(value: unknown): value is { id: string; caseId: string; outcome: string; label?: string; evidence?: import('./types').EvidenceSource } { return isRecord(value) && typeof value.id === 'string' && typeof value.caseId === 'string' && typeof value.outcome === 'string'; }
+function isFailureRecord(value: unknown): value is { id: string; caseId: string; profileId?: string; suiteId?: string; outcome: string; label?: string; evidence?: import('./types').EvidenceSource } { return isRecord(value) && typeof value.id === 'string' && typeof value.caseId === 'string' && (value.profileId === undefined || typeof value.profileId === 'string') && (value.suiteId === undefined || typeof value.suiteId === 'string') && typeof value.outcome === 'string'; }
 function isValidationIssue(value: unknown): value is { code: string; path: string; message: string; severity: 'error' | 'warning' } { return isRecord(value) && typeof value.code === 'string' && typeof value.path === 'string' && typeof value.message === 'string' && (value.severity === 'error' || value.severity === 'warning'); }
 
 function safeOutcome(value: unknown): SafeOutcome { return typeof value === 'string' && ['resisted', 'attackSucceeded', 'indeterminate', 'infrastructureError', 'passed', 'failed', 'error', 'cancelled'].includes(value) ? value as SafeOutcome : 'indeterminate'; }
@@ -453,7 +560,19 @@ function requiredSlug(value: unknown, field: string): string { const id = requir
 function requiredFingerprint(value: unknown, field: string): string { if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) throw new InputError(`${field} must be a SHA-256 fingerprint.`); return value; }
 function boundedInteger(value: unknown, min: number, max: number, field: string): number { if (!Number.isInteger(value) || Number(value) < min || Number(value) > max) throw new InputError(`${field} must be an integer from ${min} to ${max}.`); return Number(value); }
 function parseStringArray(value: unknown, maxItems: number, field: string, maxLength: number = COPILOT_LIMITS.maxInputString): string[] { if (!Array.isArray(value) || value.length > maxItems) throw new InputError(`${field} must contain at most ${maxItems} values.`); return value.map((item, index) => requiredText(item, `${field}[${index}]`, maxLength)); }
-function isBoundedValue(value: unknown, depth = 0, seen = new WeakSet<object>(), nodes = { count: 0 }): boolean { if (++nodes.count > 2_000 || depth > 8) return false; if (value === null || typeof value === 'boolean' || typeof value === 'number') return true; if (typeof value === 'string') return value.length <= COPILOT_LIMITS.maxDraftString; if (typeof value !== 'object' || seen.has(value)) return false; seen.add(value); if (Array.isArray(value)) return value.length <= 100 && value.every((child) => isBoundedValue(child, depth + 1, seen, nodes)); return Object.entries(value as Record<string, unknown>).length <= 100 && Object.entries(value as Record<string, unknown>).every(([key, child]) => key.length <= 256 && isBoundedValue(child, depth + 1, seen, nodes)); }
+function isBoundedValue(value: unknown, depth = 0, ancestors = new WeakSet<object>(), nodes = { count: 0 }, maxNodes = 2_000, maxDepth = 8): boolean {
+  if (++nodes.count > maxNodes || depth > maxDepth) return false;
+  if (value === undefined || value === null || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'string') return value.length <= COPILOT_LIMITS.maxDraftString;
+  if (typeof value !== 'object' || ancestors.has(value)) return false;
+  ancestors.add(value);
+  const valid = Array.isArray(value)
+    ? value.length <= 10_000 && value.every((child) => isBoundedValue(child, depth + 1, ancestors, nodes, maxNodes, maxDepth))
+    : Object.entries(value as Record<string, unknown>).length <= 1_000 && Object.entries(value as Record<string, unknown>).every(([key, child]) => key.length <= 256 && isBoundedValue(child, depth + 1, ancestors, nodes, maxNodes, maxDepth));
+  ancestors.delete(value);
+  return valid;
+}
 function isCancellation(error: unknown): boolean { return error instanceof Error && /cancel/i.test(error.message); }
 
 class InputError extends Error {}

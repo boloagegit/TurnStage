@@ -157,6 +157,18 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         }
         if (message.type === 'test.runAll') { await vscode.commands.executeCommand('turnstage.runContractTests'); return; }
         if (message.type === 'test.evidence.open') { await vscode.commands.executeCommand('turnstage.openTestEvidence', { evidenceId: message.evidenceId, location: message.location }); return; }
+        if (message.type === 'copilot.diagnose') {
+          await openCopilotChat(`Use #turnstage_analyze_run to diagnose TurnStage evidence ${JSON.stringify(message.evidenceId)} in ${message.mode} mode. Explain the deterministic evidence first, distinguish facts from hypotheses, and suggest only safe profile changes.`);
+          return;
+        }
+        if (message.type === 'copilot.qualityReview') {
+          await openCopilotChat(`Use #turnstage_review_response_quality to start an Advisory AI review for these explicitly selected TurnStage evidence ids: ${message.evidenceIds.map((id) => JSON.stringify(id)).join(', ')}. Show the disclosure confirmation before reading response content. This review must not change the formal test outcome.`);
+          return;
+        }
+        if (message.type === 'copilot.profileDoctor') {
+          await openCopilotChat(`Use #turnstage_analyze_run in configuration mode as a Profile Doctor for TurnStage profile ${JSON.stringify(document.uri.toString())}. Report deterministic validation and configuration evidence. Do not propose secret, proxy, VPN, or certificate changes.`);
+          return;
+        }
         if (message.type === 'output.open') { this.output.show(true); return; }
         if (!controller) return;
         switch (message.type) {
@@ -463,6 +475,10 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private html(webview: vscode.Webview, instanceId: string): string { const nonce = crypto.randomUUID().replace(/-/g, ''); const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js')); const style = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css')); const locale = configuredLocale(); const direction = textDirection(locale); return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ${webview.cspSource}; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource} data:; script-src 'nonce-${nonce}'"><link rel="stylesheet" href="${style}"><title>TurnStage</title></head><body><div id="root" data-instance-id="${instanceId}"></div><script nonce="${nonce}" src="${script}"></script></body></html>`; }
 }
 
+async function openCopilotChat(query: string): Promise<void> {
+  await vscode.commands.executeCommand('workbench.action.chat.open', { query, isPartialQuery: false });
+}
+
 function configuredLocale(): string {
   return resolveDisplayLanguage(vscode.workspace.getConfiguration('turnstage').get('displayLanguage', 'auto'), vscode.env.language);
 }
@@ -482,7 +498,7 @@ function inspectorTarget(location: ScenarioEvidenceLocation, evidence?: Scenario
 export function isAllowedPatchPath(path: unknown): path is Array<string | number> {
   if (!Array.isArray(path) || !path.length || !path.every((part) => (typeof part === 'string' || (typeof part === 'number' && Number.isInteger(part) && part >= 0)) && part !== '__proto__' && part !== 'prototype' && part !== 'constructor')) return false;
   const key = path.join('.');
-  if (key === 'name' || key === 'description' || key === 'environment' || key === 'opening.mode' || key === 'opening.message' || key === 'opening.trigger' || key === 'opening.starters' || key === 'opening.request' || key === 'opening.response' || key === 'opening.fallbacks' || key === 'opening.failurePolicy' || key === 'conversation.send.method' || key === 'conversation.send.url' || key === 'conversation.send.variants' || key === 'conversation.send.timeoutMs' || key === 'conversation.send.idleTimeoutMs' || key === 'conversation.send.headers' || key === 'conversation.send.body' || key === 'conversation.stop.strategy' || key === 'conversation.stop.request' || key === 'conversation.stop.requiredContext' || key === 'stream.transport' || key === 'stream.dataFormat' || key === 'stream.doneValue' || key === 'stream.mappingMode' || key === 'stream.unexpectedEndPolicy' || key === 'stream.mappings' || key === 'history.remoteSessions' || key === 'metrics.enabled' || key === 'metrics.messageEnabled' || key === 'security.allowedUriSchemes' || key === 'security.allowedDomains' || key === 'security.allowedCommands' || key === 'ui.messageActions' || key === 'ui.messageActionVisibility' || key === 'tests.scenarios' || key === 'tests.adversarialSuites' || key === 'tests.reporting' || key === 'tests.visual') return true;
+  if (key === 'name' || key === 'description' || key === 'environment' || key === 'opening.mode' || key === 'opening.message' || key === 'opening.trigger' || key === 'opening.starters' || key === 'opening.request' || key === 'opening.response' || key === 'opening.fallbacks' || key === 'opening.failurePolicy' || key === 'conversation.send.method' || key === 'conversation.send.url' || key === 'conversation.send.variants' || key === 'conversation.send.timeoutMs' || key === 'conversation.send.idleTimeoutMs' || key === 'conversation.send.headers' || key === 'conversation.send.body' || key === 'conversation.stop.strategy' || key === 'conversation.stop.request' || key === 'conversation.stop.requiredContext' || key === 'stream.transport' || key === 'stream.dataFormat' || key === 'stream.doneValue' || key === 'stream.mappingMode' || key === 'stream.unexpectedEndPolicy' || key === 'stream.mappings' || key === 'history.remoteSessions' || key === 'metrics.enabled' || key === 'metrics.messageEnabled' || key === 'security.allowedUriSchemes' || key === 'security.allowedDomains' || key === 'security.allowedCommands' || key === 'ui.messageActions' || key === 'ui.messageActionVisibility' || key === 'tests.scenarios' || key === 'tests.adversarialSuites' || key === 'tests.reporting' || key === 'tests.visual' || key === 'tests.qualityRubrics') return true;
   if (/^conversation\.send\.variants\.\d+\.(id|body|headers)$/.test(key)) return true;
   if (/^conversation\.send\.variants\.\d+\.when\.(path|operator|value)$/.test(key)) return true;
   if (/^conversation\.send\.reconnect\.(maxAttempts|baseDelayMs|maxDelayMs|retryOnStatuses)$/.test(key)) return true;

@@ -195,6 +195,19 @@ describe('ProfileValidator', () => {
     ]));
   });
 
+  it('accepts bounded advisory quality rubrics and rejects unsafe duplicates', () => {
+    const valid = validProfile();
+    valid.tests = { scenarios: [] };
+    valid.tests!.qualityRubrics = [{ id: 'support', name: 'Support quality', criteria: [{ id: 'correct', label: 'Correct', description: 'Claims match the disclosed response evidence.' }] }];
+    expect(new ProfileValidator().validate(valid, undefined, [{ version: 1, id: 'local', name: 'Local', variables: {} }]).map((entry) => entry.message)).not.toEqual(expect.arrayContaining([expect.stringContaining('quality rubrics')]));
+
+    valid.tests!.qualityRubrics = [{ id: 'support', name: 'Support quality', criteria: [
+      { id: 'correct', label: 'Correct', description: 'First.' },
+      { id: 'correct', label: 'Duplicate', description: 'Second.' },
+    ] }];
+    expect(new ProfileValidator().validate(valid, undefined, [{ version: 1, id: 'local', name: 'Local', variables: {} }]).map((entry) => entry.message)).toEqual(expect.arrayContaining([expect.stringContaining('Duplicate criterion id')]));
+  });
+
   it('requires comparison before applying regression limits', () => {
     const profile = validProfile();
     profile.tests = { scenarios: [{ id: 'no-baseline', name: 'No baseline', steps: [{ id: 'turn', input: 'Hello' }], performance: { regression: { 'scenario.durationMs': { maxIncreasePercent: 10 } } } }] };

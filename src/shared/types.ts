@@ -30,6 +30,19 @@ export interface ProfileTestsDefinition {
   /** Optional explicit, workspace-relative CI report output. */
   reporting?: ScenarioReportingDefinition;
   visual?: ScenarioVisualDefinition;
+  /** Optional declarative rubrics used only by explicit, advisory Copilot reviews. */
+  qualityRubrics?: QualityRubricDefinition[];
+}
+
+export interface QualityRubricDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  criteria: Array<{
+    id: string;
+    label: string;
+    description: string;
+  }>;
 }
 
 export interface ScenarioVisualDefinition {
@@ -249,6 +262,7 @@ export interface AdversarialRepetitionSummary {
 
 export interface AdversarialResultSummary {
   profileId: string;
+  suiteId?: string;
   scenarioId: string;
   scenarioName: string;
   outcome: AdversarialOutcome;

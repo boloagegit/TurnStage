@@ -62,6 +62,15 @@
 .scenario-editor__header > div { display: flex; align-items: center; gap: var(--ts-space-2); min-width: 0; }.scenario-editor__header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.scenario-editor__header code { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: .846em; }
 .scenario-editor__identity { padding: var(--ts-space-3); }
 .scenario-reporting-fields { margin-top: var(--ts-space-3); }
+.quality-rubric-list { display: grid; gap: var(--ts-space-3); margin-top: var(--ts-space-3); }
+.quality-rubric-editor { border: 1px solid var(--vscode-editorWidget-border); }
+.quality-rubric-editor > header { display: flex; align-items: center; justify-content: space-between; gap: var(--ts-space-2); padding: var(--ts-space-2); border-bottom: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-editorWidget-background); }
+.quality-rubric-editor > header > div { display: grid; min-width: 0; }.quality-rubric-editor > header code { color: var(--vscode-descriptionForeground); font-size: .769em; }
+.quality-rubric-editor > .settings-form-grid { padding: var(--ts-space-3); }
+.quality-criterion-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--ts-space-2); padding: var(--ts-space-2) var(--ts-space-3); border-top: 1px solid var(--vscode-editorWidget-border); }
+.quality-criterion-list { display: grid; gap: 1px; background: var(--vscode-editorWidget-border); }
+.quality-criterion-list > article { display: grid; gap: var(--ts-space-2); padding: var(--ts-space-3); background: var(--vscode-editor-background); }
+.quality-criterion-list > article > button { justify-self: end; }
 .adversarial-file-actions { display: flex; flex-wrap: wrap; gap: var(--ts-space-1); margin-bottom: var(--ts-space-3); }
 .adversarial-file-actions button { min-height: var(--ts-control-height); }
 .adversarial-file-actions details { position: relative; }
@@ -77,6 +86,8 @@
 .adversarial-linked-suites li { display: flex; align-items: center; justify-content: space-between; gap: var(--ts-space-2); min-height: var(--ts-control-height); padding: var(--ts-space-1) var(--ts-space-2); background: var(--vscode-editor-background); }
 .adversarial-linked-suites code { overflow: hidden; font-family: var(--vscode-editor-font-family); font-size: .846em; text-overflow: ellipsis; white-space: nowrap; }
 .adversarial-case-list { margin-top: var(--ts-space-3); }
+.copilot-profile-doctor { display: flex; align-items: center; justify-content: space-between; gap: var(--ts-space-3); margin-bottom: var(--ts-space-3); padding: var(--ts-space-2); border: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-textBlockQuote-background); }
+.copilot-profile-doctor > div { display: grid; gap: 2px; min-width: 0; }.copilot-profile-doctor span { color: var(--vscode-descriptionForeground); }
 .adversarial-case-editor { display: grid; gap: var(--ts-space-3); padding: var(--ts-space-3); border-top: 1px solid var(--vscode-editorWidget-border); }
 .adversarial-forbid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ts-space-3); min-width: 0; margin: 0; padding: var(--ts-space-3); border: 1px solid var(--vscode-editorWidget-border); }
 .adversarial-forbid legend { padding-inline: var(--ts-space-1); font-weight: 600; }
@@ -87,6 +98,8 @@
 .adversarial-outcome { display: inline-flex; align-items: center; gap: var(--ts-space-1); font-weight: 600; }.adversarial-outcome .product-icon { width: 1em; height: 1em; font-size: 1em; }.adversarial-outcome--resisted { color: var(--vscode-testing-iconPassed); }.adversarial-outcome--attackSucceeded { color: var(--vscode-testing-iconFailed); }.adversarial-outcome--indeterminate, .adversarial-outcome--infrastructureError { color: var(--vscode-testing-iconErrored, var(--vscode-editorWarning-foreground)); }
 .adversarial-result-sample { display: grid; gap: 2px; }.adversarial-result-sample small { color: var(--vscode-descriptionForeground); font-size: .846em; }
 .adversarial-result-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ts-space-1); }
+.adversarial-result-actions details { position: relative; }.adversarial-result-actions summary { display: flex; align-items: center; min-height: var(--ts-control-height); padding: var(--ts-space-1) var(--ts-space-2); border: 1px solid var(--vscode-button-secondaryBackground); border-radius: 2px; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); cursor: pointer; }
+.adversarial-result-actions details > div { position: absolute; z-index: 5; inset-block-start: calc(100% + 2px); inset-inline-end: 0; display: grid; min-width: max-content; gap: 1px; padding: var(--ts-space-1); border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border)); background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); box-shadow: 0 3px 10px var(--vscode-widget-shadow, rgba(0, 0, 0, .35)); }
 .scenario-advanced { border-top: 1px solid var(--vscode-editorWidget-border); }
 .scenario-advanced > summary { min-height: var(--ts-control-height); padding: var(--ts-space-2) var(--ts-space-3); color: var(--vscode-foreground); background: var(--vscode-editorWidget-background); cursor: pointer; font-weight: 600; }
 .scenario-advanced > summary:hover { background: var(--vscode-list-hoverBackground); color: var(--vscode-list-hoverForeground, var(--vscode-foreground)); }
@@ -137,6 +150,6 @@
 @media (max-width: 46em) { .assertion-row { grid-template-columns: 1fr; align-items: stretch; }.assertion-row > button { justify-self: end; }.settings-empty--action { align-items: flex-start; flex-direction: column; }.scenario-target-grid { grid-template-columns: 1fr; }.scenario-budget__header { display: none; }.scenario-budget__row { grid-template-columns: repeat(3, minmax(0, 1fr)); }.scenario-budget__row > span { grid-column: 1 / -1; }.scenario-budget__cell { gap: 2px; }.scenario-budget__cell-label { display: block; } }
 @media (max-width: 46em) { .adversarial-forbid { grid-template-columns: 1fr; }.adversarial-forbid__checks { grid-column: auto; } }
 @media (max-width: 46em) { .adversarial-file-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; }.adversarial-file-actions > button, .adversarial-file-actions summary { width: 100%; justify-content: center; }.adversarial-file-actions details > div { position: fixed; inset-inline: var(--ts-space-2); inset-block-start: auto; min-width: 0; } }
-@media (max-width: 46em) { .adversarial-result-list li { grid-template-columns: auto auto minmax(6em, 1fr); }.adversarial-result-identity, .adversarial-result-actions { grid-column: 1 / -1; }.adversarial-result-list li > span:last-of-type { justify-self: end; } }
+@media (max-width: 46em) { .adversarial-result-list li { grid-template-columns: auto auto minmax(6em, 1fr); }.adversarial-result-identity, .adversarial-result-actions { grid-column: 1 / -1; }.adversarial-result-list li > span:last-of-type { justify-self: end; }.copilot-profile-doctor { align-items: stretch; flex-direction: column; }.copilot-profile-doctor > button { align-self: flex-start; } }
 @media (max-width: 58em) { .settings-content-layout { grid-template-columns: 1fr; }.settings-section-nav { position: relative; border-inline-end: 0; border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-editorGroup-border)); overflow-x: auto; }.settings-section-nav-list { display: flex; gap: 1px; min-width: max-content; padding: var(--ts-space-1) var(--ts-space-2); }.settings-section-nav button { width: auto; min-width: max-content; }.settings-section-nav button.is-active { box-shadow: inset 0 -2px var(--vscode-list-focusAndSelectionOutline, var(--vscode-focusBorder)); }.settings-panel { padding: var(--ts-space-4) var(--ts-space-4) calc(var(--ts-space-5) + var(--ts-space-5)); }.settings-form-grid { grid-template-columns: 1fr; }.settings-field-wide { grid-column: auto; }.settings-subtitle, .settings-section-count { display: none; } }
 @media (forced-colors: active) { .settings-card, .settings-editor-frame, .settings-preview, .scenario-editor { border-color: ButtonText; } }

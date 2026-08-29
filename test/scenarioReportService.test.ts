@@ -80,22 +80,59 @@ describe('ScenarioReportService', () => {
 
   it('exports a new sanitized evidence folder with an offline HTML entry point and manifest', async () => {
     const output = { appendLine: vi.fn() };
-    const service = new ScenarioReportService(output as never);
+    const service = new ScenarioReportService(output as never, undefined, '0.13.0', { snapshot: () => ({ version: 'CopilotArtifactSnapshotV1', sanitized: true, diagnoses: [{ artifactId: 'safe-diagnosis', kind: 'diagnosis', runId: 'copilot-run', profileId: 'safe-profile', summary: 'Bounded timeout evidence.' }], profilePatches: [], qualityReviews: [] }) });
     service.record([{ profileId: 'safe-profile', profileName: 'Private Name', scenarioId: 'safe-scenario', scenarioName: 'Private Scenario', status: 'passed' }]);
 
     const directory = await service.exportEvidenceBundle();
 
     expect(directory?.path).toMatch(/^\/chosen\/turnstage-evidence-/);
-    expect(mock.writes.map((entry) => entry.path.slice(entry.path.lastIndexOf('/') + 1)).sort()).toEqual(['adversarial-findings.csv', 'adversarial-summary.csv', 'adversarial-turns.csv', 'events.csv', 'index.html', 'junit.xml', 'manifest.json', 'network.csv', 'provenance.json', 'report.json']);
+    expect(mock.writes.map((entry) => entry.path.slice(entry.path.lastIndexOf('/') + 1)).sort()).toEqual(['adversarial-findings.csv', 'adversarial-summary.csv', 'adversarial-turns.csv', 'diagnostics.json', 'events.csv', 'index.html', 'junit.xml', 'manifest.json', 'network.csv', 'provenance.json', 'report.json']);
     const html = mock.writes.find((entry) => entry.path.endsWith('/index.html'))?.text ?? '';
     const manifest = mock.writes.find((entry) => entry.path.endsWith('/manifest.json'))?.text ?? '';
+    const diagnostics = mock.writes.find((entry) => entry.path.endsWith('/diagnostics.json'))?.text ?? '';
     expect(html).toContain('<!doctype html>');
     expect(html).not.toContain('Private Name');
     expect(manifest).toContain('"visualChatContent": false');
-    expect(manifest).toContain('"version": 3');
+    expect(manifest).toContain('"version": 4');
+    expect(manifest).toContain('"profileEditContent": false');
+    expect(manifest).toContain('"advisoryResponseContent": false');
+    expect(diagnostics).toContain('Bounded timeout evidence.');
+    expect(diagnostics).not.toContain('Private Name');
     const provenance = JSON.parse(mock.writes.find((entry) => entry.path.endsWith('/provenance.json'))?.text ?? '{}') as { format?: string; files?: unknown[]; manifestDigest?: string };
     expect(provenance).toMatchObject({ format: 'turnstage-provenance-manifest' });
-    expect(provenance.files).toHaveLength(9);
+    expect(provenance.files).toHaveLength(10);
     expect(provenance.manifestDigest).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('filters Copilot diagnostics to the recorded run and profile scope', async () => {
+    const output = { appendLine: vi.fn() };
+    const service = new ScenarioReportService(output as never, undefined, '0.13.0', { snapshot: () => ({
+      version: 'CopilotArtifactSnapshotV1',
+      sanitized: true,
+      diagnoses: [
+        { artifactId: 'keep', kind: 'diagnosis', runId: 'run-a', profileId: 'profile-a', summary: 'Keep this diagnosis.' },
+        { artifactId: 'drop', kind: 'diagnosis', runId: 'run-b', profileId: 'profile-b', summary: 'Drop this diagnosis.' },
+      ],
+      profilePatches: [
+        { artifactId: 'keep-patch', kind: 'profilePatch', profileId: 'profile-a', runId: 'run-a', summary: 'Keep this patch.' },
+        { artifactId: 'wrong-run-patch', kind: 'profilePatch', profileId: 'profile-a', runId: 'run-b', summary: 'Drop this patch.' },
+        { artifactId: 'missing-run-patch', kind: 'profilePatch', profileId: 'profile-a', summary: 'Drop this unbound patch.' },
+        { artifactId: 'wrong-profile-patch', kind: 'profilePatch', profileId: 'profile-b', runId: 'run-a', summary: 'Drop this profile.' },
+      ],
+      qualityReviews: [
+        { artifactId: 'keep-quality', kind: 'qualityReview', profileId: 'profile-a', runId: 'run-a', summary: 'Keep this review.' },
+        { artifactId: 'wrong-run-quality', kind: 'qualityReview', profileId: 'profile-a', runId: 'run-b', summary: 'Drop this review.' },
+        { artifactId: 'missing-run-quality', kind: 'qualityReview', profileId: 'profile-a', summary: 'Drop this unbound review.' },
+        { artifactId: 'wrong-profile-quality', kind: 'qualityReview', profileId: 'profile-b', runId: 'run-a', summary: 'Drop this profile.' },
+      ],
+    }) });
+    service.record([{ profileId: 'profile-a', profileName: 'Profile A', scenarioId: 'case-a', scenarioName: 'Case A', status: 'passed' }], { runId: 'run-a' });
+
+    await service.exportEvidenceBundle();
+
+    const diagnostics = JSON.parse(mock.writes.find((entry) => entry.path.endsWith('/diagnostics.json'))?.text ?? '{}') as { diagnoses?: Array<{ summary?: string }>; profilePatches?: Array<{ artifactId?: string }>; qualityReviews?: Array<{ artifactId?: string }> };
+    expect(diagnostics.diagnoses?.map((item) => item.summary)).toEqual(['Keep this diagnosis.']);
+    expect(diagnostics.profilePatches?.map((item) => item.artifactId)).toEqual(['keep-patch']);
+    expect(diagnostics.qualityReviews?.map((item) => item.artifactId)).toEqual(['keep-quality']);
   });
 });

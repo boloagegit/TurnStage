@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import type { MappingTestResult, WebviewPayload } from '../shared/protocol';
-import type { AdversarialForbidDefinition, AdversarialResultSummary, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TurnStageProfile } from '../shared/types';
+import type { AdversarialForbidDefinition, AdversarialResultSummary, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
@@ -341,6 +341,7 @@ const performanceMetricOptions: Array<{ id: ScenarioPerformanceMetric; label: st
 
 function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[] }): React.JSX.Element {
   const scenarios = profile.tests?.scenarios ?? [];
+  const qualityRubrics = profile.tests?.qualityRubrics ?? [];
   const [undo, setUndo] = useState<{ label: string; scenarios: ScenarioDefinition[] }>();
   const adversarialEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => scenario.adversarial);
   const contractEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => !scenario.adversarial);
@@ -370,9 +371,16 @@ function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: 
       adversarial: { mode: 'singleTurn', maxTurns: 1, timeoutMs: 60_000, stopOnAttackSucceeded: true, forbid: { content: ['forbidden-marker'] } },
     }]);
   };
+  const saveQualityRubrics = (value: QualityRubricDefinition[] | undefined) => patch(['tests', 'qualityRubrics'], value);
+  const addQualityRubric = () => {
+    const ordinal = qualityRubrics.length + 1;
+    const id = uniqueId(new Set(qualityRubrics.map((rubric) => rubric.id)), `quality-${ordinal}`);
+    saveQualityRubrics([...qualityRubrics, { id, name: t('Quality rubric {number}', { number: formatNumber(ordinal) }), criteria: [{ id: 'criterion-1', label: t('Criterion 1'), description: t('Describe the observable quality expected from the disclosed response.') }] }]);
+  };
   return <div className="settings-section-stack">
     <section className="settings-card" aria-labelledby="adversarial-tests-heading">
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-tests-heading">{t('Adversarial tests')}</h2><p className="settings-card-description">{t('Replay known attack messages and record whether observable prohibited effects occurred. Timeout and incomplete evidence never count as resistance.')}</p></div><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div>
+      <div className="copilot-profile-doctor"><div><strong>{t('Profile Doctor')}</strong><span>{t('Ask Copilot to explain validation, timeout, streaming, and mapping configuration evidence without exposing secrets.')}</span></div><button type="button" onClick={() => post({ type: 'copilot.profileDoctor' })}>{t('Diagnose profile with Copilot')}</button></div>
       <div className="adversarial-file-actions" role="group" aria-label={t('Bulk adversarial test files')}>
         <details><summary>{t('Import')}</summary><div>
           <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'importJsonc' })}>{t('Import JSONC copy')}</button>
@@ -402,7 +410,11 @@ function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: 
           <small>{t(adversarialStabilityText(result.repetitions.stability))}{result.repetitions.sampleComplete ? '' : ` · ${t('Incomplete sample')}`}</small>
         </> : t('{completed}/{planned} turns', { completed: formatNumber(result.completedTurns), planned: formatNumber(result.plannedTurns) })}</span>
         <span>{formatNumber(result.durationMs)} ms</span>
-        <div className="adversarial-result-actions">{(result.availableLocations.length ? result.availableLocations : [result.primaryLocation]).map((location) => <button key={`${result.evidenceId}-${location.kind}`} type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })}>{t(evidenceLocationText(location.kind))}</button>)}</div>
+        <div className="adversarial-result-actions">
+          <button type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location: result.primaryLocation })}>{t('Open evidence')}</button>
+          <button type="button" onClick={() => post({ type: 'copilot.diagnose', evidenceId: result.evidenceId, mode: result.repetitions ? 'stability' : 'failure' })}>{t('Diagnose with Copilot')}</button>
+          <details><summary>{t('More')}</summary><div>{(result.availableLocations.length ? result.availableLocations : [result.primaryLocation]).map((location) => <button key={`${result.evidenceId}-${location.kind}`} type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })}>{t(evidenceLocationText(location.kind))}</button>)}<button type="button" onClick={() => post({ type: 'copilot.qualityReview', evidenceIds: [result.evidenceId] })}>{t('Advisory quality review')}</button></div></details>
+        </div>
       </li>)}</ul>}
     </section>
     <section className="settings-card" aria-labelledby="scenario-reporting-heading">
@@ -416,6 +428,11 @@ function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: 
         </SettingCheckboxGroup>
         <SettingField label={t('Output directory')} id="settings-test-reporting-directory" hint={t('Workspace-relative; traversal and absolute paths are rejected.')}><PatchInput id="settings-test-reporting-directory" value={profile.tests.reporting.outputDirectory} onCommit={(value) => patch(['tests', 'reporting'], { ...profile.tests!.reporting!, outputDirectory: value })} spellCheck={false} /></SettingField>
       </div> : null}
+    </section>
+    <section className="settings-card" aria-labelledby="quality-rubrics-heading">
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="quality-rubrics-heading">{t('Advisory AI review')}</h2><p className="settings-card-description">{t('Optional rubrics guide Copilot after you explicitly select and approve response disclosure. Findings never change formal test outcomes.')}</p></div>{qualityRubrics.length ? <button type="button" onClick={addQualityRubric}>{t('Add rubric')}</button> : null}</div>
+      <SettingCheckbox id="settings-quality-rubrics-enabled" label={t('Use custom quality rubrics')} checked={qualityRubrics.length > 0} onChange={(enabled) => enabled ? addQualityRubric() : saveQualityRubrics(undefined)} />
+      {qualityRubrics.length ? <div className="quality-rubric-list">{qualityRubrics.map((rubric, rubricIndex) => <QualityRubricEditor key={`${rubric.id}-${rubricIndex}`} rubric={rubric} index={rubricIndex} onChange={(value) => saveQualityRubrics(replaceAt(qualityRubrics, rubricIndex, value))} onDelete={() => saveQualityRubrics(qualityRubrics.length === 1 ? undefined : qualityRubrics.filter((_, index) => index !== rubricIndex))} />)}</div> : <p className="settings-footnote">{t('TurnStage uses its built-in relevance, clarity, completeness, and grounding rubric when no custom rubric is configured.')}</p>}
     </section>
     <section className="settings-card" aria-labelledby="scenario-visual-heading">
       <SectionHeading id="scenario-visual-heading" title={t('Visual regression')} description={t('Compare the rendered Chat viewport with a workspace baseline.')} />
@@ -434,6 +451,31 @@ function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: 
     </section>
     <p className="settings-footnote">{t('Run these scenarios from VS Code Test Explorer. Every completed step also receives TurnStage state-invariant checks.')}</p>
   </div>;
+}
+
+function QualityRubricEditor({ rubric, index, onChange, onDelete }: { rubric: QualityRubricDefinition; index: number; onChange: (value: QualityRubricDefinition) => void; onDelete: () => void }): React.JSX.Element {
+  const addCriterion = () => {
+    const ordinal = rubric.criteria.length + 1;
+    const id = uniqueId(new Set(rubric.criteria.map((criterion) => criterion.id)), `criterion-${ordinal}`);
+    onChange({ ...rubric, criteria: [...rubric.criteria, { id, label: t('Criterion {number}', { number: formatNumber(ordinal) }), description: t('Describe the observable quality expected from the disclosed response.') }] });
+  };
+  return <article className="quality-rubric-editor" aria-labelledby={`quality-rubric-title-${index}`}>
+    <header><div><strong id={`quality-rubric-title-${index}`}>{rubric.name}</strong><code>{rubric.id}</code></div><button type="button" onClick={onDelete}>{t('Delete rubric')}</button></header>
+    <div className="settings-form-grid">
+      <SettingField label={t('Rubric name')} id={`quality-rubric-name-${index}`}><PatchInput id={`quality-rubric-name-${index}`} value={rubric.name} onCommit={(name) => onChange({ ...rubric, name })} required /></SettingField>
+      <SettingField label={t('Rubric ID')} id={`quality-rubric-id-${index}`} hint={t('Letters, numbers, dots, colons, underscores, and hyphens.')}><PatchInput id={`quality-rubric-id-${index}`} value={rubric.id} onCommit={(id) => onChange({ ...rubric, id })} required spellCheck={false} /></SettingField>
+      <SettingField label={t('Description')} id={`quality-rubric-description-${index}`} wide><PatchInput id={`quality-rubric-description-${index}`} value={rubric.description ?? ''} onCommit={(description) => onChange({ ...rubric, description: description || undefined })} multiline rows={2} /></SettingField>
+    </div>
+    <div className="quality-criterion-heading"><strong>{t('Criteria')}</strong><button type="button" onClick={addCriterion}>{t('Add criterion')}</button></div>
+    <div className="quality-criterion-list">{rubric.criteria.map((criterion, criterionIndex) => <article key={`${criterion.id}-${criterionIndex}`}>
+      <div className="settings-form-grid">
+        <SettingField label={t('Label')} id={`quality-criterion-label-${index}-${criterionIndex}`}><PatchInput id={`quality-criterion-label-${index}-${criterionIndex}`} value={criterion.label} onCommit={(label) => onChange({ ...rubric, criteria: replaceAt(rubric.criteria, criterionIndex, { ...criterion, label }) })} required /></SettingField>
+        <SettingField label={t('Criterion ID')} id={`quality-criterion-id-${index}-${criterionIndex}`}><PatchInput id={`quality-criterion-id-${index}-${criterionIndex}`} value={criterion.id} onCommit={(id) => onChange({ ...rubric, criteria: replaceAt(rubric.criteria, criterionIndex, { ...criterion, id }) })} required spellCheck={false} /></SettingField>
+        <SettingField label={t('Evaluation guidance')} id={`quality-criterion-description-${index}-${criterionIndex}`} wide><PatchInput id={`quality-criterion-description-${index}-${criterionIndex}`} value={criterion.description} onCommit={(description) => onChange({ ...rubric, criteria: replaceAt(rubric.criteria, criterionIndex, { ...criterion, description }) })} multiline rows={2} required /></SettingField>
+      </div>
+      <button type="button" disabled={rubric.criteria.length === 1} onClick={() => onChange({ ...rubric, criteria: rubric.criteria.filter((_, index) => index !== criterionIndex) })}>{t('Delete criterion')}</button>
+    </article>)}</div>
+  </article>;
 }
 
 function ScenarioEditor({ scenario, index, onChange, onDestructiveChange, onDelete }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void; onDestructiveChange: (value: ScenarioDefinition, label: string) => void; onDelete: () => void }): React.JSX.Element {

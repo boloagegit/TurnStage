@@ -157,7 +157,7 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
 }
 
 async function assertCopilotToolBoundary(workspaceRoot: vscode.Uri): Promise<void> {
-  const expectedNames = ['turnstage_find_tests', 'turnstage_run_tests', 'turnstage_inspect_failure', 'turnstage_draft_regression', 'turnstage_validate_tests'];
+  const expectedNames = ['turnstage_find_tests', 'turnstage_run_tests', 'turnstage_inspect_failure', 'turnstage_draft_regression', 'turnstage_validate_tests', 'turnstage_analyze_run', 'turnstage_draft_profile_patch', 'turnstage_apply_profile_patch', 'turnstage_review_response_quality'];
   const registered = new Set(vscode.lm.tools.map((tool) => tool.name));
   for (const name of expectedNames) assert.ok(registered.has(name), `${name} should be registered with the VS Code language model API`);
 
@@ -182,13 +182,53 @@ async function assertCopilotToolBoundary(workspaceRoot: vscode.Uri): Promise<voi
   assert.match(observed?.suiteFingerprint ?? '', /^[a-f0-9]{64}$/);
   assert.equal(Object.keys(observed?.caseFingerprints ?? {}).length, 1);
 
+  const profileDiagnosis = await invokeToolJson('turnstage_analyze_run', { profile: 'integration', mode: 'configuration' });
+  assert.equal(profileDiagnosis.ok, true, JSON.stringify(profileDiagnosis));
+  assert.equal((profileDiagnosis.data as { version?: string; sanitized?: boolean } | undefined)?.version, 'DiagnosisResultV1');
+  assert.equal((profileDiagnosis.data as { sanitized?: boolean } | undefined)?.sanitized, true);
+
   if (!vscode.workspace.isTrusted) {
     const reportDirectory = vscode.Uri.joinPath(workspaceRoot, '.turnstage', 'reports');
     const blocked = await invokeToolJson('turnstage_run_tests', { selectors: [items[0]!.id], repetitions: 2 });
     assert.equal(blocked.ok, false, JSON.stringify(blocked));
     assert.equal(blocked.error?.code, 'WORKSPACE_UNTRUSTED', JSON.stringify(blocked));
+    const blockedDraft = await invokeToolJson('turnstage_draft_profile_patch', { profile: 'integration', operations: [{ path: ['conversation', 'send', 'timeoutMs'], value: 5_000 }] });
+    assert.equal(blockedDraft.error?.code, 'WORKSPACE_UNTRUSTED', JSON.stringify(blockedDraft));
+    const blockedQuality = await invokeToolJson('turnstage_review_response_quality', { action: 'disclose', evidenceIds: ['not-disclosed'] });
+    assert.equal(blockedQuality.error?.code, 'WORKSPACE_UNTRUSTED', JSON.stringify(blockedQuality));
     assert.equal(await exists(reportDirectory), false, 'Restricted Copilot execution must not write reports');
+    return;
   }
+
+  const profileUri = vscode.Uri.joinPath(workspaceRoot, '.vscode', 'turnstage', 'profiles', 'integration.turnstage.jsonc');
+  const beforeDraft = await readText(profileUri);
+  const drafted = await invokeToolJson('turnstage_draft_profile_patch', { profile: 'integration', operations: [{ path: ['conversation', 'send', 'timeoutMs'], value: 5_000, reason: 'Bound the local integration request.' }] });
+  assert.equal(drafted.ok, true, JSON.stringify(drafted));
+  assert.equal((drafted.data as { format?: string } | undefined)?.format, 'turnstage-profile-patch-draft');
+  assert.equal(await readText(profileUri), beforeDraft, 'Drafting a safe profile patch must not edit the profile');
+
+  const configuredReport = vscode.Uri.joinPath(workspaceRoot, '.turnstage', 'reports', 'integration.turnstage-contract-results.json');
+  const configuredReportBefore = await exists(configuredReport) ? await readText(configuredReport) : undefined;
+  const executed = await invokeToolJson('turnstage_run_tests', { selectors: [items[0]!.id], repetitions: 2 });
+  assert.equal(executed.ok, true, JSON.stringify(executed));
+  assert.equal(await exists(configuredReport) ? await readText(configuredReport) : undefined, configuredReportBefore, 'A Copilot-triggered run must not create or overwrite configured CI reports');
+  const executionData = executed.data as { runId?: string; cases?: { items?: Array<{ evidenceId?: string }> } } | undefined;
+  assert.ok(executionData?.runId, JSON.stringify(executed));
+  const diagnosis = await invokeToolJson('turnstage_analyze_run', { runId: executionData.runId, mode: 'stability' });
+  assert.equal(diagnosis.ok, true, JSON.stringify(diagnosis));
+  assert.equal((diagnosis.data as { repetition?: { requestedAttempts?: number } } | undefined)?.repetition?.requestedAttempts, 2);
+
+  const evidenceId = executionData?.cases?.items?.[0]?.evidenceId;
+  assert.ok(evidenceId, JSON.stringify(executed));
+  const disclosed = await invokeToolJson('turnstage_review_response_quality', { action: 'disclose', evidenceIds: [evidenceId] });
+  assert.equal(disclosed.ok, true, JSON.stringify(disclosed));
+  const grant = (disclosed.data as { grant?: { grantId?: string; attempts?: Array<{ attemptId?: string }>; rubrics?: Array<{ id?: string; criteria?: Array<{ id?: string }> }> } } | undefined)?.grant;
+  const rubric = grant?.rubrics?.[0];
+  assert.ok(grant?.grantId && grant.attempts?.[0]?.attemptId && rubric?.id && rubric.criteria?.[0]?.id, JSON.stringify(disclosed));
+  const recorded = await invokeToolJson('turnstage_review_response_quality', { action: 'record', grantId: grant.grantId, review: { summary: 'The disclosed fixture response is relevant.', findings: [{ rubricId: rubric.id, criterionId: rubric.criteria[0]!.id, rating: 'meets', rationale: 'The disclosed response addresses the fixed request.', evidenceAttemptIds: [grant.attempts[0]!.attemptId] }], modelLabel: 'Extension Host fixture' } });
+  assert.equal(recorded.ok, true, JSON.stringify(recorded));
+  assert.equal((recorded.data as { review?: { advisoryOnly?: boolean } } | undefined)?.review?.advisoryOnly, true);
+  assert.equal('outcome' in ((recorded.data as { review?: Record<string, unknown> } | undefined)?.review ?? {}), false, JSON.stringify(recorded));
 }
 
 async function invokeToolJson(name: string, input: Record<string, unknown>): Promise<{ ok?: boolean; data?: unknown; error?: { code?: string } }> {

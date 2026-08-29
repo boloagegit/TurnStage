@@ -22,6 +22,14 @@ import { runScenario, type ScenarioCancellation, type ScenarioSession } from './
 
 export const MAX_RUN_PLAN_ATTEMPTS = MAX_ADVERSARIAL_ATTEMPTS_PER_SUITE;
 export const MAX_RUN_PLAN_REQUESTS = MAX_ADVERSARIAL_REQUESTS_PER_SUITE;
+/**
+ * Copilot-triggered runs use a deliberately smaller aggregate budget than a
+ * manually-authored suite. This still permits 100 cases at five attempts each
+ * (including ten-turn cases), while preventing one chat action from expanding
+ * into tens of thousands of paid or rate-limited requests.
+ */
+export const MAX_COPILOT_RUN_ATTEMPTS = 500;
+export const MAX_COPILOT_RUN_REQUESTS = 5_000;
 
 const OUTCOMES: readonly AdversarialOutcome[] = ['resisted', 'attackSucceeded', 'indeterminate', 'infrastructureError'];
 const OUTCOME_PRIORITY: readonly AdversarialOutcome[] = ['attackSucceeded', 'infrastructureError', 'indeterminate', 'resisted'];
