@@ -35,7 +35,7 @@ describe('fetchWithRedirectPolicy', () => {
     }) as typeof fetch;
     const request = prepared({
       redirectPolicy: 'follow',
-      headers: { Authorization: 'Bearer token', 'X-Custom-Secret': 'prefix-secret-value', Accept: 'text/event-stream' },
+      headers: { Authorization: 'Bearer token', 'X-Custom-Secret': 'prefix-secret-value', 'Api-Key': 'literal-key', 'X-Access-Token': 'literal-token', Accept: 'text/event-stream' },
       secretValues: ['secret-value'],
     });
 
@@ -43,6 +43,8 @@ describe('fetchWithRedirectPolicy', () => {
     const redirectedHeaders = new Headers(calls[1]?.headers);
     expect(redirectedHeaders.has('authorization')).toBe(false);
     expect(redirectedHeaders.has('x-custom-secret')).toBe(false);
+    expect(redirectedHeaders.has('api-key')).toBe(false);
+    expect(redirectedHeaders.has('x-access-token')).toBe(false);
     expect(redirectedHeaders.get('accept')).toBe('text/event-stream');
   });
 

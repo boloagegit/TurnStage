@@ -6,6 +6,8 @@ import { createScenarioReport, serializeAdversarialEventsCsv, serializeAdversari
 import type { VisualRegressionService } from './visualRegression';
 import { createProvenanceManifest, type ProvenanceFileInput } from './provenance';
 
+const MAX_VISUAL_ARTIFACT_BYTES = 24 * 1024 * 1024;
+
 interface ConfiguredReportGroup {
   profileId: string;
   profileUri: vscode.Uri;
@@ -81,8 +83,8 @@ export class ScenarioReportService {
       ['diagnostics.json', `${JSON.stringify(scopeCopilotArtifacts(this.copilotArtifacts?.snapshot(), this.scope), null, 2)}\n`],
     ];
     if (includeVisual && visual) {
-      files.push(['visual-baseline.png', await vscode.workspace.fs.readFile(visual.baselineUri)]);
-      if (visual.diffUri) files.push(['visual-diff.png', await vscode.workspace.fs.readFile(visual.diffUri)]);
+      files.push(['visual-baseline.png', await readBoundedVisualArtifact(visual.baselineUri)]);
+      if (visual.diffUri) files.push(['visual-diff.png', await readBoundedVisualArtifact(visual.diffUri)]);
     }
     const report = createScenarioReport(this.records, generatedAt);
     files.push(['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 5, generatedAt, files: [...fileNames, 'manifest.json', 'provenance.json'], privacy: { rawEvents: false, payloads: false, urls: false, headers: false, messageContent: false, secrets: false, profileEditContent: false, advisoryResponseContent: false, visualChatContent: includeVisual, causalMetadata: true, failureFingerprints: true }, summary: report.summary }, null, 2)}\n`]);
@@ -123,6 +125,13 @@ export class ScenarioReportService {
       }
     }
   }
+}
+
+async function readBoundedVisualArtifact(uri: vscode.Uri): Promise<Uint8Array> {
+  if ((await vscode.workspace.fs.stat(uri)).size > MAX_VISUAL_ARTIFACT_BYTES) throw new Error(localize('Visual artifacts cannot exceed 24 MiB.'));
+  const bytes = await vscode.workspace.fs.readFile(uri);
+  if (bytes.byteLength > MAX_VISUAL_ARTIFACT_BYTES) throw new Error(localize('Visual artifacts cannot exceed 24 MiB.'));
+  return bytes;
 }
 
 function serialize(format: ScenarioReportFormat, records: readonly ScenarioExecutionRecord[]): string {

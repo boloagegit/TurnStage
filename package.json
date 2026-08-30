@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -33,7 +33,16 @@
     "untrustedWorkspaces": {
       "supported": "limited",
       "description": "%workspaceTrust.description%",
-      "restrictedConfigurations": []
+      "restrictedConfigurations": [
+        "turnstage.profileGlob",
+        "turnstage.maxBufferedEvents",
+        "turnstage.maxConversationMessages",
+        "turnstage.maxBufferedBytes",
+        "turnstage.streamBatchIntervalMs",
+        "turnstage.runRetention",
+        "turnstage.adversarialConcurrency",
+        "turnstage.logLevel"
+      ]
     },
     "virtualWorkspaces": true
   },
@@ -1476,6 +1485,7 @@
           "scope": "window",
           "default": 5000,
           "minimum": 100,
+          "maximum": 10000,
           "description": "%setting.maxBufferedEvents%"
         },
         "turnstage.maxConversationMessages": {
@@ -1483,7 +1493,7 @@
           "scope": "window",
           "default": 500,
           "minimum": 50,
-          "maximum": 5000,
+          "maximum": 1000,
           "description": "%setting.maxConversationMessages%"
         },
         "turnstage.maxBufferedBytes": {
@@ -1491,6 +1501,7 @@
           "scope": "window",
           "default": 10485760,
           "minimum": 1048576,
+          "maximum": 20971520,
           "description": "%setting.maxBufferedBytes%"
         },
         "turnstage.streamBatchIntervalMs": {

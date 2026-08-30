@@ -6,6 +6,8 @@ import { isSafeReportDirectory } from './scenarioConfig';
 
 const PNG_PREFIX = 'data:image/png;base64,';
 const MAX_PNG_BYTES = 24 * 1024 * 1024;
+const MAX_PNG_DIMENSION = 8192;
+const MAX_PNG_PIXELS = 25_000_000;
 const DEFAULT_VISUAL: ScenarioVisualDefinition = { baselineDirectory: '.turnstage/baselines', maxDifferencePercent: 0.1, channelTolerance: 16 };
 
 export interface VisualViewport { id: string; width: number; height: number }
@@ -41,9 +43,10 @@ export class VisualRegressionService {
   async compare(profile: TurnStageProfile, profileUri: vscode.Uri, viewport: VisualViewport, dataUrl: string): Promise<VisualRegressionResult> {
     const currentBytes = decodePng(dataUrl);
     const baselineUri = this.baselineUri(profile, profileUri, viewport);
-    let baselineBytes: Uint8Array;
-    try { baselineBytes = await vscode.workspace.fs.readFile(baselineUri); }
-    catch { throw new Error(localize('No visual baseline exists for this profile and viewport.')); }
+    if (!await exists(baselineUri)) throw new Error(localize('No visual baseline exists for this profile and viewport.'));
+    if ((await vscode.workspace.fs.stat(baselineUri)).size > MAX_PNG_BYTES) throw new Error(localize('The visual baseline exceeds the 24 MiB safety limit.'));
+    const baselineBytes = await vscode.workspace.fs.readFile(baselineUri);
+    if (baselineBytes.byteLength > MAX_PNG_BYTES) throw new Error(localize('The visual baseline exceeds the 24 MiB safety limit.'));
     const definition = visualDefinition(profile);
     const compared = comparePng(baselineBytes, currentBytes, definition.channelTolerance ?? DEFAULT_VISUAL.channelTolerance!);
     const passed = compared.differencePercent <= (definition.maxDifferencePercent ?? DEFAULT_VISUAL.maxDifferencePercent!);
@@ -68,11 +71,15 @@ export class VisualRegressionService {
 }
 
 export function comparePng(baselineBytes: Uint8Array, currentBytes: Uint8Array, channelTolerance = 16): { differencePercent: number; changedPixels: number; totalPixels: number; diff: Uint8Array } {
+  inspectPngHeader(baselineBytes);
+  inspectPngHeader(currentBytes);
   const baseline = PNG.sync.read(Buffer.from(baselineBytes));
   const current = PNG.sync.read(Buffer.from(currentBytes));
   const width = Math.max(baseline.width, current.width);
   const height = Math.max(baseline.height, current.height);
+  if (width * height > MAX_PNG_PIXELS) throw new Error(localize('Visual image dimensions exceed the safety limit.'));
   const diff = new PNG({ width, height });
+  channelTolerance = Number.isFinite(channelTolerance) ? Math.min(255, Math.max(0, channelTolerance)) : 16;
   let changedPixels = 0;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -90,7 +97,9 @@ export function comparePng(baselineBytes: Uint8Array, currentBytes: Uint8Array, 
     }
   }
   const totalPixels = width * height;
-  return { differencePercent: totalPixels ? changedPixels / totalPixels * 100 : 0, changedPixels, totalPixels, diff: PNG.sync.write(diff) };
+  const diffBytes = PNG.sync.write(diff);
+  if (diffBytes.byteLength > MAX_PNG_BYTES) throw new Error(localize('Visual diff exceeds the 24 MiB safety limit.'));
+  return { differencePercent: totalPixels ? changedPixels / totalPixels * 100 : 0, changedPixels, totalPixels, diff: diffBytes };
 }
 
 function visualDefinition(profile: TurnStageProfile): ScenarioVisualDefinition { return { ...DEFAULT_VISUAL, ...(profile.tests?.visual ?? {}) }; }
@@ -102,7 +111,16 @@ function decodePng(dataUrl: string): Uint8Array {
   if (!bytes.length || bytes.length > MAX_PNG_BYTES) throw new Error(localize('Visual capture exceeds the 24 MiB safety limit.'));
   const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (!signature.every((value, index) => bytes[index] === value)) throw new Error(localize('Visual capture has an invalid PNG signature.'));
+  inspectPngHeader(bytes);
   return bytes;
+}
+function inspectPngHeader(bytes: Uint8Array): { width: number; height: number } {
+  if (bytes.byteLength < 24 || String.fromCharCode(...bytes.slice(12, 16)) !== 'IHDR') throw new Error(localize('Visual capture has an invalid PNG header.'));
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16);
+  const height = view.getUint32(20);
+  if (!width || !height || width > MAX_PNG_DIMENSION || height > MAX_PNG_DIMENSION || width * height > MAX_PNG_PIXELS) throw new Error(localize('Visual image dimensions exceed the safety limit.'));
+  return { width, height };
 }
 async function exists(uri: vscode.Uri): Promise<boolean> { try { await vscode.workspace.fs.stat(uri); return true; } catch { return false; } }
 function safePart(value: string): string { return value.replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 100) || 'visual'; }

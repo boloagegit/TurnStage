@@ -3,7 +3,7 @@ import { modify } from 'jsonc-parser';
 import type { HostPayload, InspectorTargetTab, WebviewMessage, WorkspaceSection } from '../../shared/protocol';
 import { isWebviewMessage, PROTOCOL_VERSION } from '../../shared/protocol';
 import type { AdversarialResultSummary, ConnectionDoctorSummary, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, ScenarioRunEvidence, ScenarioRunResult, SessionSnapshot, TurnStageProfile } from '../../shared/types';
-import { EnvironmentRepository } from '../config/profileRepository';
+import { EnvironmentRepository, MAX_PROFILE_BYTES } from '../config/profileRepository';
 import { ProfileCodec } from '../config/profileCodec';
 import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../config/profileValidator';
 import { LocalRunRepository, type LocalRunImportResult } from '../history/localRunRepository';
@@ -23,6 +23,7 @@ import { adversarialCsvTemplate, parseAdversarialCsv, serializeAdversarialCsv } 
 import { createAdversarialSuite, isSafeAdversarialSuitePath, normalizeAdversarialSuite, parseAdversarialSuite, serializeAdversarialSuite } from '../testing/adversarialSuite';
 import { buildEvidenceTimeline } from '../testing/evidenceTimeline';
 import { analyzeConnectionProbe } from '../connection/protocolProbe';
+import { loadFixture } from '../runtime/fixtureLoader';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -48,7 +49,8 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     // Code releases can paint the backing JSONC filename as soon as the custom
     // editor resolves, so waiting for environment discovery causes a visible
     // and test-observable title race.
-    panel.title = profileEditorTitle(this.codec.parse(document.getText()).profile?.name, resourceTitle);
+    const initialText = document.getText();
+    panel.title = profileEditorTitle(Buffer.byteLength(initialText) <= MAX_PROFILE_BYTES ? this.codec.parse(initialText).profile?.name : undefined, resourceTitle);
     const instanceId = crypto.randomUUID(); panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] }; panel.webview.html = this.html(panel.webview, instanceId);
     let controller: SessionController | undefined; let documentVersion = -1; let loadTimer: ReturnType<typeof setTimeout> | undefined; let disposed = false; let latestConnectionResult: ConnectionDoctorSummary | undefined;
     let profileSnapshot: Extract<HostPayload, { type: 'profile.snapshot' }> | undefined;
@@ -85,7 +87,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       if (disposed) return;
       const snapshot = currentSessionSnapshot();
       if (snapshot) void post(snapshot);
-    }, vscode.workspace.getConfiguration('turnstage').get('streamBatchIntervalMs', 32), 50);
+    }, boundedNumber(vscode.workspace.getConfiguration('turnstage').get('streamBatchIntervalMs', 32), 16, 1000, 32), Number.MAX_SAFE_INTEGER);
     const syncTurnActiveContext = () => {
       if (panel.active) void vscode.commands.executeCommand('setContext', 'turnstage.turnActive', Boolean(controller && isActive(controller.snapshot.turnState)));
     };
@@ -93,7 +95,18 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const load = async () => {
       if (disposed || (documentVersion === document.version && controller)) return;
       const version = document.version;
-      documentVersion = version; const parsed = this.codec.parse(document.getText()); const envEntries = await this.environments.discover(document.uri); if (disposed || document.version !== version) return; const issues = this.validator.validate(parsed.profile, parsed.tree, envEntries.map((item) => item.environment)); this.publishDiagnostics(document, issues);
+      documentVersion = version;
+      const text = document.getText();
+      if (Buffer.byteLength(text) > MAX_PROFILE_BYTES) {
+        const message = localize('Profile files cannot exceed 5 MB.');
+        disposeController();
+        profileSnapshot = { type: 'profile.snapshot', parseError: message, version: document.version, environments: [] };
+        validationSnapshot = { type: 'profile.validation', diagnostics: [{ severity: 'error', message, offset: 0, length: 1 }] };
+        this.publishDiagnostics(document, validationSnapshot.diagnostics);
+        await post(profileSnapshot); await post(validationSnapshot);
+        return;
+      }
+      const parsed = this.codec.parse(text); const envEntries = await this.environments.discover(document.uri); if (disposed || document.version !== version) return; const issues = this.validator.validate(parsed.profile, parsed.tree, envEntries.map((item) => item.environment)); this.publishDiagnostics(document, issues);
       panel.title = profileEditorTitle(parsed.profile?.name, resourceTitle);
       profileSnapshot = { type: 'profile.snapshot', profile: parsed.profile, parseError: parsed.errors.length ? localize('Invalid JSONC') : undefined, version: document.version, environments: envEntries.map((item) => item.environment.id) };
       validationSnapshot = { type: 'profile.validation', diagnostics: issues };
@@ -115,7 +128,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
             ? vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'fixtures', `${parsed.profile.id}.jsonl`)
             : folder ? vscode.Uri.joinPath(folder.uri, '.vscode', 'turnstage', 'fixtures', `${parsed.profile.id}.jsonl`) : undefined;
           if (!fixtureUri) logAt(this.output, 'warn', `[fixture] profile ${parsed.profile.id} is not inside a workspace folder`);
-          else try { const lines = new TextDecoder().decode(await vscode.workspace.fs.readFile(fixtureUri)).trim().split(/\r?\n/); const startedAt = Date.now(); controller.addBuiltInFixture(lines.map((line, index) => { const item = JSON.parse(line) as { event: string; data: unknown; delayMs?: number }; return { sequence: index + 1, receivedAt: startedAt + (item.delayMs ?? 0), elapsedMs: item.delayMs ?? 0, protocol: 'fixture' as const, sse: { event: item.event }, raw: JSON.stringify(item.data), data: item.data }; })); } catch (error) { logAt(this.output, 'error', `[fixture] ${error instanceof Error ? error.message : String(error)}`); }
+          else try { controller.addBuiltInFixture(await loadFixture(fixtureUri)); } catch (error) { logAt(this.output, 'error', `[fixture] ${error instanceof Error ? error.message : String(error)}`); }
         }
         if (parsed.profile.opening?.mode === 'static') await controller.startSession(); else sendSession();
         if (disposed || document.version !== version) { disposeController(); return; }
@@ -609,7 +622,9 @@ function nextScenarioId(ids: ReadonlySet<string>, preferred: string): string {
   throw new Error(localize('Could not create a unique imported case ID.'));
 }
 function slugScenarioId(value: string): string { return value.toLocaleLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80); }
+function boundedNumber(value: unknown, minimum: number, maximum: number, fallback: number): number { return typeof value === 'number' && Number.isFinite(value) ? Math.min(maximum, Math.max(minimum, Math.trunc(value))) : fallback; }
 async function readBoundedTextFile(uri: vscode.Uri): Promise<string> {
+  if ((await vscode.workspace.fs.stat(uri)).size > 5 * 1024 * 1024) throw new Error(localize('Adversarial import files cannot exceed 5 MB.'));
   const bytes = await vscode.workspace.fs.readFile(uri);
   if (bytes.byteLength > 5 * 1024 * 1024) throw new Error(localize('Adversarial import files cannot exceed 5 MB.'));
   return new TextDecoder().decode(bytes);

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.14.1
+
+- Hardened request deadlines and cancellation so Opening and CLI response-body reads cannot outlive their configured timeout. Oversized responses now fail closed, active Opening and Stop requests are aborted during replacement or disposal, and timeout, user cancellation, infrastructure failure, and excessive evidence remain distinguishable.
+- Expanded privacy controls for URL-encoded secret values, sensitive redirect headers, Network inspection, CLI environment variables, and Restricted Mode configuration. Authorization, cookies, tokens, passwords, credentials, API keys, and reversible encoded secret representations remain excluded from logs, persisted runs, exports, diagnostics, and Webview payloads.
+- Added bounded processing for Profile, Environment, fixture, suite, run-history, Evidence Bundle, event, message, regular-expression, and PNG inputs. Large adversarial batches retain compact planning and bounded concurrency, with explicit confirmation before a manual batch can issue more than 250 requests.
+- Existing version-1 Profiles, scenarios, suites, reports, and CLI arguments remain compatible and require no migration. Previously accepted oversized or potentially unsafe inputs may now be rejected, truncated from non-authoritative debug history, or require a smaller file before execution; these limits do not convert timeouts or incomplete evidence into passes.
+
 ## 0.14.0
 
 - Added a safe **Create Profile from cURL** workflow for bounded OpenAI-compatible requests. TurnStage parses without invoking a shell, rejects unsafe flags and expansion, removes captured prompts, messages, tools, and payload content, converts unknown header and query values to SecretStorage references, URI-encodes URL secrets, and requires review before creating a Profile.

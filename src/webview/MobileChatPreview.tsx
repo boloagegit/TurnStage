@@ -19,6 +19,7 @@ import { IconButton, ProductIcon } from './Icon';
 import { SafeMarkdown } from './SafeMarkdown';
 import { captureChatScreenshot, copyChatScreenshotToClipboard } from './chatScreenshot';
 import { resolveComposer, resolveMessageActions, resolveMessageActionVisibility, resolveStreaming, type ResolvedStreaming } from './uiConfig';
+import { isSafeRegexPattern } from '../shared/regexSafety';
 import './mobileChatPreview.css';
 
 export const CHAT_SCROLL_BOTTOM_THRESHOLD = 48;
@@ -725,7 +726,7 @@ function MobileFormControl({ field, formId, value, error, update }: { field: For
   const describedBy = error ? `${id}-error` : undefined;
   return <div className="mobile-chat-preview__field">
     <label htmlFor={id}>{field.label}{field.required && <span aria-hidden="true"> *</span>}</label>
-    {field.type === 'textarea' ? <textarea id={id} value={String(value ?? '')} maxLength={field.maxLength} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={(event) => update(event.target.value)} /> : field.type === 'select' ? <select id={id} value={String(value ?? '')} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={(event) => update(event.target.value)}><option value="">{t('Select…')}</option>{field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.type === 'checkbox' ? <input id={id} type="checkbox" checked={Boolean(value)} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={(event) => update(event.target.checked)} /> : <input id={id} type={field.type} value={String(value ?? '')} maxLength={field.maxLength} pattern={field.pattern} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={(event) => update(event.target.value)} />}
+    {field.type === 'textarea' ? <textarea id={id} value={String(value ?? '')} maxLength={field.maxLength} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={(event) => update(event.target.value)} /> : field.type === 'select' ? <select id={id} value={String(value ?? '')} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={(event) => update(event.target.value)}><option value="">{t('Select…')}</option>{field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.type === 'checkbox' ? <input id={id} type="checkbox" checked={Boolean(value)} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={(event) => update(event.target.checked)} /> : <input id={id} type={field.type} value={String(value ?? '')} maxLength={field.maxLength} pattern={isSafeRegexPattern(field.pattern) ? field.pattern : undefined} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={(event) => update(event.target.value)} />}
     {error && <p className="mobile-chat-preview__field-error" id={`${id}-error`} role="alert">{error}</p>}
   </div>;
 }
@@ -737,11 +738,8 @@ function validateForm(fields: FormField[], values: Record<string, unknown>): Rec
     if (field.required && (value === undefined || value === '' || value === false)) errors[field.id] = t('{field} is required.', { field: field.label });
     else if (field.maxLength && String(value ?? '').length > field.maxLength) errors[field.id] = t('Use no more than {count} characters.', { count: formatNumber(field.maxLength) });
     else if (field.pattern) {
-      try {
-        if (value && !new RegExp(field.pattern).test(String(value))) errors[field.id] = t('{field} has an invalid format.', { field: field.label });
-      } catch {
-        errors[field.id] = t('The profile contains an invalid validation pattern.');
-      }
+      if (!isSafeRegexPattern(field.pattern)) errors[field.id] = t('The profile contains an invalid validation pattern.');
+      else if (value && !new RegExp(field.pattern, 'u').test(String(value).slice(0, 4096))) errors[field.id] = t('{field} has an invalid format.', { field: field.label });
     }
   }
   return errors;

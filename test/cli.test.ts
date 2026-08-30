@@ -124,6 +124,26 @@ describe('headless CLI contract', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('resolves only explicitly prefixed CLI secrets and never arbitrary process environment names', async () => {
+    const arbitraryName = 'TURNSTAGE_REVIEW_ARBITRARY_ENV';
+    const prefixedName = 'TURNSTAGE_SECRET_CLI_REVIEW_TOKEN';
+    process.env[arbitraryName] = 'must-not-resolve';
+    process.env[prefixedName] = 'prefixed-canary';
+    try {
+      const profile = requestOpeningProfile();
+      const environment: TurnStageEnvironment = {
+        ...cliEnvironment(),
+        secretReferences: { arbitrary: arbitraryName, allowed: 'cli-review-token' },
+      };
+      const session = new NodeScenarioSession(profile, environment, cliScenario(), '/workspace') as unknown as { secret(name: string): Promise<string | undefined> };
+      await expect(session.secret('arbitrary')).resolves.toBeUndefined();
+      await expect(session.secret('allowed')).resolves.toBe('prefixed-canary');
+    } finally {
+      delete process.env[arbitraryName];
+      delete process.env[prefixedName];
+    }
+  });
 });
 
 function requestOpeningProfile(): TurnStageProfile {

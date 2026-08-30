@@ -80,7 +80,16 @@ async function assertManifestCapabilities(extension: vscode.Extension<unknown>):
   } | undefined;
   assert.ok(capabilities, 'The extension manifest must declare untrusted workspace support');
   assert.equal(capabilities.supported, 'limited');
-  assert.deepEqual(capabilities.restrictedConfigurations, []);
+  assert.deepEqual(capabilities.restrictedConfigurations, [
+    'turnstage.profileGlob',
+    'turnstage.maxBufferedEvents',
+    'turnstage.maxConversationMessages',
+    'turnstage.maxBufferedBytes',
+    'turnstage.streamBatchIntervalMs',
+    'turnstage.runRetention',
+    'turnstage.adversarialConcurrency',
+    'turnstage.logLevel',
+  ]);
 }
 
 async function assertSecretStorageCommandPath(): Promise<void> {

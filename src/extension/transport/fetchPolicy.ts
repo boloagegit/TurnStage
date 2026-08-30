@@ -8,8 +8,11 @@ const SENSITIVE_HEADER_NAMES = new Set([
   'cookie',
   'cookie2',
   'proxy-authorization',
+  'api-key',
   'x-api-key',
   'x-auth-token',
+  'x-access-token',
+  'x-refresh-token',
 ]);
 
 /** Fetch a prepared request while enforcing TurnStage's bounded redirect policy. */
@@ -70,9 +73,15 @@ function stripSensitiveHeaders(source: Headers, secretValues: string[]): Headers
   const result = new Headers();
   for (const [name, value] of source.entries()) {
     const containsKnownSecret = secretValues.some((secret) => secret.length > 0 && value.includes(secret));
-    if (!SENSITIVE_HEADER_NAMES.has(name.toLowerCase()) && !containsKnownSecret) result.append(name, value);
+    if (!isSensitiveHeaderName(name) && !containsKnownSecret) result.append(name, value);
   }
   return result;
+}
+
+function isSensitiveHeaderName(name: string): boolean {
+  const normalized = name.toLowerCase();
+  return SENSITIVE_HEADER_NAMES.has(normalized)
+    || /(?:^|[-_])(?:token|secret|credential|password|api[-_]?key)(?:$|[-_])/u.test(normalized);
 }
 
 function shouldSwitchToGet(status: number, method: string): boolean {

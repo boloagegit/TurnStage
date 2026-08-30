@@ -6,10 +6,10 @@ import type {
   ScenarioEvidenceLocation,
   SessionSnapshot,
 } from '../../shared/types';
+import { isSafeRegexPattern } from '../../shared/regexSafety';
 import { localize } from '../l10n';
 
 const MAX_PATH_SEGMENTS = 24;
-const MAX_REGEX_LENGTH = 256;
 const terminalTurnStates = new Set(['completed', 'failed', 'aborted']);
 const terminalMessageStates = new Set(['completed', 'failed', 'aborted']);
 const assertionRoots = new Set(['session', 'turn', 'conversation', 'assistant', 'messages', 'events', 'metrics', 'errors', 'controls', 'network']);
@@ -83,9 +83,7 @@ export function resolveAssertionPath(root: unknown, path: string): unknown {
 }
 
 export function isSafeAssertionRegex(pattern: unknown): boolean {
-  if (typeof pattern !== 'string' || pattern.length > MAX_REGEX_LENGTH) return false;
-  if (/\([^)]*[+*][^)]*\)[+*]/.test(pattern)) return false;
-  try { new RegExp(pattern); return true; } catch { return false; }
+  return isSafeRegexPattern(pattern);
 }
 
 export function isValidAssertionPath(path: unknown): path is string {
@@ -133,7 +131,7 @@ function evaluateOperator(operator: ScenarioAssertionDefinition['operator'], act
     case 'exists': return actual !== undefined && actual !== null;
     case 'notExists': return actual === undefined || actual === null;
     case 'contains': return contains(actual, expected);
-    case 'regex': return isSafeAssertionRegex(expected) && new RegExp(String(expected)).test(typeof actual === 'string' ? actual : JSON.stringify(actual) ?? '');
+    case 'regex': return isSafeAssertionRegex(expected) && new RegExp(String(expected), 'u').test((typeof actual === 'string' ? actual : JSON.stringify(actual) ?? '').slice(0, 4096));
     case 'oneOf': return Array.isArray(expected) && expected.some((item) => jsonEqual(actual, item));
     case 'lessThan': return numericCompare(actual, expected, (left, right) => left < right);
     case 'lessThanOrEqual': return numericCompare(actual, expected, (left, right) => left <= right);

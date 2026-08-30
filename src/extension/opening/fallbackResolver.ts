@@ -1,5 +1,6 @@
 import type { MatchCondition, OpeningDefinition } from '../../shared/types';
 import { getPath } from '../request/templateResolver';
+import { isSafeRegexPattern } from '../../shared/regexSafety';
 
 export function selectOpeningFallback(opening: OpeningDefinition, data: unknown, metadata: { status?: number; missingMessage?: boolean; errorType?: string }): NonNullable<OpeningDefinition['fallbacks']>[number] | undefined {
   return opening.fallbacks?.find((fallback) => {
@@ -21,6 +22,6 @@ function conditionMatches(condition: MatchCondition, actual: unknown): boolean {
     case 'contains': return Array.isArray(actual) ? actual.includes(expected) : String(actual ?? '').includes(String(expected));
     case 'startsWith': return String(actual ?? '').startsWith(String(expected));
     case 'endsWith': return String(actual ?? '').endsWith(String(expected));
-    case 'regex': return typeof expected === 'string' && expected.length <= 256 && new RegExp(expected).test(String(actual ?? '').slice(0, 4096));
+    case 'regex': return isSafeRegexPattern(expected) && new RegExp(expected, 'u').test(String(actual ?? '').slice(0, 4096));
   }
 }

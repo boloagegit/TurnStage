@@ -1,6 +1,7 @@
 import type { MappingRule, NormalizedEvent, RawStreamEvent, StreamDefinition } from '../../shared/types';
 import { getPath } from '../request/templateResolver';
 import { localize } from '../l10n';
+import { isSafeRegexPattern } from '../../shared/regexSafety';
 
 interface CompiledRule { rule: MappingRule; regex?: RegExp; compileError?: string }
 
@@ -43,8 +44,8 @@ export class MappingEngine {
     this.rules = stream.mappings.map((source) => {
       const rule = { ...source, match: { ...source.match }, emit: structuredClone(source.emit) };
       if (rule.match.operator !== 'regex') return { rule };
-      if (typeof rule.match.value !== 'string' || rule.match.value.length > 256 || /\([^)]*[+*][^)]*\)[+*]/.test(rule.match.value)) return { rule, compileError: localize('Invalid or unsafe regular expression.') };
-      try { return { rule, regex: new RegExp(rule.match.value) }; } catch { return { rule, compileError: localize('Invalid regular expression.') }; }
+      if (!isSafeRegexPattern(rule.match.value)) return { rule, compileError: localize('Invalid or unsafe regular expression.') };
+      try { return { rule, regex: new RegExp(rule.match.value, 'u') }; } catch { return { rule, compileError: localize('Invalid regular expression.') }; }
     });
   }
   map(raw: RawStreamEvent): MappingResult {

@@ -3,6 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { resolve } from 'node:path';
 import type { PreparedRequest, RawStreamEvent } from '../src/shared/types';
 import { HttpStreamTransport, type StreamSink } from '../src/extension/transport/transport';
+import { fetchBoundedText } from '../src/extension/transport/boundedFetch';
 
 let server: ChildProcessWithoutNullStreams;
 let baseUrl: string;
@@ -416,6 +417,19 @@ describe('HttpStreamTransport against the real SSE mock server', () => {
     await expect(collect('idle-timeout', { timeoutMs: 100, idleTimeoutMs: undefined })).rejects.toMatchObject({
       type: 'TimeoutError',
     });
+  });
+
+  it('keeps the deadline active after headers while a bounded response body is still streaming', async () => {
+    const startedAt = Date.now();
+    let sawHeaders = false;
+    await expect(fetchBoundedText({ ...request('delayed-first-chunk'), timeoutMs: 100 }, {
+      maxBytes: 1024,
+      timeoutMs: 100,
+      rejectOnTruncate: true,
+      onHeaders: () => { sawHeaders = true; },
+    })).rejects.toMatchObject({ type: 'TimeoutError' });
+    expect(sawHeaders).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
   });
 
   it('serves opening and remote-stop contracts from the real mock server', async () => {

@@ -26,7 +26,9 @@ export class ScenarioRunGroupRepository {
   async list(profileId: string): Promise<ScenarioRunGroupRecord[]> {
     if (!safeString(profileId)) return [];
     try {
-      const bytes = await vscode.workspace.fs.readFile(this.uri(profileId));
+      const uri = this.uri(profileId);
+      if ((await vscode.workspace.fs.stat(uri)).size > MAX_RUN_GROUP_BYTES) return [];
+      const bytes = await vscode.workspace.fs.readFile(uri);
       if (bytes.byteLength > MAX_RUN_GROUP_BYTES) return [];
       const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
       if (!Array.isArray(value)) return [];

@@ -531,9 +531,8 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByText(/event: start/)).toBeTruthy();
     await user.click(within(list).getByRole('option', { name: /opening/i }));
     await user.click(screen.getByRole('tab', { name: 'Headers' }));
-    expect(screen.getByText('Bearer local-debug-token')).toBeTruthy();
-    expect(screen.getByRole('status', { name: /Authorization is visible/ })).toBeTruthy();
-    expect(screen.getByText('••••••••')).toBeTruthy();
+    expect(screen.queryByText('Bearer local-debug-token')).toBeNull();
+    expect(screen.getAllByText('••••••••').length).toBeGreaterThanOrEqual(2);
 
     await user.type(screen.getByLabelText('Filter network requests'), 'missing');
     expect(within(list).queryAllByRole('option')).toHaveLength(0);

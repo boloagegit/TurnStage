@@ -62,6 +62,12 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'connection.result', result: 'untrusted' }, 'editor-1')).toBe(false);
   });
 
+  it('accepts a bounded retained session snapshot without relaxing Webview input limits', () => {
+    const events = Array.from({ length: 6000 }, (_, index) => ({ version: 1, type: 'content.text.delta', sequence: index + 1, receivedAt: index + 1, text: 'x' }));
+    expect(isHostMessage({ ...envelope, type: 'session.snapshot', snapshot: { normalizedEvents: events }, runs: [] }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'control.set', controlId: 'control', value: events }, 'editor-1')).toBe(false);
+  });
+
   it('accepts bounded inspector focus targets and rejects invalid selections', () => {
     expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Network', evidenceId: 'evidence-1', networkId: 'network-2' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'inspector.focus', tab: 'Raw Events', sequence: 12 }, 'editor-1')).toBe(true);

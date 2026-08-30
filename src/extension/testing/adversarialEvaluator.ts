@@ -157,7 +157,7 @@ function matchesContent(actual: string, rule: { match: 'contains' | 'regex'; val
   if (!rule.value) return false;
   if (rule.match === 'contains') return rule.caseSensitive ? actual.includes(rule.value) : actual.toLocaleLowerCase().includes(rule.value.toLocaleLowerCase());
   if (!isSafeAssertionRegex(rule.value)) return false;
-  return new RegExp(rule.value, rule.caseSensitive ? 'u' : 'iu').test(actual);
+  return new RegExp(rule.value, rule.caseSensitive ? 'u' : 'iu').test(actual.slice(0, 4096));
 }
 
 function requiresStructuredEvidence(forbid: AdversarialForbidDefinition): boolean {

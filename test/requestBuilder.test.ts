@@ -142,6 +142,8 @@ describe('RequestBuilder', () => {
     expect(new URL(request.url).searchParams.get('token')).toBe(secret);
     expect(new URL(request.url).searchParams.get('admin')).toBeNull();
     expect(new URL(request.url).hash).toBe('');
+    expect(JSON.stringify(request.redacted)).not.toContain(encodeURIComponent(secret));
+    expect(request.redacted.url).toBe('https://example.test/chat?token=••••••••&api-version=2026-08-01');
   });
 });
 

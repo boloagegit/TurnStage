@@ -24,6 +24,7 @@ const mock = vi.hoisted(() => {
       return value;
     },
     writeFile: async (uri: Uri, bytes: Uint8Array) => { files.set(uri.path, bytes); },
+    stat: async (uri: Uri) => { const value = files.get(uri.path); if (!value) throw new Error('missing'); return { size: value.byteLength }; },
     createDirectory: async (uri: Uri) => { directories.push(uri.path); },
     delete: async (uri: Uri) => { files.delete(uri.path); },
   };

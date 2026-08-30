@@ -1,5 +1,6 @@
 import type { ChatMessage, FormDefinition } from '../../shared/types';
 import { localize } from '../l10n';
+import { isSafeRegexPattern } from '../../shared/regexSafety';
 
 export interface ValidatedFormSubmission { form: FormDefinition; values: Record<string, unknown> }
 
@@ -35,9 +36,8 @@ export function validateFormSubmission(messages: ChatMessage[], formId: string, 
     if (field.type === 'number' && text !== '' && !Number.isFinite(Number(text))) throw new Error(localize('{field} must be a finite number.', { field: field.label }));
     if (field.type === 'select' && text !== '' && !field.options?.some((option) => option.value === text)) throw new Error(localize('{field} must use one of the configured options.', { field: field.label }));
     if (field.pattern && text) {
-      if (field.pattern.length > 256 || /\([^)]*[+*][^)]*\)[+*]/.test(field.pattern)) throw new Error(localize('The profile contains an unsafe validation pattern.'));
-      let pattern: RegExp;
-      try { pattern = new RegExp(field.pattern); } catch { throw new Error(localize('The profile contains an invalid validation pattern.')); }
+      if (!isSafeRegexPattern(field.pattern)) throw new Error(localize('The profile contains an unsafe validation pattern.'));
+      const pattern = new RegExp(field.pattern, 'u');
       if (!pattern.test(text.slice(0, 4096))) throw new Error(localize('{field} has an invalid format.', { field: field.label }));
     }
     values[field.id] = value;

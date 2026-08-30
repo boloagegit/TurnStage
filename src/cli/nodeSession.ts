@@ -14,8 +14,9 @@ import { MappingEngine } from '../extension/mapping/mappingEngine';
 import { selectOpeningFallback } from '../extension/opening/fallbackResolver';
 import { getPath, resolveTemplate } from '../extension/request/templateResolver';
 import { createSnapshot, reduceEvent } from '../extension/runtime/reducer';
-import { fetchWithRedirectPolicy } from '../extension/transport/fetchPolicy';
 import { HttpStreamTransport } from '../extension/transport/transport';
+import { fetchBoundedText } from '../extension/transport/boundedFetch';
+import { isSafeRegexPattern } from '../shared/regexSafety';
 
 const MAX_EVENTS = 5_000;
 const MAX_MESSAGES = 500;
@@ -62,16 +63,23 @@ export class NodeScenarioSession implements ScenarioSession {
         state: 'pending', startedAt, requestHeaders: {}, timing: { timeout: request.timeoutMs ?? 30_000 }, transferredBytes: 0, eventCount: 0,
       };
       this.network.push(entry);
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), request.timeoutMs ?? 30_000);
-      let response: Response;
-      try { response = await fetchWithRedirectPolicy(request, controller.signal); }
-      catch (error) { if (controller.signal.aborted) throw new Error('The opening request timeout elapsed.'); throw error; }
-      finally { clearTimeout(timeout); }
-      entry.status = response.status;
-      entry.timing.headers = Date.now() - startedAt;
-      entry.state = 'streaming';
-      const responseText = await readBoundedOpeningResponse(response, entry);
+      this.abortController = new AbortController();
+      const bounded = await fetchBoundedText(request, {
+        controller: this.abortController,
+        timeoutMs: request.timeoutMs ?? 30_000,
+        maxBytes: MAX_OPENING_RESPONSE_BYTES,
+        rejectOnTruncate: true,
+        timeoutMessage: 'The opening request timeout elapsed.',
+        tooLargeMessage: `Opening response exceeded ${MAX_OPENING_RESPONSE_BYTES} bytes.`,
+        onHeaders: (response) => {
+          entry!.status = response.status;
+          entry!.timing.headers = Date.now() - startedAt;
+          entry!.state = 'streaming';
+        },
+        onChunk: (bytes) => { entry!.transferredBytes = bytes; },
+        onTruncate: () => { entry!.responseBodyTruncated = true; },
+      });
+      const { response, text: responseText } = bounded;
       let data: unknown = responseText;
       try { data = responseText ? JSON.parse(responseText) : {}; } catch { /* fallback matching can still inspect the status */ }
       if (!response.ok) {
@@ -101,6 +109,7 @@ export class NodeScenarioSession implements ScenarioSession {
         throw error;
       }
     } finally {
+      this.abortController = undefined;
       if (entry) { entry.completedAt = Date.now(); entry.timing.total = entry.completedAt - startedAt; }
       this.bound();
     }
@@ -203,7 +212,10 @@ export class NodeScenarioSession implements ScenarioSession {
 
   private async secret(name: string): Promise<string | undefined> {
     const storageName = this.environment.secretReferences?.[name] ?? name;
-    return process.env[storageName] ?? process.env[`TURNSTAGE_SECRET_${storageName.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()}`];
+    const environmentName = storageName.startsWith('TURNSTAGE_SECRET_')
+      ? storageName
+      : `TURNSTAGE_SECRET_${storageName.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()}`;
+    return process.env[environmentName];
   }
 
   private useOpeningFallback(fallback: NonNullable<NonNullable<TurnStageProfile['opening']>['fallbacks']>[number]): void {
@@ -234,30 +246,9 @@ async function buildRequest(definition: RequestDefinition, context: Record<strin
   const resolvedBody = await resolveTemplate(variant?.body ?? definition.body, context, resolveSecret);
   return {
     method: definition.method, url, headers, body: resolvedBody === undefined ? undefined : JSON.stringify(resolvedBody),
-    timeoutMs: definition.timeoutMs, idleTimeoutMs: definition.idleTimeoutMs, reconnect: definition.reconnect, redirectPolicy: definition.redirectPolicy, maxRedirects: definition.maxRedirects, secretValues,
+    timeoutMs: definition.timeoutMs ?? 120_000, idleTimeoutMs: definition.idleTimeoutMs, reconnect: definition.reconnect, redirectPolicy: definition.redirectPolicy, maxRedirects: definition.maxRedirects, secretValues,
     redacted: { method: definition.method, url: stripQuery(url), headers: Object.fromEntries(Object.keys(headers).map((key) => [key, '[REDACTED]'])), body: resolvedBody === undefined ? undefined : '[REDACTED]', variantId: variant?.id },
   };
-}
-
-async function readBoundedOpeningResponse(response: Response, entry: NetworkExchange): Promise<string> {
-  if (!response.body) return '';
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let text = '';
-  let bytes = 0;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done || !value) break;
-    bytes += value.byteLength;
-    entry.transferredBytes = bytes;
-    if (bytes > MAX_OPENING_RESPONSE_BYTES) {
-      entry.responseBodyTruncated = true;
-      await reader.cancel();
-      throw new Error(`Opening response exceeded ${MAX_OPENING_RESPONSE_BYTES} bytes.`);
-    }
-    text += decoder.decode(value, { stream: true });
-  }
-  return text + decoder.decode();
 }
 
 function matchesVariant(condition: NonNullable<RequestDefinition['variants']>[number]['when'], context: Record<string, unknown>): boolean {
@@ -271,7 +262,7 @@ function matchesVariant(condition: NonNullable<RequestDefinition['variants']>[nu
   if (condition.operator === 'contains') return Array.isArray(actual) ? actual.includes(expected) : String(actual ?? '').includes(String(expected));
   if (condition.operator === 'startsWith') return String(actual ?? '').startsWith(String(expected));
   if (condition.operator === 'endsWith') return String(actual ?? '').endsWith(String(expected));
-  if (condition.operator === 'regex') { try { return typeof expected === 'string' && expected.length <= 256 && new RegExp(expected).test(String(actual ?? '').slice(0, 4096)); } catch { return false; } }
+  if (condition.operator === 'regex') return isSafeRegexPattern(expected) && new RegExp(expected, 'u').test(String(actual ?? '').slice(0, 4096));
   return actual === expected;
 }
 

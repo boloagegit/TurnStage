@@ -3,6 +3,7 @@ import { redactDeep, redactHeaders, redactKnownSecrets } from '../security/secur
 import { errors } from '../errors';
 import { getPath, resolveTemplate, type ResolutionContext } from './templateResolver';
 import { localize } from '../l10n';
+import { isSafeRegexPattern } from '../../shared/regexSafety';
 
 function matches(variant: RequestVariant, context: ResolutionContext): boolean {
   if (!variant.when) return true;
@@ -18,8 +19,7 @@ function matches(variant: RequestVariant, context: ResolutionContext): boolean {
     case 'startsWith': return String(actual ?? '').startsWith(String(value));
     case 'endsWith': return String(actual ?? '').endsWith(String(value));
     case 'regex': {
-      if (typeof value !== 'string' || value.length > 256 || /\([^)]*[+*][^)]*\)[+*]/.test(value)) return false;
-      try { return new RegExp(value).test(String(actual ?? '').slice(0, 4096)); } catch { return false; }
+      return isSafeRegexPattern(value) && new RegExp(value, 'u').test(String(actual ?? '').slice(0, 4096));
     }
     default: return false;
   }
@@ -45,7 +45,7 @@ export class RequestBuilder {
     const body = resolvedBody === undefined ? undefined : JSON.stringify(resolvedBody);
     const knownSecrets = [...new Set(secretValues)];
     const redacted = redactKnownSecrets({ method: definition.method, url, headers: redactHeaders(headers), body: redactDeep(resolvedBody), variantId: variant?.id }, knownSecrets) as PreparedRequest['redacted'];
-    return { method: definition.method, url, headers, body, timeoutMs: definition.timeoutMs, idleTimeoutMs: definition.idleTimeoutMs, reconnect: definition.reconnect, redirectPolicy: definition.redirectPolicy, maxRedirects: definition.maxRedirects, secretValues: knownSecrets, redacted };
+    return { method: definition.method, url, headers, body, timeoutMs: definition.timeoutMs ?? 120_000, idleTimeoutMs: definition.idleTimeoutMs, reconnect: definition.reconnect, redirectPolicy: definition.redirectPolicy, maxRedirects: definition.maxRedirects, secretValues: knownSecrets, redacted };
   }
 }
 

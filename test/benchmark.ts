@@ -74,4 +74,17 @@ describe('TurnStage stream benchmarks', () => {
       reduceEvent(snapshot, { ...base, sequence: base.sequence + 2, type: 'followup.upsert', followup: { id: `followup-${index}`, label: 'Show another example', prompt: 'Show another example', behavior: 'send' } });
     }
   });
+
+  bench('reduce 5,000 correlated text deltas', () => {
+    const snapshot = createSnapshot(true);
+    for (let index = 0; index < 5_000; index += 1) reduceEvent(snapshot, {
+      version: 1,
+      type: 'content.text.delta',
+      sequence: index + 1,
+      rawSequence: index + 1,
+      receivedAt: index,
+      mappingRuleId: 'delta',
+      text: 'x',
+    });
+  });
 });

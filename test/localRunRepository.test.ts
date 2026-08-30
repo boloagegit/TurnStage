@@ -49,7 +49,7 @@ const mock = vi.hoisted(() => {
 
 vi.mock('vscode', () => ({ Uri: mock.Uri, workspace: mock.workspace, window: mock.window }));
 
-import { LOCAL_RUN_EXPORT_FORMAT, LOCAL_RUN_EXPORT_VERSION, MAX_RUN_IMPORT_BYTES, LocalRunRepository } from '../src/extension/history/localRunRepository';
+import { LOCAL_RUN_EXPORT_FORMAT, LOCAL_RUN_EXPORT_VERSION, MAX_RUN_IMPORT_BYTES, MAX_RUN_STORAGE_BYTES, LocalRunRepository } from '../src/extension/history/localRunRepository';
 import { SessionController } from '../src/extension/runtime/sessionController';
 
 describe('LocalRunRepository', () => {
@@ -69,6 +69,19 @@ describe('LocalRunRepository', () => {
     expect(await repository.list('broken')).toEqual([]);
     mock.files.set('/global-storage/runs/object.json', new TextEncoder().encode(JSON.stringify({ id: 'not-an-array' })));
     expect(await repository.list('object')).toEqual([]);
+  });
+
+  it('degrades oversized local evidence instead of creating an unbounded storage file', async () => {
+    const repository = makeRepository();
+    const oversized = run('oversized', 'bounded-profile', {
+      rawEvents: [{ sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: 'x'.repeat(MAX_RUN_STORAGE_BYTES + 1024), data: {} }],
+    });
+    await repository.save(oversized, 20);
+    const stored = mock.files.get('/global-storage/runs/bounded-profile.json')!;
+    expect(stored.byteLength).toBeLessThanOrEqual(MAX_RUN_STORAGE_BYTES);
+    const [saved] = await repository.list('bounded-profile');
+    expect(saved?.id).toBe('oversized');
+    expect(saved?.rawEvents).toBeUndefined();
   });
 
   it('saves and lists runs in profile-scoped global storage', async () => {

@@ -5,6 +5,11 @@ import { copyFileName, copyProfileId, duplicateProfileGroups, duplicateProfileTe
 import type { TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
 import { localize } from '../l10n';
 
+export const MAX_PROFILE_BYTES = 5 * 1024 * 1024;
+export const MAX_ENVIRONMENT_BYTES = 1024 * 1024;
+const MAX_DISCOVERED_FILES = 500;
+const READ_CONCURRENCY = 8;
+
 export interface ProfileEntry {
   uri: vscode.Uri;
   scope: ProfileScope;
@@ -35,12 +40,12 @@ export class ProfileRepository {
         const glob = vscode.workspace.getConfiguration('turnstage', folder.uri).get('profileGlob', '.vscode/turnstage/profiles/*.turnstage.jsonc');
         return vscode.workspace.findFiles(new vscode.RelativePattern(folder, glob), '**/{node_modules,.git}/**', 500);
       }));
-      const uris = [...new Map(perFolder.flat().map((uri) => [uri.toString(), uri])).values()];
-      entries.push(...await Promise.all(uris.map((uri) => this.read(uri, 'workspace'))));
+      const uris = [...new Map(perFolder.flat().map((uri) => [uri.toString(), uri])).values()].slice(0, MAX_DISCOVERED_FILES);
+      entries.push(...await mapWithConcurrency(uris, READ_CONCURRENCY, (uri) => this.read(uri, 'workspace')));
     }
     if (scope !== 'workspace') {
       const uris = await filesInDirectory(this.userProfileDirectory(), '.turnstage.jsonc');
-      entries.push(...await Promise.all(uris.map((uri) => this.read(uri, 'user'))));
+      entries.push(...await mapWithConcurrency(uris.slice(0, MAX_DISCOVERED_FILES), READ_CONCURRENCY, (uri) => this.read(uri, 'user')));
     }
     if (scope === undefined) {
       const workspaceIds = new Set(entries.filter((entry) => entry.scope === 'workspace').flatMap((entry) => entry.profile?.id ? [entry.profile.id] : []));
@@ -51,7 +56,8 @@ export class ProfileRepository {
   async read(uri: vscode.Uri, scope = this.scopeOf(uri)): Promise<ProfileEntry> {
     try {
       const openDocument = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString());
-      const text = openDocument?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+      const text = openDocument?.getText() ?? new TextDecoder().decode(await readBoundedBytes(uri, MAX_PROFILE_BYTES, localize('Profile files cannot exceed 5 MB.')));
+      if (Buffer.byteLength(text) > MAX_PROFILE_BYTES) throw new Error(localize('Profile files cannot exceed 5 MB.'));
       const parsed = this.codec.parse(text);
       const idNode = parsed.tree ? findNodeAtLocation(parsed.tree, ['id']) : undefined;
       const stringPadding = idNode?.type === 'string' ? 1 : 0;
@@ -67,7 +73,7 @@ export class ProfileRepository {
   }
 
   async import(source: vscode.Uri, destination: ProfileDestination): Promise<vscode.Uri> {
-    const bytes = await vscode.workspace.fs.readFile(source);
+    const bytes = await readBoundedBytes(source, MAX_PROFILE_BYTES, localize('Profile files cannot exceed 5 MB.'));
     const text = new TextDecoder().decode(bytes);
     const parsed = this.codec.parse(text);
     if (!parsed.profile || parsed.errors.length) throw new Error(localize('The selected file is not valid JSONC.'));
@@ -116,7 +122,9 @@ export class ProfileRepository {
 
   private async readText(uri: vscode.Uri): Promise<string> {
     const document = vscode.workspace.textDocuments.find((item) => item.uri.toString() === uri.toString());
-    return document?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+    const text = document?.getText() ?? new TextDecoder().decode(await readBoundedBytes(uri, MAX_PROFILE_BYTES, localize('Profile files cannot exceed 5 MB.')));
+    if (Buffer.byteLength(text) > MAX_PROFILE_BYTES) throw new Error(localize('Profile files cannot exceed 5 MB.'));
+    return text;
   }
 
   private async availableUri(uri: vscode.Uri, isCopy = false): Promise<vscode.Uri> {
@@ -160,8 +168,8 @@ export class EnvironmentRepository {
     const includeWorkspace = Boolean(workspaceFolder) || profileUri === undefined;
     const workspaceUris = includeWorkspace && vscode.workspace.workspaceFolders?.length ? await vscode.workspace.findFiles(pattern, '**/{node_modules,.git}/**', 100) : [];
     const userUris = await filesInDirectory(this.userEnvironmentDirectory(), '.environment.jsonc');
-    const workspaceEntries = await Promise.all(workspaceUris.map((uri) => this.read(uri, 'workspace')));
-    const userEntries = await Promise.all(userUris.map((uri) => this.read(uri, 'user')));
+    const workspaceEntries = await mapWithConcurrency(workspaceUris.slice(0, MAX_DISCOVERED_FILES), READ_CONCURRENCY, (uri) => this.read(uri, 'workspace'));
+    const userEntries = await mapWithConcurrency(userUris.slice(0, MAX_DISCOVERED_FILES), READ_CONCURRENCY, (uri) => this.read(uri, 'user'));
     const effective = new Map<string, EnvironmentEntry>();
     for (const entry of [...workspaceEntries, ...userEntries]) if (entry.environment?.id && !effective.has(entry.environment.id)) effective.set(entry.environment.id, entry);
     return [...effective.values()];
@@ -172,7 +180,7 @@ export class EnvironmentRepository {
   }
 
   private async read(uri: vscode.Uri, scope: ProfileScope): Promise<EnvironmentEntry> {
-    const text = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+    const text = new TextDecoder().decode(await readBoundedBytes(uri, MAX_ENVIRONMENT_BYTES, localize('Environment files cannot exceed 1 MB.')));
     return { uri, scope, environment: this.codec.parse(text).profile as unknown as TurnStageEnvironment };
   }
 }
@@ -187,4 +195,24 @@ async function filesInDirectory(directory: vscode.Uri | undefined, suffix: strin
   } catch {
     return [];
   }
+}
+
+async function readBoundedBytes(uri: vscode.Uri, maxBytes: number, message: string): Promise<Uint8Array> {
+  const stat = await vscode.workspace.fs.stat(uri);
+  if (stat.size > maxBytes) throw new Error(message);
+  const bytes = await vscode.workspace.fs.readFile(uri);
+  if (bytes.byteLength > maxBytes) throw new Error(message);
+  return bytes;
+}
+
+async function mapWithConcurrency<T, R>(items: readonly T[], concurrency: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+  const output = new Array<R>(items.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      output[index] = await worker(items[index]!);
+    }
+  }));
+  return output;
 }

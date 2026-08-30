@@ -8,6 +8,7 @@ import { scenarioPerformanceMetrics } from '../testing/performanceEvaluator';
 import { isSafeAdversarialSuitePath, MAX_ADVERSARIAL_REPETITIONS, MAX_ADVERSARIAL_RULES, MAX_ADVERSARIAL_TURNS_PER_CASE } from '../testing/adversarialSuite';
 import { validateSourceBinding } from '../testing/impactMapping';
 import { validateQualityRubrics } from '../copilot/quality/policy';
+import { isSafeRegexPattern } from '../../shared/regexSafety';
 
 export interface ValidationIssue { severity: 'error' | 'warning'; message: string; offset: number; length: number }
 
@@ -33,8 +34,8 @@ function validatesRegex(condition: MatchCondition): string | undefined {
   if (condition.operator !== 'regex') return;
   if (typeof condition.value !== 'string') return localize('Regex match value must be a string.');
   if (condition.value.length > 256) return localize('Regex patterns are limited to 256 characters.');
-  if (/\([^)]*[+*][^)]*\)[+*]/.test(condition.value)) return localize('Potentially unsafe nested quantifier.');
-  try { new RegExp(condition.value); } catch { return localize('Invalid regular expression.'); }
+  try { new RegExp(condition.value, 'u'); } catch { return localize('Invalid regular expression.'); }
+  if (!isSafeRegexPattern(condition.value)) return localize('Potentially unsafe nested quantifier.');
 }
 
 function requestTemplatePaths(request: Partial<RequestDefinition> | undefined): string[] {

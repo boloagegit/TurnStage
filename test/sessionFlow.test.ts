@@ -113,12 +113,12 @@ describe('SessionController end-to-end functional flow', () => {
       kind: 'stream', attempt: 1, method: 'POST', status: 200, state: 'completed',
       protocol: 'sse', transferredBytes: expect.any(Number), eventCount: 6,
       timing: { headers: expect.any(Number), firstChunk: expect.any(Number), total: expect.any(Number) },
-      requestHeaders: { Authorization: 'Bearer test-token' },
+      requestHeaders: { Authorization: 'Bearer ••••••••' },
     });
     expect(networkEntries[0]?.responseHeaders).toMatchObject({ 'content-type': expect.stringContaining('text/event-stream') });
     expect(networkEntries[0]?.requestHeaders).toMatchObject({ Cookie: '••••••••', 'X-API-Key': '••••••••', 'X-Custom-Trace': 'prefix-••••••••' });
     expect(networkEntries[0]?.responseBodyPreview).toContain('sample result');
-    expect(JSON.stringify(networkEntries)).toContain('Bearer test-token');
+    expect(JSON.stringify(networkEntries)).not.toContain('Bearer test-token');
     expect(JSON.stringify(networkEntries)).not.toContain('local-cookie');
     expect(JSON.stringify(networkEntries)).not.toContain('local-api-key');
     expect(outputText).not.toContain('local-cookie');

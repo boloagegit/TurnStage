@@ -69,6 +69,12 @@ describe('PNG visual regression comparison', () => {
     expect(PNG.sync.read(Buffer.from(result.diff))).toMatchObject({ width: 2, height: 1 });
   });
 
+  it('rejects a tiny PNG payload that advertises unsafe decoded dimensions', () => {
+    const hostile = Uint8Array.from(png(1, 1));
+    new DataView(hostile.buffer).setUint32(16, 100_000);
+    expect(() => comparePng(hostile, png(1, 1))).toThrow(/dimensions exceed/i);
+  });
+
   it('stores a viewport-specific baseline and writes a diff for a failed comparison', async () => {
     mock.files.clear();
     const service = new VisualRegressionService({ globalStorageUri: mock.uri('/global') } as never);

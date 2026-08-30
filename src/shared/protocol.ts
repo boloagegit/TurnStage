@@ -105,6 +105,7 @@ const MAX_ID_LENGTH = 1024;
 const MAX_TEXT_LENGTH = 1024 * 1024;
 const MAX_VALUE_DEPTH = 24;
 const MAX_VALUE_NODES = 20_000;
+const MAX_HOST_VALUE_NODES = 250_000;
 const MAX_PNG_DATA_URL_LENGTH = 32 * 1024 * 1024 + 64;
 const interactionKinds = new Set<InteractionContext['kind']>(['manual', 'starter', 'followup', 'responseAction', 'formSubmit', 'retry']);
 const streamProtocols = new Set<RawStreamEvent['protocol']>(['sse', 'ndjson', 'json', 'text-stream', 'fixture']);
@@ -115,19 +116,19 @@ function isBoundedString(value: unknown, max = MAX_ID_LENGTH): value is string {
 function optionalBoundedString(value: unknown): boolean { return value === undefined || isBoundedString(value); }
 
 /** Bound depth and node count before host code traverses attacker-controlled values. */
-function isStructuredValue(value: unknown): boolean {
+function isStructuredValue(value: unknown, maxNodes = MAX_VALUE_NODES): boolean {
   const seen = new WeakSet<object>();
   let nodes = 0;
   const visit = (item: unknown, depth: number): boolean => {
-    if (++nodes > MAX_VALUE_NODES || depth > MAX_VALUE_DEPTH) return false;
+    if (++nodes > maxNodes || depth > MAX_VALUE_DEPTH) return false;
     if (item === null || typeof item === 'boolean' || typeof item === 'number') return true;
     if (typeof item === 'string') return item.length <= MAX_TEXT_LENGTH;
     if (typeof item !== 'object') return false;
     if (seen.has(item)) return false;
     seen.add(item);
-    if (Array.isArray(item)) return item.length <= MAX_VALUE_NODES && item.every((child) => visit(child, depth + 1));
+    if (Array.isArray(item)) return item.length <= maxNodes && item.every((child) => visit(child, depth + 1));
     const entries = Object.entries(item as Record<string, unknown>);
-    return entries.length <= MAX_VALUE_NODES && entries.every(([key, child]) => key.length <= MAX_ID_LENGTH && visit(child, depth + 1));
+    return entries.length <= maxNodes && entries.every(([key, child]) => key.length <= MAX_ID_LENGTH && visit(child, depth + 1));
   };
   return visit(value, 0);
 }
@@ -203,20 +204,20 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'host.ready': return typeof message.trusted === 'boolean' && optionalBoundedString(message.remoteName) && isBoundedString(message.locale, 64) && (message.direction === 'ltr' || message.direction === 'rtl');
     case 'workspace.section': return isWorkspaceSection(message.section);
     case 'inspector.focus': return (message.tab === 'Network' || message.tab === 'Raw Events' || message.tab === 'Normalized') && optionalBoundedString(message.evidenceId) && optionalBoundedString(message.networkId) && optionalBoundedString(message.messageId) && (message.sequence === undefined || (Number.isInteger(message.sequence) && Number(message.sequence) >= 0));
-    case 'profile.snapshot': return (message.profile === undefined || (isRecord(message.profile) && isStructuredValue(message.profile))) && optionalBoundedString(message.parseError) && Number.isInteger(message.version) && Array.isArray(message.environments) && message.environments.every((item) => isBoundedString(item));
+    case 'profile.snapshot': return (message.profile === undefined || (isRecord(message.profile) && isStructuredValue(message.profile, MAX_HOST_VALUE_NODES))) && optionalBoundedString(message.parseError) && Number.isInteger(message.version) && Array.isArray(message.environments) && message.environments.every((item) => isBoundedString(item));
     case 'profile.validation': return Array.isArray(message.diagnostics) && message.diagnostics.length <= 10_000 && message.diagnostics.every((item) => isRecord(item) && (item.severity === 'error' || item.severity === 'warning') && isBoundedString(item.message, MAX_TEXT_LENGTH) && Number.isInteger(item.offset) && Number(item.offset) >= 0 && Number.isInteger(item.length) && Number(item.length) >= 0);
     case 'profile.validated': return typeof message.valid === 'boolean';
-    case 'session.snapshot': return isRecord(message.snapshot) && Array.isArray(message.runs) && isStructuredValue(message.snapshot) && isStructuredValue(message.runs) && (message.requestPreview === undefined || isStructuredValue(message.requestPreview)) && (message.networkEntries === undefined || (Array.isArray(message.networkEntries) && isStructuredValue(message.networkEntries)));
-    case 'mapping.test.result': return isRecord(message.result) && isStructuredValue(message.result);
+    case 'session.snapshot': return isRecord(message.snapshot) && Array.isArray(message.runs) && isStructuredValue(message.snapshot, MAX_HOST_VALUE_NODES) && isStructuredValue(message.runs, MAX_HOST_VALUE_NODES) && (message.requestPreview === undefined || isStructuredValue(message.requestPreview, MAX_HOST_VALUE_NODES)) && (message.networkEntries === undefined || (Array.isArray(message.networkEntries) && isStructuredValue(message.networkEntries, MAX_HOST_VALUE_NODES)));
+    case 'mapping.test.result': return isRecord(message.result) && isStructuredValue(message.result, MAX_HOST_VALUE_NODES);
     case 'request.error': return isRecord(message.error) && isBoundedString(message.error.type) && isBoundedString(message.error.message, MAX_TEXT_LENGTH);
     case 'action.feedback': return isBoundedString(message.actionId) && isBoundedString(message.sourceMessageId) && (message.status === 'success' || message.status === 'error') && isBoundedString(message.message, MAX_TEXT_LENGTH);
     case 'form.accepted': return isBoundedString(message.formId) && optionalBoundedString(message.sourceMessageId);
     case 'run.imported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedString(message.runId) && typeof message.duplicate === 'boolean';
     case 'run.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH);
     case 'adversarial.operation': return ['importCsv', 'importJsonc', 'linkJsonc', 'exportCsv', 'exportJsonc', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path);
-    case 'test.results': return Array.isArray(message.results) && message.results.length <= 10_000 && isStructuredValue(message.results);
-    case 'test.timeline': return isBoundedString(message.evidenceId) && isRecord(message.timeline) && isStructuredValue(message.timeline);
-    case 'connection.result': return isConnectionDoctorResult(message.result) && isStructuredValue(message.result);
+    case 'test.results': return Array.isArray(message.results) && message.results.length <= 10_000 && isStructuredValue(message.results, MAX_HOST_VALUE_NODES);
+    case 'test.timeline': return isBoundedString(message.evidenceId) && isRecord(message.timeline) && isStructuredValue(message.timeline, MAX_HOST_VALUE_NODES);
+    case 'connection.result': return isConnectionDoctorResult(message.result) && isStructuredValue(message.result, MAX_HOST_VALUE_NODES);
     case 'adversarial.captured': return isBoundedString(message.detail, MAX_TEXT_LENGTH);
     case 'visual.result': return (message.operation === 'baseline' || message.operation === 'compare') && ['saved', 'passed', 'failed'].includes(String(message.status)) && optionalBoundedString(message.baselinePath) && optionalBoundedString(message.diffPath) && (message.differencePercent === undefined || (typeof message.differencePercent === 'number' && Number.isFinite(message.differencePercent) && message.differencePercent >= 0 && message.differencePercent <= 100));
     case 'workspaceTrust.changed': return typeof message.trusted === 'boolean';

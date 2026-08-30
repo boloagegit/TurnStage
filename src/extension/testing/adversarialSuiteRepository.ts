@@ -16,6 +16,7 @@ export async function loadAdversarialSuite(profileUri: vscode.Uri, path: string)
   const folder = vscode.workspace.getWorkspaceFolder(profileUri);
   if (!folder) throw new Error(`Adversarial suite ${path} cannot be resolved because the profile is not inside a workspace folder.`);
   const uri = vscode.Uri.joinPath(folder.uri, ...path.split('/'));
+  if ((await vscode.workspace.fs.stat(uri)).size > MAX_SUITE_BYTES) throw new Error(`Adversarial suite ${path} exceeds the 5 MB limit.`);
   const bytes = await vscode.workspace.fs.readFile(uri);
   if (bytes.byteLength > MAX_SUITE_BYTES) throw new Error(`Adversarial suite ${path} exceeds the 5 MB limit.`);
   const parsed = parseAdversarialSuite(new TextDecoder().decode(bytes));

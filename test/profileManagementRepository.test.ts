@@ -29,7 +29,7 @@ const mock = vi.hoisted(() => {
       readDirectory: async (uri: Uri) => [...files.keys()]
         .filter((path) => path.startsWith(`${uri.path.replace(/\/$/, '')}/`) && !path.slice(uri.path.length + 1).includes('/'))
         .map((path) => [path.slice(path.lastIndexOf('/') + 1), 1] as [string, number]),
-      stat: async (uri: Uri) => { if (!files.has(uri.path)) throw new Error('Not found'); return { type: 1 }; },
+      stat: async (uri: Uri) => { const value = files.get(uri.path); if (!value) throw new Error('Not found'); return { type: 1, size: value.byteLength }; },
     },
   };
   return { Uri, RelativePattern, files, workspace, FileType: { File: 1 } };
@@ -92,6 +92,14 @@ describe('ProfileRepository management', () => {
     const target = await new ProfileRepository(new mock.Uri('/global') as never).import(source as never, 'user');
 
     expect(target.path).toBe('/global/configuration/profiles/shared.turnstage.jsonc');
+  });
+
+  it('rejects oversized profile input before parsing or copying it', async () => {
+    const source = new mock.Uri('/downloads/oversized.json');
+    mock.files.set(source.path, new Uint8Array(5 * 1024 * 1024 + 1));
+    const repository = new ProfileRepository();
+    await expect(repository.import(source as never, mock.workspace.workspaceFolders[0] as never)).rejects.toThrow(/5 MB/i);
+    await expect(repository.read(source as never)).resolves.toMatchObject({ error: expect.stringMatching(/5 MB/i) });
   });
 
   it('uses a workspace environment before a user environment with the same id', async () => {

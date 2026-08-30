@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { parse, parseTree } from 'jsonc-parser';
 import type { ScenarioCheckResult, ScenarioDefinition, ScenarioRunResult, TurnStageEnvironment, TurnStageProfile } from '../shared/types';
@@ -23,6 +23,15 @@ interface LoadedCase {
   environments: TurnStageEnvironment[];
 }
 
+const MAX_PROFILE_BYTES = 5 * 1024 * 1024;
+const MAX_ENVIRONMENT_BYTES = 1024 * 1024;
+const MAX_SUITE_BYTES = 5 * 1024 * 1024;
+const MAX_MANIFEST_BYTES = 20 * 1024 * 1024;
+const MAX_EVIDENCE_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_TOTAL_EVIDENCE_BYTES = 100 * 1024 * 1024;
+const MAX_CLI_CASES = 500;
+const DEFAULT_MAX_REQUESTS = 10_000;
+
 export class NodeCliRuntime implements CliExecutionRuntime {
   constructor(private readonly version: string, private readonly cwd = process.cwd()) {}
 
@@ -37,11 +46,17 @@ export class NodeCliRuntime implements CliExecutionRuntime {
         selected = selected.filter((item) => ids.has(item.key));
       }
       if (!selected.length) return { records: [{ id: 'selection', outcome: 'policy' }] };
+      if (selected.length > MAX_CLI_CASES) return { records: [{ id: 'selection-cap', outcome: 'policy' }] };
 
       const repetitions = request.policy.repetitions;
       const selectedWithPolicy = selected.map((item) => ({ ...item, scenario: applyPolicy(item.scenario, repetitions, request.policy.timeoutMs, request.policy.failFast) }));
-      const plannedRequests = selectedWithPolicy.reduce((sum, item) => sum + item.scenario.steps.length * (item.scenario.adversarial?.repetitions ?? 1), 0);
-      if (request.policy.maxRequests !== undefined && plannedRequests > request.policy.maxRequests) return { records: [{ id: 'request-budget', outcome: 'policy' }] };
+      const plannedRequests = selectedWithPolicy.reduce((sum, item) => {
+        const executions = item.scenario.comparison ? 2 : item.scenario.adversarial?.repetitions ?? 1;
+        const turns = Math.max(1, Math.min(item.scenario.steps.length, item.scenario.adversarial?.maxTurns ?? item.scenario.steps.length));
+        const opening = item.profile.opening?.mode === 'request' ? 1 : 0;
+        return sum + (turns + opening) * executions;
+      }, 0);
+      if (plannedRequests > (request.policy.maxRequests ?? DEFAULT_MAX_REQUESTS)) return { records: [{ id: 'request-budget', outcome: 'policy' }] };
 
       const records = await runPool(selectedWithPolicy, request.policy.concurrency ?? 3, signal, (item) => runCase(item, workspaceRoot, signal));
       const runId = crypto.randomUUID();
@@ -64,11 +79,15 @@ export class NodeCliRuntime implements CliExecutionRuntime {
   async verify(request: CliVerifyRequest): Promise<CliExecutionResult> {
     try {
       const path = resolve(this.cwd, request.manifestPath);
-      const manifest = JSON.parse(await readFile(path, 'utf8')) as ProvenanceManifest;
+      const manifest = JSON.parse(await readBoundedUtf8(path, MAX_MANIFEST_BYTES)) as ProvenanceManifest;
       const files: ProvenanceFileInput[] = [];
+      let totalEvidenceBytes = 0;
       for (const file of manifest.files ?? []) {
         const target = resolveSafe(dirname(path), file.path);
-        files.push({ path: file.path, contents: new Uint8Array(await readFile(target)) });
+        const contents = new Uint8Array(await readBoundedBytes(target, MAX_EVIDENCE_FILE_BYTES));
+        totalEvidenceBytes += contents.byteLength;
+        if (totalEvidenceBytes > MAX_TOTAL_EVIDENCE_BYTES) throw new Error('Evidence files exceed the total safety limit.');
+        files.push({ path: file.path, contents });
       }
       const verification = verifyProvenanceManifest(manifest, { evidenceFiles: files });
       return { manifestDigest: manifest.manifestDigest, verification: { valid: verification.valid, manifestValid: verification.manifestValid, errors: verification.errors } };
@@ -81,23 +100,30 @@ export class NodeCliRuntime implements CliExecutionRuntime {
 async function loadCases(workspaceRoot: string, configured: readonly string[]): Promise<LoadedCase[]> {
   const profileFiles = configured.length ? configured.map((value) => resolveSafe(workspaceRoot, value)) : await discoverFiles(resolve(workspaceRoot, '.vscode/turnstage/profiles'), /\.turnstage\.jsonc?$/i);
   if (!profileFiles.length) throw new Error('No TurnStage profiles were found.');
-  const environments = [builtInEnvironment(), ...(await Promise.all((await discoverFiles(resolve(workspaceRoot, '.vscode/turnstage/environments'), /\.environment\.jsonc?$/i)).map((path) => readJsonc<TurnStageEnvironment>(path))))];
+  if (profileFiles.length > MAX_CLI_CASES) throw new Error('Too many profile files were selected.');
+  const environments = [builtInEnvironment(), ...(await Promise.all((await discoverFiles(resolve(workspaceRoot, '.vscode/turnstage/environments'), /\.environment\.jsonc?$/i)).map((path) => readJsonc<TurnStageEnvironment>(path, MAX_ENVIRONMENT_BYTES))))];
   const uniqueEnvironments = [...new Map(environments.map((item) => [item.id, item])).values()];
   const result: LoadedCase[] = [];
   for (const profilePath of profileFiles) {
-    const text = await readFile(profilePath, 'utf8');
+    const text = await readBoundedUtf8(profilePath, MAX_PROFILE_BYTES);
     const profile = parse(text, [], { allowTrailingComma: true, disallowComments: false }) as TurnStageProfile;
     const tree = parseTree(text, [], { allowTrailingComma: true, disallowComments: false });
     const issues = new ProfileValidator().validate(profile, tree, uniqueEnvironments);
     if (issues.some((issue) => issue.severity === 'error')) throw new Error('Profile validation failed.');
-    for (const scenario of profile.tests?.scenarios ?? []) result.push({ key: `${profile.id}/inline/${scenario.id}`, profile, scenario, environments: uniqueEnvironments });
+    for (const scenario of profile.tests?.scenarios ?? []) {
+      if (result.length >= MAX_CLI_CASES) throw new Error('The selected profiles contain too many test cases.');
+      result.push({ key: `${profile.id}/inline/${scenario.id}`, profile, scenario, environments: uniqueEnvironments });
+    }
     for (const suitePath of profile.tests?.adversarialSuites ?? []) {
       const path = resolveSafe(workspaceRoot, suitePath);
-      const parsed = parseAdversarialSuite(await readFile(path, 'utf8'));
+      const parsed = parseAdversarialSuite(await readBoundedUtf8(path, MAX_SUITE_BYTES));
       if (!parsed.suite || parsed.parseErrors.length || parsed.issues.length) throw new Error('Adversarial suite validation failed.');
       const scenarios = normalizeAdversarialSuite(parsed.suite);
       if (validateAdversarialScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new Error('Adversarial suite is incompatible with its profile.');
-      for (const scenario of scenarios) result.push({ key: `${profile.id}/${parsed.suite.id}/${scenario.id}`, profile, scenario, suiteId: parsed.suite.id, suite: parsed.suite, environments: uniqueEnvironments });
+      for (const scenario of scenarios) {
+        if (result.length >= MAX_CLI_CASES) throw new Error('The selected profiles contain too many test cases.');
+        result.push({ key: `${profile.id}/${parsed.suite.id}/${scenario.id}`, profile, scenario, suiteId: parsed.suite.id, suite: parsed.suite, environments: uniqueEnvironments });
+      }
     }
   }
   return result;
@@ -166,11 +192,19 @@ async function runPool<T, R>(items: readonly T[], concurrency: number, signal: A
 }
 
 async function discoverFiles(directory: string, pattern: RegExp): Promise<string[]> {
-  try { return (await readdir(directory, { withFileTypes: true })).filter((item) => item.isFile() && pattern.test(item.name)).map((item) => resolve(directory, item.name)).sort(); }
+  try { return (await readdir(directory, { withFileTypes: true })).filter((item) => item.isFile() && pattern.test(item.name)).map((item) => resolve(directory, item.name)).sort().slice(0, MAX_CLI_CASES); }
   catch { return []; }
 }
 
-async function readJsonc<T>(path: string): Promise<T> { return parse(await readFile(path, 'utf8'), [], { allowTrailingComma: true, disallowComments: false }) as T; }
+async function readJsonc<T>(path: string, maxBytes: number): Promise<T> { return parse(await readBoundedUtf8(path, maxBytes), [], { allowTrailingComma: true, disallowComments: false }) as T; }
+
+async function readBoundedUtf8(path: string, maxBytes: number): Promise<string> { return new TextDecoder().decode(await readBoundedBytes(path, maxBytes)); }
+async function readBoundedBytes(path: string, maxBytes: number): Promise<Uint8Array> {
+  if ((await stat(path)).size > maxBytes) throw new Error('File exceeds the safety limit.');
+  const bytes = new Uint8Array(await readFile(path));
+  if (bytes.byteLength > maxBytes) throw new Error('File exceeds the safety limit.');
+  return bytes;
+}
 
 function resolveSafe(root: string, value: string): string {
   const target = resolve(root, value);

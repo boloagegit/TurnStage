@@ -18,9 +18,15 @@ const actionAppearances = new Set<NonNullable<ResponseAction['appearance']>>(['p
 const citationKinds = new Set<NonNullable<Citation['kind']>>(['url', 'file', 'symbol', 'artifact']);
 const replayStatuses = new Set<ReplaySnapshot['status']>(['idle', 'playing', 'paused', 'completed', 'stopped']);
 const replaySpeeds = new Set<ReplaySnapshot['speed']>([0.25, 0.5, 1, 2, 4]);
+const MAX_STORED_RUNS = 100;
+const MAX_STORED_EVENTS = 10_000;
+const MAX_STORED_MESSAGES = 5_000;
+const MAX_STORED_PARTS = 1_000;
+const MAX_STORED_ENTITIES = 500;
 export const LOCAL_RUN_EXPORT_FORMAT = 'turnstage-run' as const;
 export const LOCAL_RUN_EXPORT_VERSION = 1 as const;
 export const MAX_RUN_IMPORT_BYTES = 20 * 1024 * 1024;
+export const MAX_RUN_STORAGE_BYTES = 20 * 1024 * 1024;
 
 export interface LocalRunImportResult {
   run: LocalRun;
@@ -36,26 +42,32 @@ export class LocalRunRepository {
   async list(profileId: string): Promise<LocalRun[]> {
     if (!isNonEmptyString(profileId)) return [];
     try {
-      const parsed: unknown = JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(this.uri(profileId))));
+      const uri = this.uri(profileId);
+      if ((await vscode.workspace.fs.stat(uri)).size > MAX_RUN_STORAGE_BYTES) return [];
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      if (bytes.byteLength > MAX_RUN_STORAGE_BYTES) return [];
+      const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
       return sanitizeLocalRuns(parsed, profileId);
     } catch {
       return [];
     }
   }
 
-  async save(run: LocalRun, retention: number): Promise<void> {
+  async save(run: LocalRun, retention: number): Promise<LocalRun[]> {
     const profileId = isRecord(run) && isNonEmptyString(run.profileId) ? run.profileId : undefined;
-    if (!profileId) return;
+    if (!profileId) return [];
     const uri = this.uri(profileId);
-    await withQueue(localSaveQueues, uri.toString(), async () => {
+    return withQueue(localSaveQueues, uri.toString(), async () => {
       const safeRun = sanitizeLocalRun(run, profileId);
-      if (!safeRun) return;
+      if (!safeRun) return [];
       const runs = [safeRun, ...(await this.list(profileId)).filter((item) => item.id !== safeRun.id)].slice(0, normalizeRetention(retention));
       await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, '..'));
       // VS Code's workspace.fs adapters and the repository fakes do not expose a
       // common atomic replace contract. The in-process queue makes this
       // read-modify-write sequence lossless for concurrent extension callers.
-      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify(runs)));
+      const bytes = encodeBoundedRuns(runs);
+      await vscode.workspace.fs.writeFile(uri, bytes);
+      return sanitizeLocalRuns(JSON.parse(new TextDecoder().decode(bytes)) as unknown, profileId);
     });
   }
 
@@ -63,7 +75,9 @@ export class LocalRunRepository {
     const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`${run.profileId}-${run.id}.turnstage-run.json`), filters: { 'TurnStage Run': ['json'] } });
     if (uri) {
       const exported = { format: LOCAL_RUN_EXPORT_FORMAT, version: LOCAL_RUN_EXPORT_VERSION, exportedAt: Date.now(), run };
-      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify(exported, null, 2)));
+      const bytes = new TextEncoder().encode(JSON.stringify(exported, null, 2));
+      if (bytes.byteLength > MAX_RUN_IMPORT_BYTES) throw new Error(localize('The run is larger than {size} MB and cannot be exported as an importable bundle.', { size: MAX_RUN_IMPORT_BYTES / 1024 / 1024 }));
+      await vscode.workspace.fs.writeFile(uri, bytes);
     }
     return uri;
   }
@@ -100,11 +114,35 @@ export class LocalRunRepository {
       const imported = duplicate ? { ...safeRun, id: crypto.randomUUID() } : safeRun;
       const runs = [imported, ...existing.filter((run) => run.id !== imported.id)].slice(0, normalizeRetention(retention));
       await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(storageUri, '..'));
-      await vscode.workspace.fs.writeFile(storageUri, new TextEncoder().encode(JSON.stringify(runs)));
+      await vscode.workspace.fs.writeFile(storageUri, encodeBoundedRuns(runs));
       return { run: imported, duplicate };
     });
     return { ...stored, uri };
   }
+}
+
+function encodeBoundedRuns(source: LocalRun[]): Uint8Array {
+  const runs = source.map((run) => ({ ...run }));
+  for (const run of runs) {
+    const observedRawBytes = run.rawEvents?.reduce((total, event) => total + Buffer.byteLength(event.raw), 0) ?? 0;
+    if (Math.max(run.metrics.byteCount, observedRawBytes) > MAX_RUN_STORAGE_BYTES / 2) {
+      delete run.normalizedEvents;
+      delete run.snapshot;
+    }
+  }
+  const encoder = new TextEncoder();
+  let bytes = encoder.encode(JSON.stringify(runs));
+  while (bytes.byteLength > MAX_RUN_STORAGE_BYTES && runs.length > 1) {
+    runs.pop();
+    bytes = encoder.encode(JSON.stringify(runs));
+  }
+  const newest = runs[0];
+  for (const field of ['rawEvents', 'normalizedEvents', 'snapshot'] as const) {
+    if (bytes.byteLength <= MAX_RUN_STORAGE_BYTES || !newest) break;
+    delete newest[field];
+    bytes = encoder.encode(JSON.stringify(runs));
+  }
+  return bytes.byteLength <= MAX_RUN_STORAGE_BYTES ? bytes : encoder.encode('[]');
 }
 
 function withQueue<T>(queues: Map<string, Promise<void>>, key: string, operation: () => Promise<T>): Promise<T> {
@@ -118,7 +156,7 @@ function withQueue<T>(queues: Map<string, Promise<void>>, key: string, operation
 }
 
 function sanitizeLocalRuns(value: unknown, profileId: string): LocalRun[] {
-  if (!Array.isArray(value)) return [];
+  if (!Array.isArray(value) || value.length > MAX_STORED_RUNS) return [];
   return value.flatMap((item) => {
     const safe = sanitizeLocalRun(item, profileId);
     return safe ? [safe] : [];
@@ -169,7 +207,7 @@ function sanitizeRedactedRequest(value: unknown): LocalRun['request'] | undefine
 }
 
 function sanitizeRawEvents(value: unknown): RawStreamEvent[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_STORED_EVENTS) return undefined;
   const events: RawStreamEvent[] = [];
   for (const item of value) {
     const record = asRecord(item);
@@ -209,7 +247,7 @@ function sanitizeSse(value: unknown): NonNullable<RawStreamEvent['sse']> | undef
 }
 
 function sanitizeNormalizedEvents(value: unknown): NormalizedEvent[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_STORED_EVENTS) return undefined;
   const events: NormalizedEvent[] = [];
   for (const item of value) {
     const record = asRecord(item);
@@ -329,7 +367,7 @@ function sanitizeSnapshot(value: unknown): SessionSnapshot | undefined {
 }
 
 function sanitizeMessages(value: unknown): ChatMessage[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_STORED_MESSAGES) return undefined;
   const messages: ChatMessage[] = [];
   for (const item of value) {
     const record = asRecord(item);
@@ -369,7 +407,7 @@ function sanitizeMessages(value: unknown): ChatMessage[] | undefined {
 }
 
 function sanitizeMessageMetrics(value: unknown): MessageMetric[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_STORED_ENTITIES) return undefined;
   const metrics: MessageMetric[] = [];
   for (const item of value) {
     const record = asRecord(item);
@@ -403,7 +441,7 @@ function isMetricValue(value: unknown): value is MessageMetric['value'] {
 }
 
 function sanitizeMessageParts(value: unknown): MessagePart[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_STORED_PARTS) return undefined;
   const parts: MessagePart[] = [];
   for (const item of value) {
     const record = asRecord(item);
@@ -415,7 +453,7 @@ function sanitizeMessageParts(value: unknown): MessagePart[] | undefined {
 }
 
 function sanitizeCitations(value: unknown): Citation[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_STORED_ENTITIES) return undefined;
   const citations: Citation[] = [];
   for (const item of value) {
     const record = asRecord(item);
@@ -428,7 +466,7 @@ function sanitizeCitations(value: unknown): Citation[] | undefined {
 }
 
 function sanitizeActions(value: unknown): ResponseAction[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_STORED_ENTITIES) return undefined;
   const actions: ResponseAction[] = [];
   for (const item of value) {
     const record = asRecord(item);
@@ -446,7 +484,7 @@ function sanitizeActions(value: unknown): ResponseAction[] | undefined {
 }
 
 function sanitizeFollowups(value: unknown): Followup[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_STORED_ENTITIES) return undefined;
   const followups: Followup[] = [];
   for (const item of value) {
     const record = asRecord(item);
@@ -460,7 +498,7 @@ function sanitizeFollowups(value: unknown): Followup[] | undefined {
 }
 
 function sanitizeErrors(value: unknown): RuntimeErrorData[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_STORED_ENTITIES) return undefined;
   const errors: RuntimeErrorData[] = [];
   for (const item of value) {
     const error = sanitizeRuntimeError(item);
@@ -478,7 +516,7 @@ function sanitizeOpening(value: unknown): SessionSnapshot['opening'] | undefined
 }
 
 function sanitizeStarters(value: unknown): Starter[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_STORED_ENTITIES) return undefined;
   const starters: Starter[] = [];
   for (const item of value) {
     const record = asRecord(item);
@@ -496,7 +534,7 @@ function sanitizeReplay(value: unknown): ReplaySnapshot | undefined {
 }
 
 function sanitizeRemoteSessions(value: unknown): RemoteSessionReference[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_STORED_ENTITIES) return undefined;
   const references: RemoteSessionReference[] = [];
   for (const item of value) {
     const record = asRecord(item);
@@ -518,9 +556,9 @@ function asRecord(value: unknown): UnknownRecord | undefined {
 }
 
 function isRecord(value: unknown): value is UnknownRecord { return asRecord(value) !== undefined; }
-function isNonEmptyString(value: unknown): value is string { return typeof value === 'string' && value.length > 0; }
+function isNonEmptyString(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= 1024 * 1024; }
 function isFiniteNumber(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value); }
 function isNonNegativeNumber(value: unknown): value is number { return isFiniteNumber(value) && value >= 0; }
 function isTimestamp(value: unknown): value is number { return isNonNegativeNumber(value) && Number.isFinite(new Date(value).getTime()); }
-function isStringRecord(value: unknown): value is Record<string, string> { return isRecord(value) && Object.values(value).every((item) => typeof item === 'string'); }
-function normalizeRetention(value: number): number { return isFiniteNumber(value) ? Math.max(0, Math.floor(value)) : 0; }
+function isStringRecord(value: unknown): value is Record<string, string> { return isRecord(value) && Object.keys(value).length <= 1000 && Object.entries(value).every(([key, item]) => key.length <= 1024 && typeof item === 'string' && item.length <= 1024 * 1024); }
+function normalizeRetention(value: number): number { return isFiniteNumber(value) ? Math.min(100, Math.max(0, Math.floor(value))) : 0; }

@@ -28,15 +28,26 @@ export function redactDeep(value: unknown): unknown {
 export function redactKnownSecrets(value: unknown, secrets: readonly unknown[]): unknown {
   if (value === undefined || value === null || !secrets.length) return value;
   if (typeof value === 'string') {
-    return secrets.reduce<string>((result, secret) => {
-      if (typeof secret !== 'string' || !secret.length) return result;
-      return result.split(secret).join(SECRET_REDACTION);
-    }, value);
+    return secretRepresentations(secrets).reduce((result, secret) => result.split(secret).join(SECRET_REDACTION), value);
   }
   if (typeof value === 'number' || typeof value === 'boolean') return secrets.some((secret) => Object.is(secret, value)) ? SECRET_REDACTION : value;
   if (Array.isArray(value)) return value.map((item) => redactKnownSecrets(item, secrets));
   if (typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, redactKnownSecrets(item, secrets)]));
   return value;
+}
+
+/**
+ * URL templates percent-encode secret placeholders before transport. Treat the
+ * encoded representation as secret material as well: it is reversible and must
+ * never survive in previews, logs, persisted runs, or diagnostic errors.
+ */
+export function secretRepresentations(secrets: readonly unknown[]): string[] {
+  const values = secrets.filter((secret): secret is string => typeof secret === 'string' && secret.length > 0);
+  return [...new Set(values.flatMap((secret) => {
+    let encoded: string | undefined;
+    try { encoded = encodeURIComponent(secret); } catch { encoded = undefined; }
+    return encoded && encoded !== secret ? [secret, encoded] : [secret];
+  }))].sort((left, right) => right.length - left.length);
 }
 
 export class UriPolicy {

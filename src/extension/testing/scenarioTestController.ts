@@ -150,6 +150,7 @@ const MAX_EVIDENCE_ENTRIES = MAX_COPILOT_RUN_ATTEMPTS * 2;
 const MAX_PROTECTED_EVIDENCE_ENTRIES = MAX_COPILOT_RUN_ATTEMPTS;
 const MAX_MESSAGE_EVIDENCE_ENTRIES = 500;
 const MESSAGE_EVIDENCE_PREFIX = 'turnstage.evidence.';
+const MANUAL_BATCH_CONFIRM_REQUESTS = 250;
 
 export class ScenarioTestController implements vscode.Disposable {
   readonly controller: vscode.TestController;
@@ -447,6 +448,20 @@ export class ScenarioTestController implements vscode.Disposable {
         maxRequests: scope.runId ? MAX_COPILOT_RUN_REQUESTS : MAX_RUN_PLAN_REQUESTS,
       });
       if (!batchPlan.valid || !batchPlan.withinBudget) throw new Error(batchPlan.issues.map((issue) => issue.message).join('\n'));
+      if (!scope.runId && vscode.workspace.isTrusted && batchPlan.plannedRequests > MANUAL_BATCH_CONFIRM_REQUESTS) {
+        const confirm = localize('Run batch');
+        const selected = await vscode.window.showWarningMessage(
+          localize('This batch can send up to {requests} requests across {attempts} attempts. Continue?', { requests: batchPlan.plannedRequests, attempts: batchPlan.plannedAttempts }),
+          { modal: true },
+          confirm,
+        );
+        if (selected !== confirm) {
+          for (const job of jobs) run.skipped(job.item);
+          run.appendOutput(`${localize('Batch run cancelled before any requests were sent.')}\r\n`);
+          this.latestRunSummaries = [];
+          return { summaries: [], results: [] };
+        }
+      }
       for (const uriKey of new Set(jobs.map((job) => job.uri.toString()))) {
         const uri = vscode.Uri.parse(uriKey);
         this.latestResults.set(uriKey, []);

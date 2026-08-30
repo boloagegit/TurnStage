@@ -59,6 +59,18 @@ describe('reduceEvent', () => {
     expect(assistantMessage(snapshot).parts).toEqual([{ type: 'text', text: 'once' }]);
   });
 
+  it('bounds accumulated message text and raw-event links under hostile streams', () => {
+    const snapshot = createSnapshot(true);
+    reduceEvent(snapshot, event('content.text.delta', 1, { text: 'a'.repeat(700_000), rawSequence: 1 }));
+    reduceEvent(snapshot, event('content.text.delta', 2, { text: 'b'.repeat(700_000), rawSequence: 2 }));
+    for (let sequence = 3; sequence <= 6000; sequence += 1) reduceEvent(snapshot, event('progress.updated', sequence, { text: 'working', rawSequence: sequence }));
+    const message = assistantMessage(snapshot);
+    expect(String(message.parts.find((part) => part.type === 'text')?.text)).toHaveLength(1024 * 1024);
+    expect(message.metadata?.rawSequences).toHaveLength(5000);
+    expect((message.metadata?.rawSequences as number[] | undefined)?.[0]).toBe(1001);
+    expect(snapshot.errors).toContainEqual(expect.objectContaining({ type: 'ResourceLimitError' }));
+  });
+
   it('upserts citations, attaches references, and avoids duplicate citation entities', () => {
     const snapshot = createSnapshot(true);
 
