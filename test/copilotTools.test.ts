@@ -2,8 +2,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
+import { lm } from 'vscode';
 import { createIntegrityLock, fingerprint } from '../src/extension/copilot/evidenceCapsule';
-import { executeCopilotTool, prepareInvocation } from '../src/extension/copilot/tools';
+import { executeCopilotTool, prepareInvocation, registerCopilotTools } from '../src/extension/copilot/tools';
 import { COPILOT_LIMITS, COPILOT_TOOL_NAMES, type CopilotRuntime, type CopilotCancellationToken } from '../src/extension/copilot/types';
 
 vi.mock('vscode', () => ({
@@ -32,6 +33,19 @@ function runtime(overrides: Partial<CopilotRuntime> = {}): CopilotRuntime {
 }
 
 describe('Copilot tool contract', () => {
+  it('reports bounded adapter lifecycle without exposing tool input or output', async () => {
+    const finish = vi.fn();
+    const onStart = vi.fn(() => finish);
+    registerCopilotTools(runtime(), { onStart });
+    const registration = vi.mocked(lm.registerTool).mock.calls.find(([name]) => name === COPILOT_TOOL_NAMES.findTests);
+    const implementation = registration?.[1] as vscode.LanguageModelTool<unknown>;
+    await implementation.invoke({ input: { query: 'private prompt' }, toolInvocationToken: undefined } as never, token() as vscode.CancellationToken);
+    expect(onStart).toHaveBeenCalledWith(COPILOT_TOOL_NAMES.findTests);
+    expect(finish).toHaveBeenCalledWith({ ok: true, cancelled: false });
+    expect(JSON.stringify(onStart.mock.calls)).not.toContain('private prompt');
+    expect(JSON.stringify(finish.mock.calls)).not.toContain('Case 0');
+  });
+
   it('declares all bounded language model tools in the extension manifest', () => {
     const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')) as { contributes?: { languageModelTools?: Array<Record<string, unknown>> } };
     const tools = manifest.contributes?.languageModelTools ?? [];

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.15.0
+
+- Added bounded Test Campaigns for selecting scenarios, adversarial suites, tags, and failed or unstable cases; campaigns support deterministic planning, configurable concurrency and repetitions, cancellation, checkpoint/resume, selective reruns, baseline comparison, compact progress, and sanitized HTML evidence without converting incomplete or timed-out work into a pass.
+- Added safe bulk adversarial JSONL import and export alongside the existing CSV workflow. Imports validate schema and limits before execution, reject unsafe or oversized records, preserve multi-turn cases and per-case repetition settings, and keep executable behavior, secrets, raw responses, URLs, headers, and payloads out of exported evidence.
+- Added a native structured **TurnStage Log** output channel with cached log-level checks, lazy high-frequency diagnostics, bounded single-line records, operation identifiers, and start/progress/end lifecycle entries for tests, campaigns, Connection Doctor, Copilot tools, and local-history recovery. Error notifications can open the channel directly, while payload content and secrets remain excluded.
+- Existing version-1 Profiles, scenarios, adversarial suites, CLI behavior, and report consumers remain compatible. Campaign limits are explicit and bounded; this release does not add an LLM judge, external classifier, adaptive attack generation, arbitrary scripts, or unbounded execution.
+
 ## 0.14.1
 
 - Hardened request deadlines and cancellation so Opening and CLI response-body reads cannot outlive their configured timeout. Oversized responses now fail closed, active Opening and Stop requests are aborted during replacement or disposal, and timeout, user cancellation, infrastructure failure, and excessive evidence remain distinguishable.

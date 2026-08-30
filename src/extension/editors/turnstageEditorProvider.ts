@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { modify } from 'jsonc-parser';
 import type { HostPayload, InspectorTargetTab, WebviewMessage, WorkspaceSection } from '../../shared/protocol';
 import { isWebviewMessage, PROTOCOL_VERSION } from '../../shared/protocol';
-import type { AdversarialResultSummary, ConnectionDoctorSummary, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, ScenarioRunEvidence, ScenarioRunResult, SessionSnapshot, TurnStageProfile } from '../../shared/types';
+import type { AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, ScenarioRunEvidence, ScenarioRunResult, SessionSnapshot, TurnStageProfile } from '../../shared/types';
 import { EnvironmentRepository, MAX_PROFILE_BYTES } from '../config/profileRepository';
 import { ProfileCodec } from '../config/profileCodec';
 import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../config/profileValidator';
@@ -15,7 +15,7 @@ import { validateFormSubmission } from './formSubmission';
 import { resolveDisplayLanguage, textDirection } from '../displayLanguage';
 import { profileEditorTitle } from './profileEditorTitle';
 import { EventBatcher } from '../runtime/eventBatcher';
-import { logAt } from '../logging';
+import { logAt, startLogOperation } from '../logging';
 import { confirmRestartSession } from '../confirmRestartSession';
 import { builtInEnvironment } from '../config/defaultEnvironment';
 import { VisualRegressionService } from '../testing/visualRegression';
@@ -24,6 +24,8 @@ import { createAdversarialSuite, isSafeAdversarialSuitePath, normalizeAdversaria
 import { buildEvidenceTimeline } from '../testing/evidenceTimeline';
 import { analyzeConnectionProbe } from '../connection/protocolProbe';
 import { loadFixture } from '../runtime/fixtureLoader';
+import type { ScenarioTestController } from '../testing/scenarioTestController';
+import { parseAdversarialJsonl, serializeAdversarialJsonl, serializeCampaignResultsJsonl } from '../testing/adversarialJsonl';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -40,8 +42,11 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private readonly evidencePosters = new Map<string, Set<(evidence: ScenarioRunEvidence, result: ScenarioRunResult | undefined, target: { tab: InspectorTargetTab; evidenceId: string; networkId?: string; sequence?: number; messageId?: string }) => Promise<boolean>>>();
   private readonly pendingSections = new Map<string, WorkspaceSection>();
   private readonly resultPosters = new Map<string, Set<(results: AdversarialResultSummary[]) => Thenable<boolean>>>();
+  private readonly campaignPosters = new Map<string, Set<(dashboard: CampaignDashboardV1) => Thenable<boolean>>>();
+  private readonly activeCampaignRuns = new Map<string, { campaignId: string; cancellation: vscode.CancellationTokenSource }>();
+  private readonly pendingCampaignRuns = new Set<Promise<unknown>>();
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
-  constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel, private readonly environments = new EnvironmentRepository(context.globalStorageUri), visualRegression?: VisualRegressionService) { this.runs = new LocalRunRepository(context); this.secrets = new SecretService(context); this.visualRegression = visualRegression ?? new VisualRegressionService(context); }
+  constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel, private readonly environments = new EnvironmentRepository(context.globalStorageUri), visualRegression?: VisualRegressionService, private readonly scenarioTests?: ScenarioTestController) { this.runs = new LocalRunRepository(context, output); this.secrets = new SecretService(context); this.visualRegression = visualRegression ?? new VisualRegressionService(context); }
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     const resourceTitle = panel.title;
@@ -65,6 +70,10 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const resultPosters = this.resultPosters.get(documentKey) ?? new Set<typeof postResults>();
     resultPosters.add(postResults);
     this.resultPosters.set(documentKey, resultPosters);
+    const postCampaigns = (dashboard: CampaignDashboardV1) => post({ type: 'campaign.dashboard', dashboard });
+    const campaignPosters = this.campaignPosters.get(documentKey) ?? new Set<typeof postCampaigns>();
+    campaignPosters.add(postCampaigns);
+    this.campaignPosters.set(documentKey, campaignPosters);
     const postEvidence = async (evidence: ScenarioRunEvidence, result: ScenarioRunResult | undefined, target: { tab: InspectorTargetTab; evidenceId: string; networkId?: string; sequence?: number; messageId?: string }): Promise<boolean> => {
       if (!controller?.applyScenarioEvidence(evidence)) return false;
       const snapshot = currentSessionSnapshot();
@@ -157,7 +166,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const messageListener = panel.webview.onDidReceiveMessage(async (raw: unknown) => {
       if (!isWebviewMessage(raw, instanceId)) return; const message = raw as WebviewMessage;
       try {
-        if (message.type === 'webview.ready') { await postHostReady(message.requestId); await postSection(this.pendingSections.get(documentKey) ?? 'test'); await rehydrate(); await postResults(this.latestResults.get(documentKey) ?? []); return; }
+        if (message.type === 'webview.ready') { await postHostReady(message.requestId); await postSection(this.pendingSections.get(documentKey) ?? 'test'); await rehydrate(); await postResults(this.latestResults.get(documentKey) ?? []); if (this.scenarioTests) await post({ type: 'campaign.dashboard', dashboard: await this.scenarioTests.getCampaignDashboard(document.uri) }); return; }
         if (message.type === 'profile.openAsText') { await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default'); return; }
         if (message.type === 'profile.validate') {
           documentVersion = -1;
@@ -175,6 +184,67 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         if (message.type === 'test.runAll') { await vscode.commands.executeCommand('turnstage.runContractTests'); return; }
         if (message.type === 'test.rerun') { await vscode.commands.executeCommand('turnstage.rerunLatestTests', document.uri, message.status); return; }
         if (message.type === 'test.evidence.open') { await vscode.commands.executeCommand('turnstage.openTestEvidence', { evidenceId: message.evidenceId, location: message.location }); return; }
+        if (message.type === 'campaign.preview') {
+          if (!this.scenarioTests) throw new Error('Campaign runtime is unavailable.');
+          const plan = await this.scenarioTests.previewCampaign(document.uri, message.campaignId);
+          await post({ type: 'campaign.preview', campaignId: message.campaignId, selectedCases: plan.batch.selectedCases, plannedAttempts: plan.batch.plannedAttempts, plannedRequests: plan.batch.plannedRequests, maximumDurationMs: plan.batch.maximumDurationMs, maxConcurrency: plan.batch.maxConcurrency, warnings: plan.batch.issues.map((item) => item.message) }, message.requestId);
+          return;
+        }
+        if (message.type === 'campaign.run' || message.type === 'campaign.resume') {
+          if (!this.scenarioTests) throw new Error('Campaign runtime is unavailable.');
+          if (this.activeCampaignRuns.has(documentKey)) throw new Error('A campaign is already running for this profile.');
+          const cancellation = new vscode.CancellationTokenSource();
+          this.activeCampaignRuns.set(documentKey, { campaignId: message.campaignId, cancellation });
+          const execution = this.scenarioTests.runCampaign(document.uri, message.campaignId, cancellation.token, message.type === 'campaign.resume' ? message.runId : undefined);
+          this.pendingCampaignRuns.add(execution);
+          try { await execution; }
+          finally {
+            this.pendingCampaignRuns.delete(execution);
+            if (this.activeCampaignRuns.get(documentKey)?.cancellation === cancellation) this.activeCampaignRuns.delete(documentKey);
+            cancellation.dispose();
+          }
+          await post({ type: 'campaign.dashboard', dashboard: await this.scenarioTests.getCampaignDashboard(document.uri) }, message.requestId);
+          return;
+        }
+        if (message.type === 'campaign.cancel') {
+          const active = this.activeCampaignRuns.get(documentKey);
+          if (!active || active.campaignId !== message.campaignId) throw new Error('The selected campaign is not running.');
+          active.cancellation.cancel();
+          return;
+        }
+        if (message.type === 'campaign.acceptBaseline') {
+          if (!this.scenarioTests) throw new Error('Campaign runtime is unavailable.');
+          const run = await this.scenarioTests.getCampaignRun(document.uri, message.runId);
+          if (!run || run.campaignId !== message.campaignId) throw new Error('Campaign run was not found.');
+          if (run.diff?.regressions) {
+            const acceptLabel = localize('Accept as baseline');
+            const selected = await vscode.window.showWarningMessage(
+              localize('This campaign has {count} regression(s). Accept it as the new baseline?', { count: run.diff.regressions }),
+              { modal: true, detail: localize('The current accepted baseline will be replaced. Formal test outcomes are not changed.') },
+              acceptLabel,
+            );
+            if (selected !== acceptLabel) return;
+          }
+          await this.scenarioTests.acceptCampaignBaseline(document.uri, message.campaignId, message.runId);
+          await post({ type: 'campaign.dashboard', dashboard: await this.scenarioTests.getCampaignDashboard(document.uri) }, message.requestId);
+          return;
+        }
+        if (message.type === 'campaign.exportResults') {
+          if (!this.scenarioTests) throw new Error('Campaign runtime is unavailable.');
+          const run = await this.scenarioTests.getCampaignRun(document.uri, message.runId);
+          if (!run || run.campaignId !== message.campaignId) throw new Error('Campaign run was not found.');
+          const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`${run.campaignId}-${run.id}.results.jsonl`), filters: { JSONL: ['jsonl'] } });
+          if (uri) await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(serializeCampaignResultsJsonl(run)));
+          return;
+        }
+        if (message.type === 'campaign.copilotSummary') {
+          if (!this.scenarioTests) throw new Error('Campaign runtime is unavailable.');
+          const run = await this.scenarioTests.getCampaignRun(document.uri, message.runId);
+          if (!run || run.campaignId !== message.campaignId) throw new Error('Campaign run was not found.');
+          const summary = { campaign: run.campaignName, status: run.status, plan: run.plan, coverage: run.coverage, diff: run.diff ? { regressions: run.diff.regressions, improvements: run.diff.improvements, changed: run.diff.changed, entries: run.diff.entries.slice(0, 100) } : undefined, outcomes: run.cases.map((item) => ({ case: item.scenarioId, outcome: item.outcome, stability: item.stability, completedAttempts: item.completedAttempts, requestedAttempts: item.requestedAttempts })) };
+          await openCopilotChat(`Review this sanitized TurnStage Campaign summary. Explain deterministic regressions, instability, incomplete samples, coverage gaps, and practical next actions. Do not act as an LLM judge and do not change formal outcomes: ${JSON.stringify(summary)}`);
+          return;
+        }
         if (message.type === 'copilot.diagnose') {
           await openCopilotChat(`Use #turnstage_analyze_run to diagnose TurnStage evidence ${JSON.stringify(message.evidenceId)} in ${message.mode} mode. Explain the deterministic evidence first, distinguish facts from hypotheses, and suggest only safe profile changes.`);
           return;
@@ -192,44 +262,51 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         if (!controller) return;
         switch (message.type) {
           case 'connection.analyze': {
-            const snapshot = controller.snapshot;
-            const network = controller.getLatestConnectionExchange();
-            const result = analyzeConnectionProbe({
-              status: network?.status,
-              contentType: headerValue(network?.responseHeaders, 'content-type'),
-              timing: {
-                headersLatencyMs: snapshot.metrics.headersLatency ?? network?.timing.headers,
-                firstChunkLatencyMs: snapshot.metrics.firstChunkLatency ?? network?.timing.firstChunk,
-                firstEventLatencyMs: snapshot.metrics.firstEventLatency,
-                totalLatencyMs: snapshot.metrics.totalDuration ?? network?.timing.total,
-              },
-              bodyPrefix: network?.responseBodyPreview,
-              bodyPrefixTruncated: network?.responseBodyTruncated,
-              rawEvents: snapshot.rawEvents,
-              normalizedEvents: snapshot.normalizedEvents,
-              mapping: {
-                configured: controller.profile.stream.mappings.length > 0,
-                mappedEventCount: snapshot.normalizedEvents.length,
-                unmatchedEventCount: snapshot.metrics.unmatchedEventCount,
-                mappingErrorCount: snapshot.metrics.mappingErrorCount,
-              },
-            });
-            latestConnectionResult = {
-              protocol: result.fingerprint.protocol,
-              confidence: result.fingerprint.confidence,
-              status: result.fingerprint.status,
-              rawEventCount: result.fingerprint.rawEventCount,
-              normalizedEventCount: result.fingerprint.normalizedEventCount,
-              mappedEventCount: result.fingerprint.mappedEventCount,
-              unmatchedEventCount: result.fingerprint.unmatchedEventCount,
-              parseErrorCount: result.fingerprint.parseErrorCount,
-              mappingErrorCount: result.fingerprint.mappingErrorCount,
-              terminalEventSeen: result.fingerprint.terminalEventSeen,
-              terminalMapped: result.fingerprint.terminalMapped,
-              safe: result.safe,
-              findings: result.findings.map((finding) => ({ id: finding.id, category: finding.category, severity: finding.severity, message: finding.message })),
-            };
-            await post({ type: 'connection.result', result: latestConnectionResult }, message.requestId);
+            const operation = startLogOperation(this.output, 'connection', 'analyze');
+            try {
+              const snapshot = controller.snapshot;
+              const network = controller.getLatestConnectionExchange();
+              const result = analyzeConnectionProbe({
+                status: network?.status,
+                contentType: headerValue(network?.responseHeaders, 'content-type'),
+                timing: {
+                  headersLatencyMs: snapshot.metrics.headersLatency ?? network?.timing.headers,
+                  firstChunkLatencyMs: snapshot.metrics.firstChunkLatency ?? network?.timing.firstChunk,
+                  firstEventLatencyMs: snapshot.metrics.firstEventLatency,
+                  totalLatencyMs: snapshot.metrics.totalDuration ?? network?.timing.total,
+                },
+                bodyPrefix: network?.responseBodyPreview,
+                bodyPrefixTruncated: network?.responseBodyTruncated,
+                rawEvents: snapshot.rawEvents,
+                normalizedEvents: snapshot.normalizedEvents,
+                mapping: {
+                  configured: controller.profile.stream.mappings.length > 0,
+                  mappedEventCount: snapshot.normalizedEvents.length,
+                  unmatchedEventCount: snapshot.metrics.unmatchedEventCount,
+                  mappingErrorCount: snapshot.metrics.mappingErrorCount,
+                },
+              });
+              latestConnectionResult = {
+                protocol: result.fingerprint.protocol,
+                confidence: result.fingerprint.confidence,
+                status: result.fingerprint.status,
+                rawEventCount: result.fingerprint.rawEventCount,
+                normalizedEventCount: result.fingerprint.normalizedEventCount,
+                mappedEventCount: result.fingerprint.mappedEventCount,
+                unmatchedEventCount: result.fingerprint.unmatchedEventCount,
+                parseErrorCount: result.fingerprint.parseErrorCount,
+                mappingErrorCount: result.fingerprint.mappingErrorCount,
+                terminalEventSeen: result.fingerprint.terminalEventSeen,
+                terminalMapped: result.fingerprint.terminalMapped,
+                safe: result.safe,
+                findings: result.findings.map((finding) => ({ id: finding.id, category: finding.category, severity: finding.severity, message: finding.message })),
+              };
+              operation.complete({ protocol: result.fingerprint.protocol, safe: result.safe, findings: result.findings.length });
+              await post({ type: 'connection.result', result: latestConnectionResult }, message.requestId);
+            } catch (error) {
+              operation.fail({ reason: error instanceof Error ? error.name : 'Error' });
+              throw error;
+            }
             break;
           }
           case 'mapping.test': {
@@ -314,14 +391,21 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           }
           case 'form.cancel': break;
         }
-      } catch (error) { logAt(this.output, 'error', `[editor] ${error instanceof Error ? error.stack ?? error.message : String(error)}`); await post({ type: 'request.error', error: { type: error instanceof Error ? error.name : 'Error', message: error instanceof Error ? error.message : String(error) } }, message.requestId); }
+      } catch (error) {
+        const type = error instanceof Error ? error.name : 'Error';
+        logAt(this.output, 'error', () => `[editor] action=${message.type} type=${type}`);
+        await post({ type: 'request.error', error: { type, message: error instanceof Error ? error.message : String(error) } }, message.requestId);
+        const openOutput = localize('Open TurnStage Output');
+        void vscode.window.showErrorMessage(localize('TurnStage could not complete {action}.', { action: message.type }), openOutput).then((choice) => { if (choice === openOutput) this.output.show(true); });
+      }
     });
-    panel.onDidDispose(() => { disposed = true; sessionBatcher.dispose(); if (loadTimer) clearTimeout(loadTimer); disposeController(); posters.delete(postSection); if (!posters.size) { this.sectionPosters.delete(documentKey); this.pendingSections.delete(documentKey); } resultPosters.delete(postResults); if (!resultPosters.size) this.resultPosters.delete(documentKey); evidencePosters.delete(postEvidence); if (!evidencePosters.size) this.evidencePosters.delete(documentKey); documentListener.dispose(); trustListener.dispose(); configurationListener.dispose(); viewStateListener.dispose(); messageListener.dispose(); });
+    panel.onDidDispose(() => { disposed = true; sessionBatcher.dispose(); if (loadTimer) clearTimeout(loadTimer); this.activeCampaignRuns.get(documentKey)?.cancellation.cancel(); disposeController(); posters.delete(postSection); if (!posters.size) { this.sectionPosters.delete(documentKey); this.pendingSections.delete(documentKey); } resultPosters.delete(postResults); if (!resultPosters.size) this.resultPosters.delete(documentKey); campaignPosters.delete(postCampaigns); if (!campaignPosters.size) this.campaignPosters.delete(documentKey); evidencePosters.delete(postEvidence); if (!evidencePosters.size) this.evidencePosters.delete(documentKey); documentListener.dispose(); trustListener.dispose(); configurationListener.dispose(); viewStateListener.dispose(); messageListener.dispose(); });
   }
 
   getController(uri?: vscode.Uri): SessionController | undefined { return uri ? this.controllers.get(uri.toString()) : [...this.controllers.values()].at(-1); }
   async drainPending(): Promise<void> {
-    await Promise.allSettled([...this.pendingDisposals, ...[...this.controllers.values()].map((controller) => controller.disposeAndWait())]);
+    for (const active of this.activeCampaignRuns.values()) active.cancellation.cancel();
+    await Promise.allSettled([...this.pendingCampaignRuns, ...this.pendingDisposals, ...[...this.controllers.values()].map((controller) => controller.disposeAndWait())]);
   }
   async waitForController(uri: vscode.Uri, timeoutMs = 5000): Promise<SessionController | undefined> {
     const deadline = Date.now() + timeoutMs;
@@ -367,6 +451,9 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     this.latestResults.set(key, structuredClone(results));
     await Promise.all([...(this.resultPosters.get(key) ?? [])].map((poster) => poster(results)));
   }
+  async publishCampaignDashboard(uri: vscode.Uri, dashboard: CampaignDashboardV1): Promise<void> {
+    await Promise.all([...(this.campaignPosters.get(uri.toString()) ?? [])].map((poster) => poster(dashboard)));
+  }
   private async patchDocument(document: vscode.TextDocument, path: Array<string | number>, value: unknown): Promise<void> {
     if (!isAllowedPatchPath(path)) throw new Error(localize('This profile setting cannot be edited from the configuration surface.'));
     const edits = modify(document.getText(), path, value, { formattingOptions: { insertSpaces: true, tabSize: 2 } }); const workspaceEdit = new vscode.WorkspaceEdit(); for (const edit of [...edits].sort((a, b) => b.offset - a.offset)) workspaceEdit.replace(document.uri, new vscode.Range(document.positionAt(edit.offset), document.positionAt(edit.offset + edit.length)), edit.content); await vscode.workspace.applyEdit(workspaceEdit);
@@ -380,24 +467,24 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(adversarialCsvTemplate()));
       return completedOperation(localize('CSV template exported.'), uri);
     }
-    if (action === 'exportCsv' || action === 'exportJsonc') {
+    if (action === 'exportCsv' || action === 'exportJsonc' || action === 'exportJsonl') {
       const scenarios = (profile.tests?.scenarios ?? []).filter((scenario) => scenario.adversarial);
       if (!scenarios.length) throw new Error(localize('This profile has no inline adversarial cases to export.'));
       const jsonc = action === 'exportJsonc';
+      const jsonl = action === 'exportJsonl';
       const uri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(`${profile.id}.adversarial.${jsonc ? 'jsonc' : 'csv'}`),
-        filters: jsonc ? { JSONC: ['jsonc'] } : { CSV: ['csv'] },
+        defaultUri: vscode.Uri.file(`${profile.id}.adversarial.${jsonc ? 'jsonc' : jsonl ? 'jsonl' : 'csv'}`),
+        filters: jsonc ? { JSONC: ['jsonc'] } : jsonl ? { JSONL: ['jsonl'] } : { CSV: ['csv'] },
       });
       if (!uri) return cancelledOperation();
-      const contents = jsonc
-        ? serializeAdversarialSuite(createAdversarialSuite(`${profile.id}-adversarial`, `${profile.name} adversarial tests`, scenarios))
-        : serializeAdversarialCsv(scenarios);
+      const suite = createAdversarialSuite(`${profile.id}-adversarial`, `${profile.name} adversarial tests`, scenarios);
+      const contents = jsonc ? serializeAdversarialSuite(suite) : jsonl ? serializeAdversarialJsonl(suite) : serializeAdversarialCsv(scenarios);
       await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(contents));
       return completedOperation(localize('Exported {count} adversarial cases.', { count: String(scenarios.length) }), uri);
     }
     const selected = await vscode.window.showOpenDialog({
       canSelectMany: false,
-      filters: action === 'importCsv' ? { CSV: ['csv'] } : { JSONC: ['jsonc', 'json'] },
+      filters: action === 'importCsv' ? { CSV: ['csv'] } : action === 'importJsonl' ? { JSONL: ['jsonl'] } : { JSONC: ['jsonc', 'json'] },
       openLabel: action === 'linkJsonc' ? localize('Link Adversarial Suite') : localize('Import Adversarial Tests'),
     });
     const uri = selected?.[0];
@@ -422,6 +509,10 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       const parsed = parseAdversarialCsv(contents);
       if (parsed.issues.length) throw new Error(parsed.issues.slice(0, 20).map((issue) => `Row ${issue.row}${issue.column ? ` (${issue.column})` : ''}: ${issue.message}`).join('\n'));
       imported = parsed.scenarios;
+    } else if (action === 'importJsonl') {
+      const parsed = parseAdversarialJsonl(contents);
+      if (!parsed.suite || parsed.issues.length) throw new Error(parsed.issues.slice(0, 20).map((issue) => `Line ${issue.line}: ${issue.message}`).join('\n') || localize('The selected suite is not valid JSONL.'));
+      imported = normalizeAdversarialSuite(parsed.suite);
     } else {
       const parsed = parseAdversarialSuite(contents);
       if (parsed.parseErrors.length || !parsed.suite || parsed.issues.length) throw new Error(parsed.issues.slice(0, 20).map((issue) => `${issue.path}: ${issue.message}`).join('\n') || localize('The selected suite is not valid JSONC.'));
@@ -564,7 +655,7 @@ function inspectorTarget(location: ScenarioEvidenceLocation, evidence?: Scenario
 export function isAllowedPatchPath(path: unknown): path is Array<string | number> {
   if (!Array.isArray(path) || !path.length || !path.every((part) => (typeof part === 'string' || (typeof part === 'number' && Number.isInteger(part) && part >= 0)) && part !== '__proto__' && part !== 'prototype' && part !== 'constructor')) return false;
   const key = path.join('.');
-  if (key === 'name' || key === 'description' || key === 'environment' || key === 'opening.mode' || key === 'opening.message' || key === 'opening.trigger' || key === 'opening.starters' || key === 'opening.request' || key === 'opening.response' || key === 'opening.fallbacks' || key === 'opening.failurePolicy' || key === 'conversation.send.method' || key === 'conversation.send.url' || key === 'conversation.send.variants' || key === 'conversation.send.timeoutMs' || key === 'conversation.send.idleTimeoutMs' || key === 'conversation.send.headers' || key === 'conversation.send.body' || key === 'conversation.stop.strategy' || key === 'conversation.stop.request' || key === 'conversation.stop.requiredContext' || key === 'stream.transport' || key === 'stream.dataFormat' || key === 'stream.doneValue' || key === 'stream.mappingMode' || key === 'stream.unexpectedEndPolicy' || key === 'stream.mappings' || key === 'history.remoteSessions' || key === 'metrics.enabled' || key === 'metrics.messageEnabled' || key === 'security.allowedUriSchemes' || key === 'security.allowedDomains' || key === 'security.allowedCommands' || key === 'ui.messageActions' || key === 'ui.messageActionVisibility' || key === 'tests.scenarios' || key === 'tests.adversarialSuites' || key === 'tests.reporting' || key === 'tests.visual' || key === 'tests.qualityRubrics') return true;
+  if (key === 'name' || key === 'description' || key === 'environment' || key === 'opening.mode' || key === 'opening.message' || key === 'opening.trigger' || key === 'opening.starters' || key === 'opening.request' || key === 'opening.response' || key === 'opening.fallbacks' || key === 'opening.failurePolicy' || key === 'conversation.send.method' || key === 'conversation.send.url' || key === 'conversation.send.variants' || key === 'conversation.send.timeoutMs' || key === 'conversation.send.idleTimeoutMs' || key === 'conversation.send.headers' || key === 'conversation.send.body' || key === 'conversation.stop.strategy' || key === 'conversation.stop.request' || key === 'conversation.stop.requiredContext' || key === 'stream.transport' || key === 'stream.dataFormat' || key === 'stream.doneValue' || key === 'stream.mappingMode' || key === 'stream.unexpectedEndPolicy' || key === 'stream.mappings' || key === 'history.remoteSessions' || key === 'metrics.enabled' || key === 'metrics.messageEnabled' || key === 'security.allowedUriSchemes' || key === 'security.allowedDomains' || key === 'security.allowedCommands' || key === 'ui.messageActions' || key === 'ui.messageActionVisibility' || key === 'tests' || key === 'tests.scenarios' || key === 'tests.adversarialSuites' || key === 'tests.reporting' || key === 'tests.visual' || key === 'tests.qualityRubrics' || key === 'tests.campaigns') return true;
   if (/^conversation\.send\.variants\.\d+\.(id|body|headers)$/.test(key)) return true;
   if (/^conversation\.send\.variants\.\d+\.when\.(path|operator|value)$/.test(key)) return true;
   if (/^conversation\.send\.reconnect\.(maxAttempts|baseDelayMs|maxDelayMs|retryOnStatuses)$/.test(key)) return true;

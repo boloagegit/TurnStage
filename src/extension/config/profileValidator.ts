@@ -123,6 +123,58 @@ function validateAdversarialForbid(value: unknown, tree: Node | undefined, path:
 
 function hasAdversarialForbid(value: AdversarialForbidDefinition): boolean { return Boolean(value.urls || value.ctas || value.tools || value.content?.length || value.events?.length); }
 
+function validateCampaigns(value: unknown, tree: Node | undefined, out: ValidationIssue[]): void {
+  const basePath = ['tests', 'campaigns'];
+  if (!Array.isArray(value) || value.length > 50) {
+    out.push(issue(tree, basePath, localize('Test campaigns must be an array with at most 50 entries.')));
+    return;
+  }
+  const ids: string[] = [];
+  value.forEach((raw, index) => {
+    const path = [...basePath, index];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { out.push(issue(tree, path, localize('Test campaign must be an object.'))); return; }
+    const campaign = raw as Record<string, unknown>;
+    if (typeof campaign.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(campaign.id)) out.push(issue(tree, [...path, 'id'], localize('Campaign id must use up to 64 lowercase letters, numbers, and hyphens.')));
+    else ids.push(campaign.id);
+    if (typeof campaign.name !== 'string' || !campaign.name.trim() || campaign.name.length > 120) out.push(issue(tree, [...path, 'name'], localize('Campaign name must contain 1 to 120 characters.')));
+    if (campaign.description !== undefined && (typeof campaign.description !== 'string' || !campaign.description.trim() || campaign.description.length > 500)) out.push(issue(tree, [...path, 'description'], localize('Campaign description must contain 1 to 500 characters.')));
+    const selectors = campaign.selectors;
+    if (selectors !== undefined) {
+      if (!selectors || typeof selectors !== 'object' || Array.isArray(selectors)) out.push(issue(tree, [...path, 'selectors'], localize('Campaign selectors must be an object.')));
+      else {
+        const selection = selectors as Record<string, unknown>;
+        validateCampaignStringList(selection.caseIds, 500, 512, tree, [...path, 'selectors', 'caseIds'], out);
+        validateCampaignStringList(selection.suiteIds, 100, 256, tree, [...path, 'selectors', 'suiteIds'], out);
+        validateCampaignStringList(selection.tags, 100, 64, tree, [...path, 'selectors', 'tags'], out);
+        if (selection.tagMode !== undefined && selection.tagMode !== 'all' && selection.tagMode !== 'any') out.push(issue(tree, [...path, 'selectors', 'tagMode'], localize('Campaign tagMode must be all or any.')));
+      }
+    }
+    const policy = campaign.runPolicy;
+    if (policy !== undefined) {
+      if (!policy || typeof policy !== 'object' || Array.isArray(policy)) out.push(issue(tree, [...path, 'runPolicy'], localize('Campaign runPolicy must be an object.')));
+      else {
+        const runPolicy = policy as Record<string, unknown>;
+        for (const [key, min, max] of [['repetitions', 1, 100], ['maxConcurrency', 1, 8], ['maxRequests', 1, 100_000], ['maxDurationMs', 1_000, 86_400_000]] as const) {
+          const entry = runPolicy[key];
+          if (entry !== undefined && (!Number.isSafeInteger(entry) || Number(entry) < min || Number(entry) > max)) out.push(issue(tree, [...path, 'runPolicy', key], localize('{field} must be an integer from {minimum} to {maximum}.', { field: key, minimum: String(min), maximum: String(max) })));
+        }
+        if (runPolicy.failFast !== undefined && typeof runPolicy.failFast !== 'boolean') out.push(issue(tree, [...path, 'runPolicy', 'failFast'], localize('Campaign failFast must be boolean.')));
+      }
+    }
+    validateCampaignStringList(campaign.coverageTags, 100, 64, tree, [...path, 'coverageTags'], out);
+  });
+  for (const duplicate of duplicates(ids)) out.push(issue(tree, basePath, localize('Duplicate campaign id: {id}.', { id: duplicate })));
+}
+
+function validateCampaignStringList(value: unknown, maximumItems: number, maximumLength: number, tree: Node | undefined, path: Array<string | number>, out: ValidationIssue[]): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length > maximumItems || value.some((entry) => typeof entry !== 'string' || !entry.trim() || entry.length > maximumLength)) {
+    out.push(issue(tree, path, localize('Campaign list must contain at most {count} unique, non-empty values.', { count: String(maximumItems) })));
+    return;
+  }
+  if (duplicates(value).length) out.push(issue(tree, path, localize('Campaign list values must be unique.')));
+}
+
 export class ProfileValidator {
   validate(profile: TurnStageProfile | undefined, tree?: Node, environments: TurnStageEnvironment[] = []): ValidationIssue[] {
     if (!profile) return [issue(tree, [], localize('Profile could not be parsed.'))];
@@ -199,6 +251,8 @@ export class ProfileValidator {
       try { validateQualityRubrics(profile.tests.qualityRubrics); }
       catch (error) { out.push(issue(tree, ['tests', 'qualityRubrics'], localize('Invalid advisory quality rubrics: {message}', { message: error instanceof Error ? error.message : String(error) }))); }
     }
+    const campaigns = profile.tests?.campaigns as unknown;
+    if (campaigns !== undefined) validateCampaigns(campaigns, tree, out);
     if (scenarios.length > 100) out.push(issue(tree, ['tests', 'scenarios'], localize('A profile can define at most 100 scenarios.')));
     for (const duplicate of duplicates(scenarios.flatMap((scenario) => scenario && typeof scenario === 'object' && !Array.isArray(scenario) && typeof scenario.id === 'string' ? [scenario.id] : []))) out.push(issue(tree, ['tests', 'scenarios'], localize('Duplicate scenario id: {id}.', { id: duplicate })));
     scenarios.forEach((scenario, scenarioIndex) => {

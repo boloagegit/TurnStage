@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import type { MappingTestResult, WebviewPayload } from '../shared/protocol';
-import type { AdversarialForbidDefinition, AdversarialResultSummary, ConnectionDoctorSummary, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TurnStageProfile } from '../shared/types';
+import type { AdversarialForbidDefinition, AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TestCampaignDefinition, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
@@ -35,6 +35,7 @@ export interface SettingsWorkspaceProps {
   requestPreview?: unknown;
   remoteName?: string;
   testResults?: AdversarialResultSummary[];
+  campaignDashboard?: CampaignDashboardV1;
   /** The section selected by the host tree/editor. */
   section: SettingsSectionId;
   onSectionChange: (section: SettingsSectionId) => void;
@@ -54,6 +55,7 @@ export function SettingsWorkspace({
   requestPreview,
   remoteName,
   testResults = [],
+  campaignDashboard,
   section,
   onSectionChange,
   embedded = false
@@ -108,7 +110,7 @@ export function SettingsWorkspace({
           {active.id === 'request' && <RequestSection profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} connectionResult={connectionResult} post={post} patch={patch} />}
           {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
           {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
-          {active.id === 'scenario-tests' && <ScenarioTestsSection profile={profile} patch={patch} post={post} testResults={testResults} />}
+          {active.id === 'scenario-tests' && <ScenarioTestsSection profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} />}
           {active.id === 'history-errors' && <HistoryErrorsSection profile={profile} snapshot={snapshot} patch={patch} />}
           {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} />}
         </section>
@@ -358,7 +360,7 @@ const performanceMetricOptions: Array<{ id: ScenarioPerformanceMetric; label: st
   { id: 'metrics.maxEventGap', label: 'Maximum event gap' },
 ];
 
-function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[] }): React.JSX.Element {
+function ScenarioTestsSection({ profile, patch, post, testResults, campaignDashboard }: { profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; campaignDashboard?: CampaignDashboardV1 }): React.JSX.Element {
   const scenarios = profile.tests?.scenarios ?? [];
   const qualityRubrics = profile.tests?.qualityRubrics ?? [];
   const [undo, setUndo] = useState<{ label: string; scenarios: ScenarioDefinition[] }>();
@@ -396,7 +398,45 @@ function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: 
     const id = uniqueId(new Set(qualityRubrics.map((rubric) => rubric.id)), `quality-${ordinal}`);
     saveQualityRubrics([...qualityRubrics, { id, name: t('Quality rubric {number}', { number: formatNumber(ordinal) }), criteria: [{ id: 'criterion-1', label: t('Criterion 1'), description: t('Describe the observable quality expected from the disclosed response.') }] }]);
   };
+  const campaigns = profile.tests?.campaigns ?? [];
+  const saveCampaigns = (value: TestCampaignDefinition[] | undefined) => profile.tests ? patch(['tests', 'campaigns'], value) : patch(['tests'], { scenarios: [], ...(value ? { campaigns: value } : {}) });
+  const addCampaign = () => {
+    const ordinal = campaigns.length + 1;
+    const id = uniqueId(new Set(campaigns.map((campaign) => campaign.id)), `campaign-${ordinal}`);
+    saveCampaigns([...campaigns, { id, name: t('Campaign {number}', { number: formatNumber(ordinal) }), selectors: { tagMode: 'all' }, runPolicy: { repetitions: 1, maxConcurrency: 3, maxRequests: 1000, maxDurationMs: 3_600_000 } }]);
+  };
   return <div className="settings-section-stack">
+    <section className="settings-card" aria-labelledby="test-campaigns-heading">
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="test-campaigns-heading">{t('Test campaigns')}</h2><p className="settings-card-description">{t('Create a bounded, repeatable selection of existing cases. Campaign history stores metadata only; raw prompts and evidence remain session-scoped.')}</p></div><button type="button" disabled={campaigns.length >= 50} onClick={addCampaign}>{t('Add campaign')}</button></div>
+      {!campaigns.length ? <div className="settings-empty settings-empty--action"><span>{t('No test campaigns configured.')}</span><button type="button" onClick={addCampaign}>{t('Add campaign')}</button></div> : <div className="campaign-list">
+        {campaigns.map((campaign, index) => {
+          const dashboard = campaignDashboard?.campaigns.find((item) => item.definition.id === campaign.id);
+          const latest = dashboard?.latest;
+          const update = (value: TestCampaignDefinition) => saveCampaigns(replaceAt(campaigns, index, value));
+          return <article className="campaign-card" key={`${campaign.id}-${index}`}>
+            <div className="campaign-card__heading"><div><strong>{campaign.name || campaign.id}</strong><code>{campaign.id}</code></div>{latest ? <span className={`campaign-status campaign-status--${latest.status}`}>{t(localizeHumanized(latest.status))}</span> : <span className="campaign-status">{t('Not run')}</span>}</div>
+            <div className="settings-form-grid">
+              <SettingField label={t('Name')} id={`campaign-${index}-name`}><PatchInput id={`campaign-${index}-name`} value={campaign.name} onCommit={(name) => update({ ...campaign, name })} /></SettingField>
+              <NumberSettingField label={t('Repetitions per adversarial case')} id={`campaign-${index}-repetitions`} value={campaign.runPolicy?.repetitions} placeholder="1" min={1} max={100} hint={t('Conversation contracts run once; adversarial cases use this sample size.')} onCommit={(repetitions) => update({ ...campaign, runPolicy: { ...(campaign.runPolicy ?? {}), repetitions } })} />
+              <ListPatchField label={t('Case IDs')} id={`campaign-${index}-cases`} value={campaign.selectors?.caseIds ?? []} placeholder="jailbreak-basic, leakage-check" hint={t('Leave empty to select by suite or tags.')} onCommit={(caseIds) => update({ ...campaign, selectors: { ...(campaign.selectors ?? {}), caseIds: caseIds.length ? caseIds : undefined } })} />
+              <ListPatchField label={t('Suite IDs')} id={`campaign-${index}-suites`} value={campaign.selectors?.suiteIds ?? []} placeholder="security-regression" hint={t('Optional exact suite IDs.')} onCommit={(suiteIds) => update({ ...campaign, selectors: { ...(campaign.selectors ?? {}), suiteIds: suiteIds.length ? suiteIds : undefined } })} />
+              <ListPatchField label={t('Selector tags')} id={`campaign-${index}-tags`} value={campaign.selectors?.tags ?? []} placeholder="security, release" hint={t('All tags must match unless tag mode is changed in JSONC.')} onCommit={(tags) => update({ ...campaign, selectors: { ...(campaign.selectors ?? {}), tags: tags.length ? tags : undefined } })} />
+              <ListPatchField label={t('Coverage tags')} id={`campaign-${index}-coverage`} value={campaign.coverageTags ?? []} placeholder="prompt-boundary, privacy" hint={t('Missing required tags are reported before and after execution.')} onCommit={(coverageTags) => update({ ...campaign, coverageTags: coverageTags.length ? coverageTags : undefined })} />
+            </div>
+            {latest && <div className={`campaign-summary${latest.diff?.regressions ? ' has-regressions' : ''}`} role="status"><span>{t('{completed}/{planned} cases complete', { completed: formatNumber(latest.cases.filter((item) => item.sampleComplete).length), planned: formatNumber(latest.plan.selectedCases) })}</span><span>{t('{percent}% coverage', { percent: formatNumber(latest.coverage.percent) })}</span>{latest.diff ? <span className={latest.diff.regressions ? 'is-regression' : ''}>{t(latest.diff.regressions === 1 ? '{count} regression' : '{count} regressions', { count: formatNumber(latest.diff.regressions) })}</span> : null}</div>}
+            {latest?.diff?.entries.some((item) => item.transition === 'regressed') ? <ul className="campaign-regressions">{latest.diff.entries.filter((item) => item.transition === 'regressed').slice(0, 20).map((item) => <li key={item.key}><code>{item.scenarioId}</code><span>{t(localizeHumanized(item.baselineOutcome ?? 'unknown'))} → {t(localizeHumanized(item.currentOutcome ?? 'unknown'))}</span></li>)}</ul> : null}
+            <div className="campaign-actions" role="group" aria-label={t('Campaign actions for {name}', { name: campaign.name })}>
+              <button type="button" onClick={() => post({ type: 'campaign.preview', campaignId: campaign.id })}>{t('Preview plan')}</button>
+              <button type="button" className="primary" disabled={latest?.status === 'running'} onClick={() => post({ type: 'campaign.run', campaignId: campaign.id })}>{t('Run')}</button>
+              {latest?.status === 'running' ? <button type="button" className="danger" onClick={() => post({ type: 'campaign.cancel', campaignId: campaign.id })}>{t('Cancel run')}</button> : null}
+              {latest?.status === 'cancelled' ? <button type="button" onClick={() => post({ type: 'campaign.resume', campaignId: campaign.id, runId: latest.id })}>{t('Resume')}</button> : null}
+              {latest?.status === 'completed' && latest.cases.every((item) => item.sampleComplete) ? <button type="button" disabled={dashboard?.baseline?.runId === latest.id} onClick={() => post({ type: 'campaign.acceptBaseline', campaignId: campaign.id, runId: latest.id })}>{dashboard?.baseline?.runId === latest.id ? t('Accepted baseline') : t('Accept as baseline')}</button> : null}
+              {latest ? <details><summary>{t('More')}</summary><div><button type="button" onClick={() => post({ type: 'campaign.exportResults', campaignId: campaign.id, runId: latest.id })}>{t('Export results JSONL')}</button><button type="button" onClick={() => post({ type: 'campaign.copilotSummary', campaignId: campaign.id, runId: latest.id })}>{t('Summarize with Copilot')}</button><button type="button" className="danger" onClick={() => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index))}>{t('Delete campaign')}</button></div></details> : <button type="button" className="danger" onClick={() => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index))}>{t('Delete campaign')}</button>}
+            </div>
+          </article>;
+        })}
+      </div>}
+    </section>
     <section className="settings-card" aria-labelledby="adversarial-tests-heading">
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-tests-heading">{t('Adversarial tests')}</h2><p className="settings-card-description">{t('Replay known attack messages and record whether observable prohibited effects occurred. Timeout and incomplete evidence never count as resistance.')}</p></div><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div>
       <div className="copilot-profile-doctor"><div><strong>{t('Profile Doctor')}</strong><span>{t('Ask Copilot to explain validation, timeout, streaming, and mapping configuration evidence without exposing secrets.')}</span></div><button type="button" onClick={() => post({ type: 'copilot.profileDoctor' })}>{t('Diagnose profile with Copilot')}</button></div>
@@ -404,11 +444,13 @@ function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: 
         <details><summary>{t('Import')}</summary><div>
           <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'importJsonc' })}>{t('Import JSONC copy')}</button>
           <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'importCsv' })}>{t('Import CSV')}</button>
+          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'importJsonl' })}>{t('Import JSONL')}</button>
         </div></details>
         <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'linkJsonc' })}>{t('Link JSONC suite')}</button>
         <details><summary>{t('Export')}</summary><div>
           <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'exportJsonc' })}>{t('Export JSONC')}</button>
           <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'exportCsv' })}>{t('Export CSV')}</button>
+          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'exportJsonl' })}>{t('Export JSONL')}</button>
           <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'csvTemplate' })}>{t('CSV template')}</button>
         </div></details>
       </div>

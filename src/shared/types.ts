@@ -32,6 +32,124 @@ export interface ProfileTestsDefinition {
   visual?: ScenarioVisualDefinition;
   /** Optional declarative rubrics used only by explicit, advisory Copilot reviews. */
   qualityRubrics?: QualityRubricDefinition[];
+  /** Named, bounded selections that reuse Test Explorer cases. */
+  campaigns?: TestCampaignDefinition[];
+}
+
+export interface TestCampaignDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  selectors?: {
+    caseIds?: string[];
+    suiteIds?: string[];
+    tags?: string[];
+    tagMode?: 'all' | 'any';
+  };
+  runPolicy?: {
+    repetitions?: number;
+    failFast?: boolean;
+    maxConcurrency?: number;
+    maxRequests?: number;
+    maxDurationMs?: number;
+  };
+  /** Risk or product-area tags that should be represented by selected cases. */
+  coverageTags?: string[];
+}
+
+export type CampaignCaseOutcome = AdversarialOutcome | 'passed' | 'failed' | 'error';
+export type CampaignRunStatus = 'planned' | 'running' | 'cancelled' | 'completed';
+
+export interface CampaignCaseResultV1 {
+  key: string;
+  profileId: string;
+  suiteId?: string;
+  scenarioId: string;
+  scenarioName: string;
+  tags: string[];
+  requestedAttempts: number;
+  completedAttempts: number;
+  plannedTurns: number;
+  outcome?: CampaignCaseOutcome;
+  stability?: AdversarialStability;
+  sampleComplete: boolean;
+  counts?: Record<AdversarialOutcome, number>;
+  durationMs?: number;
+  ttftP95Ms?: number;
+  /** Ephemeral and intentionally omitted when a record is persisted or exported. */
+  evidenceId?: string;
+}
+
+export interface CampaignCoverageV1 {
+  requiredTags: string[];
+  coveredTags: string[];
+  missingTags: string[];
+  caseCountByTag: Record<string, number>;
+  percent: number;
+}
+
+export interface CampaignDiffEntryV1 {
+  key: string;
+  profileId: string;
+  suiteId?: string;
+  scenarioId: string;
+  scenarioName: string;
+  baselineOutcome?: CampaignCaseOutcome;
+  currentOutcome?: CampaignCaseOutcome;
+  transition: 'added' | 'removed' | 'unchanged' | 'regressed' | 'improved' | 'changed';
+}
+
+export interface CampaignDiffV1 {
+  baselineRunId: string;
+  currentRunId: string;
+  regressions: number;
+  improvements: number;
+  changed: number;
+  entries: CampaignDiffEntryV1[];
+}
+
+/** Metadata-only, workspace-local campaign history. Prompts and raw evidence are excluded. */
+export interface CampaignRunRecordV1 {
+  format: 'turnstage-campaign-run';
+  version: 1;
+  id: string;
+  campaignId: string;
+  campaignName: string;
+  profileId: string;
+  createdAt: number;
+  updatedAt: number;
+  status: CampaignRunStatus;
+  sourceDigest: string;
+  plan: {
+    selectedCases: number;
+    plannedAttempts: number;
+    plannedTurns: number;
+    plannedRequests: number;
+    maximumDurationMs: number;
+    maxConcurrency: number;
+  };
+  cases: CampaignCaseResultV1[];
+  coverage: CampaignCoverageV1;
+  baselineRunId?: string;
+  diff?: CampaignDiffV1;
+}
+
+export interface CampaignBaselineV1 {
+  campaignId: string;
+  runId: string;
+  acceptedAt: number;
+  sourceDigest: string;
+}
+
+export interface CampaignDashboardEntryV1 {
+  definition: TestCampaignDefinition;
+  latest?: CampaignRunRecordV1;
+  baseline?: CampaignBaselineV1;
+}
+
+export interface CampaignDashboardV1 {
+  profileId: string;
+  campaigns: CampaignDashboardEntryV1[];
 }
 
 export interface QualityRubricDefinition {

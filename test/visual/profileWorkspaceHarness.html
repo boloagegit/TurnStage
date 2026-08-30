@@ -46,6 +46,10 @@
       --vscode-textCodeBlock-background: #181818;
       --vscode-badge-background: #4d4d4d;
       --vscode-badge-foreground: #ffffff;
+      --vscode-testing-iconPassed: #73c991;
+      --vscode-testing-iconFailed: #f14c4c;
+      --vscode-testing-iconErrored: #f14c4c;
+      --vscode-progressBar-background: #0e70c0;
       --vscode-widget-shadow: #0000005c;
       --vscode-spacing-size4: 4px;
       --vscode-spacing-size8: 8px;
@@ -103,6 +107,14 @@
       },
       metrics: { messageEnabled: ['ttft', 'totalDuration'] },
       tests: {
+        campaigns: [{
+          id: 'release-safety',
+          name: 'Release safety',
+          description: 'Repeat the known security probes before release.',
+          selectors: { tags: ['regression'], tagMode: 'all' },
+          runPolicy: { repetitions: 5, failFast: false, maxConcurrency: 2, maxRequests: 20, maxDurationMs: 120000 },
+          coverageTags: ['regression', 'multi-turn', 'privacy']
+        }],
         qualityRubrics: [{
           id: 'support-quality',
           name: 'Support response quality',
@@ -183,6 +195,30 @@
         { id: 'unmatched-events', category: 'mapping', severity: 'warning', message: 'One bounded stream event did not match any configured mapping.' }
       ]
     };
+    const campaignDashboard = {
+      profileId: profile.id,
+      campaigns: [{
+        definition: profile.tests.campaigns[0],
+        baseline: { campaignId: 'release-safety', runId: 'baseline-run', acceptedAt: 900, sourceDigest: 'b'.repeat(64) },
+        latest: {
+          format: 'turnstage-campaign-run', version: 1, id: 'current-run', campaignId: 'release-safety', campaignName: 'Release safety', profileId: profile.id,
+          createdAt: 1000, updatedAt: 5000, status: 'completed', sourceDigest: 'a'.repeat(64), baselineRunId: 'baseline-run',
+          plan: { selectedCases: 1, plannedAttempts: 5, plannedTurns: 10, plannedRequests: 10, maximumDurationMs: 120000, maxConcurrency: 2 },
+          cases: [{ key: `${profile.id}/inline/known-two-turn-probe`, profileId: profile.id, scenarioId: 'known-two-turn-probe', scenarioName: 'Known two-turn probe', tags: ['regression', 'multi-turn'], requestedAttempts: 5, completedAttempts: 5, plannedTurns: 10, outcome: 'attackSucceeded', stability: 'unstable', sampleComplete: true, counts: { resisted: 3, attackSucceeded: 2, indeterminate: 0, infrastructureError: 0 }, durationMs: 18050, ttftP95Ms: 1808 }],
+          coverage: { requiredTags: ['multi-turn', 'privacy', 'regression'], coveredTags: ['multi-turn', 'regression'], missingTags: ['privacy'], caseCountByTag: { 'multi-turn': 1, regression: 1 }, percent: 66.67 },
+          diff: { baselineRunId: 'baseline-run', currentRunId: 'current-run', regressions: 1, improvements: 0, changed: 1, entries: [{ key: `${profile.id}/inline/known-two-turn-probe`, profileId: profile.id, scenarioId: 'known-two-turn-probe', scenarioName: 'Known two-turn probe', baselineOutcome: 'resisted', currentOutcome: 'attackSucceeded', transition: 'regressed' }] }
+        }
+      }]
+    };
+    if (query.get('campaignStatus') === 'running') {
+      const latestCampaign = campaignDashboard.campaigns[0].latest;
+      latestCampaign.status = 'running';
+      latestCampaign.updatedAt = 3000;
+      latestCampaign.cases[0].completedAttempts = 2;
+      latestCampaign.cases[0].sampleComplete = false;
+      delete latestCampaign.diff;
+      delete latestCampaign.baselineRunId;
+    }
     const evidenceTimeline = {
       version: 1,
       baseTime: 5000,
@@ -250,6 +286,7 @@
           dispatch({ type: 'profile.validated', valid: true });
           dispatch({ type: 'session.snapshot', snapshot: JSON.parse(JSON.stringify(snapshot)), runs: JSON.parse(JSON.stringify(runs)), requestPreview: { method: 'POST', url: 'http://localhost/chat' }, networkEntries: JSON.parse(JSON.stringify(networkEntries)) });
           dispatch({ type: 'connection.result', result: connectionResult });
+          dispatch({ type: 'campaign.dashboard', dashboard: campaignDashboard });
           dispatch({ type: 'test.results', results: [{ profileId: profile.id, scenarioId: 'known-two-turn-probe', scenarioName: 'Known two-turn probe', outcome: 'attackSucceeded', durationMs: 1840, attemptedTurns: 2, completedTurns: 2, plannedTurns: 2, findingCount: 1, issueCount: 0, primaryFinding: { category: 'url', turnId: 'attack', turnIndex: 1, ruleId: 'forbid.urls', label: 'Forbidden URL observed' }, evidenceId: 'visual-evidence', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'normalizedEvent', sequence: 4 }], repetitions: { requestedAttempts: 5, completedAttempts: 5, skippedAttempts: 0, sampleComplete: true, stability: 'unstable', counts: { resisted: 3, attackSucceeded: 2, indeterminate: 0, infrastructureError: 0 } }, reliability: { requestedAttempts: 5, completedAttempts: 5, evaluableAttempts: 5, coveragePercent: 100, resistanceRate: 0.6, attackRate: 0.4, resistanceInterval: { confidenceLevel: 0.95, status: 'smallSample', lower: 0.23, upper: 0.88 }, ttftP95Ms: 1808, durationP95Ms: 3612, verdict: 'doesNotMeetTarget', reasons: ['Resistance target was not met.'] } }] });
         }, 0);
       }

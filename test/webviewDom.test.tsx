@@ -639,6 +639,8 @@ describe('Webview DOM behavior', () => {
 
     await user.click(screen.getByRole('button', { name: 'Import CSV' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'importCsv' });
+    await user.click(screen.getByRole('button', { name: 'Import JSONL' }));
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'importJsonl' });
     await user.click(screen.getByRole('button', { name: 'Link JSONC suite' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'linkJsonc' });
     await user.click(screen.getAllByRole('button', { name: 'Add case' })[0]!);
@@ -654,6 +656,44 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } });
     await user.click(screen.getByRole('button', { name: 'Diagnose profile with Copilot' }));
     expect(post).toHaveBeenCalledWith({ type: 'copilot.profileDoctor' });
+  });
+
+  it('authors and operates a bounded campaign with baseline, diff, resume, and JSONL actions', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [], campaigns: [{ id: 'release', name: 'Release safety', selectors: { tags: ['security'] }, runPolicy: { repetitions: 5, maxConcurrency: 2, maxRequests: 100 }, coverageTags: ['security', 'privacy'] }] } };
+    render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={configured} post={post} campaignDashboard={{ profileId: profile.id, campaigns: [{ definition: configured.tests!.campaigns![0]!, latest: {
+      format: 'turnstage-campaign-run', version: 1, id: 'run-1', campaignId: 'release', campaignName: 'Release safety', profileId: profile.id, createdAt: 1, updatedAt: 2, status: 'cancelled', sourceDigest: 'a'.repeat(64),
+      plan: { selectedCases: 1, plannedAttempts: 5, plannedTurns: 5, plannedRequests: 5, maximumDurationMs: 10_000, maxConcurrency: 2 },
+      cases: [{ key: `${profile.id}/red/jailbreak`, profileId: profile.id, suiteId: 'red', scenarioId: 'jailbreak', scenarioName: 'Jailbreak', tags: ['security'], requestedAttempts: 5, completedAttempts: 2, plannedTurns: 5, outcome: 'attackSucceeded', sampleComplete: false }],
+      coverage: { requiredTags: ['privacy', 'security'], coveredTags: ['security'], missingTags: ['privacy'], caseCountByTag: { security: 1 }, percent: 50 },
+      diff: { baselineRunId: 'base', currentRunId: 'run-1', regressions: 1, improvements: 0, changed: 1, entries: [{ key: `${profile.id}/red/jailbreak`, profileId: profile.id, suiteId: 'red', scenarioId: 'jailbreak', scenarioName: 'Jailbreak', baselineOutcome: 'resisted', currentOutcome: 'attackSucceeded', transition: 'regressed' }] },
+    } }] }} />);
+
+    expect(screen.getByText('1 regression')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Preview plan' }));
+    expect(post).toHaveBeenCalledWith({ type: 'campaign.preview', campaignId: 'release' });
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(post).toHaveBeenCalledWith({ type: 'campaign.resume', campaignId: 'release', runId: 'run-1' });
+    await user.click(screen.getByRole('button', { name: 'Export results JSONL' }));
+    expect(post).toHaveBeenCalledWith({ type: 'campaign.exportResults', campaignId: 'release', runId: 'run-1' });
+    await user.click(screen.getByRole('button', { name: 'Summarize with Copilot' }));
+    expect(post).toHaveBeenCalledWith({ type: 'campaign.copilotSummary', campaignId: 'release', runId: 'run-1' });
+  });
+
+  it('disables duplicate campaign starts and exposes a distinct cancel action while running', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const definition: NonNullable<NonNullable<TurnStageProfile['tests']>['campaigns']>[number] = { id: 'release', name: 'Release safety', selectors: { caseIds: ['case'] } };
+    render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={{ ...profile, tests: { scenarios: [], campaigns: [definition] } }} post={post} campaignDashboard={{ profileId: profile.id, campaigns: [{ definition, latest: {
+      format: 'turnstage-campaign-run', version: 1, id: 'run-1', campaignId: 'release', campaignName: 'Release safety', profileId: profile.id, createdAt: 1, updatedAt: 2, status: 'running', sourceDigest: 'a'.repeat(64),
+      plan: { selectedCases: 1, plannedAttempts: 1, plannedTurns: 1, plannedRequests: 1, maximumDurationMs: 10_000, maxConcurrency: 1 },
+      cases: [{ key: `${profile.id}/inline/case`, profileId: profile.id, scenarioId: 'case', scenarioName: 'Case', tags: [], requestedAttempts: 1, completedAttempts: 0, plannedTurns: 1, sampleComplete: false }],
+      coverage: { requiredTags: [], coveredTags: [], missingTags: [], caseCountByTag: {}, percent: 100 },
+    } }] }} />);
+    expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Cancel run' }));
+    expect(post).toHaveBeenCalledWith({ type: 'campaign.cancel', campaignId: 'release' });
   });
 
   it('authors optional advisory quality rubrics without changing test outcomes', async () => {

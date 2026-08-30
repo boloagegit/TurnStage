@@ -82,6 +82,8 @@ const ALLOWED_KEYS: Record<CopilotToolName, readonly string[]> = {
 export interface ToolRegistrationOptions {
   /** Optional logger used by integration tests and hosts that want diagnostics. */
   onError?: (tool: CopilotToolName, error: unknown) => void;
+  /** Optional bounded lifecycle hook. Inputs and model output are never passed. */
+  onStart?: (tool: CopilotToolName) => ((result: { ok: boolean; cancelled: boolean; code?: string }) => void) | void;
 }
 
 /** Register every static manifest tool against the injected runtime. */
@@ -92,11 +94,14 @@ export function registerCopilotTools(runtime: CopilotRuntime, options: ToolRegis
     const implementation: vscode.LanguageModelTool<unknown> = {
       prepareInvocation: (invocation, token) => prepareInvocation(name, invocation.input, runtime, token),
       invoke: async (invocation, token) => {
+        const finish = options.onStart?.(name);
         try {
           const response = await executeCopilotTool(name, invocation.input, runtime, token);
+          finish?.({ ok: response.ok, cancelled: !response.ok && response.error.code === ERROR_CODES.cancelled, ...(!response.ok ? { code: response.error.code } : {}) });
           return toLanguageModelResult(response);
         } catch (error) {
           options.onError?.(name, error);
+          finish?.({ ok: false, cancelled: false, code: ERROR_CODES.runtimeFailed });
           return toLanguageModelResult(failure(name, ERROR_CODES.runtimeFailed, 'TurnStage tool failed safely.', true));
         }
       },

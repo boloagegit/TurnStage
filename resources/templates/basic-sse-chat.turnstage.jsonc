@@ -66,6 +66,14 @@
         ] }
       ],
       "assertions": [{ "path": "metrics.totalDuration", "operator": "lessThan", "value": 10000 }]
+    }],
+    "campaigns": [{
+      "id": "release-smoke",
+      "name": "Release smoke",
+      "description": "A small reusable campaign for the built-in conversation contract.",
+      "selectors": { "caseIds": ["basic-two-turn"] },
+      "runPolicy": { "maxConcurrency": 1, "maxRequests": 10, "maxDurationMs": 180000 },
+      "coverageTags": []
     }]
   },
   "history": { "localRuns": { "enabled": true, "maxRuns": 20, "recordRawEvents": true, "recordNormalizedEvents": true, "recordChatSnapshot": true } },

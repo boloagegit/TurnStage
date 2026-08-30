@@ -22,16 +22,56 @@ import { registerCopilotTools } from './copilot/tools';
 import { ScenarioCopilotRuntime } from './copilot/scenarioRuntime';
 import { createCopilotArtifactRepository } from './copilot/artifacts';
 import { buildOpenAICompatibleProfileDraft, parseCurlCommand } from './connection';
+import { configureTurnStageLogging, logAt, startLogOperation } from './logging';
 
 let activeEditor: TurnStageEditorProvider | undefined;
+let activeOutput: vscode.OutputChannel | undefined;
 export const TURNSTAGE_WALKTHROUGH_ID = 'turnstage.turnstage#gettingStarted';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   configureL10n((message, values) => vscode.l10n.t(message, values ?? {}));
-  const output = vscode.window.createOutputChannel(vscode.l10n.t('TurnStage')); const diagnostics = vscode.languages.createDiagnosticCollection('turnstage'); const repository = new ProfileRepository(context.globalStorageUri); const environments = new EnvironmentRepository(context.globalStorageUri); const duplicateDiagnostics = new ProfileDuplicateDiagnostics(repository, diagnostics); const tree = new ProfileTreeProvider(repository, (entries) => duplicateDiagnostics.refresh(entries)); const visualRegression = new VisualRegressionService(context); const editor = new TurnStageEditorProvider(context, diagnostics, output, environments, visualRegression); activeEditor = editor; const secrets = new SecretService(context); const copilotArtifacts = createCopilotArtifactRepository(); const scenarioTests = new ScenarioTestController(context, repository, environments, output, visualRegression, copilotArtifacts);
+  const output = vscode.window.createOutputChannel(vscode.l10n.t('TurnStage'), { log: true });
+  activeOutput = output;
+  const loggingConfiguration = configureTurnStageLogging();
+  const diagnostics = vscode.languages.createDiagnosticCollection('turnstage');
+  const repository = new ProfileRepository(context.globalStorageUri);
+  const environments = new EnvironmentRepository(context.globalStorageUri);
+  const duplicateDiagnostics = new ProfileDuplicateDiagnostics(repository, diagnostics);
+  const tree = new ProfileTreeProvider(repository, (entries) => duplicateDiagnostics.refresh(entries));
+  const visualRegression = new VisualRegressionService(context);
+  const secrets = new SecretService(context);
+  const copilotArtifacts = createCopilotArtifactRepository();
+  const scenarioTests = new ScenarioTestController(context, repository, environments, output, visualRegression, copilotArtifacts);
+  const editor = new TurnStageEditorProvider(context, diagnostics, output, environments, visualRegression, scenarioTests);
+  const campaignStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
+  campaignStatus.name = vscode.l10n.t('TurnStage Campaign Progress');
+  campaignStatus.command = 'turnstage.openOutput';
+  campaignStatus.tooltip = vscode.l10n.t('Open TurnStage Output');
+  const activeCampaignProgress = new Map<string, import('./testing/scenarioTestController').CampaignProgressEvent>();
+  activeEditor = editor;
   const demoProvider = vscode.workspace.registerTextDocumentContentProvider('turnstage-demo', { provideTextDocumentContent: async (uri) => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(context.extensionUri, 'resources', 'templates', uri.path.split('/').pop()!))) });
-  const copilotTools = registerCopilotTools(new ScenarioCopilotRuntime(scenarioTests, repository, environments, copilotArtifacts), { onError: (name, error) => output.appendLine(`[error] [copilot:${name}] ${error instanceof Error ? error.message : String(error)}`) });
-  context.subscriptions.push(output, diagnostics, tree, duplicateDiagnostics, demoProvider, scenarioTests, ...copilotTools, scenarioTests.onDidChangeResults(({ uri, results }) => { void editor.publishTestResults(uri, results); }));
+  const copilotTools = registerCopilotTools(new ScenarioCopilotRuntime(scenarioTests, repository, environments, copilotArtifacts), {
+    onError: (name, error) => logAt(output, 'error', () => `[copilot] tool=${name} type=${error instanceof Error ? error.name : 'Error'}`),
+    onStart: (name) => {
+      const operation = startLogOperation(output, 'copilot', name);
+      return (result) => {
+        if (result.cancelled) operation.cancel({ code: result.code });
+        else if (result.ok) operation.complete();
+        else operation.fail({ code: result.code });
+      };
+    },
+  });
+  context.subscriptions.push(output, loggingConfiguration, campaignStatus, diagnostics, tree, duplicateDiagnostics, demoProvider, scenarioTests, ...copilotTools, scenarioTests.onDidChangeResults(({ uri, results }) => { void editor.publishTestResults(uri, results); }), scenarioTests.onDidChangeCampaigns(({ uri, dashboard }) => { void editor.publishCampaignDashboard(uri, dashboard); }), scenarioTests.onDidChangeCampaignProgress((progress) => {
+    if (progress.state === 'running') activeCampaignProgress.set(progress.runId, progress);
+    else activeCampaignProgress.delete(progress.runId);
+    const current = [...activeCampaignProgress.values()].at(-1);
+    if (!current) { campaignStatus.hide(); return; }
+    campaignStatus.text = activeCampaignProgress.size === 1 ? `$(beaker) TurnStage: ${current.completedCases}/${current.totalCases}` : `$(beaker) TurnStage: ${activeCampaignProgress.size}`;
+    campaignStatus.accessibilityInformation = { label: activeCampaignProgress.size === 1
+      ? vscode.l10n.t('TurnStage campaign progress: {completed} of {total} cases', { completed: current.completedCases, total: current.totalCases })
+      : vscode.l10n.t('{count} TurnStage campaigns are running', { count: activeCampaignProgress.size }) };
+    campaignStatus.show();
+  }));
   context.subscriptions.push(vscode.window.registerTreeDataProvider('turnstage.profiles', tree), vscode.window.registerCustomEditorProvider('turnstage.profileEditor', editor, { webviewOptions: { retainContextWhenHidden: false }, supportsMultipleEditorsPerDocument: false }));
 
   const command = (id: string, handler: (...args: any[]) => unknown) => context.subscriptions.push(vscode.commands.registerCommand(`turnstage.${id}`, handler));
@@ -152,13 +192,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (!await editor.showScenarioEvidence(reference.uri, reference.evidence, location, evidenceId!, reference.result)) void showNotification('error', vscode.l10n.t('The TurnStage profile editor could not display this test evidence.'));
   });
   command('migrateProfile', async (item?: ProfileTreeItem | vscode.Uri) => { if (!requireWorkspaceTrust()) return; const uri = asUri(item); if (!uri) return; const document = await vscode.workspace.openTextDocument(uri); const result = new ProfileMigrator().migrate(document.getText()); if (!result.changed) { void showNotification('information', vscode.l10n.t('This TurnStage profile is already current.')); return; } const migrateLabel = vscode.l10n.t('Migrate'); const confirmation = await vscode.window.showInformationMessage(vscode.l10n.t('Migrate profile from version {from} to {to}? A backup will be created.', { from: result.fromVersion, to: result.toVersion }), { modal: true, detail: result.notes.join('\n') }, migrateLabel); if (confirmation !== migrateLabel) return; const backup = uri.with({ path: `${uri.path}.v${result.fromVersion}.backup` }); await vscode.workspace.fs.writeFile(backup, new TextEncoder().encode(document.getText())); const edit = new vscode.WorkspaceEdit(); edit.replace(uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), result.text); await vscode.workspace.applyEdit(edit); await vscode.commands.executeCommand('vscode.diff', backup, uri, vscode.l10n.t('TurnStage Migration')); });
-  output.appendLine(vscode.l10n.t('TurnStage activated in {host}.', { host: vscode.env.remoteName ?? vscode.l10n.t('Local Extension Host') }));
+  logAt(output, 'info', () => `[extension] activated host=${vscode.env.remoteName ?? 'local'} version=${String(context.extension.packageJSON.version ?? 'unknown')}`);
   void scenarioTests.refresh().catch((error) => logScenarioTestError(output, error));
 }
 
 export async function deactivate(): Promise<void> {
   const editor = activeEditor;
   activeEditor = undefined;
+  activeOutput = undefined;
   await editor?.drainPending();
 }
 
@@ -334,9 +375,11 @@ async function showNotification(kind: NotificationKind, message: string): Promis
   const configuration = vscode.workspace.getConfiguration('turnstage');
   if (configuration.get<boolean>('notifications.enabled', true) === false) return;
   const doNotShowAgain = vscode.l10n.t('Do not show again');
+  const openOutput = vscode.l10n.t('Open TurnStage Output');
   const action = kind === 'error'
-    ? await vscode.window.showErrorMessage(message, doNotShowAgain)
+    ? await vscode.window.showErrorMessage(message, openOutput, doNotShowAgain)
     : await vscode.window.showInformationMessage(message, doNotShowAgain);
+  if (action === openOutput) activeOutput?.show(true);
   if (action === doNotShowAgain) {
     try { await configuration.update('notifications.enabled', false, vscode.ConfigurationTarget.Global); } catch { /* notification preferences are best effort */ }
   }

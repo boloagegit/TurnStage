@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
-import type { ScenarioReportFormat, ScenarioReportingDefinition } from '../../shared/types';
+import type { CampaignRunRecordV1, ScenarioReportFormat, ScenarioReportingDefinition } from '../../shared/types';
 import { localize } from '../l10n';
 import { isSafeReportDirectory } from './scenarioConfig';
 import { createScenarioReport, serializeAdversarialEventsCsv, serializeAdversarialFindingsCsv, serializeAdversarialNetworkCsv, serializeAdversarialSummaryCsv, serializeAdversarialTurnsCsv, serializeScenarioHtml, serializeScenarioJson, serializeScenarioJUnit, type ScenarioExecutionRecord } from './scenarioReport';
 import type { VisualRegressionService } from './visualRegression';
 import { createProvenanceManifest, type ProvenanceFileInput } from './provenance';
+import { serializeCampaignResultsJsonl } from './adversarialJsonl';
+import { sanitizeCampaignCase } from './campaign';
 
 const MAX_VISUAL_ARTIFACT_BYTES = 24 * 1024 * 1024;
 
@@ -18,6 +20,7 @@ interface ConfiguredReportGroup {
 export interface ScenarioReportScope {
   runId?: string;
   profileIds?: readonly string[];
+  campaign?: CampaignRunRecordV1;
 }
 
 export interface CopilotArtifactProvider {
@@ -35,7 +38,13 @@ export class ScenarioReportService {
     this.scope = {
       ...(scope.runId ? { runId: scope.runId } : {}),
       profileIds: [...new Set(scope.profileIds ?? records.map((record) => record.profileId))],
+      ...(scope.campaign ? { campaign: sanitizeCampaignForReport(scope.campaign) } : {}),
     };
+  }
+  attachCampaign(campaign: CampaignRunRecordV1): boolean {
+    if (this.scope.runId && this.scope.runId !== campaign.id) return false;
+    this.scope = { ...this.scope, runId: campaign.id, campaign: sanitizeCampaignForReport(campaign) };
+    return true;
   }
   hasRecords(): boolean { return this.records.length > 0; }
 
@@ -70,9 +79,10 @@ export class ScenarioReportService {
     await vscode.workspace.fs.createDirectory(directory);
     const generatedAt = new Date().toISOString();
     const fileNames = ['index.html', 'report.json', 'junit.xml', 'adversarial-summary.csv', 'adversarial-turns.csv', 'adversarial-findings.csv', 'network.csv', 'events.csv', 'diagnostics.json'];
+    if (this.scope.campaign) fileNames.push('campaign-summary.json', 'campaign-results.jsonl');
     if (includeVisual && visual) { fileNames.push('visual-baseline.png'); if (visual.diffUri) fileNames.push('visual-diff.png'); }
     const files: Array<[string, string | Uint8Array]> = [
-      ['index.html', serializeScenarioHtml(this.records, generatedAt)],
+      ['index.html', appendCampaignHtml(serializeScenarioHtml(this.records, generatedAt), this.scope.campaign)],
       ['report.json', serializeScenarioJson(this.records, generatedAt)],
       ['junit.xml', serializeScenarioJUnit(this.records, generatedAt)],
       ['adversarial-summary.csv', serializeAdversarialSummaryCsv(this.records)],
@@ -82,12 +92,16 @@ export class ScenarioReportService {
       ['events.csv', serializeAdversarialEventsCsv(this.records)],
       ['diagnostics.json', `${JSON.stringify(scopeCopilotArtifacts(this.copilotArtifacts?.snapshot(), this.scope), null, 2)}\n`],
     ];
+    if (this.scope.campaign) {
+      files.push(['campaign-summary.json', `${JSON.stringify(this.scope.campaign, null, 2)}\n`]);
+      files.push(['campaign-results.jsonl', serializeCampaignResultsJsonl(this.scope.campaign)]);
+    }
     if (includeVisual && visual) {
       files.push(['visual-baseline.png', await readBoundedVisualArtifact(visual.baselineUri)]);
       if (visual.diffUri) files.push(['visual-diff.png', await readBoundedVisualArtifact(visual.diffUri)]);
     }
     const report = createScenarioReport(this.records, generatedAt);
-    files.push(['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 5, generatedAt, files: [...fileNames, 'manifest.json', 'provenance.json'], privacy: { rawEvents: false, payloads: false, urls: false, headers: false, messageContent: false, secrets: false, profileEditContent: false, advisoryResponseContent: false, visualChatContent: includeVisual, causalMetadata: true, failureFingerprints: true }, summary: report.summary }, null, 2)}\n`]);
+    files.push(['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 6, generatedAt, files: [...fileNames, 'manifest.json', 'provenance.json'], privacy: { rawEvents: false, payloads: false, urls: false, headers: false, messageContent: false, secrets: false, profileEditContent: false, advisoryResponseContent: false, visualChatContent: includeVisual, causalMetadata: true, failureFingerprints: true, campaignMetadata: Boolean(this.scope.campaign) }, summary: report.summary, campaign: this.scope.campaign ? { id: this.scope.campaign.campaignId, runId: this.scope.campaign.id, status: this.scope.campaign.status, coverage: this.scope.campaign.coverage, diff: this.scope.campaign.diff } : undefined }, null, 2)}\n`]);
     const provenanceFiles: ProvenanceFileInput[] = files.map(([path, contents]) => ({ path, contents }));
     const provenance = createProvenanceManifest({
       runId: this.scope.runId ?? crypto.randomUUID(),
@@ -96,9 +110,9 @@ export class ScenarioReportService {
       runnerVersion: this.runnerVersion,
       extensionVersion: this.runnerVersion,
       selectedTestIds: this.records.map((record) => `${record.profileId}/${record.scenarioId}`),
-      policy: { evidenceBundleVersion: 5, visualChatContent: includeVisual },
+      policy: { evidenceBundleVersion: 6, visualChatContent: includeVisual, campaignMetadata: Boolean(this.scope.campaign) },
       result: report,
-      evidence: { summary: report.summary },
+      evidence: { summary: report.summary, campaign: this.scope.campaign },
       evidenceFiles: provenanceFiles,
     });
     files.push(['provenance.json', `${JSON.stringify(provenance, null, 2)}\n`]);
@@ -182,4 +196,19 @@ function matchesCopilotArtifactScope(item: unknown, runId: string | undefined, p
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function appendCampaignHtml(html: string, campaign: CampaignRunRecordV1 | undefined): string {
+  if (!campaign) return html;
+  const regressions = campaign.diff?.entries.filter((item) => item.transition === 'regressed') ?? [];
+  const section = `<section><h2>Test Campaign</h2><dl><dt>Campaign</dt><dd>${escapeHtml(campaign.campaignName)}</dd><dt>Status</dt><dd>${escapeHtml(campaign.status)}</dd><dt>Cases</dt><dd>${campaign.cases.filter((item) => item.sampleComplete).length} / ${campaign.plan.selectedCases}</dd><dt>Coverage</dt><dd>${campaign.coverage.percent}%</dd><dt>Regressions</dt><dd>${campaign.diff?.regressions ?? 0}</dd></dl>${campaign.coverage.missingTags.length ? `<h3>Coverage gaps</h3><ul>${campaign.coverage.missingTags.map((tag) => `<li>${escapeHtml(tag)}</li>`).join('')}</ul>` : ''}${regressions.length ? `<h3>Regressions</h3><table><thead><tr><th>Case</th><th>Baseline</th><th>Current</th></tr></thead><tbody>${regressions.map((item) => `<tr><td>${escapeHtml(item.scenarioName)} <code>${escapeHtml(item.scenarioId)}</code></td><td>${escapeHtml(item.baselineOutcome ?? 'unknown')}</td><td>${escapeHtml(item.currentOutcome ?? 'unknown')}</td></tr>`).join('')}</tbody></table>` : ''}</section>`;
+  return html.includes('</body>') ? html.replace('</body>', `${section}</body>`) : `${html}${section}`;
+}
+
+function sanitizeCampaignForReport(campaign: CampaignRunRecordV1): CampaignRunRecordV1 {
+  return { ...structuredClone(campaign), cases: campaign.cases.map(sanitizeCampaignCase) };
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }

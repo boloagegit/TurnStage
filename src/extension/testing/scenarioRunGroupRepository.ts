@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { AdversarialAttemptSummary, AdversarialOutcome, ScenarioRunGroupRecord } from '../../shared/types';
+import { logAt } from '../logging';
 
 export const RUN_GROUP_FORMAT = 'turnstage-run-group' as const;
 export const RUN_GROUP_VERSION = 1 as const;
@@ -17,8 +18,9 @@ const saveQueues = new Map<string, Promise<void>>();
  */
 export class ScenarioRunGroupRepository {
   private readonly root: vscode.Uri;
+  private readonly warnedReads = new Set<string>();
 
-  constructor(private readonly context: vscode.ExtensionContext) {
+  constructor(private readonly context: vscode.ExtensionContext, private readonly output?: Pick<vscode.OutputChannel, 'appendLine'>) {
     const storageUri = (context as vscode.ExtensionContext & { storageUri?: vscode.Uri }).storageUri;
     this.root = storageUri ?? context.globalStorageUri;
   }
@@ -27,18 +29,28 @@ export class ScenarioRunGroupRepository {
     if (!safeString(profileId)) return [];
     try {
       const uri = this.uri(profileId);
-      if ((await vscode.workspace.fs.stat(uri)).size > MAX_RUN_GROUP_BYTES) return [];
+      if ((await vscode.workspace.fs.stat(uri)).size > MAX_RUN_GROUP_BYTES) { this.warnRead(profileId, 'size-limit'); return []; }
       const bytes = await vscode.workspace.fs.readFile(uri);
-      if (bytes.byteLength > MAX_RUN_GROUP_BYTES) return [];
+      if (bytes.byteLength > MAX_RUN_GROUP_BYTES) { this.warnRead(profileId, 'size-limit'); return []; }
       const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
-      if (!Array.isArray(value)) return [];
-      return value.flatMap((item) => {
+      if (!Array.isArray(value)) { this.warnRead(profileId, 'unsupported-format'); return []; }
+      const records = value.flatMap((item) => {
         const record = sanitizeRecord(item, profileId);
         return record ? [record] : [];
       });
-    } catch {
+      if (records.length !== value.length) this.warnRead(profileId, 'invalid-records-discarded');
+      else this.warnedReads.delete(profileId);
+      return records;
+    } catch (error) {
+      if (!isMissingRunGroupFile(error)) this.warnRead(profileId, 'read-failed');
       return [];
     }
+  }
+
+  private warnRead(profileId: string, reason: string): void {
+    if (!this.output || this.warnedReads.has(profileId)) return;
+    this.warnedReads.add(profileId);
+    logAt(this.output, 'warn', () => `[storage] run-group history unavailable profile=${safeFilePart(profileId)} reason=${reason}`);
   }
 
   async get(profileId: string, id: string): Promise<ScenarioRunGroupRecord | undefined> {
@@ -149,3 +161,8 @@ function stability(value: unknown): value is ScenarioRunGroupRecord['stability']
 function emptyCounts(): ScenarioRunGroupRecord['counts'] { return { resisted: 0, attackSucceeded: 0, indeterminate: 0, infrastructureError: 0 }; }
 function normalizeRetention(value: number): number { return Number.isInteger(value) ? Math.max(1, Math.min(MAX_RUN_GROUP_RETENTION, value)) : DEFAULT_RUN_GROUP_RETENTION; }
 function safeFilePart(value: string): string { return value.replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 100) || 'profile'; }
+function isMissingRunGroupFile(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as { code?: unknown; name?: unknown; message?: unknown };
+  return value.code === 'FileNotFound' || value.code === 'ENOENT' || value.name === 'EntryNotFound (FileSystemError)' || /\bENOENT\b/.test(String(value.message ?? ''));
+}

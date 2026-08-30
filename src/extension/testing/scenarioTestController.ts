@@ -2,6 +2,9 @@ import * as vscode from 'vscode';
 import { findNodeAtLocation } from 'jsonc-parser';
 import type {
   AdversarialResultSummary,
+  CampaignBaselineV1,
+  CampaignDashboardV1,
+  CampaignRunRecordV1,
   ScenarioCheckResult,
   ScenarioDefinition,
   ScenarioEvidenceLocation,
@@ -9,6 +12,8 @@ import type {
   ScenarioReportingDefinition,
   ScenarioRunEvidence,
   ScenarioRunResult,
+  ScenarioRunGroupRecord,
+  TestCampaignDefinition,
   TurnStageEnvironment,
   TurnStageProfile,
 } from '../../shared/types';
@@ -32,11 +37,15 @@ import type { VisualRegressionService } from './visualRegression';
 import { createTrustAwareCancellation } from './trustCancellation';
 import { createReliabilitySummary } from './reliabilityStatistics';
 import { createBatchRunPlan } from './batchRun';
+import { attachCampaignBaseline, createCampaignPlan, createCampaignRunRecord, type CampaignCaseInput, type CampaignPlanV1 } from './campaign';
+import { CampaignRepository } from './campaignRepository';
+import { digestValue } from './provenance';
+import { logAt, startLogOperation } from '../logging';
 
 type TestData =
   | { type: 'profile'; uri: vscode.Uri; profileId: string }
   | { type: 'suite'; uri: vscode.Uri; profileId: string; suiteId?: string; suitePath: string }
-  | { type: 'scenario'; uri: vscode.Uri; profileId: string; suiteId?: string; scenarioId: string; suitePath?: string; tags?: string[]; sourceBinding?: ScenarioDefinition['sourceBinding']; repetitions?: number; plannedTurns: number }
+  | { type: 'scenario'; uri: vscode.Uri; profileId: string; suiteId?: string; scenarioId: string; suitePath?: string; tags?: string[]; sourceBinding?: ScenarioDefinition['sourceBinding']; adversarial: boolean; repetitions?: number; plannedTurns: number }
   | { type: 'step'; uri: vscode.Uri; profileId: string; suiteId?: string; scenarioId: string; stepIndex: number; suitePath?: string };
 
 export interface TestEvidenceReference {
@@ -71,6 +80,10 @@ interface PreparedScenarioJob {
 
 interface ScenarioRunScope {
   runId?: string;
+  campaign?: {
+    runId: string;
+    onAttemptComplete: (job: ScenarioJob, record: import('../../shared/types').ScenarioRunGroupRecord) => Promise<void>;
+  };
   /** Throws when the final immutable execution snapshot is stale. */
   validateIntegrity?: (material: ScenarioIntegrityMaterial) => void;
 }
@@ -87,6 +100,9 @@ export interface ScenarioRunSelection {
   itemIds?: readonly string[];
   repetitions?: number;
   failFast?: boolean;
+  maxConcurrency?: number;
+  maxRequests?: number;
+  maxDurationMs?: number;
 }
 
 export interface ScenarioRunPreview {
@@ -98,6 +114,14 @@ export interface ScenarioRunPreview {
   maximumRepetitions: number;
   environments: string[];
   warnings: string[];
+}
+
+export interface CampaignProgressEvent {
+  runId: string;
+  campaignId: string;
+  completedCases: number;
+  totalCases: number;
+  state: 'running' | 'completed' | 'cancelled' | 'failed';
 }
 
 /**
@@ -124,6 +148,7 @@ export interface ScenarioControllerRunSummary {
 
 export interface ScenarioControllerTestDescriptor {
   id: string;
+  uri: string;
   label: string;
   kind: 'profile' | 'suite' | 'case' | 'step';
   profileId: string;
@@ -132,6 +157,7 @@ export interface ScenarioControllerTestDescriptor {
   tags?: string[];
   plannedTurns?: number;
   repetitions?: number;
+  adversarial?: boolean;
   sourceBinding?: ScenarioDefinition['sourceBinding'];
 }
 
@@ -164,8 +190,13 @@ export class ScenarioTestController implements vscode.Disposable {
   private readonly protectedCopilotEvidence = new Set<string>();
   private readonly reports: ScenarioReportService;
   private readonly runGroups: ScenarioRunGroupRepository;
+  private readonly campaigns: CampaignRepository;
   private readonly resultsEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; results: AdversarialResultSummary[] }>();
   readonly onDidChangeResults = this.resultsEmitter.event;
+  private readonly campaignEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; dashboard: CampaignDashboardV1 }>();
+  readonly onDidChangeCampaigns = this.campaignEmitter.event;
+  private readonly campaignProgressEmitter = new vscode.EventEmitter<CampaignProgressEvent>();
+  readonly onDidChangeCampaignProgress = this.campaignProgressEmitter.event;
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
   private latestRunSummaries: ScenarioControllerRunSummary[] = [];
   private refreshing?: Promise<void>;
@@ -179,7 +210,8 @@ export class ScenarioTestController implements vscode.Disposable {
     copilotArtifacts?: CopilotArtifactProvider,
   ) {
     this.reports = new ScenarioReportService(output, visualRegression, String(context.extension.packageJSON.version ?? 'unknown'), copilotArtifacts);
-    this.runGroups = new ScenarioRunGroupRepository(context);
+    this.runGroups = new ScenarioRunGroupRepository(context, output);
+    this.campaigns = new CampaignRepository(context, output);
     this.controller = vscode.tests.createTestController('turnstage.contracts', localize('TurnStage Conversation Contracts'));
     this.controller.resolveHandler = async () => this.refresh();
     this.controller.createRunProfile(localize('Run Conversation Contracts'), vscode.TestRunProfileKind.Run, async (request, token) => { await this.run(request, token); }, true);
@@ -192,7 +224,7 @@ export class ScenarioTestController implements vscode.Disposable {
     context.subscriptions.push(watcher, vscode.workspace.onDidSaveTextDocument((document) => { if (/\.(?:turnstage|adversarial)\.jsonc?$/.test(document.uri.path)) refresh(); }));
   }
 
-  dispose(): void { this.resultsEmitter.dispose(); this.controller.dispose(); }
+  dispose(): void { this.resultsEmitter.dispose(); this.campaignEmitter.dispose(); this.campaignProgressEmitter.dispose(); this.controller.dispose(); }
 
   async refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
@@ -205,6 +237,146 @@ export class ScenarioTestController implements vscode.Disposable {
   exportLastReport(format: ScenarioReportFormat): Promise<vscode.Uri | undefined> { return this.reports.exportLast(format); }
   exportEvidenceBundle(): Promise<vscode.Uri | undefined> { return this.reports.exportEvidenceBundle(); }
   getLatestResults(uri: vscode.Uri): AdversarialResultSummary[] { return this.latestResults.get(uri.toString()) ?? []; }
+  async getCampaignDashboard(uri: vscode.Uri): Promise<CampaignDashboardV1> {
+    const entry = await this.profiles.read(uri);
+    if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
+    const campaigns: CampaignDashboardV1['campaigns'] = [];
+    for (const definition of entry.profile.tests?.campaigns ?? []) {
+      const latest = (await this.campaigns.listRuns(entry.profile.id, definition.id))[0];
+      const accepted = await this.campaigns.getAcceptedBaseline(entry.profile.id, definition.id);
+      campaigns.push({
+        definition: structuredClone(definition),
+        ...(latest ? { latest: accepted && latest.id !== accepted.run.id ? attachCampaignBaseline(latest, accepted.run) : latest } : {}),
+        ...(accepted ? { baseline: accepted.baseline } : {}),
+      });
+    }
+    return { profileId: entry.profile.id, campaigns };
+  }
+
+  async previewCampaign(uri: vscode.Uri, campaignId: string): Promise<CampaignPlanV1> {
+    return (await this.prepareCampaign(uri, campaignId)).plan;
+  }
+
+  async runCampaign(uri: vscode.Uri, campaignId: string, token: vscode.CancellationToken, resumeRunId?: string): Promise<CampaignRunRecordV1> {
+    const operation = startLogOperation(this.output, 'campaign', resumeRunId ? 'resume' : 'run', { campaign: campaignId });
+    if (!vscode.workspace.isTrusted) {
+      operation.fail({ reason: 'workspace-untrusted' });
+      throw new Error('Test campaigns require a trusted workspace.');
+    }
+    let prepared: Awaited<ReturnType<ScenarioTestController['prepareCampaign']>>;
+    try { prepared = await this.prepareCampaign(uri, campaignId); }
+    catch (error) { operation.fail({ reason: error instanceof Error ? error.name : 'prepare-failed' }); throw error; }
+    if (!prepared.plan.batch.valid || !prepared.plan.batch.withinBudget) {
+      operation.fail({ reason: 'budget-rejected', issues: prepared.plan.batch.issues.length });
+      throw new Error(prepared.plan.batch.issues.map((item) => item.message).join('\n'));
+    }
+    let record = resumeRunId ? await this.campaigns.getRun(prepared.profile.id, resumeRunId) : undefined;
+    if (resumeRunId && !record) { operation.fail({ reason: 'resume-not-found' }); throw new Error('The campaign run to resume was not found.'); }
+    if (record && (record.campaignId !== campaignId || record.sourceDigest !== prepared.plan.sourceDigest)) { operation.fail({ reason: 'resume-integrity-mismatch' }); throw new Error('The saved campaign does not match the current profile, selectors, or run policy. Start a new run.'); }
+    if (record?.status === 'completed') { operation.fail({ reason: 'already-completed' }); throw new Error('The selected campaign run is already complete.'); }
+    record = record ?? createCampaignRunRecord(prepared.plan, prepared.profile.id, { id: crypto.randomUUID() });
+    record = { ...record, status: 'running', updatedAt: Date.now() };
+    try {
+      await this.campaigns.saveRun(record);
+      this.campaignEmitter.fire({ uri, dashboard: await this.getCampaignDashboard(uri) });
+    } catch (error) {
+      operation.fail({ reason: error instanceof Error ? error.name : 'storage-failed' });
+      throw error;
+    }
+    const runId = record.id;
+    let progressBucket = -1;
+    this.campaignProgressEmitter.fire({ runId, campaignId, completedCases: record.cases.filter((item) => item.sampleComplete).length, totalCases: record.cases.length, state: 'running' });
+    const checkpoint = async (job: ScenarioJob, group: ScenarioRunGroupRecord): Promise<void> => {
+      const key = campaignCaseKey(group.profileId, job.suiteId, group.scenarioId);
+      record = {
+        ...record!,
+        updatedAt: Date.now(),
+        cases: record!.cases.map((item) => item.key !== key ? item : {
+          ...item,
+          requestedAttempts: group.requestedAttempts,
+          completedAttempts: group.completedAttempts,
+          outcome: group.outcome,
+          stability: group.stability,
+          sampleComplete: group.sampleComplete,
+          counts: { ...group.counts },
+          durationMs: group.attempts.reduce((sum, attempt) => sum + attempt.durationMs, 0),
+          ttftP95Ms: percentile95(group.attempts.flatMap((attempt) => attempt.ttftMs === undefined ? [] : [attempt.ttftMs])),
+        }),
+      };
+      await this.campaigns.saveRun(record!);
+      const completedCases = record!.cases.filter((item) => item.sampleComplete).length;
+      const nextBucket = record!.cases.length ? Math.floor((completedCases * 10) / record!.cases.length) : 10;
+      if (nextBucket > progressBucket) {
+        progressBucket = nextBucket;
+        operation.progress({ completedCases, totalCases: record!.cases.length });
+        this.campaignProgressEmitter.fire({ runId, campaignId, completedCases, totalCases: record!.cases.length, state: 'running' });
+      }
+    };
+    try {
+      const snapshot = await this.runSelection({
+        itemIds: prepared.plan.selected.map((item) => item.itemId),
+        repetitions: prepared.definition.runPolicy?.repetitions,
+        failFast: prepared.definition.runPolicy?.failFast,
+        maxConcurrency: prepared.definition.runPolicy?.maxConcurrency,
+        maxRequests: prepared.definition.runPolicy?.maxRequests,
+        maxDurationMs: prepared.definition.runPolicy?.maxDurationMs,
+      }, token, { campaign: { runId, onAttemptComplete: checkpoint } });
+      const summaries = new Map(snapshot.summaries.map((item) => [campaignCaseKey(item.profileId, item.suiteId, item.scenarioId), item]));
+      record = {
+        ...record,
+        updatedAt: Date.now(),
+        status: token.isCancellationRequested ? 'cancelled' : 'completed',
+        cases: record.cases.map((item) => {
+          const summary = summaries.get(item.key);
+          if (!summary) return item;
+          const completedAttempts = summary.counts ? Object.values(summary.counts).reduce((sum, count) => sum + count, 0) : 1;
+          return { ...item, completedAttempts, outcome: summary.outcome, stability: summary.stability, sampleComplete: summary.sampleComplete ?? true, ...(summary.counts ? { counts: { ...summary.counts } } : {}) };
+        }),
+      };
+      if (!token.isCancellationRequested && record.cases.some((item) => !item.sampleComplete)) record = { ...record, status: 'cancelled' };
+      const accepted = await this.campaigns.getAcceptedBaseline(record.profileId, record.campaignId);
+      if (accepted && accepted.run.id !== record.id) record = attachCampaignBaseline(record, accepted.run);
+      await this.campaigns.saveRun(record);
+      this.reports.attachCampaign(record);
+      const dashboard = await this.getCampaignDashboard(uri);
+      this.campaignEmitter.fire({ uri, dashboard });
+      const completedCases = record.cases.filter((item) => item.sampleComplete).length;
+      const counts = campaignOutcomeCounts(record);
+      if (record.status === 'cancelled') operation.cancel({ completedCases, totalCases: record.cases.length, ...counts });
+      else operation.complete({ completedCases, totalCases: record.cases.length, ...counts });
+      this.campaignProgressEmitter.fire({ runId, campaignId, completedCases, totalCases: record.cases.length, state: record.status === 'cancelled' ? 'cancelled' : 'completed' });
+      return record;
+    } catch (error) {
+      record = { ...record, status: 'cancelled', updatedAt: Date.now() };
+      await this.campaigns.saveRun(record);
+      if (this.reports.hasRecords()) this.reports.attachCampaign(record);
+      this.campaignEmitter.fire({ uri, dashboard: await this.getCampaignDashboard(uri) });
+      const completedCases = record.cases.filter((item) => item.sampleComplete).length;
+      if (token.isCancellationRequested) {
+        operation.cancel({ completedCases, totalCases: record.cases.length });
+        this.campaignProgressEmitter.fire({ runId, campaignId, completedCases, totalCases: record.cases.length, state: 'cancelled' });
+        return record;
+      }
+      operation.fail({ reason: error instanceof Error ? error.name : 'Error', completedCases, totalCases: record.cases.length });
+      this.campaignProgressEmitter.fire({ runId, campaignId, completedCases, totalCases: record.cases.length, state: 'failed' });
+      throw error;
+    }
+  }
+
+  async acceptCampaignBaseline(uri: vscode.Uri, campaignId: string, runId: string): Promise<CampaignBaselineV1> {
+    const entry = await this.profiles.read(uri);
+    if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
+    const baseline = await this.campaigns.acceptBaseline(entry.profile.id, campaignId, runId);
+    logAt(this.output, 'info', () => `[campaign] baseline accepted campaign=${campaignId}`);
+    this.campaignEmitter.fire({ uri, dashboard: await this.getCampaignDashboard(uri) });
+    return baseline;
+  }
+
+  async getCampaignRun(uri: vscode.Uri, runId: string): Promise<CampaignRunRecordV1 | undefined> {
+    const entry = await this.profiles.read(uri);
+    if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
+    return this.campaigns.getRun(entry.profile.id, runId);
+  }
   getLatestRunSummaries(): readonly ScenarioControllerRunSummary[] { return this.latestRunSummaries.map((summary) => ({ ...summary, counts: summary.counts ? { ...summary.counts } : undefined })); }
   async runAll(): Promise<void> {
     const cancellation = new vscode.CancellationTokenSource();
@@ -296,6 +468,7 @@ export class ScenarioTestController implements vscode.Disposable {
       if (data && (includeSteps || data.type !== 'step')) {
         result.push({
           id: item.id,
+          uri: data.uri.toString(),
           label: String(item.label),
           kind: data.type === 'scenario' ? 'case' : data.type,
           profileId: data.profileId,
@@ -304,6 +477,7 @@ export class ScenarioTestController implements vscode.Disposable {
           tags: data.type === 'scenario' ? structuredClone(data.tags) : undefined,
           plannedTurns: data.type === 'scenario' ? data.plannedTurns : undefined,
           repetitions: data.type === 'scenario' ? data.repetitions : undefined,
+          adversarial: data.type === 'scenario' ? data.adversarial : undefined,
           sourceBinding: data.type === 'scenario' ? structuredClone(data.sourceBinding) : undefined,
         });
       }
@@ -371,7 +545,7 @@ export class ScenarioTestController implements vscode.Disposable {
         const scenarioItem = this.controller.createTestItem(`${entry.uri.toString()}::scenario::${scenario.id}`, scenario.name || scenario.id, entry.uri);
         scenarioItem.description = scenario.id;
         scenarioItem.range = nodeRange(document, parsed.tree, ['tests', 'scenarios', scenarioIndex]);
-        this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, profileId: entry.profile.id, scenarioId: scenario.id, tags: scenario.tags, sourceBinding: scenario.sourceBinding, repetitions: scenario.adversarial?.repetitions, plannedTurns: scenario.steps.length });
+        this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, profileId: entry.profile.id, scenarioId: scenario.id, tags: scenario.tags, sourceBinding: scenario.sourceBinding, adversarial: Boolean(scenario.adversarial), repetitions: scenario.adversarial?.repetitions, plannedTurns: scenario.steps.length });
         for (const [stepIndex, step] of scenario.steps.entries()) {
           const stepItem = this.controller.createTestItem(`${scenarioItem.id}::step::${step.id}`, step.name?.trim() || step.id, entry.uri);
           stepItem.description = step.input.length > 80 ? `${step.input.slice(0, 77)}…` : step.input;
@@ -392,7 +566,7 @@ export class ScenarioTestController implements vscode.Disposable {
           for (const scenario of loaded.scenarios) {
             const scenarioItem = this.controller.createTestItem(`${suiteItem.id}::scenario::${scenario.id}`, scenario.name || scenario.id, loaded.uri);
             scenarioItem.description = scenario.id;
-            this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, suitePath, tags: scenario.tags, sourceBinding: scenario.sourceBinding, repetitions: scenario.adversarial?.repetitions, plannedTurns: scenario.steps.length });
+            this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, suitePath, tags: scenario.tags, sourceBinding: scenario.sourceBinding, adversarial: Boolean(scenario.adversarial), repetitions: scenario.adversarial?.repetitions, plannedTurns: scenario.steps.length });
             for (const [stepIndex, step] of scenario.steps.entries()) {
               const stepItem = this.controller.createTestItem(`${scenarioItem.id}::step::${step.id}`, step.name?.trim() || step.id, loaded.uri);
               stepItem.description = step.input.length > 80 ? `${step.input.slice(0, 77)}…` : step.input;
@@ -414,6 +588,36 @@ export class ScenarioTestController implements vscode.Disposable {
     this.controller.items.replace(roots);
   }
 
+  private async prepareCampaign(uri: vscode.Uri, campaignId: string): Promise<{ profile: TurnStageProfile; definition: TestCampaignDefinition; plan: CampaignPlanV1 }> {
+    const entry = await this.profiles.read(uri);
+    if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
+    const definition = entry.profile.tests?.campaigns?.find((item) => item.id === campaignId);
+    if (!definition) throw new Error(`Campaign ${campaignId} was not found in this profile.`);
+    const issues = this.validator.validate(entry.profile);
+    const firstError = issues.find((item) => item.severity === 'error');
+    if (firstError) throw new Error(firstError.message);
+    const openingRequests = entry.profile.opening?.mode === 'request' ? 1 : 0;
+    const targetUri = uri.toString();
+    const descriptors = (await this.describeTests(false)).filter((item) => item.kind === 'case'
+      && item.profileId === entry.profile!.id
+      && item.uri === targetUri);
+    const cases: CampaignCaseInput[] = descriptors.flatMap((item) => item.caseId ? [{
+      key: campaignCaseKey(item.profileId, item.suiteId, item.caseId),
+      itemId: item.id,
+      profileId: item.profileId,
+      ...(item.suiteId ? { suiteId: item.suiteId } : {}),
+      scenarioId: item.caseId,
+      scenarioName: item.label,
+      tags: item.tags,
+      riskTags: item.sourceBinding?.riskTags,
+      adversarial: item.adversarial,
+      repetitions: item.repetitions,
+      plannedTurns: item.plannedTurns ?? 1,
+      requestsPerAttempt: (item.plannedTurns ?? 1) + openingRequests,
+    }] : []);
+    return { profile: entry.profile, definition, plan: createCampaignPlan(definition, cases) };
+  }
+
   private async run(request: vscode.TestRunRequest, token: vscode.CancellationToken, selection: ScenarioRunSelection = {}, scope: ScenarioRunScope = {}, preparedInput?: readonly PreparedScenarioJob[]): Promise<ScenarioRunSnapshot> {
     if (!preparedInput) await this.refresh();
     const run = this.controller.createTestRun(request);
@@ -422,6 +626,7 @@ export class ScenarioTestController implements vscode.Disposable {
     const runEvidenceIds: string[] = [];
     const persistedGroups: Array<{ profileId: string; id: string; retention: number }> = [];
     let retainCopilotEvidence = false;
+    const operation = startLogOperation(this.output, 'test', scope.campaign ? 'campaign-batch' : scope.runId ? 'copilot-batch' : 'batch');
     const trustCancellation = scope.runId ? createTrustAwareCancellation(token) : undefined;
     const effectiveToken = trustCancellation?.token ?? token;
     try {
@@ -443,11 +648,21 @@ export class ScenarioTestController implements vscode.Disposable {
           timeoutMs: scenario.adversarial?.timeoutMs ?? loaded.profile.conversation.send.timeoutMs ?? 120_000,
         };
       }), {
-        maxConcurrency: vscode.workspace.getConfiguration('turnstage').get<number>('adversarialConcurrency', 3),
+        maxConcurrency: selection.maxConcurrency ?? vscode.workspace.getConfiguration('turnstage').get<number>('adversarialConcurrency', 3),
         maxAttempts: scope.runId ? MAX_COPILOT_RUN_ATTEMPTS : MAX_RUN_PLAN_ATTEMPTS,
-        maxRequests: scope.runId ? MAX_COPILOT_RUN_REQUESTS : MAX_RUN_PLAN_REQUESTS,
+        maxRequests: selection.maxRequests ?? (scope.runId ? MAX_COPILOT_RUN_REQUESTS : MAX_RUN_PLAN_REQUESTS),
+        maxDurationMs: selection.maxDurationMs,
       });
-      if (!batchPlan.valid || !batchPlan.withinBudget) throw new Error(batchPlan.issues.map((issue) => issue.message).join('\n'));
+      operation.progress({
+        cases: jobs.length,
+        attempts: batchPlan.plannedAttempts,
+        requests: batchPlan.plannedRequests,
+        concurrency: batchPlan.maxConcurrency,
+      });
+      if (!batchPlan.valid || !batchPlan.withinBudget) {
+        operation.fail({ reason: 'budget-rejected', issues: batchPlan.issues.length });
+        throw new Error(batchPlan.issues.map((issue) => issue.message).join('\n'));
+      }
       if (!scope.runId && vscode.workspace.isTrusted && batchPlan.plannedRequests > MANUAL_BATCH_CONFIRM_REQUESTS) {
         const confirm = localize('Run batch');
         const selected = await vscode.window.showWarningMessage(
@@ -458,6 +673,7 @@ export class ScenarioTestController implements vscode.Disposable {
         if (selected !== confirm) {
           for (const job of jobs) run.skipped(job.item);
           run.appendOutput(`${localize('Batch run cancelled before any requests were sent.')}\r\n`);
+          operation.cancel({ reason: 'user-declined', completedCases: 0 });
           this.latestRunSummaries = [];
           return { summaries: [], results: [] };
         }
@@ -473,7 +689,7 @@ export class ScenarioTestController implements vscode.Disposable {
           run.appendOutput(`${localize('Skipped {name}: conversation contract tests require a trusted workspace.', { name: job.item.label })}\r\n`, undefined, job.item);
         }
       } else {
-        const concurrency = Math.max(1, Math.min(8, vscode.workspace.getConfiguration('turnstage').get<number>('adversarialConcurrency', 3)));
+        const concurrency = Math.max(1, Math.min(8, selection.maxConcurrency ?? vscode.workspace.getConfiguration('turnstage').get<number>('adversarialConcurrency', 3)));
         run.appendOutput(`${localize('Running {count} scenarios with concurrency {concurrency}.', { count: String(jobs.length), concurrency: String(concurrency) })} ${batchPlan.plannedAttempts} attempt(s), ${batchPlan.plannedRequests} request(s) maximum.\r\n`);
         let cursor = 0;
         await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
@@ -481,7 +697,7 @@ export class ScenarioTestController implements vscode.Disposable {
             const index = cursor++;
             const preparedJob = prepared[index];
             if (!preparedJob) return;
-            const result = await this.runJob(preparedJob.job, run, effectiveToken, selection, preparedJob.loaded, runEvidenceIds, persistedGroups, Boolean(scope.runId));
+            const result = await this.runJob(preparedJob.job, run, effectiveToken, selection, preparedJob.loaded, runEvidenceIds, persistedGroups, Boolean(scope.runId), scope.campaign);
             if (result) completed.push(result);
           }
         }));
@@ -508,7 +724,7 @@ export class ScenarioTestController implements vscode.Disposable {
       }));
       this.latestRunSummaries = snapshotSummaries;
       this.reports.record(completed.map((item) => item.record), {
-        runId: scope.runId,
+        runId: scope.runId ?? scope.campaign?.runId,
         profileIds: [...new Set(completed.map((item) => item.record.profileId))],
       });
       // A Copilot-triggered run is advisory and must not create configured
@@ -599,10 +815,16 @@ export class ScenarioTestController implements vscode.Disposable {
         this.resultsEmitter.fire({ uri, results });
       }
       retainCopilotEvidence = Boolean(scope.runId) && !effectiveToken.isCancellationRequested;
+      const failures = completed.filter((item) => item.record.status !== 'passed').length;
+      if (effectiveToken.isCancellationRequested) operation.cancel({ completedCases: completed.length, failedCases: failures });
+      else operation.complete({ completedCases: completed.length, failedCases: failures });
       return {
         summaries: snapshotSummaries.map((summary) => ({ ...summary, counts: summary.counts ? { ...summary.counts } : undefined })),
         results: snapshotResults,
       };
+    } catch (error) {
+      operation.fail({ reason: error instanceof Error ? error.name : 'Error', completedCases: completed.length });
+      throw error;
     } finally {
       if (scope.runId && !retainCopilotEvidence) {
         for (const evidenceId of runEvidenceIds) {
@@ -641,7 +863,7 @@ export class ScenarioTestController implements vscode.Disposable {
     return [...new Set(ids)].flatMap((id) => found.get(id) ? [found.get(id)!] : []);
   }
 
-  private async runJob(job: ScenarioJob, run: vscode.TestRun, token: vscode.CancellationToken, selection: ScenarioRunSelection, loaded: LoadedScenario, runEvidenceIds: string[], persistedGroups: Array<{ profileId: string; id: string; retention: number }>, protectEvidence: boolean): Promise<CompletedScenario | undefined> {
+  private async runJob(job: ScenarioJob, run: vscode.TestRun, token: vscode.CancellationToken, selection: ScenarioRunSelection, loaded: LoadedScenario, runEvidenceIds: string[], persistedGroups: Array<{ profileId: string; id: string; retention: number }>, protectEvidence: boolean, campaign?: NonNullable<ScenarioRunScope['campaign']>): Promise<CompletedScenario | undefined> {
     const startedAt = Date.now();
     run.started(job.item);
     let session: SessionController | undefined;
@@ -689,6 +911,10 @@ export class ScenarioTestController implements vscode.Disposable {
           const group = await runScenarioGroup(loaded.profile.id, scenario, async () => ({
             session: await this.createSession(job.uri, loaded.profile, loaded.environment, scenario.faults),
           }), {
+            ...(campaign ? {
+              runId: campaignGroupId(campaign.runId, job),
+              existing: await this.runGroups.get(loaded.profile.id, campaignGroupId(campaign.runId, job)),
+            } : {}),
             cancellation: token,
             openingRequestsPerAttempt: loaded.profile.opening?.mode === 'request' ? 1 : 0,
             onAttemptComplete: async (record, attempt) => {
@@ -705,6 +931,7 @@ export class ScenarioTestController implements vscode.Disposable {
               if (!vscode.workspace.isTrusted || protectEvidence) return;
               await this.runGroups.save(record, retention);
               persistedGroups.push({ profileId: record.profileId, id: record.id, retention });
+              if (campaign) await campaign.onAttemptComplete(job, record);
             },
           });
           result = group.result;
@@ -793,7 +1020,7 @@ export class ScenarioTestController implements vscode.Disposable {
   private async createSession(uri: vscode.Uri, sourceProfile: TurnStageProfile, environment: TurnStageEnvironment, faults?: ScenarioDefinition['faults']): Promise<SessionController> {
     const profile: TurnStageProfile = structuredClone(sourceProfile);
     profile.history = { ...profile.history, localRuns: { ...profile.history?.localRuns, enabled: false } };
-    const session = new SessionController(profile, uri, environment, this.context, new SecretService(this.context), new LocalRunRepository(this.context), () => undefined, this.output, { faults });
+    const session = new SessionController(profile, uri, environment, this.context, new SecretService(this.context), new LocalRunRepository(this.context, this.output), () => undefined, this.output, { faults });
     await session.loadRuns();
     return session;
   }
@@ -874,6 +1101,19 @@ function integrityMaterialFromPrepared(prepared: readonly PreparedScenarioJob[])
 }
 
 function collectionValues(collection: vscode.TestItemCollection): vscode.TestItem[] { const values: vscode.TestItem[] = []; collection.forEach((item) => values.push(item)); return values; }
+function campaignCaseKey(profileId: string, suiteId: string | undefined, scenarioId: string): string { return `${profileId}/${suiteId ?? 'inline'}/${scenarioId}`; }
+function campaignOutcomeCounts(record: CampaignRunRecordV1): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of record.cases) if (item.outcome) counts[item.outcome] = (counts[item.outcome] ?? 0) + 1;
+  return counts;
+}
+function campaignGroupId(runId: string, job: ScenarioJob): string { return `${runId}:${digestValue(campaignCaseKey(job.profileId, job.suiteId, job.scenarioId)).slice(0, 24)}`; }
+function percentile95(values: readonly number[]): number | undefined {
+  if (!values.length) return undefined;
+  const sorted = values.filter((value) => Number.isFinite(value) && value >= 0).sort((left, right) => left - right);
+  if (!sorted.length) return undefined;
+  return sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)];
+}
 function withTargetControls(scenario: ScenarioDefinition, controls: Record<string, unknown> | undefined): ScenarioDefinition { return { ...scenario, controls: { ...(scenario.controls ?? {}), ...(controls ?? {}) } }; }
 function withoutAssertions(scenario: ScenarioDefinition): ScenarioDefinition { return { ...scenario, assertions: [], steps: scenario.steps.map((step) => ({ ...step, assertions: [] })) }; }
 function withRunSelection(scenario: ScenarioDefinition, selection: ScenarioRunSelection): ScenarioDefinition {

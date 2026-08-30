@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { ChatMessage, Citation, Followup, LocalRun, MessageMetric, MessageMetricAggregation, MessagePart, MetricsSnapshot, NormalizedEvent, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ResponseAction, RuntimeErrorData, SessionSnapshot, Starter } from '../../shared/types';
 import { localize } from '../l10n';
+import { logAt } from '../logging';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -35,7 +36,9 @@ export interface LocalRunImportResult {
 }
 
 export class LocalRunRepository {
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  private readonly warnedReads = new Set<string>();
+
+  constructor(private readonly context: vscode.ExtensionContext, private readonly output?: Pick<vscode.OutputChannel, 'appendLine'>) {}
 
   private uri(profileId: string): vscode.Uri { return vscode.Uri.joinPath(this.context.globalStorageUri, 'runs', `${profileId}.json`); }
 
@@ -43,14 +46,24 @@ export class LocalRunRepository {
     if (!isNonEmptyString(profileId)) return [];
     try {
       const uri = this.uri(profileId);
-      if ((await vscode.workspace.fs.stat(uri)).size > MAX_RUN_STORAGE_BYTES) return [];
+      if ((await vscode.workspace.fs.stat(uri)).size > MAX_RUN_STORAGE_BYTES) { this.warnRead(profileId, 'size-limit'); return []; }
       const bytes = await vscode.workspace.fs.readFile(uri);
-      if (bytes.byteLength > MAX_RUN_STORAGE_BYTES) return [];
+      if (bytes.byteLength > MAX_RUN_STORAGE_BYTES) { this.warnRead(profileId, 'size-limit'); return []; }
       const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-      return sanitizeLocalRuns(parsed, profileId);
-    } catch {
+      const runs = sanitizeLocalRuns(parsed, profileId);
+      if (Array.isArray(parsed) && runs.length !== parsed.length) this.warnRead(profileId, 'invalid-records-discarded');
+      else this.warnedReads.delete(profileId);
+      return runs;
+    } catch (error) {
+      if (!isMissingRunFile(error)) this.warnRead(profileId, 'read-failed');
       return [];
     }
+  }
+
+  private warnRead(profileId: string, reason: string): void {
+    if (!this.output || this.warnedReads.has(profileId)) return;
+    this.warnedReads.add(profileId);
+    logAt(this.output, 'warn', () => `[storage] local run history unavailable profile=${safeLogToken(profileId)} reason=${reason}`);
   }
 
   async save(run: LocalRun, retention: number): Promise<LocalRun[]> {
@@ -556,6 +569,12 @@ function asRecord(value: unknown): UnknownRecord | undefined {
 }
 
 function isRecord(value: unknown): value is UnknownRecord { return asRecord(value) !== undefined; }
+function safeLogToken(value: string): string { return value.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 128) || 'unknown'; }
+function isMissingRunFile(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as { code?: unknown; name?: unknown; message?: unknown };
+  return value.code === 'FileNotFound' || value.code === 'ENOENT' || value.name === 'EntryNotFound (FileSystemError)' || /\bENOENT\b/.test(String(value.message ?? ''));
+}
 function isNonEmptyString(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= 1024 * 1024; }
 function isFiniteNumber(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value); }
 function isNonNegativeNumber(value: unknown): value is number { return isFiniteNumber(value) && value >= 0; }

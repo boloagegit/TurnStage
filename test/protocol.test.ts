@@ -28,6 +28,8 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.file', action: 'importCsv' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'connection.analyze' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'campaign.cancel', campaignId: 'release' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'campaign.cancel', campaignId: '' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'rawEvent', sequence: -1 } }, 'editor-1')).toBe(false);
   });
 

@@ -93,7 +93,7 @@ describe('ScenarioReportService', () => {
     expect(html).toContain('<!doctype html>');
     expect(html).not.toContain('Private Name');
     expect(manifest).toContain('"visualChatContent": false');
-    expect(manifest).toContain('"version": 5');
+    expect(manifest).toContain('"version": 6');
     expect(manifest).toContain('"profileEditContent": false');
     expect(manifest).toContain('"advisoryResponseContent": false');
     expect(diagnostics).toContain('Bounded timeout evidence.');
@@ -102,6 +102,40 @@ describe('ScenarioReportService', () => {
     expect(provenance).toMatchObject({ format: 'turnstage-provenance-manifest' });
     expect(provenance.files).toHaveLength(10);
     expect(provenance.manifestDigest).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('adds sanitized campaign coverage and evidence diff to bundle JSONL and HTML', async () => {
+    const service = new ScenarioReportService({ appendLine: vi.fn() } as never);
+    service.record([{ profileId: 'safe-profile', profileName: 'Private', scenarioId: 'case', scenarioName: 'Private Case', status: 'failed' }], { runId: 'campaign-run', profileIds: ['safe-profile'] });
+    service.attachCampaign({
+      format: 'turnstage-campaign-run', version: 1, id: 'campaign-run', campaignId: 'release', campaignName: 'Release safety', profileId: 'safe-profile', createdAt: 1, updatedAt: 2, status: 'completed', sourceDigest: 'a'.repeat(64),
+      plan: { selectedCases: 1, plannedAttempts: 2, plannedTurns: 2, plannedRequests: 2, maximumDurationMs: 20_000, maxConcurrency: 1 },
+      cases: [{ key: 'safe-profile/red/case', profileId: 'safe-profile', suiteId: 'red', scenarioId: 'case', scenarioName: 'Safe case label', tags: ['security'], requestedAttempts: 2, completedAttempts: 2, plannedTurns: 2, outcome: 'attackSucceeded', sampleComplete: true, evidenceId: 'ephemeral-secret' }],
+      coverage: { requiredTags: ['security', 'privacy'], coveredTags: ['security'], missingTags: ['privacy'], caseCountByTag: { security: 1 }, percent: 50 },
+      baselineRunId: 'baseline', diff: { baselineRunId: 'baseline', currentRunId: 'campaign-run', regressions: 1, improvements: 0, changed: 1, entries: [{ key: 'safe-profile/red/case', profileId: 'safe-profile', suiteId: 'red', scenarioId: 'case', scenarioName: 'Safe case label', baselineOutcome: 'resisted', currentOutcome: 'attackSucceeded', transition: 'regressed' }] },
+    });
+
+    await service.exportEvidenceBundle();
+    const names = mock.writes.map((entry) => entry.path.slice(entry.path.lastIndexOf('/') + 1));
+    expect(names).toEqual(expect.arrayContaining(['campaign-summary.json', 'campaign-results.jsonl']));
+    const html = mock.writes.find((entry) => entry.path.endsWith('/index.html'))?.text ?? '';
+    const jsonl = mock.writes.find((entry) => entry.path.endsWith('/campaign-results.jsonl'))?.text ?? '';
+    const summary = mock.writes.find((entry) => entry.path.endsWith('/campaign-summary.json'))?.text ?? '';
+    expect(html).toContain('Test Campaign');
+    expect(html).toContain('privacy');
+    expect(html).toContain('resisted');
+    expect(jsonl).not.toContain('ephemeral-secret');
+    expect(summary).not.toContain('ephemeral-secret');
+  });
+
+  it('refuses to attach campaign metadata to an unrelated report run', () => {
+    const service = new ScenarioReportService({ appendLine: vi.fn() } as never);
+    service.record([{ profileId: 'safe-profile', profileName: 'Private', scenarioId: 'case', scenarioName: 'Private Case', status: 'passed' }], { runId: 'other-run', profileIds: ['safe-profile'] });
+    expect(service.attachCampaign({
+      format: 'turnstage-campaign-run', version: 1, id: 'campaign-run', campaignId: 'release', campaignName: 'Release', profileId: 'safe-profile', createdAt: 1, updatedAt: 2, status: 'completed', sourceDigest: 'a'.repeat(64),
+      plan: { selectedCases: 0, plannedAttempts: 0, plannedTurns: 0, plannedRequests: 0, maximumDurationMs: 0, maxConcurrency: 1 }, cases: [],
+      coverage: { requiredTags: [], coveredTags: [], missingTags: [], caseCountByTag: {}, percent: 100 },
+    })).toBe(false);
   });
 
   it('filters Copilot diagnostics to the recorded run and profile scope', async () => {

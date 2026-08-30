@@ -1,4 +1,4 @@
-import type { AdversarialResultSummary, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from './types';
+import type { AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from './types';
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -63,10 +63,17 @@ export type WebviewMessage = Envelope & (
   | { type: 'run.replay.speed'; speed: 0.25 | 0.5 | 1 | 2 | 4 }
   | { type: 'run.import' }
   | { type: 'run.export'; runId: string }
-  | { type: 'adversarial.file'; action: 'importCsv' | 'importJsonc' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'csvTemplate' }
+  | { type: 'adversarial.file'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate' }
   | { type: 'test.runAll' }
   | { type: 'test.rerun'; status: 'failed' | 'unstable' | 'incomplete' }
   | { type: 'test.evidence.open'; evidenceId: string; location: ScenarioEvidenceLocation }
+  | { type: 'campaign.preview'; campaignId: string }
+  | { type: 'campaign.run'; campaignId: string }
+  | { type: 'campaign.cancel'; campaignId: string }
+  | { type: 'campaign.resume'; campaignId: string; runId: string }
+  | { type: 'campaign.acceptBaseline'; campaignId: string; runId: string }
+  | { type: 'campaign.exportResults'; campaignId: string; runId: string }
+  | { type: 'campaign.copilotSummary'; campaignId: string; runId: string }
   | { type: 'copilot.diagnose'; evidenceId: string; mode: 'failure' | 'performance' | 'stability' | 'comparison' }
   | { type: 'copilot.qualityReview'; evidenceIds: string[] }
   | { type: 'copilot.profileDoctor' }
@@ -90,8 +97,10 @@ export type HostMessage = Envelope & (
   | { type: 'form.accepted'; formId: string; sourceMessageId?: string }
   | { type: 'run.imported'; path: string; runId: string; duplicate: boolean }
   | { type: 'run.exported'; path: string }
-  | { type: 'adversarial.operation'; action: 'importCsv' | 'importJsonc' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string }
+  | { type: 'adversarial.operation'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string }
   | { type: 'test.results'; results: AdversarialResultSummary[] }
+  | { type: 'campaign.dashboard'; dashboard: CampaignDashboardV1 }
+  | { type: 'campaign.preview'; campaignId: string; selectedCases: number; plannedAttempts: number; plannedRequests: number; maximumDurationMs: number; maxConcurrency: number; warnings: string[] }
   | { type: 'test.timeline'; evidenceId: string; timeline: EvidenceTimelineSummary }
   | { type: 'connection.result'; result: ConnectionDoctorSummary }
   | { type: 'adversarial.captured'; detail: string }
@@ -113,6 +122,7 @@ const replaySpeeds = new Set([0.25, 0.5, 1, 2, 4]);
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
 function isBoundedString(value: unknown, max = MAX_ID_LENGTH): value is string { return typeof value === 'string' && value.length <= max; }
+function isBoundedId(value: unknown): value is string { return isBoundedString(value) && Boolean(value.trim()); }
 function optionalBoundedString(value: unknown): boolean { return value === undefined || isBoundedString(value); }
 
 /** Bound depth and node count before host code traverses attacker-controlled values. */
@@ -173,9 +183,11 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   const message = value;
   switch (message.type) {
     case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'test.runAll': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
-    case 'adversarial.file': return ['importCsv', 'importJsonc', 'linkJsonc', 'exportCsv', 'exportJsonc', 'csvTemplate'].includes(String(message.action));
+    case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
     case 'test.rerun': return ['failed', 'unstable', 'incomplete'].includes(String(message.status));
     case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
+    case 'campaign.preview': case 'campaign.run': case 'campaign.cancel': return isBoundedId(message.campaignId);
+    case 'campaign.resume': case 'campaign.acceptBaseline': case 'campaign.exportResults': case 'campaign.copilotSummary': return isBoundedId(message.campaignId) && isBoundedId(message.runId);
     case 'copilot.diagnose': return isBoundedString(message.evidenceId) && ['failure', 'performance', 'stability', 'comparison'].includes(String(message.mode));
     case 'copilot.qualityReview': return Array.isArray(message.evidenceIds) && message.evidenceIds.length >= 1 && message.evidenceIds.length <= 10 && message.evidenceIds.every((id) => isBoundedString(id)) && new Set(message.evidenceIds).size === message.evidenceIds.length;
     case 'profile.patch': return Array.isArray(message.path) && message.path.length > 0 && message.path.length <= MAX_VALUE_DEPTH && message.path.every((part) => (isBoundedString(part) && !['__proto__', 'prototype', 'constructor'].includes(part)) || (Number.isInteger(part) && Number(part) >= 0 && Number(part) <= 10_000)) && isStructuredValue(message.value);
@@ -214,8 +226,10 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'form.accepted': return isBoundedString(message.formId) && optionalBoundedString(message.sourceMessageId);
     case 'run.imported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedString(message.runId) && typeof message.duplicate === 'boolean';
     case 'run.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH);
-    case 'adversarial.operation': return ['importCsv', 'importJsonc', 'linkJsonc', 'exportCsv', 'exportJsonc', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path);
+    case 'adversarial.operation': return ['importCsv', 'importJsonc', 'importJsonl', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path);
     case 'test.results': return Array.isArray(message.results) && message.results.length <= 10_000 && isStructuredValue(message.results, MAX_HOST_VALUE_NODES);
+    case 'campaign.dashboard': return isRecord(message.dashboard) && isStructuredValue(message.dashboard, MAX_HOST_VALUE_NODES);
+    case 'campaign.preview': return isBoundedString(message.campaignId) && [message.selectedCases, message.plannedAttempts, message.plannedRequests, message.maximumDurationMs, message.maxConcurrency].every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0) && Array.isArray(message.warnings) && message.warnings.length <= 100 && message.warnings.every((entry) => isBoundedString(entry, 4096));
     case 'test.timeline': return isBoundedString(message.evidenceId) && isRecord(message.timeline) && isStructuredValue(message.timeline, MAX_HOST_VALUE_NODES);
     case 'connection.result': return isConnectionDoctorResult(message.result) && isStructuredValue(message.result, MAX_HOST_VALUE_NODES);
     case 'adversarial.captured': return isBoundedString(message.detail, MAX_TEXT_LENGTH);

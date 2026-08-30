@@ -254,7 +254,7 @@ export class SessionController implements vscode.Disposable {
         onDiagnostic: (event) => {
           if (event.type === 'attempt.started') {
             networkEntry = this.beginNetworkExchange('stream', request, Date.now(), protocol as RawStreamEvent['protocol'], event.attempt);
-            logAt(this.log, 'debug', `[${logId}] attempt=${event.attempt} started remainingTimeout=${formatDuration(event.remainingTimeoutMs)}`);
+            logAt(this.log, 'debug', () => `[${logId}] attempt=${event.attempt} started remainingTimeout=${formatDuration(event.remainingTimeoutMs)}`);
           } else if (event.type === 'retry.scheduled') {
             if (networkEntry) networkEntry.timing.retryDelay = event.delayMs;
             this.finishNetworkExchange(networkEntry, 'failed', new TurnStageError(event.errorType, localize('Request attempt failed and will be retried.'), { ...(event.status === undefined ? {} : { status: event.status }) }));
@@ -278,8 +278,10 @@ export class SessionController implements vscode.Disposable {
           lastChunkAt = now;
           phase = 'streaming'; chunkCount += 1; byteCount += bytes; this.metrics.chunk(bytes, latency);
           if (networkEntry) { networkEntry.state = 'streaming'; networkEntry.transferredBytes += bytes; if (latency > 0 && networkEntry.timing.firstChunk === undefined) networkEntry.timing.firstChunk = latency; }
-          const detail = `[${logId}] chunk=${chunkCount} bytes=${bytes} totalBytes=${byteCount} elapsed=${formatDuration(Date.now() - startedAt)}`;
-          logAt(this.log, chunkCount === 1 ? 'info' : 'debug', chunkCount === 1 ? detail.replace('chunk=1', 'firstChunk=1') : detail);
+          logAt(this.log, chunkCount === 1 ? 'info' : 'debug', () => {
+            const detail = `[${logId}] chunk=${chunkCount} bytes=${bytes} totalBytes=${byteCount} elapsed=${formatDuration(Date.now() - startedAt)}`;
+            return chunkCount === 1 ? detail.replace('chunk=1', 'firstChunk=1') : detail;
+          });
         },
         onEvent: async (raw) => {
           eventCount += 1;
@@ -290,7 +292,7 @@ export class SessionController implements vscode.Disposable {
           lastEventAt = Date.now();
           terminalEventSeen ||= !keepReading;
           const mapping = raw.mappingRuleId ? this.publicValue(raw.mappingRuleId) : 'unmatched';
-          logAt(this.log, 'debug', `[${logId}] event=${eventCount} sequence=${raw.sequence} name=${quoteDiagnostic(eventName)} bytes=${Buffer.byteLength(raw.raw)} elapsed=${formatDuration(raw.elapsedMs)} mapping=${quoteDiagnostic(mapping)} parseError=${Boolean(raw.parseError)} mappingError=${Boolean(raw.mappingError)}`);
+          logAt(this.log, 'debug', () => `[${logId}] event=${eventCount} sequence=${raw.sequence} name=${quoteDiagnostic(eventName)} bytes=${Buffer.byteLength(raw.raw)} elapsed=${formatDuration(raw.elapsedMs)} mapping=${quoteDiagnostic(mapping)} parseError=${Boolean(raw.parseError)} mappingError=${Boolean(raw.mappingError)}`);
           return keepReading;
         },
       }, this.abortController.signal, this.profile.stream.dataFormat ?? 'json');
