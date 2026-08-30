@@ -245,6 +245,8 @@ export interface AdversarialAttemptSummary {
   completedTurns: number;
   startedAt: number;
   completedAt: number;
+  /** TurnStage-owned time to first displayable content, when observed. */
+  ttftMs?: number;
   /** Evidence remains in the in-memory run/evidence store by default. */
   evidenceId?: string;
 }
@@ -278,6 +280,21 @@ export interface AdversarialResultSummary {
   primaryLocation: ScenarioEvidenceLocation;
   availableLocations: ScenarioEvidenceLocation[];
   repetitions?: Pick<AdversarialRepetitionSummary, 'requestedAttempts' | 'completedAttempts' | 'skippedAttempts' | 'sampleComplete' | 'stability' | 'counts'>;
+  reliability?: AdversarialReliabilitySummary;
+}
+
+export interface AdversarialReliabilitySummary {
+  requestedAttempts: number;
+  completedAttempts: number;
+  evaluableAttempts: number;
+  coveragePercent: number;
+  resistanceRate?: number;
+  attackRate?: number;
+  resistanceInterval?: { confidenceLevel: number; status: 'available' | 'smallSample' | 'zeroDenominator' | 'invalid'; lower?: number; upper?: number };
+  ttftP95Ms?: number;
+  durationP95Ms?: number;
+  verdict: 'meetsTarget' | 'doesNotMeetTarget' | 'insufficientEvidence';
+  reasons: string[];
 }
 
 export interface AdversarialSuiteDefinition {
@@ -367,6 +384,39 @@ export type ScenarioEvidenceLocation =
   | { kind: 'normalizedEvent'; sequence?: number; rawSequence?: number }
   | { kind: 'message'; messageId?: string }
   | { kind: 'profile'; path?: string };
+
+export type EvidenceTimelinePhase = 'request' | 'headers' | 'firstChunk' | 'firstEvent' | 'firstMappedEvent' | 'ttft' | 'finding' | 'terminal' | 'error';
+export type EvidenceTimelineStatus = 'normal' | 'warning' | 'failure' | 'unknown';
+
+/** Sanitized causal metadata sent to the Webview only for selected evidence. */
+export interface EvidenceTimelineEntry {
+  id: string;
+  phase: EvidenceTimelinePhase;
+  status: EvidenceTimelineStatus;
+  label: string;
+  at: number;
+  elapsedMs: number;
+  location?: ScenarioEvidenceLocation;
+  metadata?: {
+    networkKind?: NetworkExchange['kind'];
+    networkState?: NetworkExchange['state'];
+    protocol?: NetworkExchange['protocol'];
+    statusCode?: number;
+    eventType?: string;
+    errorType?: string;
+    ruleId?: string;
+    correlationId?: string;
+  };
+}
+
+export interface EvidenceTimelineSummary {
+  version: 1;
+  baseTime: number;
+  entries: EvidenceTimelineEntry[];
+  completeness: 'complete' | 'partial' | 'missing';
+  missingPhases: EvidenceTimelinePhase[];
+  truncated: boolean;
+}
 
 export interface ScenarioCheckResult {
   id: string;
@@ -662,6 +712,29 @@ export interface NetworkCorrelation {
   traceSource?: 'request' | 'response';
   requestId?: string;
   requestIdHeader?: string;
+}
+
+export interface ConnectionDoctorFinding {
+  id: string;
+  category: 'http' | 'protocol' | 'timing' | 'stream' | 'mapping' | 'terminal';
+  severity: 'info' | 'warning' | 'error';
+  message: string;
+}
+
+export interface ConnectionDoctorSummary {
+  protocol: 'sse' | 'ndjson' | 'json' | 'text-stream' | 'unknown';
+  confidence: 'high' | 'medium' | 'low';
+  status?: number;
+  rawEventCount: number;
+  normalizedEventCount: number;
+  mappedEventCount: number;
+  unmatchedEventCount: number;
+  parseErrorCount: number;
+  mappingErrorCount: number;
+  terminalEventSeen: boolean;
+  terminalMapped: boolean;
+  safe: boolean;
+  findings: ConnectionDoctorFinding[];
 }
 
 export interface SessionSnapshot {

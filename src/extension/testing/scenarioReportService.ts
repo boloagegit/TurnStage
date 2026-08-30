@@ -85,7 +85,7 @@ export class ScenarioReportService {
       if (visual.diffUri) files.push(['visual-diff.png', await vscode.workspace.fs.readFile(visual.diffUri)]);
     }
     const report = createScenarioReport(this.records, generatedAt);
-    files.push(['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 4, generatedAt, files: [...fileNames, 'manifest.json', 'provenance.json'], privacy: { rawEvents: false, payloads: false, urls: false, headers: false, messageContent: false, secrets: false, profileEditContent: false, advisoryResponseContent: false, visualChatContent: includeVisual }, summary: report.summary }, null, 2)}\n`]);
+    files.push(['manifest.json', `${JSON.stringify({ format: 'turnstage-evidence-bundle', version: 5, generatedAt, files: [...fileNames, 'manifest.json', 'provenance.json'], privacy: { rawEvents: false, payloads: false, urls: false, headers: false, messageContent: false, secrets: false, profileEditContent: false, advisoryResponseContent: false, visualChatContent: includeVisual, causalMetadata: true, failureFingerprints: true }, summary: report.summary }, null, 2)}\n`]);
     const provenanceFiles: ProvenanceFileInput[] = files.map(([path, contents]) => ({ path, contents }));
     const provenance = createProvenanceManifest({
       runId: this.scope.runId ?? crypto.randomUUID(),
@@ -94,7 +94,7 @@ export class ScenarioReportService {
       runnerVersion: this.runnerVersion,
       extensionVersion: this.runnerVersion,
       selectedTestIds: this.records.map((record) => `${record.profileId}/${record.scenarioId}`),
-      policy: { evidenceBundleVersion: 4, visualChatContent: includeVisual },
+      policy: { evidenceBundleVersion: 5, visualChatContent: includeVisual },
       result: report,
       evidence: { summary: report.summary },
       evidenceFiles: provenanceFiles,

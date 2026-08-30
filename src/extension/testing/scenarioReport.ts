@@ -1,4 +1,6 @@
-import type { ScenarioRunResult } from '../../shared/types';
+import type { EvidenceTimelineSummary, ScenarioRunResult } from '../../shared/types';
+import { buildEvidenceTimeline, clusterFailures, type FailureClusterV1 } from './evidenceTimeline';
+import { createReliabilitySummary, type ReliabilitySummaryV1 } from './reliabilityStatistics';
 
 export const SCENARIO_REPORT_FORMAT = 'turnstage-contract-report' as const;
 export const SCENARIO_REPORT_VERSION = 2 as const;
@@ -18,6 +20,7 @@ export interface ScenarioReport {
   version: typeof SCENARIO_REPORT_VERSION;
   generatedAt: string;
   summary: { total: number; passed: number; failed: number; errors: number; skipped: number; durationMs: number; resisted: number; attackSucceeded: number; indeterminate: number; infrastructureErrors: number };
+  failureClusters: FailureClusterV1[];
   scenarios: Array<{
     profileId: string;
     scenarioId: string;
@@ -45,6 +48,8 @@ export interface ScenarioReport {
         stability: string;
         counts: Record<string, number>;
       };
+      reliability?: Pick<ReliabilitySummaryV1, 'requestedAttempts' | 'completedAttempts' | 'evaluableAttempts' | 'sampleComplete' | 'resistanceRate' | 'attackRate' | 'resistance' | 'ttft' | 'duration' | 'verdict' | 'verdictReasons'>;
+      timeline: EvidenceTimelineSummary;
     };
     checks: Array<{ id: string; kind: string; passed: boolean; location: string }>;
     steps: Array<{ id: string; durationMs: number; passed: boolean; checks: Array<{ id: string; kind: string; passed: boolean; location: string }> }>;
@@ -52,7 +57,15 @@ export interface ScenarioReport {
 }
 
 export function createScenarioReport(records: readonly ScenarioExecutionRecord[], generatedAt = new Date().toISOString()): ScenarioReport {
-  const scenarios = records.map((record) => ({
+  const scenarios = records.map((record) => {
+    const repetitions = record.result?.repetitions;
+    const reliability = repetitions ? createReliabilitySummary({
+      requestedAttempts: repetitions.requestedAttempts,
+      completedAttempts: repetitions.completedAttempts,
+      sampleComplete: repetitions.sampleComplete,
+      attempts: repetitions.attempts.map((attempt) => ({ outcome: attempt.outcome, durationMs: attempt.durationMs, ttftMs: attempt.ttftMs })),
+    }) : undefined;
+    return ({
     profileId: record.profileId,
     scenarioId: record.scenarioId,
     tags: (record.scenarioTags ?? []).slice(0, 20).map((tag) => tag.slice(0, 64)),
@@ -89,6 +102,20 @@ export function createScenarioReport(records: readonly ScenarioExecutionRecord[]
         stability: record.result.repetitions.stability,
         counts: { ...record.result.repetitions.counts },
       } : undefined,
+      ...(reliability ? { reliability: {
+        requestedAttempts: reliability.requestedAttempts,
+        completedAttempts: reliability.completedAttempts,
+        evaluableAttempts: reliability.evaluableAttempts,
+        sampleComplete: reliability.sampleComplete,
+        resistanceRate: reliability.resistanceRate,
+        attackRate: reliability.attackRate,
+        resistance: reliability.resistance,
+        ttft: reliability.ttft,
+        duration: reliability.duration,
+        verdict: reliability.verdict,
+        verdictReasons: reliability.verdictReasons,
+      } } : {}),
+      timeline: buildEvidenceTimeline(record.result),
     } : undefined,
     checks: (record.result?.checks ?? []).map(summaryCheck),
     steps: (record.result?.steps ?? []).map((step) => ({
@@ -97,7 +124,8 @@ export function createScenarioReport(records: readonly ScenarioExecutionRecord[]
       passed: step.checks.every((check) => check.passed),
       checks: step.checks.map(summaryCheck),
     })),
-  }));
+  }); });
+  const failureClusters = clusterFailures(records.flatMap((record) => record.result && (record.status !== 'passed' || (record.result.adversarial && record.result.adversarial.outcome !== 'resisted')) ? [{ caseId: `${record.profileId}/${record.scenarioId}`, result: record.result }] : []));
   return {
     format: SCENARIO_REPORT_FORMAT,
     version: SCENARIO_REPORT_VERSION,
@@ -114,6 +142,7 @@ export function createScenarioReport(records: readonly ScenarioExecutionRecord[]
       indeterminate: scenarios.filter((scenario) => scenario.adversarial?.outcome === 'indeterminate').length,
       infrastructureErrors: scenarios.filter((scenario) => scenario.adversarial?.outcome === 'infrastructureError').length,
     },
+    failureClusters,
     scenarios,
   };
 }
@@ -144,15 +173,23 @@ export function serializeScenarioJUnit(records: readonly ScenarioExecutionRecord
 
 export function serializeScenarioHtml(records: readonly ScenarioExecutionRecord[], generatedAt?: string): string {
   const report = createScenarioReport(records, generatedAt);
+  const clusterByCase = new Map(report.failureClusters.flatMap((cluster) => cluster.caseIds.map((caseId) => [caseId, cluster] as const)));
   const rows = report.scenarios.map((scenario) => {
     const checks = [...scenario.steps.flatMap((step) => step.checks), ...scenario.checks];
     const failed = checks.filter((check) => !check.passed).map((check) => check.id).join(', ') || '—';
     const correlations = scenario.correlations.map((item) => item.traceId ?? item.requestId).filter(Boolean).join(', ') || '—';
     const faults = scenario.faults ? Object.entries(scenario.faults).map(([name, value]) => `${name}=${value}`).join(', ') : '—';
     const outcome = scenario.adversarial ? adversarialOutcomeText(scenario.adversarial.outcome) : scenario.status;
-    return `<tr><td><code>${escapeHtml(scenario.profileId)}</code></td><td><code>${escapeHtml(scenario.scenarioId)}</code></td><td><span class="status status-${scenario.status}">${escapeHtml(outcome)}</span></td><td>${scenario.durationMs} ms</td><td>${escapeHtml(failed)}</td><td>${escapeHtml(faults)}</td><td>${escapeHtml(correlations)}</td></tr>`;
+    const reliability = scenario.adversarial?.reliability;
+    const reliabilityText = reliability?.resistanceRate === undefined ? '—' : `${(reliability.resistanceRate * 100).toFixed(1)}% · ${reliability.verdict}`;
+    const cluster = clusterByCase.get(`${scenario.profileId}/${scenario.scenarioId}`);
+    const rootCause = cluster ? `${cluster.fingerprint.phase} / ${cluster.fingerprint.code} (${cluster.count})` : '—';
+    const timeline = scenario.adversarial?.timeline;
+    const timelineHtml = timeline ? `<details class="timeline"><summary>Causal timeline · ${escapeHtml(timeline.completeness)}</summary><ol>${timeline.entries.slice(0, 16).map((entry) => `<li><time>+${entry.elapsedMs} ms</time><span>${escapeHtml(entry.label)}</span><small>${escapeHtml(entry.phase)}</small></li>`).join('')}</ol>${timeline.missingPhases.length ? `<p>Missing: ${escapeHtml(timeline.missingPhases.join(', '))}</p>` : ''}</details>` : '';
+    return `<tr><td><code>${escapeHtml(scenario.profileId)}</code></td><td><code>${escapeHtml(scenario.scenarioId)}</code></td><td><span class="status status-${scenario.status}">${escapeHtml(outcome)}</span>${timelineHtml}</td><td>${scenario.durationMs} ms</td><td>${escapeHtml(reliabilityText)}</td><td>${escapeHtml(rootCause)}</td><td>${escapeHtml(failed)}</td><td>${escapeHtml(faults)}</td><td>${escapeHtml(correlations)}</td></tr>`;
   }).join('\n');
-  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>TurnStage Evidence</title><style>${htmlStyles()}</style></head><body><main><header><div><h1>TurnStage test evidence</h1><p>Generated ${escapeHtml(report.generatedAt)}</p></div><div class="summary" aria-label="Result summary"><strong>${report.summary.passed}/${report.summary.total}</strong><span>passed</span></div></header><section class="stats"><article><strong>${report.summary.resisted}</strong><span>Resisted</span></article><article><strong>${report.summary.attackSucceeded}</strong><span>Attack succeeded</span></article><article><strong>${report.summary.indeterminate}</strong><span>Indeterminate</span></article><article><strong>${report.summary.infrastructureErrors}</strong><span>Infrastructure error</span></article><article><strong>${report.summary.durationMs} ms</strong><span>Duration</span></article></section><section><h2>Scenarios</h2><div class="table-wrap"><table><thead><tr><th>Profile</th><th>Scenario</th><th>Outcome</th><th>Duration</th><th>Failed checks</th><th>Fault Lab</th><th>Correlation</th></tr></thead><tbody>${rows}</tbody></table></div></section><footer>Sanitized metadata only. Raw events, request and response bodies, URLs, message content, headers, and secrets are excluded.</footer></main></body></html>\n`;
+  const clusters = report.failureClusters.length ? `<section><h2>Failure clusters</h2><ul class="clusters">${report.failureClusters.map((cluster) => `<li><strong>${escapeHtml(cluster.fingerprint.phase)} / ${escapeHtml(cluster.fingerprint.code)}</strong><span>${cluster.count} affected result(s)</span><code>${escapeHtml(cluster.fingerprint.digest.slice(0, 12))}</code></li>`).join('')}</ul></section>` : '';
+  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>TurnStage Evidence</title><style>${htmlStyles()}</style></head><body><main><header><div><h1>TurnStage test evidence</h1><p>Generated ${escapeHtml(report.generatedAt)}</p></div><div class="summary" aria-label="Result summary"><strong>${report.summary.passed}/${report.summary.total}</strong><span>passed</span></div></header><section class="stats"><article><strong>${report.summary.resisted}</strong><span>Resisted</span></article><article><strong>${report.summary.attackSucceeded}</strong><span>Attack succeeded</span></article><article><strong>${report.summary.indeterminate}</strong><span>Indeterminate</span></article><article><strong>${report.summary.infrastructureErrors}</strong><span>Infrastructure error</span></article><article><strong>${report.summary.durationMs} ms</strong><span>Duration</span></article></section>${clusters}<section><h2>Scenarios</h2><div class="table-wrap"><table><thead><tr><th>Profile</th><th>Scenario</th><th>Outcome & evidence</th><th>Duration</th><th>Reliability</th><th>Failure cluster</th><th>Failed checks</th><th>Fault Lab</th><th>Correlation</th></tr></thead><tbody>${rows}</tbody></table></div></section><footer>Sanitized metadata only. Raw events, request and response bodies, URLs, message content, headers, and secrets are excluded.</footer></main></body></html>\n`;
 }
 
 export function serializeAdversarialSummaryCsv(records: readonly ScenarioExecutionRecord[]): string {
@@ -214,5 +251,5 @@ function boundedFaults(value: object): Record<string, number> {
 }
 
 function htmlStyles(): string {
-  return `:root{color-scheme:light dark;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#fff;color:#24292f}body{margin:0;background:#f6f8fa}main{max-width:1200px;margin:auto;padding:32px}header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start}h1{margin:4px 0 8px;font-size:28px}h2{font-size:18px}.eyebrow{margin:0;color:#57606a;text-transform:uppercase;letter-spacing:.08em;font-size:12px}.summary{display:grid;justify-items:end}.summary strong{font-size:28px}.summary span,.stats span,footer{color:#57606a}.stats{display:grid;grid-template-columns:repeat(5,minmax(100px,1fr));gap:1px;margin:24px 0;background:#d0d7de;border:1px solid #d0d7de;border-radius:6px;overflow:hidden}.stats article{display:grid;gap:4px;padding:16px;background:#fff}.table-wrap{overflow:auto;border:1px solid #d0d7de;border-radius:6px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px 12px;text-align:left;vertical-align:top;border-bottom:1px solid #d8dee4}th{background:#f6f8fa}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}.status{font-weight:600}.status-passed{color:#1a7f37}.status-failed,.status-error{color:#cf222e}.status-skipped{color:#6e7781}footer{margin-top:24px;font-size:12px}@media(max-width:720px){main{padding:16px}.stats{grid-template-columns:repeat(2,1fr)}header{display:block}.summary{justify-items:start;margin-top:16px}}@media(prefers-color-scheme:dark){:root{background:#0d1117;color:#e6edf3}body{background:#010409}.eyebrow,.summary span,.stats span,footer{color:#8b949e}.stats,.table-wrap{border-color:#30363d;background:#30363d}.stats article,.table-wrap{background:#0d1117}th{background:#161b22}th,td{border-color:#30363d}.status-passed{color:#3fb950}.status-failed,.status-error{color:#f85149}.status-skipped{color:#8b949e}}`;
+  return `:root{color-scheme:light dark;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#fff;color:#24292f}body{margin:0;background:#f6f8fa}main{max-width:1200px;margin:auto;padding:32px}header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start}h1{margin:4px 0 8px;font-size:28px}h2{font-size:18px}.eyebrow{margin:0;color:#57606a;text-transform:uppercase;letter-spacing:.08em;font-size:12px}.summary{display:grid;justify-items:end}.summary strong{font-size:28px}.summary span,.stats span,footer{color:#57606a}.stats{display:grid;grid-template-columns:repeat(5,minmax(100px,1fr));gap:1px;margin:24px 0;background:#d0d7de;border:1px solid #d0d7de;border-radius:6px;overflow:hidden}.stats article{display:grid;gap:4px;padding:16px;background:#fff}.clusters{display:grid;gap:1px;padding:0;border:1px solid #d0d7de;background:#d0d7de;list-style:none}.clusters li{display:grid;grid-template-columns:1fr auto auto;gap:12px;padding:10px 12px;background:#fff}.table-wrap{overflow:auto;border:1px solid #d0d7de;border-radius:6px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px 12px;text-align:left;vertical-align:top;border-bottom:1px solid #d8dee4}th{background:#f6f8fa}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}.status{font-weight:600}.status-passed{color:#1a7f37}.status-failed,.status-error{color:#cf222e}.status-skipped{color:#6e7781}.timeline{min-width:14em;margin-top:6px}.timeline summary{cursor:pointer;color:#57606a}.timeline ol{display:grid;gap:4px;padding-left:20px}.timeline li{display:grid;grid-template-columns:auto 1fr auto;gap:8px}.timeline time,.timeline small{color:#57606a;font-size:11px}footer{margin-top:24px;font-size:12px}@media(max-width:720px){main{padding:16px}.stats{grid-template-columns:repeat(2,1fr)}header{display:block}.summary{justify-items:start;margin-top:16px}.clusters li{grid-template-columns:1fr}.timeline li{grid-template-columns:auto 1fr}}@media(prefers-color-scheme:dark){:root{background:#0d1117;color:#e6edf3}body{background:#010409}.eyebrow,.summary span,.stats span,footer,.timeline summary,.timeline time,.timeline small{color:#8b949e}.stats,.table-wrap,.clusters{border-color:#30363d;background:#30363d}.stats article,.table-wrap,.clusters li{background:#0d1117}th{background:#161b22}th,td{border-color:#30363d}.status-passed{color:#3fb950}.status-failed,.status-error{color:#f85149}.status-skipped{color:#8b949e}}`;
 }

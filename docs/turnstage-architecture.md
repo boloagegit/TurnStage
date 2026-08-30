@@ -136,9 +136,20 @@ evidence. Configured reports are written below a validated workspace-relative
 directory after trusted Test Explorer runs; manual export uses the native Save
 dialog. Evidence Bundle export writes a new folder with the report projections,
 sanitized adversarial summary, turn, finding, Network, and Event CSVs, and a
-privacy manifest; visible visual artifacts are copied only after a second
+privacy manifest. Version 5 also projects a bounded causal timeline and
+deterministic failure clusters from structural metadata; it does not add raw
+content to reports. Visible visual artifacts are copied only after a second
 explicit choice. Debug evidence remains a separate in-memory path and never
 enters the report serializers.
+
+The safe cURL importer runs entirely in the Extension Host as a bounded parser;
+it never shells out. Draft construction keeps the endpoint and safe request
+shape, replaces detected credentials with SecretStorage references, discards
+captured conversation/tool content, and requires review plus explicit creation.
+Connection Doctor similarly remains host-owned: it analyzes the latest
+controller snapshot and Network exchange without issuing another request, then
+sends only a semantically validated compact fingerprint/findings projection to
+the Webview.
 
 `ScenarioDefinition.faults` is passed only to scenario-created
 `SessionController` instances and then into `HttpStreamTransport`. Baseline

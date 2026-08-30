@@ -201,6 +201,13 @@ try {
   assert.equal(await page.getByRole('combobox', { name: 'Profile configuration sections' }).inputValue(), 'general', 'Embedded Configure uses one compact section picker');
   assert.equal(await page.locator('[data-message-id="assistant-1"][data-selected="true"]').count(), 0, 'Configure must hide Debug message selection styling');
   await page.screenshot({ path: resolve(artifactDirectory, 'profile-config-right-pane-dark.png'), fullPage: true });
+  await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('request');
+  await page.getByRole('heading', { level: 1, name: 'Request' }).waitFor();
+  await page.getByRole('heading', { name: 'Connection Doctor' }).waitFor();
+  assert.equal(await page.getByText('Connection needs attention', { exact: true }).count(), 1, 'Connection Doctor must expose a clear fail-closed status');
+  assert.equal(await page.getByText('Terminal not mapped', { exact: true }).count(), 1, 'Connection Doctor must expose the terminal mapping cause without payload content');
+  assert.equal(await page.getByRole('button', { name: 'Ask Copilot to diagnose this configuration' }).count(), 1, 'Connection Doctor must expose an explicit Copilot handoff only when attention is required');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-dark.png') });
   await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('scenario-tests');
   await page.getByRole('heading', { level: 1, name: 'Scenarios' }).waitFor();
   assert.equal(await page.locator('.scenario-editor').count(), 2, 'Scenario configuration must render the contract and adversarial case');
@@ -242,8 +249,10 @@ try {
   await adversarialResults.getByRole('button', { name: 'Open evidence' }).click();
   await page.getByRole('heading', { name: 'Attack succeeded: Known two-turn probe' }).waitFor();
   assert.equal(await page.getByText('3/5 resisted · 5 attempts · Unstable result', { exact: true }).count(), 1, 'Evidence summary must preserve the repeated-run stability context');
+  assert.equal(await page.getByText('Reliability: 60% · Does not meet target · p95 3,612 ms', { exact: true }).count(), 1, 'Evidence summary must expose bounded reliability and p95 context');
   assert.equal(await page.locator('.profile-identity').count(), 0, 'Evidence arrival must not restore the duplicated Profile row');
   assert.equal(await page.getByRole('button', { name: 'Open Chat' }).count(), 1, 'Evidence summary must promote the most relevant location');
+  assert.equal(await page.getByRole('button', { name: 'Open Forbidden URL observed evidence at 1,840 ms' }).count(), 1, 'Causal timeline must make the failure point directly navigable');
   await page.locator('.operation-status').waitFor({ state: 'hidden' });
   await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-summary-dark.png'), fullPage: true });
   await page.getByRole('tab', { name: 'Configure' }).click();
@@ -430,14 +439,44 @@ try {
   assert.ok(lightContrast.composer >= 4.5, `Light-theme composer contrast must be at least 4.5:1, received ${lightContrast.composer}`);
   await page.screenshot({ path: resolve(artifactDirectory, 'wide-light.png'), fullPage: true });
 
+  await page.getByRole('tab', { name: 'Configure' }).click();
+  await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('request');
+  await page.getByRole('heading', { name: 'Connection Doctor' }).waitFor();
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-light.png') });
+
   await page.emulateMedia({ forcedColors: 'active' });
-  await page.screenshot({ path: resolve(artifactDirectory, 'high-contrast.png'), fullPage: true });
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-high-contrast.png') });
   await page.emulateMedia({ forcedColors: 'none' });
 
-  await page.setViewportSize({ width: 720, height: 450 });
-  await page.reload();
-  await waitForProfile();
-  await page.screenshot({ path: resolve(artifactDirectory, '200-percent-equivalent.png'), fullPage: true });
+  await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('scenario-tests');
+  await page.getByRole('heading', { name: 'Latest adversarial results' }).waitFor();
+  const lightAdversarialResults = page.locator('.adversarial-result-list');
+  await lightAdversarialResults.scrollIntoViewIfNeeded();
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-results-light.png') });
+  await page.emulateMedia({ forcedColors: 'active' });
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-results-high-contrast.png') });
+  await page.emulateMedia({ forcedColors: 'none' });
+  await lightAdversarialResults.getByRole('button', { name: 'Open evidence' }).click();
+  await page.getByRole('heading', { name: 'Attack succeeded: Known two-turn probe' }).waitFor();
+  await page.locator('.operation-status').waitFor({ state: 'hidden' });
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-summary-light.png'), fullPage: true });
+  await page.emulateMedia({ forcedColors: 'active' });
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-summary-high-contrast.png'), fullPage: true });
+  await page.emulateMedia({ forcedColors: 'none' });
+
+  const zoomViewport = { width: 720, height: 450 };
+  const zoomPage = await browser.newPage({ viewport: zoomViewport, deviceScaleFactor: 2 });
+  const zoomScreenshotPath = resolve(artifactDirectory, '200-percent-equivalent.png');
+  await zoomPage.goto(url);
+  await zoomPage.locator('.mobile-chat-preview__app-header strong').waitFor();
+  assert.equal(await zoomPage.evaluate(() => globalThis.devicePixelRatio), 2, '200% evidence must render at a 2x device scale factor');
+  assert.deepEqual(await zoomPage.evaluate(() => ({ width: globalThis.innerWidth, height: globalThis.innerHeight })), zoomViewport, '200% evidence must preserve the bounded CSS viewport');
+  assert.equal(await zoomPage.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, '200% layout must not overflow horizontally');
+  await zoomPage.screenshot({ path: zoomScreenshotPath });
+  await zoomPage.close();
+  const zoomScreenshot = await readFile(zoomScreenshotPath);
+  assert.equal(zoomScreenshot.readUInt32BE(16), zoomViewport.width * 2, '200% evidence PNG must retain the doubled physical width');
+  assert.equal(zoomScreenshot.readUInt32BE(20), zoomViewport.height * 2, '200% evidence PNG must retain the doubled physical height');
 
   await page.keyboard.press('Tab');
   const focus = await page.evaluate(() => {
@@ -447,7 +486,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, rightPaneConfiguration: true, scenarioSettings: true, adversarialSettings: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: true, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, scenarioSettings: true, adversarialSettings: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

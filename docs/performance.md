@@ -33,6 +33,14 @@ preview is capped at 64 KiB before it crosses into the Webview; Stop responses
 are also read through that bound. Network entries are ephemeral and are reset
 with the session rather than copied into Recorded Runs.
 
+Connection Doctor inspects at most 1,000 raw and normalized events and an
+8 KiB response prefix, and returns no response content. The causal timeline
+retains at most 256 structural entries; the Profile Webview renders at most 16
+at once. Failure clustering processes at most 500 result items. Batch planning
+rejects plans above its case, attempt, request, or concurrency ceilings before
+execution, while reliability aggregation processes a bounded attempt sample and
+ignores non-finite durations.
+
 ## Host-to-Webview update path
 
 The custom editor's `sendSession` function queues changes through

@@ -36,7 +36,7 @@ export class RequestBuilder {
     };
     const variant = definition.variants?.find((candidate) => matches(candidate, context));
     if (definition.variants?.length && !variant) throw errors.request(localize('No request variant matched the current interaction.'));
-    const url = String(await resolveTemplate(definition.url, context, resolveSecret));
+    const url = String(await resolveTemplate(definition.url, context, resolveSecret, { encodeSecrets: true }));
     let parsed: URL;
     try { parsed = new URL(url); } catch { throw errors.request(localize('Invalid request URL: {url}', { url: String(redactKnownSecrets(url, secretValues)) })); }
     if (!['http:', 'https:'].includes(parsed.protocol)) throw errors.request(localize('Unsupported request scheme: {scheme}', { scheme: parsed.protocol }));

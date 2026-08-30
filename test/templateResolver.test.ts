@@ -56,6 +56,15 @@ describe('resolveTemplate', () => {
     expect(requested).toEqual(['apiKey']);
   });
 
+  it('can URI-encode secret values without changing ordinary template values', async () => {
+    await expect(resolveTemplate(
+      'https://${env.host}/items/${input.id}?key=${secret.apiKey}',
+      { env: { host: 'example.test' }, input: { id: 'folder/name' } },
+      async () => 'private&token#segment/%',
+      { encodeSecrets: true },
+    )).resolves.toBe('https://example.test/items/folder/name?key=private%26token%23segment%2F%25');
+  });
+
   it('rejects missing interpolation paths, missing secrets, and unknown transforms', async () => {
     const context = { input: { value: 'x' } };
 

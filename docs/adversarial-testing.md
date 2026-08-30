@@ -30,6 +30,14 @@ resisted, consistently vulnerable, unstable, or inconclusive. Optional
 `failFast` stops after the first successful attack, but marks the sample
 incomplete and never reports it as a passing rate.
 
+The Profile result surface also reports completed/requested coverage, a Wilson
+confidence interval for resistance, and p95 TTFT and total duration when those
+measurements exist. The interval is omitted when the denominator is zero, and
+non-finite or malformed measurements are ignored instead of rendering a false
+number. **Rerun failures**, **Unstable**, and **Incomplete** derive a new bounded
+plan from the latest result set; authoritative four-state outcomes remain
+unchanged.
+
 Before execution, the shared runner produces a bounded preflight containing
 selected cases, attempts, turns, user-turn requests, per-attempt timeout, and
 the upper-bound duration. Safety caps reject oversized plans rather than
@@ -89,7 +97,7 @@ Test Explorer runs isolated cases with bounded concurrency. `turnstage.adversari
 
 Latest results appear as a compact list in the Profile GUI and link to available Chat, Network, Raw Events, or Normalized Events evidence. Evidence remains in Extension Host memory and is bounded like existing Scenario evidence.
 
-Evidence Bundle version 4 includes offline HTML, JSON, JUnit, adversarial summary/turn/finding CSVs, bounded Network/Event metadata, sanitized `diagnostics.json`, a manifest, and canonical SHA-256 provenance. Diagnostics retain categories, timing, evidence IDs, digest-locked patch audit metadata, and Advisory ratings, but not Profile edit content or disclosed Assistant text. Copilot patch and quality records carry their Profile identity and, when trusted, their originating run identity; a run-scoped bundle includes only matching records and excludes records without that run identity. The provenance manifest can be checked with `turnstage verify`. CSV files contain identifiers and structural metadata only. Prompts, assistant content, URLs, headers, payloads, raw events, response bodies, and secrets are excluded. Optional visual artifacts remain a separate explicit opt-in because screenshots may contain conversation content. Existing visual baselines are Profile-scoped rather than run-scoped, so a Copilot run bundle excludes them unless a future capture contract can prove they belong to that exact run; this prevents a screenshot from another run being presented as current evidence.
+Evidence Bundle version 5 includes offline HTML, JSON, JUnit, adversarial summary/turn/finding CSVs, bounded Network/Event metadata, sanitized `diagnostics.json`, causal timing metadata, deterministic failure fingerprints, a manifest, and canonical SHA-256 provenance. The causal timeline links request, headers, first chunk, first parsed/mapped event, first visible content, and terminal evidence when those locations exist; missing phases remain visibly incomplete. Failure clusters group only safe structural categories and IDs, never message or payload text. Diagnostics retain categories, timing, evidence IDs, digest-locked patch audit metadata, and Advisory ratings, but not Profile edit content or disclosed Assistant text. Copilot patch and quality records carry their Profile identity and, when trusted, their originating run identity; a run-scoped bundle includes only matching records and excludes records without that run identity. The provenance manifest can be checked with `turnstage verify`. CSV files contain identifiers and structural metadata only. Prompts, assistant content, URLs, headers, payloads, raw events, response bodies, and secrets are excluded. Optional visual artifacts remain a separate explicit opt-in because screenshots may contain conversation content. Existing visual baselines are Profile-scoped rather than run-scoped, so a Copilot run bundle excludes them unless a future capture contract can prove they belong to that exact run; this prevents a screenshot from another run being presented as current evidence.
 
 Suites and cases may declare an explicit `sourceBinding` with bounded `sourceGlobs`, `components`, `endpoints`, and `riskTags`. Changed-file selection is explainable and fail-closed: unbound cases are omitted unless the caller explicitly asks to include them. This is an ownership map, not inferred code coverage.
 

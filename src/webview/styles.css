@@ -64,6 +64,22 @@ h1 { margin: 0; font-size: 1.15rem; line-height: 1.4; } h2 { margin: 0 0 var(--t
 .evidence-summary__more > summary:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .evidence-summary__more > div { position: absolute; z-index: 4; inset-block-start: calc(100% + var(--ts-space-1)); inset-inline-end: 0; display: grid; min-width: 11em; padding: var(--ts-space-1); border: 1px solid var(--vscode-dropdown-border, var(--vscode-editorWidget-border)); background: var(--vscode-dropdown-background, var(--vscode-editorWidget-background)); box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, .28)); }
 .evidence-summary__more > div button { width: 100%; justify-content: flex-start; }
+.causal-timeline { grid-column: 1 / -1; min-width: 0; border-top: 1px solid var(--vscode-editorWidget-border); }
+.causal-timeline > summary { display: flex; align-items: baseline; justify-content: space-between; gap: var(--ts-space-3); min-height: var(--ts-control-height); padding: var(--ts-space-1) 0; color: var(--vscode-foreground); }
+.causal-timeline > summary span { font-weight: 600; }
+.causal-timeline > summary small, .causal-timeline > p { color: var(--vscode-descriptionForeground); font-size: .769em; }
+.causal-timeline > ol { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.5em, 1fr)); gap: 1px; margin: 0; padding: 1px; background: var(--vscode-editorWidget-border); list-style: none; }
+.causal-timeline__entry { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--ts-space-1); min-height: calc(var(--ts-control-height) + var(--ts-space-2)); padding: var(--ts-space-2); background: var(--vscode-editor-background); }
+.causal-timeline__entry > .product-icon { margin-top: 2px; color: var(--vscode-descriptionForeground); font-size: .769em; }
+.causal-timeline__entry--failure > .product-icon { color: var(--vscode-testing-iconFailed); }
+.causal-timeline__entry--warning > .product-icon, .causal-timeline__entry--unknown > .product-icon { color: var(--vscode-testing-iconErrored, var(--vscode-editorWarning-foreground)); }
+.causal-timeline__entry > button, .causal-timeline__entry > div { display: grid; min-width: 0; gap: 2px; padding: 0; border: 0; background: transparent; color: var(--vscode-editor-foreground); text-align: start; }
+.causal-timeline__entry > button { min-height: 0; }
+.causal-timeline__entry > button:hover { color: var(--vscode-textLink-foreground); background: transparent; }
+.causal-timeline__entry time { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: .769em; font-variant-numeric: tabular-nums; }
+.causal-timeline__entry span { overflow-wrap: anywhere; }
+.causal-timeline > p { margin: var(--ts-space-1) 0 0; }
+.causal-timeline__missing { color: var(--vscode-testing-iconErrored, var(--vscode-editorWarning-foreground)) !important; }
 .adversarial-outcome { font-weight: 600; }
 .adversarial-outcome--resisted { color: var(--vscode-testing-iconPassed); }
 .adversarial-outcome--attackSucceeded { color: var(--vscode-testing-iconFailed); }

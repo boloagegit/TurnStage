@@ -26,6 +26,7 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'run.import' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'uri.open', uri: 'https://example.test/docs' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.file', action: 'importCsv' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'connection.analyze' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'rawEvent', sequence: -1 } }, 'editor-1')).toBe(false);
   });
@@ -55,6 +56,10 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'form.accepted', formId: 'form-1', sourceMessageId: 'message-1' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'workspaceTrust.changed', trusted: 'yes' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'test.results', results: [] }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'test.timeline', evidenceId: 'evidence-1', timeline: { version: 1, baseTime: 0, entries: [], completeness: 'missing', missingPhases: ['request'], truncated: false } }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'test.timeline', evidenceId: 'evidence-1', timeline: 'untrusted' }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'connection.result', result: { protocol: 'sse', confidence: 'high', rawEventCount: 2, normalizedEventCount: 2, mappedEventCount: 2, unmatchedEventCount: 0, parseErrorCount: 0, mappingErrorCount: 0, terminalEventSeen: true, terminalMapped: true, safe: true, findings: [] } }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'connection.result', result: 'untrusted' }, 'editor-1')).toBe(false);
   });
 
   it('accepts bounded inspector focus targets and rejects invalid selections', () => {

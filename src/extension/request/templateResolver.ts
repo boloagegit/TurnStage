@@ -2,6 +2,7 @@ import { errors } from '../errors';
 import { localize } from '../l10n';
 
 export interface ResolutionContext { [key: string]: unknown }
+export interface TemplateResolutionOptions { encodeSecrets?: boolean }
 
 export function getPath(root: unknown, path: string): unknown {
   const normalized = path.replace(/^\$\.?/, '');
@@ -23,8 +24,8 @@ function applyTransform(value: unknown, transform: string, argument?: unknown): 
   }
 }
 
-export async function resolveTemplate(value: unknown, context: ResolutionContext, secretProvider?: (name: string) => Promise<string | undefined>): Promise<unknown> {
-  if (Array.isArray(value)) return Promise.all(value.map((item) => resolveTemplate(item, context, secretProvider)));
+export async function resolveTemplate(value: unknown, context: ResolutionContext, secretProvider?: (name: string) => Promise<string | undefined>, options: TemplateResolutionOptions = {}): Promise<unknown> {
+  if (Array.isArray(value)) return Promise.all(value.map((item) => resolveTemplate(item, context, secretProvider, options)));
   if (value && typeof value === 'object') {
     const object = value as Record<string, unknown>;
     if (typeof object.$value === 'string') {
@@ -35,7 +36,7 @@ export async function resolveTemplate(value: unknown, context: ResolutionContext
       }
       return resolved;
     }
-    return Object.fromEntries(await Promise.all(Object.entries(object).map(async ([key, child]) => [key, await resolveTemplate(child, context, secretProvider)])));
+    return Object.fromEntries(await Promise.all(Object.entries(object).map(async ([key, child]) => [key, await resolveTemplate(child, context, secretProvider, options)])));
   }
   if (typeof value !== 'string') return value;
   const matches = [...value.matchAll(/\$\{([A-Za-z0-9_.-]+)\}/g)];
@@ -43,13 +44,15 @@ export async function resolveTemplate(value: unknown, context: ResolutionContext
   for (const match of matches) {
     const path = match[1]!;
     let replacement: unknown;
-    if (path.startsWith('secret.')) {
+    const secret = path.startsWith('secret.');
+    if (secret) {
       const name = path.slice(7);
       replacement = await secretProvider?.(name);
       if (replacement === undefined) throw errors.missingSecret(name);
     } else replacement = getPath(context, path);
     if (replacement === undefined) throw errors.request(localize('Template path "{path}" was not found.', { path }));
-    result = result.replace(match[0], String(replacement));
+    const text = String(replacement);
+    result = result.replace(match[0], secret && options.encodeSecrets ? encodeURIComponent(text) : text);
   }
   return result;
 }

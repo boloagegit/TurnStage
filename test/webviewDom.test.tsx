@@ -561,6 +561,33 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByRole('button', { name: 'Security' }).getAttribute('aria-current')).toBe('page');
   });
 
+  it('shows bounded Connection Doctor evidence and requests a fresh analysis without exposing payloads', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    render(<SettingsWorkspace
+      section="request"
+      onSectionChange={vi.fn()}
+      profile={profile}
+      snapshot={snapshot}
+      post={post}
+      connectionResult={{
+        protocol: 'sse', confidence: 'high', status: 200,
+        rawEventCount: 4, normalizedEventCount: 3, mappedEventCount: 3, unmatchedEventCount: 1,
+        parseErrorCount: 0, mappingErrorCount: 0, terminalEventSeen: true, terminalMapped: false, safe: false,
+        findings: [{ id: 'terminal-not-mapped', category: 'terminal', severity: 'error', message: 'A terminal response signal was observed but no normalized terminal event was mapped.' }],
+      }}
+    />);
+
+    expect(screen.getByRole('heading', { name: 'Connection Doctor' })).toBeTruthy();
+    expect(screen.getByText('Connection needs attention')).toBeTruthy();
+    expect(screen.getByText('Observed, not mapped')).toBeTruthy();
+    expect(screen.getByText('Terminal not mapped')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Analyze latest response' }));
+    expect(post).toHaveBeenCalledWith({ type: 'connection.analyze' });
+    await user.click(screen.getByRole('button', { name: 'Ask Copilot to diagnose this configuration' }));
+    expect(post).toHaveBeenCalledWith({ type: 'copilot.profileDoctor' });
+  });
+
   it('uses one compact section picker instead of another navigation rail when embedded', async () => {
     const user = userEvent.setup();
     render(<EmbeddedSettingsHarness />);
@@ -649,14 +676,19 @@ describe('Webview DOM behavior', () => {
     expect((screen.getByRole('button', { name: 'Delete criterion' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('summarizes the active adversarial failure before its evidence locations', () => {
+  it('summarizes the active adversarial failure and its causal evidence before raw detail', async () => {
+    const user = userEvent.setup();
     render(<EvidenceSummary result={{
       profileId: profile.id, scenarioId: 'known-attack', scenarioName: 'Known attack', outcome: 'attackSucceeded', durationMs: 420,
       attemptedTurns: 2, completedTurns: 2, plannedTurns: 3, findingCount: 1, issueCount: 0, evidenceId: 'evidence-1',
       primaryFinding: { category: 'tool', turnId: 'turn-2', turnIndex: 1, ruleId: 'no-tools', label: 'Tool interaction was observed.' },
       primaryLocation: { kind: 'normalizedEvent', sequence: 4 }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'network', networkId: 'network-1' }, { kind: 'rawEvent', sequence: 4 }],
       repetitions: { requestedAttempts: 5, completedAttempts: 3, skippedAttempts: 2, sampleComplete: false, stability: 'inconclusive', counts: { resisted: 2, attackSucceeded: 1, indeterminate: 0, infrastructureError: 0 } },
-    }} />);
+    }} timeline={{ version: 1, baseTime: 1_000, completeness: 'partial', missingPhases: ['terminal'], truncated: false, entries: [
+      { id: 'request', phase: 'request', status: 'normal', label: 'Request sent', at: 1_000, elapsedMs: 0, location: { kind: 'network', networkId: 'network-1' } },
+      { id: 'headers', phase: 'headers', status: 'normal', label: 'Response headers 200', at: 1_120, elapsedMs: 120, location: { kind: 'network', networkId: 'network-1' } },
+      { id: 'timeout', phase: 'error', status: 'failure', label: 'IdleTimeoutError', at: 6_120, elapsedMs: 5_120, location: { kind: 'rawEvent', sequence: 4 } },
+    ] }} />);
     expect(screen.getByRole('heading', { name: 'Attack succeeded: Known attack' })).toBeTruthy();
     expect(screen.getByText('Attack succeeded')).toBeTruthy();
     expect(screen.getByText('Tool interaction was observed.')).toBeTruthy();
@@ -666,6 +698,10 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByRole('button', { name: 'Open Normalized Events' }).classList.contains('primary')).toBe(true);
     expect(screen.getByRole('group', { name: 'Open evidence location' }).querySelector('details')).toBeTruthy();
     expect(within(screen.getByRole('group', { name: 'Open evidence location' })).getByText('Raw Events')).toBeTruthy();
+    expect(screen.getByText('Causal timeline')).toBeTruthy();
+    expect(screen.getByText('3 events · Partial evidence')).toBeTruthy();
+    expect(screen.getByText('Evidence is incomplete: Terminal.')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Open IdleTimeoutError evidence at 5,120 ms' }));
   });
 
   it('offers local undo after deleting a scenario', async () => {

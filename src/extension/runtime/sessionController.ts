@@ -78,6 +78,12 @@ export class SessionController implements vscode.Disposable {
   }
   getRuns(): LocalRun[] { return this.runs; }
   getNetworkEntries(): NetworkExchange[] { return structuredClone(this.networkEntries); }
+  getLatestConnectionExchange(): NetworkExchange | undefined {
+    const startedAt = this.currentTurn?.startedAt;
+    const candidates = this.networkEntries.filter((entry) => entry.kind !== 'stop' && (startedAt === undefined || entry.startedAt >= startedAt));
+    const entry = candidates.filter((candidate) => candidate.kind === 'stream').at(-1) ?? (startedAt === undefined ? candidates.filter((candidate) => candidate.kind === 'opening').at(-1) : undefined);
+    return entry ? structuredClone(entry) : undefined;
+  }
   getRunSummaries(): LocalRunSummary[] { return this.runs.map((run) => ({ id: run.id, profileId: run.profileId, createdAt: run.createdAt, metrics: structuredClone(run.metrics), result: structuredClone(run.result), replayable: Boolean(run.rawEvents?.length), hasSnapshot: Boolean(run.snapshot), rawEventCount: run.rawEvents?.length ?? 0, normalizedEventCount: run.normalizedEvents?.length ?? 0, messageCount: run.snapshot?.messages.length ?? 0, errorCount: run.snapshot?.errors.length ?? (run.result.type === 'failed' ? 1 : 0), request: run.request ? { method: run.request.method, url: run.request.url, variantId: run.request.variantId } : undefined })); }
   addBuiltInFixture(rawEvents: RawStreamEvent[]): void {
     const fixtureSnapshot = createSnapshot(vscode.workspace.isTrusted); fixtureSnapshot.controls = this.publicControls();
@@ -325,14 +331,14 @@ export class SessionController implements vscode.Disposable {
   async newConversation(): Promise<void> {
     if (isActive(this.snapshot.turnState)) return;
     for (const definition of this.profile.controls ?? []) if (definition.resetOnNewConversation) await this.setControl(definition.id, definition.default);
-    const controls = { ...this.controls }; const remoteSessions = this.publicRemoteSessions(this.remoteSessionRepository.list(this.remoteSessionKey())); this.snapshot = createSnapshot(vscode.workspace.isTrusted); this.networkEntries = []; this.controls = controls; this.refreshSnapshotControls(); this.snapshot.remoteSessions = remoteSessions; this.rawBuffer.clear(); this.lastInteraction = undefined; await this.startSession();
+    const controls = { ...this.controls }; const remoteSessions = this.publicRemoteSessions(this.remoteSessionRepository.list(this.remoteSessionKey())); this.snapshot = createSnapshot(vscode.workspace.isTrusted); this.networkEntries = []; this.requestPreview = undefined; this.currentTurn = undefined; this.controls = controls; this.refreshSnapshotControls(); this.snapshot.remoteSessions = remoteSessions; this.rawBuffer.clear(); this.lastInteraction = undefined; await this.startSession();
   }
-  clearConversation(): void { if (isActive(this.snapshot.turnState)) return; this.snapshot.messages = []; this.snapshot.conversationId = undefined; this.snapshot.rawEvents = []; this.snapshot.normalizedEvents = []; this.rawBuffer.clear(); this.changed(); }
+  clearConversation(): void { if (isActive(this.snapshot.turnState)) return; this.snapshot.messages = []; this.snapshot.conversationId = undefined; this.snapshot.rawEvents = []; this.snapshot.normalizedEvents = []; this.snapshot.metrics = createSnapshot(this.snapshot.trusted).metrics; this.snapshot.errors = []; this.snapshot.droppedEventCount = 0; this.snapshot.droppedNormalizedEventCount = 0; this.snapshot.droppedMessageCount = 0; this.networkEntries = []; this.requestPreview = undefined; this.currentTurn = undefined; this.rawBuffer.clear(); this.changed(); }
 
   applyRemoteSession(conversationId: string): void {
     if (isActive(this.snapshot.turnState)) return;
     const reference = this.snapshot.remoteSessions?.find((item) => item.conversationId === conversationId); if (!reference) return;
-    const remoteSessions = this.publicRemoteSessions(this.snapshot.remoteSessions ?? []); this.snapshot = createSnapshot(vscode.workspace.isTrusted); this.refreshSnapshotControls(); this.snapshot.remoteSessions = remoteSessions; this.snapshot.conversationId = reference.conversationId; this.snapshot.title = reference.title; this.snapshot.sessionState = 'ready'; this.rawBuffer.clear(); this.lastInteraction = undefined;
+    const remoteSessions = this.publicRemoteSessions(this.snapshot.remoteSessions ?? []); this.snapshot = createSnapshot(vscode.workspace.isTrusted); this.networkEntries = []; this.requestPreview = undefined; this.currentTurn = undefined; this.refreshSnapshotControls(); this.snapshot.remoteSessions = remoteSessions; this.snapshot.conversationId = reference.conversationId; this.snapshot.title = reference.title; this.snapshot.sessionState = 'ready'; this.rawBuffer.clear(); this.lastInteraction = undefined;
     this.snapshot.messages.push({ id: `remote-reference-${reference.conversationId}`, role: 'system', status: 'completed', createdAt: Date.now(), completedAt: Date.now(), parts: [{ type: 'text', text: localize('Previous messages were not loaded. This profile only stores a remote session reference.') }], citations: [], actions: [], followups: [] }); this.changed(true);
   }
 

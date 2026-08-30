@@ -21,6 +21,7 @@ import { VisualRegressionService } from './testing/visualRegression';
 import { registerCopilotTools } from './copilot/tools';
 import { ScenarioCopilotRuntime } from './copilot/scenarioRuntime';
 import { createCopilotArtifactRepository } from './copilot/artifacts';
+import { buildOpenAICompatibleProfileDraft, parseCurlCommand } from './connection';
 
 let activeEditor: TurnStageEditorProvider | undefined;
 export const TURNSTAGE_WALKTHROUGH_ID = 'turnstage.turnstage#gettingStarted';
@@ -46,6 +47,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const destination = await pickProfileDestination(scopeItem?.scope); if (!destination) return;
     try { const uri = await repository.import(selected[0], destination); await refreshProfileState(); await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor'); void showNotification('information', vscode.l10n.t('Imported {path}.', { path: displayProfilePath(uri, repository) })); }
     catch (error) { void showNotification('error', vscode.l10n.t('Could not import profile: {error}', { error: error instanceof Error ? error.message : String(error) })); }
+  });
+  command('importCurl', async (scopeItem?: ProfileScopeTreeItem) => {
+    if (!requireWorkspaceTrust()) return;
+    await importProfileFromCurl(repository, scopeItem?.scope, refreshProfileState);
   });
   command('duplicateProfile', async (item?: ProfileTreeItem | vscode.Uri) => {
     if (!requireWorkspaceTrust()) return;
@@ -106,6 +111,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   command('exportRun', async (item?: ProfileTreeItem | vscode.Uri) => { if (!requireWorkspaceTrust()) return; const uri = asUri(item) ?? activeCustomEditorUri(); if (!uri) { void showNotification('error', vscode.l10n.t('Open a profile in the TurnStage editor first.')); return; } const controller = await openAndWaitForController(editor, uri); if (!controller) { void showNotification('error', vscode.l10n.t('The TurnStage profile editor did not become ready in time.')); return; } const exported = await editor.exportRun(uri); if (exported) { void showNotification('information', vscode.l10n.t('Run exported to {path}.', { path: displayExportUri(exported) })); return; } await editor.showSection(uri, 'test'); void showNotification('information', vscode.l10n.t('No recorded runs are available. Open Test to run a profile first.')); });
   command('openOutput', () => output.show(true));
   command('runContractTests', () => scenarioTests.runAll());
+  command('rerunLatestTests', async (uri?: vscode.Uri, status?: unknown) => {
+    if (!requireWorkspaceTrust()) return;
+    if (!uri || (status !== 'failed' && status !== 'unstable' && status !== 'incomplete')) return;
+    try { await scenarioTests.rerunLatest(uri, status); }
+    catch (error) { void showNotification('error', error instanceof Error ? error.message : String(error)); }
+  });
   command('exportTestReport', async () => {
     if (!scenarioTests.hasReport()) { void showNotification('information', vscode.l10n.t('No conversation contract results are available. Run a scenario from Test Explorer first.')); return; }
     const format = await vscode.window.showQuickPick([
@@ -130,7 +141,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   command('openTestEvidence', async (argument?: unknown) => {
     const messageReference = scenarioTests.getMessageEvidence(argument);
     if (messageReference) {
-      if (!await editor.showScenarioEvidence(messageReference.uri, messageReference.evidence, messageReference.location, messageReference.evidenceId)) void showNotification('error', vscode.l10n.t('The TurnStage profile editor could not display this test evidence.'));
+      if (!await editor.showScenarioEvidence(messageReference.uri, messageReference.evidence, messageReference.location, messageReference.evidenceId, messageReference.result)) void showNotification('error', vscode.l10n.t('The TurnStage profile editor could not display this test evidence.'));
       return;
     }
     const value = isRecord(argument) ? argument : undefined;
@@ -138,7 +149,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const reference = evidenceId ? scenarioTests.getEvidence(evidenceId) : undefined;
     if (!reference) { void showNotification('error', vscode.l10n.t('This test evidence is no longer available. Run the scenario again.')); return; }
     const location = isScenarioEvidenceLocation(value?.location) ? value.location : reference.location;
-    if (!await editor.showScenarioEvidence(reference.uri, reference.evidence, location, evidenceId!)) void showNotification('error', vscode.l10n.t('The TurnStage profile editor could not display this test evidence.'));
+    if (!await editor.showScenarioEvidence(reference.uri, reference.evidence, location, evidenceId!, reference.result)) void showNotification('error', vscode.l10n.t('The TurnStage profile editor could not display this test evidence.'));
   });
   command('migrateProfile', async (item?: ProfileTreeItem | vscode.Uri) => { if (!requireWorkspaceTrust()) return; const uri = asUri(item); if (!uri) return; const document = await vscode.workspace.openTextDocument(uri); const result = new ProfileMigrator().migrate(document.getText()); if (!result.changed) { void showNotification('information', vscode.l10n.t('This TurnStage profile is already current.')); return; } const migrateLabel = vscode.l10n.t('Migrate'); const confirmation = await vscode.window.showInformationMessage(vscode.l10n.t('Migrate profile from version {from} to {to}? A backup will be created.', { from: result.fromVersion, to: result.toVersion }), { modal: true, detail: result.notes.join('\n') }, migrateLabel); if (confirmation !== migrateLabel) return; const backup = uri.with({ path: `${uri.path}.v${result.fromVersion}.backup` }); await vscode.workspace.fs.writeFile(backup, new TextEncoder().encode(document.getText())); const edit = new vscode.WorkspaceEdit(); edit.replace(uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), result.text); await vscode.workspace.applyEdit(edit); await vscode.commands.executeCommand('vscode.diff', backup, uri, vscode.l10n.t('TurnStage Migration')); });
   output.appendLine(vscode.l10n.t('TurnStage activated in {host}.', { host: vscode.env.remoteName ?? vscode.l10n.t('Local Extension Host') }));
@@ -266,6 +277,44 @@ async function writeSafe(target: vscode.Uri, bytes: Uint8Array, silentNew = fals
 }
 async function duplicateUri(uri: vscode.Uri): Promise<vscode.Uri> { const match = uri.path.match(/^(.*?)(\.[^.]+\.[^.]+)$/) ?? uri.path.match(/^(.*?)(\.[^.]+)$/); const base = match?.[1] ?? uri.path; const suffix = match?.[2] ?? ''; for (let index = 2; index < 1000; index++) { const candidate = uri.with({ path: `${base}-${index}${suffix}` }); try { await vscode.workspace.fs.stat(candidate); } catch { return candidate; } } throw new Error(vscode.l10n.t('Could not create a duplicate-safe filename.')); }
 async function createEmptyProfile(repository: ProfileRepository, destination: ProfileDestination): Promise<vscode.Uri | undefined> { const id = await vscode.window.showInputBox({ title: vscode.l10n.t('Create TurnStage Profile'), prompt: vscode.l10n.t('Profile id'), value: 'sample-profile', validateInput: (value) => /^[a-z0-9][a-z0-9-]*$/.test(value) ? undefined : vscode.l10n.t('Use lowercase letters, numbers, and hyphens.') }); if (!id) return; const directory = repository.profileDirectory(destination); await vscode.workspace.fs.createDirectory(directory); const uri = await duplicateIfExists(vscode.Uri.joinPath(directory, `${id}.turnstage.jsonc`)); await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(emptyProfile(id))); return uri; }
+
+async function importProfileFromCurl(repository: ProfileRepository, preferredScope: ProfileScope | undefined, refresh: () => Promise<void>): Promise<void> {
+  const selectedText = vscode.window.activeTextEditor?.document.getText(vscode.window.activeTextEditor.selection).trim();
+  const command = selectedText || await vscode.window.showInputBox({
+    title: vscode.l10n.t('Create Profile from cURL'),
+    prompt: vscode.l10n.t('Paste a cURL command. TurnStage parses it without a shell and never executes it.'),
+    placeHolder: 'curl https://api.example.com/v1/chat/completions -H "Authorization: Bearer …" -d \'{…}\'',
+    ignoreFocusOut: true,
+  });
+  if (!command) return;
+  try {
+    const parsed = parseCurlCommand(command);
+    const draft = buildOpenAICompatibleProfileDraft(parsed);
+    const text = `${JSON.stringify(draft.profile, null, 2)}\n`;
+    const issues = new ProfileValidator().validate(draft.profile);
+    if (issues.some((issue) => issue.severity === 'error')) throw new Error(vscode.l10n.t('The generated profile did not pass validation.'));
+    const preview = await vscode.workspace.openTextDocument({ language: 'jsonc', content: text });
+    await vscode.window.showTextDocument(preview, { preview: true, preserveFocus: false });
+    const createLabel = vscode.l10n.t('Create Sanitized Profile');
+    const choice = await vscode.window.showInformationMessage(
+      vscode.l10n.t('Review the sanitized profile draft before creating it.'),
+      { detail: vscode.l10n.t('{count} secret value(s) were replaced with SecretStorage references. Captured messages, tools, and response payloads are excluded.', { count: draft.requiredSecrets.length }) },
+      createLabel,
+    );
+    if (choice !== createLabel) return;
+    const destination = await pickProfileDestination(preferredScope);
+    if (!destination) return;
+    const directory = repository.profileDirectory(destination);
+    await vscode.workspace.fs.createDirectory(directory);
+    const target = await duplicateIfExists(vscode.Uri.joinPath(directory, `${draft.profile.id}.turnstage.jsonc`));
+    await vscode.workspace.fs.writeFile(target, new TextEncoder().encode(text));
+    await refresh();
+    await vscode.commands.executeCommand('vscode.openWith', target, 'turnstage.profileEditor');
+    void showNotification('information', vscode.l10n.t('Created sanitized profile {path}. Set the referenced secrets before testing.', { path: displayProfilePath(target, repository) }));
+  } catch (error) {
+    void showNotification('error', vscode.l10n.t('Could not create a profile from cURL: {error}', { error: error instanceof Error ? error.message : String(error) }));
+  }
+}
 function displayExportUri(uri: vscode.Uri): string { return uri.scheme === 'file' ? uri.fsPath : uri.toString(true); }
 async function duplicateIfExists(uri: vscode.Uri): Promise<vscode.Uri> { try { await vscode.workspace.fs.stat(uri); return duplicateUri(uri); } catch { return uri; } }
 function emptyProfile(id: string): string { return JSON.stringify({ version: 1, id, name: id.split('-').map((part) => part[0]?.toUpperCase() + part.slice(1)).join(' '), environment: 'local', opening: { mode: 'static', message: vscode.l10n.t('Hello, I am a test assistant. What would you like to test?'), starters: [] }, conversation: { send: { method: 'POST', url: '${env.baseUrl}/basic/chat/stream', headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' }, variants: [{ id: 'first-turn', when: { path: 'conversation.id', operator: 'notExists' }, body: { message: { $value: 'input.text' } } }, { id: 'continuation', when: { path: 'conversation.id', operator: 'exists' }, body: { message: { $value: 'input.text' }, conversationId: { $value: 'conversation.id' } } }] } }, stream: { transport: 'sse', dataFormat: 'json', mappingMode: 'firstMatch', unexpectedEndPolicy: 'fail', mappings: [{ id: 'message', match: { event: 'message' }, emit: { type: 'content.text.delta', text: { path: '$.text' } } }, { id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] } }, null, 2); }

@@ -5,6 +5,7 @@
   "command.initializeUser": "Initialize User Profiles",
   "command.createProfile": "Create Profile",
   "command.importProfile": "Import Profile",
+  "command.importCurl": "Create Profile from cURL",
   "command.duplicateProfile": "Duplicate Profile",
   "command.deleteProfile": "Delete Profile",
   "command.openProfile": "Open Profile",

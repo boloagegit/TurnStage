@@ -28,7 +28,7 @@ import type { ScenarioTestController } from '../testing/scenarioTestController';
 import { MAX_COPILOT_RUN_ATTEMPTS, MAX_COPILOT_RUN_REQUESTS } from '../testing/scenarioExecution';
 import { mapChangedFilesToTests } from '../testing/impactMapping';
 import { diagnoseRun } from './diagnostics/engine';
-import type { DiagnosticInput, DiagnosticOutcome } from './diagnostics/contracts';
+import type { DiagnosticInput, DiagnosticOutcome, TimingStage } from './diagnostics/contracts';
 import { applyTextEdits, computeProfileDigest, createProfilePatchDraft, verifyProfilePatchDraft } from './remediation/planner';
 import { ProfilePatchError } from './remediation/contracts';
 import { createQualityDisclosureGrant, QualityGrantStore, QualityPolicyError, validateQualityRubrics } from './quality/policy';
@@ -36,6 +36,7 @@ import { ProfileRepository, EnvironmentRepository } from '../config/profileRepos
 import { ProfileCodec } from '../config/profileCodec';
 import { ProfileValidator } from '../config/profileValidator';
 import type { CopilotArtifactRepository } from './artifacts';
+import { buildEvidenceTimeline } from '../testing/evidenceTimeline';
 
 interface StoredRun {
   runId: string;
@@ -186,10 +187,11 @@ export class ScenarioCopilotRuntime implements CopilotRuntime {
     const run = this.runs.get(input.runId);
     if (!run) throw new CopilotRuntimeError('NOT_FOUND', 'The requested TurnStage run is no longer available.');
     const failures: FailureRecord[] = run.summaries
-      .filter((summary) => summary.outcome !== 'resisted')
+      .filter((summary) => isFailureOutcome(summary.outcome))
       .map((summary) => {
         const failureId = failureIdFor(run.runId, summary);
         const evidence = this.tests.getEvidence(summary.evidenceId);
+        const timeline = evidence?.result ? buildEvidenceTimeline(evidence.result) : undefined;
         return {
           id: failureId,
           caseId: summary.scenarioId,
@@ -209,7 +211,7 @@ export class ScenarioCopilotRuntime implements CopilotRuntime {
               outcome: summary.outcome,
             },
             evidenceRefs: evidence ? locationsToReferences(evidence.evidence, summary.availableLocations) : locationsToReferences(undefined, summary.availableLocations),
-            completeness: evidence ? 'complete' as const : 'missing' as const,
+            completeness: timeline?.completeness ?? (evidence ? 'partial' as const : 'missing' as const),
             profile: evidence ? { id: evidence.evidence.profileId } : undefined,
             suite: evidence ? { id: evidence.evidence.scenarioId } : undefined,
           },
@@ -479,7 +481,7 @@ function diagnosticInput(result: ScenarioRunResult | undefined, evidence: import
     metrics: { ...snapshot.metrics, firstNormalizedContentLatency: startedAt !== undefined && firstNormalized ? firstNormalized.receivedAt - startedAt : ttft, firstVisibleTextLatency: ttft, droppedEventCount: snapshot.droppedEventCount },
     transport: { protocol: transportProtocol(network?.protocol ?? snapshot.rawEvents[0]?.protocol), status: network?.status, state: network?.state, terminalState: timeout ? 'timeout' : terminalState(snapshot.turnState), proxyBuffered, idleTimeout, timeout, retryCount: snapshot.metrics.reconnectCount, variantId: network?.variantId, headersLatency: network?.timing.headers, firstChunkLatency: network?.timing.firstChunk, terminalLatency: network?.timing.total },
     errors: snapshot.errors.map((error) => ({ type: error.type, status: error.status, retrySafe: error.retrySafe })),
-    evidence: evidenceReferences(evidence),
+    evidence: evidenceReferences(evidence, result),
     assertions: result?.checks.map((check) => ({ id: check.id, passed: check.passed })),
     repetition,
     baseline: comparison ? { outcome: result?.passed ? 'passed' : 'failed', metrics: { terminalLatencyMs: comparison.baselineDurationMs } } : undefined,
@@ -490,12 +492,31 @@ function diagnosticInput(result: ScenarioRunResult | undefined, evidence: import
 function diagnosticOutcome(result: ScenarioRunResult | undefined): DiagnosticOutcome { return result?.adversarial?.outcome ?? (result?.passed === true ? 'passed' : result?.passed === false ? 'failed' : 'indeterminate'); }
 function transportProtocol(value: unknown): 'http' | 'sse' | 'websocket' | 'json' | 'unknown' { return value === 'sse' ? 'sse' : value === 'json' || value === 'ndjson' ? 'json' : value === 'http' || value === 'websocket' ? value : 'unknown'; }
 function terminalState(value: string): 'completed' | 'failed' | 'aborted' | 'pending' | 'unknown' { return value === 'completed' || value === 'failed' || value === 'aborted' ? value : ['submitting', 'waitingStart', 'streaming', 'stopping'].includes(value) ? 'pending' : 'unknown'; }
-function evidenceReferences(evidence: import('../../shared/types').ScenarioRunEvidence) {
-  const refs: Array<{ kind: 'chat' | 'network' | 'event' | 'profile' | 'metric'; id: string; path?: string }> = [{ kind: 'profile', id: evidence.profileId, path: 'tests' }];
+function evidenceReferences(evidence: import('../../shared/types').ScenarioRunEvidence, result?: ScenarioRunResult) {
+  type SafeEvidenceRef = { kind: 'chat' | 'network' | 'event' | 'profile' | 'metric'; id: string; path?: string; stage?: TimingStage };
+  const refs: SafeEvidenceRef[] = [{ kind: 'profile', id: evidence.profileId, path: 'tests' }];
   for (const entry of evidence.networkEntries.slice(0, 20)) refs.push({ kind: 'network', id: entry.id });
   for (const event of evidence.snapshot.rawEvents.slice(0, 20)) refs.push({ kind: 'event', id: String(event.sequence) });
   for (const message of evidence.snapshot.messages.filter((item) => item.role === 'assistant').slice(0, 20)) refs.push({ kind: 'chat', id: message.id });
-  return refs;
+  const staged: SafeEvidenceRef[] = [];
+  for (const entry of result ? buildEvidenceTimeline(result).entries : []) {
+    const stage = timelineStage(entry.phase);
+    const location = entry.location;
+    if (!stage || !location) continue;
+    if (location.kind === 'message' && location.messageId) staged.push({ kind: 'chat', id: location.messageId, stage });
+    else if (location.kind === 'network' && location.networkId) staged.push({ kind: 'network', id: location.networkId, stage });
+    else if ((location.kind === 'rawEvent' || location.kind === 'normalizedEvent') && location.sequence !== undefined) staged.push({ kind: 'event', id: String(location.sequence), stage });
+  }
+  const combined = [...staged, ...refs];
+  return combined.filter((item, index) => combined.findIndex((candidate) => candidate.kind === item.kind && candidate.id === item.id && candidate.stage === item.stage && candidate.path === item.path) === index).slice(0, 100);
+}
+
+function timelineStage(phase: import('../../shared/types').EvidenceTimelinePhase): TimingStage | undefined {
+  if (phase === 'request' || phase === 'headers' || phase === 'firstChunk' || phase === 'terminal') return phase;
+  if (phase === 'firstEvent') return 'firstRawEvent';
+  if (phase === 'firstMappedEvent') return 'firstNormalizedContent';
+  if (phase === 'ttft') return 'firstVisibleText';
+  return undefined;
 }
 
 async function readDocumentText(uri: vscode.Uri): Promise<string> { const document = vscode.workspace.textDocuments.find((item) => item.uri.toString() === uri.toString()) ?? await vscode.workspace.openTextDocument(uri); return document.getText(); }
@@ -533,6 +554,8 @@ function aggregateCaseOutcome(cases: readonly RunTestsRuntimeResult['cases'][num
   if (cases.some((item) => item.outcome === 'indeterminate' || item.outcome === 'cancelled')) return 'indeterminate';
   return cases.some((item) => item.outcome === 'passed') ? 'passed' : 'resisted';
 }
+
+function isFailureOutcome(outcome: string): boolean { return outcome !== 'resisted' && outcome !== 'passed'; }
 
 function failureIdFor(runId: string, summary: { profileId: string; suiteId?: string; scenarioId: string }): string {
   return `${runId}:${summary.profileId}:${summary.suiteId ?? 'inline'}:${summary.scenarioId}`;

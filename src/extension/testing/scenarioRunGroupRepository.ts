@@ -118,6 +118,10 @@ function sanitizeRecord(value: unknown, profileId: string): ScenarioRunGroupReco
 function sanitizeAttempt(value: unknown): AdversarialAttemptSummary | undefined {
   if (!record(value) || !positiveInteger(value.attempt) || !outcomes.has(value.outcome as AdversarialOutcome) || !nonNegativeInteger(value.durationMs) || !nonNegativeInteger(value.attemptedTurns) || !nonNegativeInteger(value.completedTurns) || value.completedTurns > value.attemptedTurns || !timestamp(value.startedAt) || !timestamp(value.completedAt) || value.completedAt < value.startedAt) return undefined;
   const attempt: AdversarialAttemptSummary = { attempt: value.attempt, outcome: value.outcome as AdversarialOutcome, durationMs: value.durationMs, attemptedTurns: value.attemptedTurns, completedTurns: value.completedTurns, startedAt: value.startedAt, completedAt: value.completedAt };
+  if (value.ttftMs !== undefined) {
+    if (!nonNegativeFinite(value.ttftMs)) return undefined;
+    attempt.ttftMs = value.ttftMs;
+  }
   if (value.evidenceId !== undefined) {
     if (!safeString(value.evidenceId)) return undefined;
     attempt.evidenceId = value.evidenceId.slice(0, 256);
@@ -138,6 +142,7 @@ function safeString(value: unknown): value is string { return typeof value === '
 function timestamp(value: unknown): value is number { return Number.isSafeInteger(value) && Number(value) >= 0; }
 function positiveInteger(value: unknown): value is number { return Number.isSafeInteger(value) && Number(value) >= 1; }
 function nonNegativeInteger(value: unknown): value is number { return Number.isSafeInteger(value) && Number(value) >= 0; }
+function nonNegativeFinite(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER; }
 function stability(value: unknown): value is ScenarioRunGroupRecord['stability'] { return value === 'stable-pass' || value === 'stable-fail' || value === 'unstable' || value === 'inconclusive'; }
 function emptyCounts(): ScenarioRunGroupRecord['counts'] { return { resisted: 0, attackSucceeded: 0, indeterminate: 0, infrastructureError: 0 }; }
 function normalizeRetention(value: number): number { return Number.isInteger(value) ? Math.max(1, Math.min(MAX_RUN_GROUP_RETENTION, value)) : DEFAULT_RUN_GROUP_RETENTION; }

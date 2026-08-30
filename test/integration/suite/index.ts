@@ -27,6 +27,7 @@ export async function run(): Promise<void> {
   await assertRegisteredCommands();
   await assertManifestCapabilities(extension);
   await assertSecretStorageCommandPath();
+  await assertCurlImportBoundary(workspaceRoot);
 
   // Activation must not initialize or rewrite an existing workspace on its
   // own. This is observable without invoking the interactive initializer.
@@ -48,6 +49,7 @@ async function assertRegisteredCommands(): Promise<void> {
     'turnstage.initializeUser',
     'turnstage.createProfile',
     'turnstage.importProfile',
+    'turnstage.importCurl',
     'turnstage.duplicateProfile',
     'turnstage.deleteProfile',
     'turnstage.openProfile',
@@ -65,6 +67,7 @@ async function assertRegisteredCommands(): Promise<void> {
     'turnstage.runContractTests',
     'turnstage.exportTestReport',
     'turnstage.openTestEvidence',
+    'turnstage.rerunLatestTests',
   ]) {
     assert.ok(commands.has(command), `${command} should be registered`);
   }
@@ -105,13 +108,48 @@ async function assertSecretStorageCommandPath(): Promise<void> {
   // not expose the secret through a UI result.
 }
 
+async function assertCurlImportBoundary(workspaceRoot: vscode.Uri): Promise<void> {
+  const target = vscode.Uri.joinPath(workspaceRoot, '.vscode', 'turnstage', 'profiles', 'api-127-0-0-1.turnstage.jsonc');
+  const windowApi = vscode.window as typeof vscode.window & {
+    showInputBox: typeof vscode.window.showInputBox;
+    showQuickPick: typeof vscode.window.showQuickPick;
+    showInformationMessage: typeof vscode.window.showInformationMessage;
+  };
+  const originalInput = windowApi.showInputBox;
+  const originalQuickPick = windowApi.showQuickPick;
+  const originalInformation = windowApi.showInformationMessage;
+  let inputCount = 0;
+  try {
+    windowApi.showInputBox = async () => {
+      inputCount += 1;
+      return 'curl -X POST http://127.0.0.1/v1/chat/completions -H "Authorization: Bearer sk-proj_12345678901234567890" -H "Content-Type: application/json" --data-raw \'{"model":"gpt-4o-mini","messages":[{"role":"user","content":"CAPTURED PRIVATE PROMPT"}]}\'';
+    };
+    windowApi.showQuickPick = (async (items: readonly unknown[]) => items.find((item) => typeof item === 'object' && item !== null && (item as { scope?: string }).scope === 'workspace')) as typeof vscode.window.showQuickPick;
+    windowApi.showInformationMessage = (async (_message: string, ...items: unknown[]) => items.find((item) => item === 'Create Sanitized Profile')) as typeof vscode.window.showInformationMessage;
+    await vscode.commands.executeCommand('turnstage.importCurl');
+  } finally {
+    windowApi.showInputBox = originalInput;
+    windowApi.showQuickPick = originalQuickPick;
+    windowApi.showInformationMessage = originalInformation;
+  }
+  if (!vscode.workspace.isTrusted) {
+    assert.equal(inputCount, 0, 'Restricted Mode must block cURL import before collecting command text');
+    assert.equal(await exists(target), false, 'Restricted Mode must not create a Profile from cURL');
+    return;
+  }
+  assert.equal(inputCount, 1, 'Trusted cURL import should collect one bounded command');
+  const imported = await waitFor(async () => await exists(target) ? readText(target) : undefined, 'the sanitized cURL Profile');
+  assert.match(imported, /\$\{secret\.apiToken\}/);
+  for (const forbidden of ['sk-proj_12345678901234567890', 'CAPTURED PRIVATE PROMPT']) assert.equal(imported.includes(forbidden), false, `Sanitized cURL Profile must exclude ${forbidden}`);
+}
+
 async function assertProfileDiscovery(profileUri: vscode.Uri): Promise<void> {
   await vscode.commands.executeCommand('workbench.view.extension.turnstage');
   const profiles = await waitFor(async () => {
     const entries = await vscode.workspace.findFiles('.vscode/turnstage/profiles/*.turnstage.jsonc');
     return entries.some((uri) => uri.toString() === profileUri.toString()) ? entries : undefined;
   }, 'the starter profile to be discoverable');
-  assert.equal(profiles.length, 1, 'The clean temp workspace should start with one profile');
+  assert.equal(profiles.length, vscode.workspace.isTrusted ? 2 : 1, 'Only the trusted run should add the sanitized cURL Profile');
   const document = await vscode.workspace.openTextDocument(profileUri);
   assert.match(document.getText(), /"id"\s*:\s*"integration"/);
 }
@@ -130,7 +168,7 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
   }
   const json = await waitFor(async () => await exists(jsonUri) ? readText(jsonUri) : undefined, 'the trusted JSON contract report', 15_000);
   const junit = await waitFor(async () => await exists(junitUri) ? readText(junitUri) : undefined, 'the trusted JUnit contract report', 15_000);
-  const parsed = JSON.parse(json) as { format?: string; version?: number; summary?: { total?: number; passed?: number; failed?: number; attackSucceeded?: number }; scenarios?: Array<{ comparison?: { differenceCount?: number }; adversarial?: { outcome?: string; attemptedTurns?: number; completedTurns?: number; plannedTurns?: number; repetitions?: { requestedAttempts?: number; completedAttempts?: number; sampleComplete?: boolean; stability?: string; counts?: Record<string, number> } } }> };
+  const parsed = JSON.parse(json) as { format?: string; version?: number; summary?: { total?: number; passed?: number; failed?: number; attackSucceeded?: number }; failureClusters?: Array<{ count?: number; fingerprint?: { digest?: string } }>; scenarios?: Array<{ comparison?: { differenceCount?: number }; adversarial?: { outcome?: string; attemptedTurns?: number; completedTurns?: number; plannedTurns?: number; repetitions?: { requestedAttempts?: number; completedAttempts?: number; sampleComplete?: boolean; stability?: string; counts?: Record<string, number> }; reliability?: { completedAttempts?: number; sampleComplete?: boolean; verdict?: string; duration?: { p95Ms?: number } }; timeline?: { entries?: Array<{ phase?: string; location?: { kind?: string } }>; completeness?: string } } }> };
   assert.equal(parsed.format, 'turnstage-contract-report');
   assert.equal(parsed.version, 2);
   assert.equal(parsed.summary?.total, 2);
@@ -148,6 +186,13 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
   assert.equal(adversarial?.repetitions?.sampleComplete, true);
   assert.equal(adversarial?.repetitions?.stability, 'stable-fail');
   assert.equal(adversarial?.repetitions?.counts?.attackSucceeded, 3);
+  assert.equal(adversarial?.reliability?.completedAttempts, 3);
+  assert.equal(adversarial?.reliability?.sampleComplete, true);
+  assert.equal(adversarial?.reliability?.verdict, 'doesNotMeetTarget');
+  assert.ok((adversarial?.timeline?.entries?.length ?? 0) > 0, json);
+  assert.ok(adversarial?.timeline?.entries?.some((entry) => entry.phase === 'terminal'), json);
+  assert.ok((parsed.failureClusters?.length ?? 0) > 0, json);
+  assert.match(parsed.failureClusters?.[0]?.fingerprint?.digest ?? '', /^[a-f0-9]{64}$/);
   assert.match(junit, /<testsuite[^>]+tests="2"[^>]+failures="1"/);
   assert.match(junit, /Adversarial attack succeeded/);
   for (const forbidden of ['Integration Profile', 'Integration contract', 'Integration adversarial', 'Integration multi-turn attack', 'Integration baseline', 'Integration candidate', 'Hello from Test Explorer', 'Establish context', 'Run the known fixed attack', 'rawEvents', 'requestPreview', 'actual', 'expected']) {

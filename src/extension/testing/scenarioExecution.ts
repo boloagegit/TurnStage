@@ -269,6 +269,7 @@ export async function runScenarioGroup(profileId: string, scenario: ScenarioDefi
       completedTurns: result.adversarial?.completedTurns ?? result.steps.length,
       startedAt,
       completedAt,
+      ...(finiteMetric(result.evidence.snapshot.metrics.ttft) ? { ttftMs: result.evidence.snapshot.metrics.ttft } : {}),
     };
     const execution: ScenarioAttemptExecution = { summary, result };
     attempts.push(execution);
@@ -307,6 +308,8 @@ export async function runScenarioGroup(profileId: string, scenario: ScenarioDefi
     record,
   };
 }
+
+function finiteMetric(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER; }
 
 export const executeScenarioGroup = runScenarioGroup;
 

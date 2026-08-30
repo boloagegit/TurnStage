@@ -454,5 +454,13 @@
   "This Profile has no observable mapping available for an adversarial prohibition.": "此 Profile 沒有可供對抗式禁止規則使用的可觀察 mapping。",
   "Adversarial case {id} is incompatible with this Profile: {message}": "對抗式案例 {id} 與此 Profile 不相容：{message}",
   "Adversarial repetitions must be an integer from 1 to {count}.": "對抗式 repetitions 必須是 1 到 {count} 的整數。",
-  "Adversarial failFast must be boolean.": "對抗式 failFast 必須是布林值。"
+  "Adversarial failFast must be boolean.": "對抗式 failFast 必須是布林值。",
+  "Could not create a profile from cURL: {error}": "無法從 cURL 建立 Profile：{error}",
+  "Create Profile from cURL": "從 cURL 建立 Profile",
+  "Create Sanitized Profile": "建立已淨化的 Profile",
+  "Created sanitized profile {path}. Set the referenced secrets before testing.": "已建立淨化後的 Profile {path}。測試前請先設定引用的秘密。",
+  "Paste a cURL command. TurnStage parses it without a shell and never executes it.": "貼上 cURL 指令。TurnStage 不會使用 shell 剖析，也絕不會執行它。",
+  "Review the sanitized profile draft before creating it.": "建立前請先檢查已淨化的 Profile 草稿。",
+  "The generated profile did not pass validation.": "產生的 Profile 未通過驗證。",
+  "{count} secret value(s) were replaced with SecretStorage references. Captured messages, tools, and response payloads are excluded.": "已將 {count} 個秘密值替換為 SecretStorage 參照。擷取的訊息、工具與回應 payload 不會被納入。"
 }

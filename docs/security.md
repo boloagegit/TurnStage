@@ -297,12 +297,38 @@ Evidence Bundle CSVs contain structural metadata only; they exclude prompts,
 assistant content, request/response payloads, URLs, headers, raw events, and
 secrets.
 
+The cURL importer is a parser, not a command runner. It accepts a bounded
+allowlist of request flags, rejects shell expansion, command substitution,
+response files, redirects, proxies, certificates, uploads, and unsupported URL
+schemes, and never starts a subprocess. Captured messages, prompts, tool
+definitions, and arbitrary payload content are not copied into the generated
+Profile. The user reviews an untitled sanitized draft before any workspace or
+user Profile file is created, and detected credentials are represented as
+SecretStorage references rather than values. Only protocol-safe `Accept`,
+`Content-Type`, and version query values are copied literally; every other
+captured header or query value fails closed to a SecretStorage reference.
+Secret values substituted into a request URL are URI-component encoded so they
+cannot create extra query parameters, fragments, or path segments.
+
+Connection Doctor performs no additional request. It analyzes the latest
+in-memory session using bounded status, content type, timing, event counts,
+mapping state, and terminal observations. A response prefix may be inspected
+in Extension Host memory for protocol framing, but response text and event
+payloads are not returned to the Webview, persisted, logged, exported, or sent
+to Copilot. Its result is advisory and cannot relabel a formal test outcome.
+
 ## Copilot diagnosis and remediation boundary
 
 TurnStage's run diagnosis is deterministic host logic over bounded timing,
 outcome, error category, and evidence references. Copilot explains that result;
 it is not the source of truth and cannot relabel a formal outcome. Profile
-Doctor uses only a discovered Profile's validation/configuration metadata.
+Doctor uses only a discovered Profile's validation/configuration metadata plus
+the explicitly requested Connection Doctor's sanitized protocol, status,
+timing, count, and terminal findings; it never receives the inspected response
+prefix or event payloads.
+Timing-stage references may point Copilot to the existing Chat, Network, or
+Event evidence location, but contain only a bounded kind, ID, and stage—not the
+underlying response, prompt, header, URL, or payload.
 
 Profile repair is split into draft and apply tools. Drafting never writes. The
 planner permits only bounded timeout, retry, parser, and mapping paths and

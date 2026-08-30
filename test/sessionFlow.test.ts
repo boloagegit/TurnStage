@@ -301,6 +301,13 @@ describe('SessionController end-to-end functional flow', () => {
     expect(controller.snapshot.messages.at(-1)).toMatchObject({ role: 'system', status: 'completed', parts: [{ type: 'text', text: 'Conversation stopped.' }] });
     expect(controller.snapshot.errors.some((error) => error.type === 'RemoteStopWarning')).toBe(false);
     expect(controller.getNetworkEntries().some((entry) => entry.kind === 'stop' && entry.status === 200 && entry.state === 'completed')).toBe(true);
+    expect(controller.getLatestConnectionExchange()).toMatchObject({ kind: 'stream' });
+
+    controller.clearConversation();
+    expect(controller.getNetworkEntries()).toEqual([]);
+    expect(controller.getLatestConnectionExchange()).toBeUndefined();
+    expect(controller.requestPreview).toBeUndefined();
+    expect(controller.snapshot.metrics).toMatchObject({ eventCount: 0, byteCount: 0, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0 });
   });
 });
 

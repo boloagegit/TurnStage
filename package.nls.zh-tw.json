@@ -5,6 +5,7 @@
   "command.initializeUser": "初始化使用者設定檔",
   "command.createProfile": "建立 Profile",
   "command.importProfile": "匯入 Profile",
+  "command.importCurl": "從 cURL 建立 Profile",
   "command.duplicateProfile": "複製 Profile",
   "command.deleteProfile": "刪除 Profile",
   "command.openProfile": "開啟 Profile",

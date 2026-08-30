@@ -19,6 +19,7 @@ export type ProductIconName =
   | 'device-desktop'
   | 'device-mobile'
   | 'edit'
+  | 'error'
   | 'ellipsis'
   | 'diff'
   | 'file-code'
@@ -51,6 +52,7 @@ const codicons: Record<ProductIconName, string> = {
   'device-desktop': 'device-desktop',
   'device-mobile': 'device-mobile',
   edit: 'edit',
+  error: 'error',
   ellipsis: 'ellipsis',
   diff: 'diff',
   'file-code': 'file-code',

@@ -1,4 +1,4 @@
-import type { AdversarialResultSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from './types';
+import type { AdversarialResultSummary, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from './types';
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -65,10 +65,12 @@ export type WebviewMessage = Envelope & (
   | { type: 'run.export'; runId: string }
   | { type: 'adversarial.file'; action: 'importCsv' | 'importJsonc' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'csvTemplate' }
   | { type: 'test.runAll' }
+  | { type: 'test.rerun'; status: 'failed' | 'unstable' | 'incomplete' }
   | { type: 'test.evidence.open'; evidenceId: string; location: ScenarioEvidenceLocation }
   | { type: 'copilot.diagnose'; evidenceId: string; mode: 'failure' | 'performance' | 'stability' | 'comparison' }
   | { type: 'copilot.qualityReview'; evidenceIds: string[] }
   | { type: 'copilot.profileDoctor' }
+  | { type: 'connection.analyze' }
   | { type: 'adversarial.capture' }
   | { type: 'visual.baseline.save'; dataUrl: string; viewport: { id: string; width: number; height: number } }
   | { type: 'visual.compare'; dataUrl: string; viewport: { id: string; width: number; height: number } }
@@ -90,6 +92,8 @@ export type HostMessage = Envelope & (
   | { type: 'run.exported'; path: string }
   | { type: 'adversarial.operation'; action: 'importCsv' | 'importJsonc' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string }
   | { type: 'test.results'; results: AdversarialResultSummary[] }
+  | { type: 'test.timeline'; evidenceId: string; timeline: EvidenceTimelineSummary }
+  | { type: 'connection.result'; result: ConnectionDoctorSummary }
   | { type: 'adversarial.captured'; detail: string }
   | { type: 'visual.result'; operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselinePath: string; diffPath?: string }
   | { type: 'workspaceTrust.changed'; trusted: boolean }
@@ -141,6 +145,20 @@ function isVisualCapture(message: Record<string, unknown>): boolean {
     && Number.isInteger(message.viewport.height) && Number(message.viewport.height) >= 1 && Number(message.viewport.height) <= 2160;
 }
 
+function isConnectionDoctorResult(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (!['sse', 'ndjson', 'json', 'text-stream', 'unknown'].includes(String(value.protocol)) || !['high', 'medium', 'low'].includes(String(value.confidence)) || typeof value.safe !== 'boolean') return false;
+  if (value.status !== undefined && (!Number.isInteger(value.status) || Number(value.status) < 100 || Number(value.status) > 599)) return false;
+  const counts = ['rawEventCount', 'normalizedEventCount', 'mappedEventCount', 'unmatchedEventCount', 'parseErrorCount', 'mappingErrorCount'];
+  if (!counts.every((key) => Number.isSafeInteger(value[key]) && Number(value[key]) >= 0 && Number(value[key]) <= 1_000_000)) return false;
+  if (typeof value.terminalEventSeen !== 'boolean' || typeof value.terminalMapped !== 'boolean') return false;
+  return Array.isArray(value.findings) && value.findings.length <= 32 && value.findings.every((finding) => isRecord(finding)
+    && isBoundedString(finding.id)
+    && ['http', 'protocol', 'timing', 'stream', 'mapping', 'terminal'].includes(String(finding.category))
+    && ['info', 'warning', 'error'].includes(String(finding.severity))
+    && isBoundedString(finding.message, MAX_TEXT_LENGTH));
+}
+
 function hasEnvelope(message: Record<string, unknown>, instanceId: string): boolean {
   return message.protocolVersion === PROTOCOL_VERSION
     && message.editorInstanceId === instanceId
@@ -153,8 +171,9 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   if (!isRecord(value) || !hasEnvelope(value, instanceId)) return false;
   const message = value;
   switch (message.type) {
-    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'test.runAll': case 'adversarial.capture': case 'copilot.profileDoctor': return true;
+    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'test.runAll': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
     case 'adversarial.file': return ['importCsv', 'importJsonc', 'linkJsonc', 'exportCsv', 'exportJsonc', 'csvTemplate'].includes(String(message.action));
+    case 'test.rerun': return ['failed', 'unstable', 'incomplete'].includes(String(message.status));
     case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
     case 'copilot.diagnose': return isBoundedString(message.evidenceId) && ['failure', 'performance', 'stability', 'comparison'].includes(String(message.mode));
     case 'copilot.qualityReview': return Array.isArray(message.evidenceIds) && message.evidenceIds.length >= 1 && message.evidenceIds.length <= 10 && message.evidenceIds.every((id) => isBoundedString(id)) && new Set(message.evidenceIds).size === message.evidenceIds.length;
@@ -196,6 +215,8 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'run.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH);
     case 'adversarial.operation': return ['importCsv', 'importJsonc', 'linkJsonc', 'exportCsv', 'exportJsonc', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path);
     case 'test.results': return Array.isArray(message.results) && message.results.length <= 10_000 && isStructuredValue(message.results);
+    case 'test.timeline': return isBoundedString(message.evidenceId) && isRecord(message.timeline) && isStructuredValue(message.timeline);
+    case 'connection.result': return isConnectionDoctorResult(message.result) && isStructuredValue(message.result);
     case 'adversarial.captured': return isBoundedString(message.detail, MAX_TEXT_LENGTH);
     case 'visual.result': return (message.operation === 'baseline' || message.operation === 'compare') && ['saved', 'passed', 'failed'].includes(String(message.status)) && optionalBoundedString(message.baselinePath) && optionalBoundedString(message.diffPath) && (message.differencePercent === undefined || (typeof message.differencePercent === 'number' && Number.isFinite(message.differencePercent) && message.differencePercent >= 0 && message.differencePercent <= 100));
     case 'workspaceTrust.changed': return typeof message.trusted === 'boolean';

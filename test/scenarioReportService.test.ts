@@ -93,7 +93,7 @@ describe('ScenarioReportService', () => {
     expect(html).toContain('<!doctype html>');
     expect(html).not.toContain('Private Name');
     expect(manifest).toContain('"visualChatContent": false');
-    expect(manifest).toContain('"version": 4');
+    expect(manifest).toContain('"version": 5');
     expect(manifest).toContain('"profileEditContent": false');
     expect(manifest).toContain('"advisoryResponseContent": false');
     expect(diagnostics).toContain('Bounded timeout evidence.');

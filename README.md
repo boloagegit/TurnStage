@@ -56,7 +56,17 @@ renderer and inspector.
   pass, and results link back to Chat, Network, and Events evidence.
 - Per-case and suite-default repetitions run in fresh conversations and expose
   stable resistance, stable attack success, unstable, or inconclusive sample
-  status without converting timeout or incomplete samples into a pass.
+  status without converting timeout or incomplete samples into a pass. Compact
+  coverage, Wilson confidence interval, resistance rate, and p95 TTFT/duration
+  statistics make probabilistic behavior reviewable; failures, unstable
+  samples, and incomplete samples can be rerun without selecting them again.
+- A safe **Create Profile from cURL** flow parses a deliberately bounded cURL
+  subset without invoking a shell. It opens a sanitized OpenAI-compatible
+  Profile draft for review, replaces detected credentials with SecretStorage
+  references, and excludes captured prompts, messages, tools, and payload
+  content. **Connection Doctor** then analyzes the latest real response's
+  bounded HTTP, framing, mapping, timing, and terminal metadata without sending
+  a second request or copying response content into its result.
 - Nine bounded VS Code language-model tools let GitHub Copilot find, validate,
   run, inspect, and diagnose TurnStage evidence, draft a regression, or prepare
   an allowlisted Profile repair. Applying a repair opens a native diff, checks
@@ -120,6 +130,10 @@ does not declare a `browser` entry and therefore does not claim support for
 2. Open the **TurnStage** Activity Bar view.
 3. Run **TurnStage: Initialize Workspace** and choose a starter option.
 4. Select a profile in the `Profiles` Tree View to open the Custom Editor.
+   Alternatively, use **Create Profile from cURL** in the Profiles view, paste
+   a supported OpenAI-compatible request, inspect the sanitized untitled draft,
+   and explicitly choose **Create Sanitized Profile**. TurnStage never executes
+   the pasted command.
 5. Use **Configure Profile** for the eight profile configuration sections, or
    use **Run Profile** for the phone chat preview and Debug inspector. Recorded
    runs are in the Debug panel's **Runs** tab.
@@ -141,6 +155,9 @@ does not declare a `browser` entry and therefore does not claim support for
    Use **Profile Doctor** for configuration-only diagnosis. Response-quality
    review is a separate, explicit Advisory action and never replaces the four
    deterministic adversarial outcomes.
+10. After a real request, open **Configure Profile → Request → Connection
+    Doctor** and choose **Analyze latest response**. The diagnosis reuses the
+    latest bounded evidence; it does not consume another request or model call.
 
 Initialization is explicit. Merely installing the extension, opening a
 workspace, or opening the sidebar does not create profile files. Existing

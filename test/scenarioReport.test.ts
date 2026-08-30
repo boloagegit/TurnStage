@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSnapshot } from '../src/extension/runtime/reducer';
-import { createScenarioReport, serializeAdversarialEventsCsv, serializeAdversarialFindingsCsv, serializeAdversarialNetworkCsv, serializeAdversarialSummaryCsv, serializeAdversarialTurnsCsv, serializeScenarioJson, serializeScenarioJUnit, type ScenarioExecutionRecord } from '../src/extension/testing/scenarioReport';
+import { createScenarioReport, serializeAdversarialEventsCsv, serializeAdversarialFindingsCsv, serializeAdversarialNetworkCsv, serializeAdversarialSummaryCsv, serializeAdversarialTurnsCsv, serializeScenarioHtml, serializeScenarioJson, serializeScenarioJUnit, type ScenarioExecutionRecord } from '../src/extension/testing/scenarioReport';
 import type { ScenarioRunResult } from '../src/shared/types';
 
 function record(status: ScenarioExecutionRecord['status'] = 'failed'): ScenarioExecutionRecord {
@@ -42,11 +42,23 @@ describe('scenario CI reports', () => {
       issues: [],
     };
     attack.result!.steps = [{ stepId: 'turn-1', name: 'private prompt', durationMs: 40, checks: [{ id: 'content-1', label: 'CI_SECRET_SHOULD_NOT_LEAK', passed: false, kind: 'adversarial', location: { kind: 'message', messageId: 'assistant-1' } }] }];
+    attack.result!.repetitions = { requestedAttempts: 2, completedAttempts: 2, skippedAttempts: 0, sampleComplete: true, outcome: 'attackSucceeded', stability: 'unstable', counts: { resisted: 1, attackSucceeded: 1, indeterminate: 0, infrastructureError: 0 }, attempts: [
+      { attempt: 1, outcome: 'resisted', durationMs: 100, ttftMs: 20, attemptedTurns: 1, completedTurns: 1, startedAt: 1, completedAt: 101 },
+      { attempt: 2, outcome: 'attackSucceeded', durationMs: 200, ttftMs: 40, attemptedTurns: 1, completedTurns: 1, startedAt: 102, completedAt: 302 },
+    ] };
     attack.result!.evidence.snapshot.normalizedEvents = [{ version: 1, type: 'content.text.delta', sequence: 1, receivedAt: 1, rawSequence: 1, text: 'CI_SECRET_SHOULD_NOT_LEAK' }];
     const outputs = [serializeAdversarialSummaryCsv([attack]), serializeAdversarialTurnsCsv([attack]), serializeAdversarialFindingsCsv([attack]), serializeAdversarialNetworkCsv([attack]), serializeAdversarialEventsCsv([attack])];
     expect(outputs.join('\n')).toContain('attackSucceeded');
     expect(outputs.join('\n')).toContain('content.text.delta');
     for (const forbidden of ['CI_SECRET_SHOULD_NOT_LEAK', 'secret.test', 'private prompt', 'authorization']) expect(outputs.join('\n')).not.toContain(forbidden);
     expect(serializeScenarioJUnit([attack])).toContain('Adversarial attack succeeded');
+    const report = createScenarioReport([attack]);
+    expect(report.failureClusters).toHaveLength(1);
+    expect(report.scenarios[0]?.adversarial?.timeline).toMatchObject({ version: 1 });
+    expect(report.scenarios[0]?.adversarial?.reliability).toMatchObject({ verdict: 'doesNotMeetTarget', resistanceRate: 0.5, duration: { p95: 195 } });
+    const html = serializeScenarioHtml([attack]);
+    expect(html).toContain('Failure clusters');
+    expect(html).toContain('Causal timeline');
+    expect(html).not.toContain('CI_SECRET_SHOULD_NOT_LEAK');
   });
 });

@@ -117,7 +117,7 @@ describe('RequestBuilder', () => {
       body: { arbitrary: '${secret.apiToken}' },
     }, {});
 
-    expect(request.url).toContain(secret);
+    expect(request.url).toContain(encodeURIComponent(secret));
     expect(request.headers['X-Custom']).toBe(secret);
     expect(request.body).toContain(secret);
     expect(request.secretValues).toEqual([secret]);
@@ -132,6 +132,16 @@ describe('RequestBuilder', () => {
     await expect(builder.build({ method: 'GET', url: 'not-a-url/${secret.apiToken}' }, {})).rejects.toMatchObject({
       message: 'Invalid request URL: not-a-url/••••••••',
     });
+  });
+
+  it('encodes URL secret placeholders so values cannot inject query parameters or fragments', async () => {
+    const secret = 'tenant&admin=true#fragment/%';
+    const builder = new RequestBuilder(async (name) => name === 'queryToken' ? secret : undefined);
+    const request = await builder.build({ method: 'GET', url: 'https://example.test/chat?token=${secret.queryToken}&api-version=2026-08-01' }, {});
+    expect(request.url).toBe(`https://example.test/chat?token=${encodeURIComponent(secret)}&api-version=2026-08-01`);
+    expect(new URL(request.url).searchParams.get('token')).toBe(secret);
+    expect(new URL(request.url).searchParams.get('admin')).toBeNull();
+    expect(new URL(request.url).hash).toBe('');
   });
 });
 

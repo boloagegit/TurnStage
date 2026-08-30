@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { modify } from 'jsonc-parser';
 import type { HostPayload, InspectorTargetTab, WebviewMessage, WorkspaceSection } from '../../shared/protocol';
 import { isWebviewMessage, PROTOCOL_VERSION } from '../../shared/protocol';
-import type { AdversarialResultSummary, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, ScenarioRunEvidence, SessionSnapshot, TurnStageProfile } from '../../shared/types';
+import type { AdversarialResultSummary, ConnectionDoctorSummary, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, ScenarioRunEvidence, ScenarioRunResult, SessionSnapshot, TurnStageProfile } from '../../shared/types';
 import { EnvironmentRepository } from '../config/profileRepository';
 import { ProfileCodec } from '../config/profileCodec';
 import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../config/profileValidator';
@@ -21,6 +21,8 @@ import { builtInEnvironment } from '../config/defaultEnvironment';
 import { VisualRegressionService } from '../testing/visualRegression';
 import { adversarialCsvTemplate, parseAdversarialCsv, serializeAdversarialCsv } from '../testing/adversarialCsv';
 import { createAdversarialSuite, isSafeAdversarialSuitePath, normalizeAdversarialSuite, parseAdversarialSuite, serializeAdversarialSuite } from '../testing/adversarialSuite';
+import { buildEvidenceTimeline } from '../testing/evidenceTimeline';
+import { analyzeConnectionProbe } from '../connection/protocolProbe';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -34,7 +36,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private readonly controllers = new Map<string, SessionController>();
   private readonly pendingDisposals = new Set<Promise<void>>();
   private readonly sectionPosters = new Map<string, Set<(section: WorkspaceSection) => Thenable<boolean>>>();
-  private readonly evidencePosters = new Map<string, Set<(evidence: ScenarioRunEvidence, target: { tab: InspectorTargetTab; evidenceId: string; networkId?: string; sequence?: number; messageId?: string }) => Promise<boolean>>>();
+  private readonly evidencePosters = new Map<string, Set<(evidence: ScenarioRunEvidence, result: ScenarioRunResult | undefined, target: { tab: InspectorTargetTab; evidenceId: string; networkId?: string; sequence?: number; messageId?: string }) => Promise<boolean>>>();
   private readonly pendingSections = new Map<string, WorkspaceSection>();
   private readonly resultPosters = new Map<string, Set<(results: AdversarialResultSummary[]) => Thenable<boolean>>>();
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
@@ -48,7 +50,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     // and test-observable title race.
     panel.title = profileEditorTitle(this.codec.parse(document.getText()).profile?.name, resourceTitle);
     const instanceId = crypto.randomUUID(); panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] }; panel.webview.html = this.html(panel.webview, instanceId);
-    let controller: SessionController | undefined; let documentVersion = -1; let loadTimer: ReturnType<typeof setTimeout> | undefined; let disposed = false;
+    let controller: SessionController | undefined; let documentVersion = -1; let loadTimer: ReturnType<typeof setTimeout> | undefined; let disposed = false; let latestConnectionResult: ConnectionDoctorSummary | undefined;
     let profileSnapshot: Extract<HostPayload, { type: 'profile.snapshot' }> | undefined;
     let validationSnapshot: Extract<HostPayload, { type: 'profile.validation' }> | undefined;
     const post = (message: HostPayload, requestId: string = crypto.randomUUID()) => panel.webview.postMessage({ ...message, protocolVersion: PROTOCOL_VERSION, editorInstanceId: instanceId, requestId });
@@ -61,10 +63,11 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const resultPosters = this.resultPosters.get(documentKey) ?? new Set<typeof postResults>();
     resultPosters.add(postResults);
     this.resultPosters.set(documentKey, resultPosters);
-    const postEvidence = async (evidence: ScenarioRunEvidence, target: { tab: InspectorTargetTab; evidenceId: string; networkId?: string; sequence?: number; messageId?: string }): Promise<boolean> => {
+    const postEvidence = async (evidence: ScenarioRunEvidence, result: ScenarioRunResult | undefined, target: { tab: InspectorTargetTab; evidenceId: string; networkId?: string; sequence?: number; messageId?: string }): Promise<boolean> => {
       if (!controller?.applyScenarioEvidence(evidence)) return false;
       const snapshot = currentSessionSnapshot();
       if (snapshot) await post(snapshot);
+      if (result) await post({ type: 'test.timeline', evidenceId: target.evidenceId, timeline: buildEvidenceTimeline(result) });
       await post({ type: 'inspector.focus', ...target });
       return true;
     };
@@ -86,7 +89,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const syncTurnActiveContext = () => {
       if (panel.active) void vscode.commands.executeCommand('setContext', 'turnstage.turnActive', Boolean(controller && isActive(controller.snapshot.turnState)));
     };
-    const sendSession = (immediate = false) => { if (controller) sessionBatcher.add(undefined, immediate); syncTurnActiveContext(); };
+    const sendSession = (immediate = false) => { latestConnectionResult = undefined; if (controller) sessionBatcher.add(undefined, immediate); syncTurnActiveContext(); };
     const load = async () => {
       if (disposed || (documentVersion === document.version && controller)) return;
       const version = document.version;
@@ -94,6 +97,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       panel.title = profileEditorTitle(parsed.profile?.name, resourceTitle);
       profileSnapshot = { type: 'profile.snapshot', profile: parsed.profile, parseError: parsed.errors.length ? localize('Invalid JSONC') : undefined, version: document.version, environments: envEntries.map((item) => item.environment.id) };
       validationSnapshot = { type: 'profile.validation', diagnostics: issues };
+      latestConnectionResult = undefined;
       logAt(this.output, 'debug', `[profile] loaded ${parsed.profile?.id ?? document.uri.toString()} at document version ${version}`);
       await post(profileSnapshot);
       await post(validationSnapshot);
@@ -156,6 +160,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           return;
         }
         if (message.type === 'test.runAll') { await vscode.commands.executeCommand('turnstage.runContractTests'); return; }
+        if (message.type === 'test.rerun') { await vscode.commands.executeCommand('turnstage.rerunLatestTests', document.uri, message.status); return; }
         if (message.type === 'test.evidence.open') { await vscode.commands.executeCommand('turnstage.openTestEvidence', { evidenceId: message.evidenceId, location: message.location }); return; }
         if (message.type === 'copilot.diagnose') {
           await openCopilotChat(`Use #turnstage_analyze_run to diagnose TurnStage evidence ${JSON.stringify(message.evidenceId)} in ${message.mode} mode. Explain the deterministic evidence first, distinguish facts from hypotheses, and suggest only safe profile changes.`);
@@ -166,12 +171,54 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           return;
         }
         if (message.type === 'copilot.profileDoctor') {
-          await openCopilotChat(`Use #turnstage_analyze_run in configuration mode as a Profile Doctor for TurnStage profile ${JSON.stringify(document.uri.toString())}. Report deterministic validation and configuration evidence. Do not propose secret, proxy, VPN, or certificate changes.`);
+          const connectionEvidence = latestConnectionResult ? JSON.stringify(latestConnectionResult) : 'unavailable';
+          await openCopilotChat(`Use #turnstage_analyze_run in configuration mode as a Profile Doctor for TurnStage profile ${JSON.stringify(document.uri.toString())}. Combine its deterministic validation result with this sanitized Connection Doctor evidence: ${connectionEvidence}. Explain the observed protocol, HTTP status, mapping counts, terminal state, and bounded timing findings before proposing safe profile-only changes. Do not propose secret, proxy, VPN, or certificate changes.`);
           return;
         }
         if (message.type === 'output.open') { this.output.show(true); return; }
         if (!controller) return;
         switch (message.type) {
+          case 'connection.analyze': {
+            const snapshot = controller.snapshot;
+            const network = controller.getLatestConnectionExchange();
+            const result = analyzeConnectionProbe({
+              status: network?.status,
+              contentType: headerValue(network?.responseHeaders, 'content-type'),
+              timing: {
+                headersLatencyMs: snapshot.metrics.headersLatency ?? network?.timing.headers,
+                firstChunkLatencyMs: snapshot.metrics.firstChunkLatency ?? network?.timing.firstChunk,
+                firstEventLatencyMs: snapshot.metrics.firstEventLatency,
+                totalLatencyMs: snapshot.metrics.totalDuration ?? network?.timing.total,
+              },
+              bodyPrefix: network?.responseBodyPreview,
+              bodyPrefixTruncated: network?.responseBodyTruncated,
+              rawEvents: snapshot.rawEvents,
+              normalizedEvents: snapshot.normalizedEvents,
+              mapping: {
+                configured: controller.profile.stream.mappings.length > 0,
+                mappedEventCount: snapshot.normalizedEvents.length,
+                unmatchedEventCount: snapshot.metrics.unmatchedEventCount,
+                mappingErrorCount: snapshot.metrics.mappingErrorCount,
+              },
+            });
+            latestConnectionResult = {
+              protocol: result.fingerprint.protocol,
+              confidence: result.fingerprint.confidence,
+              status: result.fingerprint.status,
+              rawEventCount: result.fingerprint.rawEventCount,
+              normalizedEventCount: result.fingerprint.normalizedEventCount,
+              mappedEventCount: result.fingerprint.mappedEventCount,
+              unmatchedEventCount: result.fingerprint.unmatchedEventCount,
+              parseErrorCount: result.fingerprint.parseErrorCount,
+              mappingErrorCount: result.fingerprint.mappingErrorCount,
+              terminalEventSeen: result.fingerprint.terminalEventSeen,
+              terminalMapped: result.fingerprint.terminalMapped,
+              safe: result.safe,
+              findings: result.findings.map((finding) => ({ id: finding.id, category: finding.category, severity: finding.severity, message: finding.message })),
+            };
+            await post({ type: 'connection.result', result: latestConnectionResult }, message.requestId);
+            break;
+          }
           case 'mapping.test': {
             const sample = message.event;
             const rawEvent: RawStreamEvent = {
@@ -292,14 +339,14 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     this.pendingSections.set(key, section);
     await Promise.all([...(this.sectionPosters.get(key) ?? [])].map((postSection) => postSection(section)));
   }
-  async showScenarioEvidence(uri: vscode.Uri, evidence: ScenarioRunEvidence, location: ScenarioEvidenceLocation, evidenceId: string): Promise<boolean> {
+  async showScenarioEvidence(uri: vscode.Uri, evidence: ScenarioRunEvidence, location: ScenarioEvidenceLocation, evidenceId: string, result?: ScenarioRunResult): Promise<boolean> {
     await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor', { viewColumn: vscode.ViewColumn.Active, preserveFocus: false });
     await this.showSection(uri, 'test');
     if (!await this.waitForController(uri)) return false;
     const target = { ...inspectorTarget(location, evidence), evidenceId };
     const posters = [...(this.evidencePosters.get(uri.toString()) ?? [])];
     if (!posters.length) return false;
-    const results = await Promise.all(posters.map((poster) => poster(evidence, target)));
+    const results = await Promise.all(posters.map((poster) => poster(evidence, result, target)));
     return results.some(Boolean);
   }
   async publishTestResults(uri: vscode.Uri, results: AdversarialResultSummary[]): Promise<void> {
@@ -473,6 +520,12 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     throw new Error(localize('This response action is not supported: {action}.', { action: action.actionId }));
   }
   private html(webview: vscode.Webview, instanceId: string): string { const nonce = crypto.randomUUID().replace(/-/g, ''); const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js')); const style = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css')); const locale = configuredLocale(); const direction = textDirection(locale); return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ${webview.cspSource}; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource} data:; script-src 'nonce-${nonce}'"><link rel="stylesheet" href="${style}"><title>TurnStage</title></head><body><div id="root" data-instance-id="${instanceId}"></div><script nonce="${nonce}" src="${script}"></script></body></html>`; }
+}
+
+function headerValue(headers: Record<string, string> | undefined, name: string): string | undefined {
+  if (!headers) return undefined;
+  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase());
+  return entry?.[1];
 }
 
 async function openCopilotChat(query: string): Promise<void> {

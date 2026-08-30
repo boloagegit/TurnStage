@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import type { MappingTestResult, WebviewPayload } from '../shared/protocol';
-import type { AdversarialForbidDefinition, AdversarialResultSummary, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TurnStageProfile } from '../shared/types';
+import type { AdversarialForbidDefinition, AdversarialResultSummary, ConnectionDoctorSummary, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
@@ -30,6 +30,7 @@ export interface SettingsWorkspaceProps {
   profile: TurnStageProfile;
   post: SettingsWorkspacePost;
   mappingTestResult?: MappingTestResult;
+  connectionResult?: ConnectionDoctorSummary;
   snapshot?: SessionSnapshot;
   requestPreview?: unknown;
   remoteName?: string;
@@ -48,6 +49,7 @@ export function SettingsWorkspace({
   profile,
   post,
   mappingTestResult,
+  connectionResult,
   snapshot,
   requestPreview,
   remoteName,
@@ -103,7 +105,7 @@ export function SettingsWorkspace({
           </div>
           {active.id === 'general' && <GeneralSection profile={profile} snapshot={snapshot} post={post} patch={patch} />}
           {active.id === 'opening-flow' && <OpeningFlowSection profile={profile} post={post} />}
-          {active.id === 'request' && <RequestSection profile={profile} requestPreview={requestPreview} remoteName={remoteName} patch={patch} />}
+          {active.id === 'request' && <RequestSection profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} connectionResult={connectionResult} post={post} patch={patch} />}
           {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
           {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
           {active.id === 'scenario-tests' && <ScenarioTestsSection profile={profile} patch={patch} post={post} testResults={testResults} />}
@@ -164,12 +166,29 @@ function OpeningFlowSection({ profile, post }: { profile: TurnStageProfile; post
   </div>;
 }
 
-function RequestSection({ profile, requestPreview, remoteName, patch }: { profile: TurnStageProfile; requestPreview?: unknown; remoteName?: string; patch: (path: PatchPath, value: unknown) => void }): React.JSX.Element {
+function RequestSection({ profile, snapshot, requestPreview, remoteName, connectionResult, post, patch }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; requestPreview?: unknown; remoteName?: string; connectionResult?: ConnectionDoctorSummary; post: SettingsWorkspacePost; patch: (path: PatchPath, value: unknown) => void }): React.JSX.Element {
   const request = profile.conversation.send;
   const preview = isRecord(requestPreview) ? requestPreview : undefined;
   const previewUrl = typeof preview?.url === 'string' ? preview.url : request.url;
   const loopback = isLoopbackUrl(previewUrl);
   return <div className="settings-section-stack">
+    <section className="settings-card connection-doctor" aria-labelledby="connection-doctor-heading">
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="connection-doctor-heading">{t('Connection Doctor')}</h2><p className="settings-card-description">{t('Analyze the latest bounded HTTP, stream, mapping, timing, and terminal evidence. Response content and secrets are never copied into the result.')}</p></div><button type="button" disabled={!snapshot} onClick={() => post({ type: 'connection.analyze' })}>{t('Analyze latest response')}</button></div>
+      {!connectionResult ? <p className="settings-empty">{t(snapshot ? 'Run a request, then analyze its latest connection evidence.' : 'Start the profile before analyzing connection evidence.')}</p> : <>
+        <div className={`connection-doctor__status connection-doctor__status--${connectionResult.safe ? 'ready' : 'attention'}`} role="status">
+          <ProductIcon name={connectionResult.safe ? 'check' : 'warning'} />
+          <div><strong>{t(connectionResult.safe ? 'No blocking connection issue found' : 'Connection needs attention')}</strong><span>{t('{protocol} · {confidence} confidence · HTTP {status}', { protocol: connectionResult.protocol.toUpperCase(), confidence: t(localizeHumanized(connectionResult.confidence)), status: connectionResult.status === undefined ? '—' : formatNumber(connectionResult.status) })}</span></div>
+        </div>
+        <dl className="connection-doctor__metrics">
+          <div><dt>{t('Raw events')}</dt><dd>{formatNumber(connectionResult.rawEventCount)}</dd></div>
+          <div><dt>{t('Mapped events')}</dt><dd>{formatNumber(connectionResult.mappedEventCount)}</dd></div>
+          <div><dt>{t('Unmatched')}</dt><dd>{formatNumber(connectionResult.unmatchedEventCount)}</dd></div>
+          <div><dt>{t('Terminal')}</dt><dd>{t(connectionResult.terminalMapped ? 'Observed and mapped' : connectionResult.terminalEventSeen ? 'Observed, not mapped' : 'Not observed')}</dd></div>
+        </dl>
+        <ul className="connection-doctor__findings">{connectionResult.findings.map((finding) => <li className={`is-${finding.severity}`} key={finding.id}><ProductIcon name={finding.severity === 'error' || finding.severity === 'warning' ? 'warning' : 'info'} /><div><strong>{t(localizeHumanized(finding.id))}</strong><span>{t(finding.message)}</span></div></li>)}</ul>
+        {!connectionResult.safe && <button type="button" className="settings-inline-action" onClick={() => post({ type: 'copilot.profileDoctor' })}>{t('Ask Copilot to diagnose this configuration')}</button>}
+      </>}
+    </section>
     <section className="settings-card" aria-labelledby="request-definition-heading">
       <SectionHeading id="request-definition-heading" title={t('Conversation request')} description={t('The endpoint is shared by first-turn and continuation variants. Templates are resolved in the Extension Host.')} />
       <div className="settings-form-grid">
@@ -401,7 +420,7 @@ function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: 
       <p className="settings-footnote">{t('CSV uses one row per turn. JSONC suites preserve the full multi-turn structure and are the recommended Git-managed format.')}</p>
     </section>
     <section className="settings-card" aria-labelledby="adversarial-results-heading">
-      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-results-heading">{t('Latest adversarial results')}</h2><p className="settings-card-description">{t('Run from Test Explorer, then open the exact Chat, Network, or Events evidence for a result.')}</p></div><button type="button" onClick={() => post({ type: 'test.runAll' })}>{t('Run all tests')}</button></div>
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-results-heading">{t('Latest adversarial results')}</h2><p className="settings-card-description">{t('Run from Test Explorer, then open the exact Chat, Network, or Events evidence for a result.')}</p></div><div className="adversarial-rerun-actions" role="group" aria-label={t('Run adversarial tests')}><button type="button" onClick={() => post({ type: 'test.runAll' })}>{t('Run all')}</button><button type="button" disabled={!testResults.some((result) => result.outcome !== 'resisted')} onClick={() => post({ type: 'test.rerun', status: 'failed' })}>{t('Rerun failures')}</button><details><summary>{t('More reruns')}</summary><div><button type="button" disabled={!testResults.some((result) => result.repetitions?.stability === 'unstable')} onClick={() => post({ type: 'test.rerun', status: 'unstable' })}>{t('Unstable')}</button><button type="button" disabled={!testResults.some((result) => result.repetitions?.sampleComplete === false)} onClick={() => post({ type: 'test.rerun', status: 'incomplete' })}>{t('Incomplete')}</button></div></details></div></div>
       {!testResults.length ? <p className="settings-empty">{t('No adversarial results in this Extension Host session.')}</p> : <ul className="adversarial-result-list">{testResults.map((result) => <li key={`${result.scenarioId}-${result.evidenceId}`}>
         <div className="adversarial-result-identity"><strong>{result.scenarioName}</strong><code>{result.scenarioId}</code></div>
         <span className={`adversarial-outcome adversarial-outcome--${result.outcome}`}><ProductIcon name={result.outcome === 'resisted' ? 'check' : result.outcome === 'attackSucceeded' ? 'target' : 'warning'} />{t(adversarialOutcomeText(result.outcome))}</span>
@@ -415,6 +434,7 @@ function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: 
           <button type="button" onClick={() => post({ type: 'copilot.diagnose', evidenceId: result.evidenceId, mode: result.repetitions ? 'stability' : 'failure' })}>{t('Diagnose with Copilot')}</button>
           <details><summary>{t('More')}</summary><div>{(result.availableLocations.length ? result.availableLocations : [result.primaryLocation]).map((location) => <button key={`${result.evidenceId}-${location.kind}`} type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })}>{t(evidenceLocationText(location.kind))}</button>)}<button type="button" onClick={() => post({ type: 'copilot.qualityReview', evidenceIds: [result.evidenceId] })}>{t('Advisory quality review')}</button></div></details>
         </div>
+        {result.reliability && <ReliabilitySummary summary={result.reliability} />}
       </li>)}</ul>}
     </section>
     <section className="settings-card" aria-labelledby="scenario-reporting-heading">
@@ -451,6 +471,34 @@ function ScenarioTestsSection({ profile, patch, post, testResults }: { profile: 
     </section>
     <p className="settings-footnote">{t('Run these scenarios from VS Code Test Explorer. Every completed step also receives TurnStage state-invariant checks.')}</p>
   </div>;
+}
+
+function ReliabilitySummary({ summary }: { summary: NonNullable<AdversarialResultSummary['reliability']> }): React.JSX.Element {
+  const percent = summary.resistanceRate === undefined ? t('Unavailable') : `${formatNumber(summary.resistanceRate * 100)}%`;
+  const interval = summary.resistanceInterval?.lower === undefined || summary.resistanceInterval.upper === undefined
+    ? t('Confidence interval unavailable')
+    : t('{confidence}% CI {lower}–{upper}%', {
+      confidence: formatNumber(summary.resistanceInterval.confidenceLevel * 100),
+      lower: formatNumber(summary.resistanceInterval.lower * 100),
+      upper: formatNumber(summary.resistanceInterval.upper * 100),
+    });
+  return <details className="adversarial-reliability">
+    <summary>{t('Reliability')} · {percent} · {t(reliabilityVerdictText(summary.verdict))}</summary>
+    <dl>
+      <div><dt>{t('Coverage')}</dt><dd>{formatNumber(summary.coveragePercent)}%</dd></div>
+      <div><dt>{t('Resistance')}</dt><dd>{percent}</dd></div>
+      <div><dt>{t('Confidence')}</dt><dd>{interval}</dd></div>
+      <div><dt>{t('TTFT p95')}</dt><dd>{summary.ttftP95Ms === undefined ? '—' : `${formatNumber(summary.ttftP95Ms)} ms`}</dd></div>
+      <div><dt>{t('Duration p95')}</dt><dd>{summary.durationP95Ms === undefined ? '—' : `${formatNumber(summary.durationP95Ms)} ms`}</dd></div>
+    </dl>
+    {summary.reasons[0] && <p>{t(summary.reasons[0])}</p>}
+  </details>;
+}
+
+function reliabilityVerdictText(verdict: NonNullable<AdversarialResultSummary['reliability']>['verdict']): string {
+  if (verdict === 'meetsTarget') return 'Meets target';
+  if (verdict === 'doesNotMeetTarget') return 'Does not meet target';
+  return 'Insufficient evidence';
 }
 
 function QualityRubricEditor({ rubric, index, onChange, onDelete }: { rubric: QualityRubricDefinition; index: number; onChange: (value: QualityRubricDefinition) => void; onDelete: () => void }): React.JSX.Element {

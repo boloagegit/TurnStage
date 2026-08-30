@@ -175,6 +175,30 @@
       { id: 'replayable-run', profileId: profile.id, createdAt: 4600, replayable: true, hasSnapshot: true, metrics: snapshot.metrics, result: { type: 'completed' } },
       { id: 'metadata-only-run', profileId: profile.id, createdAt: 4000, replayable: false, hasSnapshot: false, metrics: { ...snapshot.metrics, eventCount: 0 }, result: { type: 'aborted', reason: 'user_cancel' } }
     ];
+    const connectionResult = {
+      protocol: 'sse', confidence: 'high', status: 200, rawEventCount: 6, normalizedEventCount: 6, mappedEventCount: 5, unmatchedEventCount: 1,
+      parseErrorCount: 0, mappingErrorCount: 0, terminalEventSeen: true, terminalMapped: false, safe: false,
+      findings: [
+        { id: 'terminal-not-mapped', category: 'terminal', severity: 'error', message: 'A terminal event was observed but no terminal mapping completed the turn.' },
+        { id: 'unmatched-events', category: 'mapping', severity: 'warning', message: 'One bounded stream event did not match any configured mapping.' }
+      ]
+    };
+    const evidenceTimeline = {
+      version: 1,
+      baseTime: 5000,
+      completeness: 'partial',
+      missingPhases: ['ttft'],
+      truncated: false,
+      entries: [
+        { id: 'request', phase: 'request', status: 'normal', label: 'Request started', at: 5000, elapsedMs: 0, location: { kind: 'network', networkId: 'stream-2' } },
+        { id: 'headers', phase: 'headers', status: 'normal', label: 'Response headers received', at: 5190, elapsedMs: 190, location: { kind: 'network', networkId: 'stream-2' }, metadata: { statusCode: 200 } },
+        { id: 'first-chunk', phase: 'firstChunk', status: 'normal', label: 'First response chunk', at: 5240, elapsedMs: 240, location: { kind: 'rawEvent', sequence: 2 } },
+        { id: 'first-event', phase: 'firstEvent', status: 'normal', label: 'First stream event', at: 5606, elapsedMs: 606, location: { kind: 'rawEvent', sequence: 2 } },
+        { id: 'mapped', phase: 'firstMappedEvent', status: 'normal', label: 'First mapped event', at: 5606, elapsedMs: 606, location: { kind: 'normalizedEvent', sequence: 2, rawSequence: 2 } },
+        { id: 'finding', phase: 'finding', status: 'failure', label: 'Forbidden URL observed', at: 6840, elapsedMs: 1840, location: { kind: 'message', messageId: 'assistant-1' }, metadata: { ruleId: 'forbid.urls' } },
+        { id: 'error', phase: 'error', status: 'warning', label: 'Idle timeout', at: 10200, elapsedMs: 5200, location: { kind: 'network', networkId: 'stream-2' }, metadata: { errorType: 'IdleTimeoutError' } }
+      ]
+    };
     const dispatch = (message) => window.dispatchEvent(new MessageEvent('message', { data: { ...envelope, ...message } }));
     window.__turnstageMessages = [];
     const applyProfilePatch = (path, value) => {
@@ -212,7 +236,10 @@
         if (message.type === 'test.evidence.open') {
           const location = message.location;
           const tab = location.kind === 'network' ? 'Network' : location.kind === 'normalizedEvent' ? 'Normalized' : 'Raw Events';
-          setTimeout(() => dispatch({ type: 'inspector.focus', tab, evidenceId: message.evidenceId, networkId: location.networkId, sequence: location.sequence ?? location.rawSequence, messageId: location.messageId }), 0);
+          setTimeout(() => {
+            dispatch({ type: 'inspector.focus', tab, evidenceId: message.evidenceId, networkId: location.networkId, sequence: location.sequence ?? location.rawSequence, messageId: location.messageId });
+            dispatch({ type: 'test.timeline', evidenceId: message.evidenceId, timeline: evidenceTimeline });
+          }, 0);
           return;
         }
         if (message.type !== 'webview.ready') return;
@@ -222,7 +249,8 @@
           dispatch({ type: 'profile.validation', diagnostics: [] });
           dispatch({ type: 'profile.validated', valid: true });
           dispatch({ type: 'session.snapshot', snapshot: JSON.parse(JSON.stringify(snapshot)), runs: JSON.parse(JSON.stringify(runs)), requestPreview: { method: 'POST', url: 'http://localhost/chat' }, networkEntries: JSON.parse(JSON.stringify(networkEntries)) });
-          dispatch({ type: 'test.results', results: [{ profileId: profile.id, scenarioId: 'known-two-turn-probe', scenarioName: 'Known two-turn probe', outcome: 'attackSucceeded', durationMs: 1840, attemptedTurns: 2, completedTurns: 2, plannedTurns: 2, findingCount: 1, issueCount: 0, evidenceId: 'visual-evidence', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'normalizedEvent', sequence: 4 }], repetitions: { requestedAttempts: 5, completedAttempts: 5, skippedAttempts: 0, sampleComplete: true, stability: 'unstable', counts: { resisted: 3, attackSucceeded: 2, indeterminate: 0, infrastructureError: 0 } } }] });
+          dispatch({ type: 'connection.result', result: connectionResult });
+          dispatch({ type: 'test.results', results: [{ profileId: profile.id, scenarioId: 'known-two-turn-probe', scenarioName: 'Known two-turn probe', outcome: 'attackSucceeded', durationMs: 1840, attemptedTurns: 2, completedTurns: 2, plannedTurns: 2, findingCount: 1, issueCount: 0, primaryFinding: { category: 'url', turnId: 'attack', turnIndex: 1, ruleId: 'forbid.urls', label: 'Forbidden URL observed' }, evidenceId: 'visual-evidence', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'normalizedEvent', sequence: 4 }], repetitions: { requestedAttempts: 5, completedAttempts: 5, skippedAttempts: 0, sampleComplete: true, stability: 'unstable', counts: { resisted: 3, attackSucceeded: 2, indeterminate: 0, infrastructureError: 0 } }, reliability: { requestedAttempts: 5, completedAttempts: 5, evaluableAttempts: 5, coveragePercent: 100, resistanceRate: 0.6, attackRate: 0.4, resistanceInterval: { confidenceLevel: 0.95, status: 'smallSample', lower: 0.23, upper: 0.88 }, ttftP95Ms: 1808, durationP95Ms: 3612, verdict: 'doesNotMeetTarget', reasons: ['Resistance target was not met.'] } }] });
         }, 0);
       }
     });

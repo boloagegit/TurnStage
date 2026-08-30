@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -44,6 +44,7 @@
     "onCommand:turnstage.initializeUser",
     "onCommand:turnstage.createProfile",
     "onCommand:turnstage.importProfile",
+    "onCommand:turnstage.importCurl",
     "onCommand:turnstage.duplicateProfile",
     "onCommand:turnstage.deleteProfile",
     "onCommand:turnstage.openProfile",
@@ -101,6 +102,13 @@
         "title": "%command.importProfile%",
         "category": "%command.category%",
         "icon": "$(cloud-download)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.importCurl",
+        "title": "%command.importCurl%",
+        "category": "%command.category%",
+        "icon": "$(terminal)",
         "enablement": "isWorkspaceTrusted"
       },
       {
@@ -389,14 +397,19 @@
           "group": "navigation@2"
         },
         {
+          "command": "turnstage.importCurl",
+          "when": "view == turnstage.profiles && isWorkspaceTrusted",
+          "group": "navigation@3"
+        },
+        {
           "command": "turnstage.refreshProfiles",
           "when": "view == turnstage.profiles",
-          "group": "navigation@4"
+          "group": "navigation@5"
         },
         {
           "command": "turnstage.openGuide",
           "when": "view == turnstage.profiles",
-          "group": "navigation@3"
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
@@ -409,6 +422,11 @@
           "command": "turnstage.importProfile",
           "when": "view == turnstage.profiles && (viewItem == turnstageProfileScope.user || viewItem == turnstageProfileScope.workspace) && isWorkspaceTrusted",
           "group": "inline@2"
+        },
+        {
+          "command": "turnstage.importCurl",
+          "when": "view == turnstage.profiles && (viewItem == turnstageProfileScope.user || viewItem == turnstageProfileScope.workspace) && isWorkspaceTrusted",
+          "group": "management@1"
         },
         {
           "command": "turnstage.initializeUser",

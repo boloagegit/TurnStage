@@ -78,7 +78,7 @@ describe('VS Code contribution UX', () => {
     expect(walkthrough.steps.map((step) => step.id)).toEqual(['tryDemo', 'createProfile', 'configureFlow', 'inspectRun']);
     expect(walkthrough.steps).toHaveLength(4);
     expect(manifest.contributes.commands).toContainEqual(expect.objectContaining({ command: 'turnstage.openGuide', icon: '$(book)' }));
-    expect(manifest.contributes.menus['view/title']).toContainEqual(expect.objectContaining({ command: 'turnstage.openGuide', group: 'navigation@3' }));
+    expect(manifest.contributes.menus['view/title']).toContainEqual(expect.objectContaining({ command: 'turnstage.openGuide', group: 'navigation@4' }));
 
     const english = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.nls.json'), 'utf8')) as Record<string, string>;
     const traditionalChinese = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.nls.zh-tw.json'), 'utf8')) as Record<string, string>;

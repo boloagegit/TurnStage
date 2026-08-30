@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.14.0
+
+- Added a safe **Create Profile from cURL** workflow for bounded OpenAI-compatible requests. TurnStage parses without invoking a shell, rejects unsafe flags and expansion, removes captured prompts, messages, tools, and payload content, converts unknown header and query values to SecretStorage references, URI-encodes URL secrets, and requires review before creating a Profile.
+- Added **Connection Doctor** for the latest relevant stream exchange. It explains bounded HTTP, protocol, timing, mapping, and terminal evidence without sending another request; stop requests and cleared or stale session evidence are excluded. A user-initiated Copilot handoff includes only sanitized structural findings and continues to forbid secret, proxy, VPN, and certificate recommendations.
+- Added bounded batch planning, selective reruns, and compact reliability statistics for repeated adversarial cases, including coverage, resistance and attack rates, Wilson intervals, p95 TTFT/duration, and fail-closed verdicts. Attempts must follow explicit start/complete transitions, baseline/candidate runs count both targets against safety budgets, and timeout, cancellation, infrastructure errors, and incomplete samples never pass.
+- Added a sanitized causal evidence timeline and deterministic failure clustering to Test Explorer evidence navigation and HTML Evidence Bundles. Evidence Bundle version 5 includes structural timeline, reliability, cluster, digest, and privacy metadata while continuing to exclude prompts, assistant content, headers, URLs, bodies, raw payloads, and secrets.
+- Existing version-1 Profiles, scenarios, linked suites, CLI behavior, and Copilot tools remain compatible; all new Profile fields and UI actions are optional. Report consumers should accept Evidence Bundle manifest/policy version 5 and the additional reliability, timeline, and failure-cluster fields. This release does not add a GitHub CI workflow, LLM judge, external classifier, adaptive attack generator, PyRIT integration, or unbounded execution.
+
 ## 0.13.0
 
 - Added deterministic Copilot-assisted diagnosis for failed, slow, unstable, comparison, and configuration scenarios. Diagnostics separate measured evidence from bounded hypotheses, retain run/profile scope, and link back to available Chat, Network, and Event evidence without exposing prompts, response text, headers, bodies, full URLs, or secrets.

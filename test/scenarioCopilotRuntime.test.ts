@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ScenarioRunResult } from '../src/shared/types';
 
 const vscodeMock = vi.hoisted(() => ({
   workspace: { isTrusted: true },
@@ -28,6 +29,44 @@ function controller(overrides: Record<string, unknown> = {}) {
     runSelection: vi.fn(async () => ({ summaries: [], results: [] })),
     getEvidence: vi.fn(() => undefined),
     ...overrides,
+  };
+}
+
+function partialResult(): ScenarioRunResult {
+  return {
+    scenarioId: 'case-a',
+    passed: false,
+    durationMs: 500,
+    steps: [],
+    checks: [],
+    evidence: {
+      profileId: 'profile-a',
+      scenarioId: 'case-a',
+      networkEntries: [],
+      snapshot: {
+        sessionId: 'session-a',
+        sessionState: 'ready',
+        turnState: 'failed',
+        messages: [],
+        rawEvents: [],
+        normalizedEvents: [],
+        metrics: { eventCount: 0, byteCount: 0, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0 },
+        errors: [{ type: 'TimeoutError', message: 'safe test error' }],
+        droppedEventCount: 1,
+        trusted: true,
+        controls: {},
+      },
+    },
+    adversarial: {
+      outcome: 'attackSucceeded',
+      attemptedTurns: 1,
+      completedTurns: 0,
+      plannedTurns: 1,
+      maxTurns: 1,
+      timeoutMs: 500,
+      findings: [],
+      issues: [],
+    },
   };
 }
 
@@ -97,6 +136,47 @@ describe('ScenarioCopilotRuntime safety boundaries', () => {
     await expect(runtime.runTests({ selectors: ['case'] }, token)).rejects.toMatchObject({ code: 'RUNTIME_FAILED' });
     release();
     await expect(first).resolves.toMatchObject({ completedCases: 0 });
+  });
+
+  it('does not report an ordinary passed outcome as a failure', async () => {
+    const passed = {
+      profileId: 'profile-a', suiteId: 'suite-a', scenarioId: 'case-a', scenarioName: 'Case A', outcome: 'passed',
+      durationMs: 20, attemptedTurns: 1, completedTurns: 1, plannedTurns: 1, findingCount: 0, issueCount: 0,
+      evidenceId: 'evidence-a', primaryLocation: { kind: 'profile' }, availableLocations: [],
+    };
+    const tests = controller({
+      runSelection: vi.fn(async () => ({
+        summaries: [{ profileId: 'profile-a', suiteId: 'suite-a', scenarioId: 'case-a', scenarioName: 'Case A', outcome: 'passed', evidenceId: 'evidence-a', sampleComplete: true }],
+        results: [passed],
+      })),
+    });
+    const runtime = new ScenarioCopilotRuntime(tests as never);
+
+    const run = await runtime.runTests({ selectors: ['case-a'] }, token);
+
+    await expect(runtime.inspectFailure({ runId: run.runId }, token)).resolves.toMatchObject({ failures: [], total: 0 });
+  });
+
+  it('derives Copilot failure completeness from the causal evidence timeline', async () => {
+    const detailed = partialResult();
+    const summary = {
+      profileId: 'profile-a', suiteId: 'suite-a', scenarioId: 'case-a', scenarioName: 'Case A', outcome: 'attackSucceeded',
+      durationMs: 500, attemptedTurns: 1, completedTurns: 0, plannedTurns: 1, findingCount: 0, issueCount: 1,
+      evidenceId: 'evidence-a', primaryLocation: { kind: 'profile' }, availableLocations: [],
+    };
+    const tests = controller({
+      runSelection: vi.fn(async () => ({
+        summaries: [{ profileId: 'profile-a', suiteId: 'suite-a', scenarioId: 'case-a', scenarioName: 'Case A', outcome: 'attackSucceeded', evidenceId: 'evidence-a', sampleComplete: true }],
+        results: [summary],
+      })),
+      getEvidence: vi.fn((id: string) => id === 'evidence-a' ? { evidence: detailed.evidence, result: detailed, location: { kind: 'profile' } } : undefined),
+    });
+    const runtime = new ScenarioCopilotRuntime(tests as never);
+
+    const run = await runtime.runTests({ selectors: ['case-a'] }, token);
+    const inspected = await runtime.inspectFailure({ runId: run.runId }, token);
+
+    expect(inspected.failures[0]?.evidence?.completeness).toBe('partial');
   });
 
   it('binds an advisory quality artifact to the stored run and profile', async () => {
