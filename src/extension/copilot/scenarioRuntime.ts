@@ -18,6 +18,7 @@ import {
   type RunPreflight,
   type RunTestsInput,
   type RunTestsRuntimeResult,
+  type StableRunSelector,
   type TestDescriptor,
   type ValidateTestsInput,
   type ValidateTestsRuntimeResult,
@@ -45,6 +46,8 @@ interface StoredRun {
   summaries: AdversarialResultSummary[];
 }
 
+const INLINE_SUITE_SELECTOR = '@inline';
+
 /**
  * Compatibility adapter for the current Test Explorer controller. It only
  * delegates execution to `ScenarioTestController.runAll`; the Copilot layer
@@ -71,7 +74,12 @@ export class ScenarioCopilotRuntime implements CopilotRuntime {
 
   async previewRun(input: RunTestsInput, token: vscode.CancellationToken): Promise<RunPreflight> {
     throwIfCancelled(token);
-    const preview = await this.tests.previewSelection({ itemIds: input.selectors, repetitions: input.repetitions, failFast: input.failFast });
+    const itemIds = await this.resolveRunItemIds(input, token);
+    return this.previewResolvedRun(input, itemIds, token);
+  }
+
+  private async previewResolvedRun(input: RunTestsInput, itemIds: readonly string[], token: vscode.CancellationToken): Promise<RunPreflight> {
+    const preview = await this.tests.previewSelection({ itemIds, repetitions: input.repetitions, failFast: input.failFast });
     throwIfCancelled(token);
     return {
       requiresNetwork: true,
@@ -86,6 +94,30 @@ export class ScenarioCopilotRuntime implements CopilotRuntime {
       selectedEnvironment: preview.environments.length === 1 ? preview.environments[0] : preview.environments.join(', '),
       warnings: [...preview.warnings, ...(preview.selectedCount > 100 ? ['The result is paginated to at most 100 cases per Copilot page.'] : [])],
     };
+  }
+
+  private async resolveRunItemIds(input: RunTestsInput, token: vscode.CancellationToken): Promise<readonly string[]> {
+    const suppliedSelectors = input.selectors;
+    const hasStableSelector = input.profileId !== undefined || input.suiteId !== undefined || input.caseId !== undefined;
+    if (suppliedSelectors?.length && hasStableSelector) throw new CopilotRuntimeError('INVALID_INPUT', 'Use either selectors or a top-level profileId/caseId selector, not both.');
+    if (suppliedSelectors !== undefined && !suppliedSelectors.length) throw new CopilotRuntimeError('INVALID_INPUT', 'At least one test selector is required.');
+    const selectors: Array<string | StableRunSelector> = suppliedSelectors?.length
+      ? [...suppliedSelectors]
+      : input.profileId && input.caseId
+        ? [{ profileId: input.profileId, caseId: input.caseId, ...(input.suiteId ? { suiteId: input.suiteId } : {}) }]
+        : [];
+    if (!selectors.length) throw new CopilotRuntimeError('INVALID_INPUT', 'Provide selectors or both profileId and caseId.');
+    throwIfCancelled(token);
+    const descriptors = await this.tests.describeTests(true);
+    const descriptorIds = new Set(descriptors.map((item) => item.id));
+    const caseDescriptors = descriptors.filter((item) => item.kind === 'case');
+    throwIfCancelled(token);
+    const itemIds = selectors.map((selector) => {
+      if (typeof selector !== 'string') return resolveStableRunSelector(selector, caseDescriptors);
+      if (!descriptorIds.has(selector)) throw new CopilotRuntimeError('NOT_FOUND', 'An exact TurnStage selector was not returned by the current find_tests discovery.');
+      return selector;
+    });
+    return [...new Set(itemIds)];
   }
 
   async findTests(input: FindTestsInput, token: vscode.CancellationToken): Promise<FindTestsRuntimeResult> {
@@ -127,11 +159,12 @@ export class ScenarioCopilotRuntime implements CopilotRuntime {
     if (this.runActive) throw new CopilotRuntimeError('RUNTIME_FAILED', 'Another Copilot-triggered TurnStage run is already active. Wait for it to finish or cancel it before starting another run.');
     this.runActive = true;
     try {
-    const preflight = await this.previewRun(input, token);
+    const itemIds = await this.resolveRunItemIds(input, token);
+    const preflight = await this.previewResolvedRun(input, itemIds, token);
     if (!preflight.selectedCount) throw new CopilotRuntimeError('NOT_FOUND', 'No matching TurnStage tests were selected.');
     assertRunBudget(preflight);
     assertWorkspaceTrusted();
-    const material = await this.tests.getIntegrityMaterial({ itemIds: input.selectors });
+    const material = await this.tests.getIntegrityMaterial({ itemIds });
     assertWorkspaceTrusted();
     const observedIntegrity = createIntegrityLock(material.profile, material.suite, material.cases);
     const integrity = compareIntegrityLock(input.expectedIntegrity, observedIntegrity);
@@ -139,7 +172,7 @@ export class ScenarioCopilotRuntime implements CopilotRuntime {
     const runId = randomUUID();
     assertWorkspaceTrusted();
     const execution = await this.tests.runSelection(
-      { itemIds: input.selectors, repetitions: input.repetitions, failFast: input.failFast },
+      { itemIds, repetitions: input.repetitions, failFast: input.failFast },
       token,
       {
         runId,
@@ -546,6 +579,16 @@ function locationsToReferences(evidence: { snapshot?: unknown } | undefined, loc
   }
   if (!references.length && evidence) references.push({ kind: 'chat', id: 'snapshot' });
   return references;
+}
+
+function resolveStableRunSelector(selector: StableRunSelector, descriptors: readonly TestDescriptor[]): string {
+  const matches = descriptors.filter((item) => item.profileId === selector.profileId
+    && item.caseId === selector.caseId
+    && (selector.suiteId === undefined
+      || (selector.suiteId === INLINE_SUITE_SELECTOR ? item.suiteId === undefined : item.suiteId === selector.suiteId)));
+  if (!matches.length) throw new CopilotRuntimeError('NOT_FOUND', 'No TurnStage test matches the supplied profileId, caseId, and suiteId.');
+  if (matches.length > 1) throw new CopilotRuntimeError('SELECTION_UNSUPPORTED', `A stable selector matches ${matches.length} tests. Add suiteId, use ${INLINE_SUITE_SELECTOR} for an inline Scenario, or use an exact selector returned by find_tests.`);
+  return matches[0]!.id;
 }
 
 function aggregateCaseOutcome(cases: readonly RunTestsRuntimeResult['cases'][number][]): RunTestsRuntimeResult['outcome'] {

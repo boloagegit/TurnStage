@@ -20,6 +20,7 @@ import type { ScenarioEvidenceLocation } from '../shared/types';
 import { VisualRegressionService } from './testing/visualRegression';
 import { registerCopilotTools } from './copilot/tools';
 import { ScenarioCopilotRuntime } from './copilot/scenarioRuntime';
+import { registerTurnStageChatParticipant } from './copilot/chatParticipant';
 import { createCopilotArtifactRepository } from './copilot/artifacts';
 import { buildOpenAICompatibleProfileDraft, parseCurlCommand } from './connection';
 import { configureTurnStageLogging, logAt, startLogOperation } from './logging';
@@ -50,7 +51,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const activeCampaignProgress = new Map<string, import('./testing/scenarioTestController').CampaignProgressEvent>();
   activeEditor = editor;
   const demoProvider = vscode.workspace.registerTextDocumentContentProvider('turnstage-demo', { provideTextDocumentContent: async (uri) => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(context.extensionUri, 'resources', 'templates', uri.path.split('/').pop()!))) });
-  const copilotTools = registerCopilotTools(new ScenarioCopilotRuntime(scenarioTests, repository, environments, copilotArtifacts), {
+  const copilotRuntime = new ScenarioCopilotRuntime(scenarioTests, repository, environments, copilotArtifacts);
+  const copilotTools = registerCopilotTools(copilotRuntime, {
     onError: (name, error) => logAt(output, 'error', () => `[copilot] tool=${name} type=${error instanceof Error ? error.name : 'Error'}`),
     onStart: (name) => {
       const operation = startLogOperation(output, 'copilot', name);
@@ -61,7 +63,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       };
     },
   });
-  context.subscriptions.push(output, loggingConfiguration, campaignStatus, diagnostics, tree, duplicateDiagnostics, demoProvider, scenarioTests, ...copilotTools, scenarioTests.onDidChangeResults(({ uri, results }) => { void editor.publishTestResults(uri, results); }), scenarioTests.onDidChangeCampaigns(({ uri, dashboard }) => { void editor.publishCampaignDashboard(uri, dashboard); }), scenarioTests.onDidChangeCampaignProgress((progress) => {
+  const copilotParticipant = registerTurnStageChatParticipant(context, {
+    onStart: (chatCommand) => {
+      const operation = startLogOperation(output, 'copilot-chat', chatCommand ?? 'general');
+      return (result) => {
+        const fields = { toolCalls: result.toolCalls, code: result.code };
+        if (result.status === 'cancelled') operation.cancel(fields);
+        else if (result.status === 'complete') operation.complete(fields);
+        else operation.fail(fields);
+      };
+    },
+  });
+  context.subscriptions.push(output, loggingConfiguration, campaignStatus, diagnostics, tree, duplicateDiagnostics, demoProvider, scenarioTests, ...copilotTools, ...(copilotParticipant ? [copilotParticipant] : []), scenarioTests.onDidChangeResults(({ uri, results }) => { void editor.publishTestResults(uri, results); }), scenarioTests.onDidChangeCampaigns(({ uri, dashboard }) => { void editor.publishCampaignDashboard(uri, dashboard); }), scenarioTests.onDidChangeCampaignProgress((progress) => {
     if (progress.state === 'running') activeCampaignProgress.set(progress.runId, progress);
     else activeCampaignProgress.delete(progress.runId);
     const current = [...activeCampaignProgress.values()].at(-1);

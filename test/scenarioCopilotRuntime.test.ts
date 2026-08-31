@@ -27,6 +27,10 @@ function controller(overrides: Record<string, unknown> = {}) {
     })),
     getIntegrityMaterial: vi.fn(async () => ({ profile: { id: 'profile' }, cases: [{ id: 'case' }] })),
     runSelection: vi.fn(async () => ({ summaries: [], results: [] })),
+    describeTests: vi.fn(async () => [
+      { id: 'case', uri: 'file:///workspace/profile.jsonc', label: 'Case', kind: 'case', profileId: 'profile-a', caseId: 'case' },
+      { id: 'case-a', uri: 'file:///workspace/profile.jsonc', label: 'Case A', kind: 'case', profileId: 'profile-a', caseId: 'case-a' },
+    ]),
     getEvidence: vi.fn(() => undefined),
     ...overrides,
   };
@@ -72,6 +76,62 @@ function partialResult(): ScenarioRunResult {
 
 describe('ScenarioCopilotRuntime safety boundaries', () => {
   beforeEach(() => { vscodeMock.workspace.isTrusted = true; });
+
+  it('resolves stable profile and case ids once for preflight, integrity, and execution', async () => {
+    const exactId = 'file:///workspace/profile.jsonc::scenario::case-a';
+    const tests = controller({
+      describeTests: vi.fn(async () => [{ id: exactId, uri: 'file:///workspace/profile.jsonc', label: 'Case A', kind: 'case', profileId: 'profile-a', caseId: 'case-a' }]),
+    });
+    const runtime = new ScenarioCopilotRuntime(tests as never);
+
+    await runtime.runTests({ selectors: [{ profileId: 'profile-a', caseId: 'case-a' }], repetitions: 2 }, token);
+
+    expect(tests.previewSelection).toHaveBeenCalledWith(expect.objectContaining({ itemIds: [exactId], repetitions: 2 }));
+    expect(tests.getIntegrityMaterial).toHaveBeenCalledWith({ itemIds: [exactId] });
+    expect(tests.runSelection).toHaveBeenCalledWith(expect.objectContaining({ itemIds: [exactId], repetitions: 2 }), token, expect.anything());
+  });
+
+  it('fails closed for unknown or ambiguous stable selectors before preflight or network work', async () => {
+    const descriptors = [
+      { id: 'inline-id', uri: 'file:///workspace/profile.jsonc', label: 'Inline', kind: 'case', profileId: 'profile-a', caseId: 'duplicate' },
+      { id: 'suite-id', uri: 'file:///workspace/profile.jsonc', label: 'Suite', kind: 'case', profileId: 'profile-a', suiteId: 'suite-a', caseId: 'duplicate' },
+    ];
+    const tests = controller({ describeTests: vi.fn(async () => descriptors) });
+    const runtime = new ScenarioCopilotRuntime(tests as never);
+
+    await expect(runtime.previewRun({ profileId: 'profile-a', caseId: 'missing' }, token)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(runtime.previewRun({ profileId: 'profile-a', caseId: 'duplicate' }, token)).rejects.toMatchObject({ code: 'SELECTION_UNSUPPORTED' });
+    expect(tests.previewSelection).not.toHaveBeenCalled();
+    expect(tests.runSelection).not.toHaveBeenCalled();
+  });
+
+  it('uses suiteId or @inline to disambiguate a stable case selector', async () => {
+    const descriptors = [
+      { id: 'inline-id', uri: 'file:///workspace/profile.jsonc', label: 'Inline', kind: 'case', profileId: 'profile-a', caseId: 'duplicate' },
+      { id: 'suite-id', uri: 'file:///workspace/profile.jsonc', label: 'Suite', kind: 'case', profileId: 'profile-a', suiteId: 'suite-a', caseId: 'duplicate' },
+    ];
+    const tests = controller({ describeTests: vi.fn(async () => descriptors) });
+    const runtime = new ScenarioCopilotRuntime(tests as never);
+
+    await runtime.previewRun({ profileId: 'profile-a', caseId: 'duplicate', suiteId: '@inline' }, token);
+    await runtime.previewRun({ profileId: 'profile-a', caseId: 'duplicate', suiteId: 'suite-a' }, token);
+
+    expect(tests.previewSelection).toHaveBeenNthCalledWith(1, expect.objectContaining({ itemIds: ['inline-id'] }));
+    expect(tests.previewSelection).toHaveBeenNthCalledWith(2, expect.objectContaining({ itemIds: ['suite-id'] }));
+  });
+
+  it('keeps legacy exact selectors compatible but rejects invented ids before preflight', async () => {
+    const tests = controller({
+      describeTests: vi.fn(async () => [{ id: 'exact-id', uri: 'file:///workspace/profile.jsonc', label: 'Case', kind: 'case', profileId: 'profile-a', caseId: 'case-a' }]),
+    });
+    const runtime = new ScenarioCopilotRuntime(tests as never);
+
+    await runtime.previewRun({ selectors: ['exact-id'] }, token);
+    await expect(runtime.previewRun({ selectors: ['invented-id'] }, token)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+    expect(tests.describeTests).toHaveBeenCalledWith(true);
+    expect(tests.previewSelection).toHaveBeenCalledWith(expect.objectContaining({ itemIds: ['exact-id'] }));
+  });
 
   it('fails closed when Workspace Trust changes while a network run is active', async () => {
     const tests = controller({

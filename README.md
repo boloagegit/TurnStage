@@ -76,6 +76,15 @@ renderer and inspector.
   response disclosure, and cannot change a test outcome or CLI exit code.
   Network runs and content disclosure require confirmation and Workspace Trust;
   tool output is bounded, redacted, and protected by integrity fingerprints.
+- The VS Code-native `@turnstage` Chat participant provides `/diagnose`, `/run`,
+  `/compare`, `/configure`, and `/evidence` entry points over those tools. It
+  shows native progress, confirmation cards, evidence buttons, references, and
+  deterministic follow-ups while keeping raw prompts, transcripts, payloads,
+  URLs, headers, and secrets out of retained cross-turn metadata. Test runs use
+  stable Profile and case id selector objects; an optional suite id resolves
+  duplicates without requiring users or models to reconstruct internal Test
+  Explorer URIs. Existing exact-id callers remain compatible through the
+  explicit `exactSelectors` input.
 - An executable `turnstage` CLI runs the same fixed Scenario contracts in CI,
   supports changed-file selection through explicit `sourceBinding` metadata,
   emits deterministic exit codes and sanitized JSON/JUnit/HTML/evidence output,
@@ -154,7 +163,9 @@ does not declare a `browser` entry and therefore does not claim support for
    TTFT, stream, mapping, assertion, comparison, or repeat-stability evidence.
    Use **Profile Doctor** for configuration-only diagnosis. Response-quality
    review is a separate, explicit Advisory action and never replaces the four
-   deterministic adversarial outcomes.
+   deterministic adversarial outcomes. You can also open VS Code Chat and use
+   `@turnstage /diagnose`, `/run`, `/compare`, `/configure`, or `/evidence` with
+   an exact Run, Evidence, Profile, Case, Failure ID, or test selection.
 10. After a real request, open **Configure Profile → Request → Connection
     Doctor** and choose **Analyze latest response**. The diagnosis reuses the
     latest bounded evidence; it does not consume another request or model call.

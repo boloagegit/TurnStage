@@ -54,6 +54,8 @@ describe('Copilot tool contract', () => {
       expect(tool.canBeReferencedInPrompt).toBe(true);
       expect(tool.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
     }
+    const runTool = tools.find((tool) => tool.name === COPILOT_TOOL_NAMES.runTests) as { inputSchema?: { properties?: Record<string, unknown> } } | undefined;
+    expect(runTool?.inputSchema?.properties).toMatchObject({ selectors: { type: 'array' }, exactSelectors: { type: 'array' }, profileId: { type: 'string' }, suiteId: { type: 'string' }, caseId: { type: 'string' } });
   });
 
   it('paginates runtime output and rejects unsupported input properties', async () => {
@@ -65,6 +67,34 @@ describe('Copilot tool contract', () => {
     }
     const invalid = await executeCopilotTool(COPILOT_TOOL_NAMES.findTests, { unsupported: true }, runtime(), token());
     expect(invalid).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+  });
+
+  it('accepts stable run selector objects and rejects malformed, missing, or mixed selection before runtime work', async () => {
+    const runTests = vi.fn(runtime().runTests);
+    const stable = await executeCopilotTool(COPILOT_TOOL_NAMES.runTests, { selectors: [{ profileId: 'profile-a', caseId: 'case-a' }], repetitions: 2 }, runtime({ runTests }), token());
+    expect(stable.ok).toBe(true);
+    expect(runTests).toHaveBeenCalledWith(expect.objectContaining({ selectors: [{ profileId: 'profile-a', caseId: 'case-a' }], repetitions: 2 }), expect.anything());
+
+    const topLevel = await executeCopilotTool(COPILOT_TOOL_NAMES.runTests, { profileId: 'profile-a', caseId: 'case-a' }, runtime({ runTests }), token());
+    expect(topLevel.ok).toBe(true);
+    const legacy = await executeCopilotTool(COPILOT_TOOL_NAMES.runTests, { exactSelectors: ['exact-id'] }, runtime({ runTests }), token());
+    expect(legacy.ok).toBe(true);
+    expect(runTests).toHaveBeenLastCalledWith(expect.objectContaining({ selectors: ['exact-id'] }), expect.anything());
+
+    for (const input of [
+      {},
+      { profileId: 'profile-a' },
+      { caseId: 'case-a' },
+      { suiteId: 'suite-a' },
+      { selectors: ['exact-id'], profileId: 'profile-a', caseId: 'case-a' },
+      { selectors: [{ profileId: 'profile-a', caseId: 'case-a' }], exactSelectors: ['exact-id'] },
+      { selectors: [{ profileId: 'profile-a' }] },
+      { selectors: [{ profileId: 'profile-a', caseId: 'case-a', unsupported: true }] },
+    ]) {
+      const result = await executeCopilotTool(COPILOT_TOOL_NAMES.runTests, input, runtime({ runTests }), token());
+      expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    }
+    expect(runTests).toHaveBeenCalledTimes(3);
   });
 
   it('preserves bounded changed-file coverage gaps even when no tests match', async () => {
@@ -83,7 +113,7 @@ describe('Copilot tool contract', () => {
   });
 
   it('requires a truthful network confirmation with preflight counts', async () => {
-    const preview = await prepareInvocation(COPILOT_TOOL_NAMES.runTests, {}, runtime(), token());
+    const preview = await prepareInvocation(COPILOT_TOOL_NAMES.runTests, { profileId: 'profile-a', caseId: 'case-a' }, runtime(), token());
     expect(preview?.confirmationMessages?.title).toContain('network');
     expect(String(preview?.confirmationMessages?.message)).toContain('2 case(s)');
     expect(String(preview?.confirmationMessages?.message)).toContain('6 planned turn(s)');
@@ -124,7 +154,7 @@ describe('Copilot tool contract', () => {
   it('fails closed for untrusted network execution and cancellation', async () => {
     let calls = 0;
     const untrusted = runtime({ isWorkspaceTrusted: () => false, runTests: async () => { calls++; throw new Error('must not run'); } });
-    const restricted = await executeCopilotTool(COPILOT_TOOL_NAMES.runTests, {}, untrusted, token());
+    const restricted = await executeCopilotTool(COPILOT_TOOL_NAMES.runTests, { selectors: ['case-1'] }, untrusted, token());
     expect(restricted).toMatchObject({ ok: false, error: { code: 'WORKSPACE_UNTRUSTED' } });
     expect(calls).toBe(0);
     const cancelled = await executeCopilotTool(COPILOT_TOOL_NAMES.findTests, {}, runtime(), { isCancellationRequested: true } as vscode.CancellationToken);

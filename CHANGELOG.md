@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added the stable VS Code-native `@turnstage` Chat participant with bounded `/diagnose`, `/run`, `/compare`, `/configure`, and `/evidence` workflows. It orchestrates only TurnStage language-model tools, preserves native confirmations for network runs, Profile edits, and response disclosure, renders evidence actions and deterministic follow-ups, supports English and Traditional Chinese prompts, and retains only sanitized IDs and outcome metadata across turns.
+- Existing Diagnose with Copilot, Advisory response-quality review, Profile Doctor, and Campaign summary actions now open `@turnstage` directly. Chat orchestration is capped at four model rounds and six tool calls, duplicate side effects fail closed, cancellation and model/quota failures never become passes, and raw prompts, transcripts, headers, payloads, URLs, or secrets are not written to Chat metadata or TurnStage logs.
+- Copilot test runs now accept one or more stable `{ profileId, caseId, suiteId? }` selector objects, with the reserved `@inline` disambiguator for Profile-inline Scenarios. The simpler top-level pair and existing exact Test Explorer ids remain supported through the explicit `exactSelectors` compatibility input, while missing, mixed, unknown, invented, or ambiguous selection fails before network execution.
+
 ## 0.15.0
 
 - Added bounded Test Campaigns for selecting scenarios, adversarial suites, tags, and failed or unstable cases; campaigns support deterministic planning, configurable concurrency and repetitions, cancellation, checkpoint/resume, selective reruns, baseline comparison, compact progress, and sanitized HTML evidence without converting incomplete or timed-out work into a pass.

@@ -47,6 +47,7 @@
     "virtualWorkspaces": true
   },
   "activationEvents": [
+    "onChatParticipant:turnstage.chat",
     "onView:turnstage.profiles",
     "onCustomEditor:turnstage.profileEditor",
     "onCommand:turnstage.initializeWorkspace",
@@ -650,6 +651,37 @@
         "url": "./resources/schemas/turnstage-environment.schema.json"
       }
     ],
+    "chatParticipants": [
+      {
+        "id": "turnstage.chat",
+        "name": "turnstage",
+        "fullName": "TurnStage",
+        "description": "%chatParticipant.description%",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "diagnose",
+            "description": "%chatParticipant.command.diagnose%"
+          },
+          {
+            "name": "run",
+            "description": "%chatParticipant.command.run%"
+          },
+          {
+            "name": "compare",
+            "description": "%chatParticipant.command.compare%"
+          },
+          {
+            "name": "configure",
+            "description": "%chatParticipant.command.configure%"
+          },
+          {
+            "name": "evidence",
+            "description": "%chatParticipant.command.evidence%"
+          }
+        ]
+      }
+    ],
     "languageModelTools": [
       {
         "name": "turnstage_find_tests",
@@ -728,7 +760,7 @@
         "toolReferenceName": "turnstage_run_tests",
         "displayName": "Run TurnStage tests",
         "userDescription": "Run selected TurnStage behavior tests after showing a network preflight.",
-        "modelDescription": "Run TurnStage tests through the shared execution service. This may issue network requests and resolve configured credentials, so always respect the confirmation and preflight. Restricted Mode blocks network execution. Results contain only bounded summaries and a cursor, never full transcripts.",
+        "modelDescription": "Run explicitly selected TurnStage tests through the shared execution service. Put one or more objects in selectors, each with profileId plus caseId copied from turnstage_find_tests; add suiteId only when needed to disambiguate and use @inline for a Profile-inline Scenario. Do not put strings in selectors. A top-level profileId/caseId pair is also accepted. Legacy callers may put exact ids copied from find_tests in exactSelectors, but never invent or reconstruct an exact id. This may issue network requests and resolve configured credentials, so always respect the confirmation and preflight. Restricted Mode blocks network execution. Results contain only bounded summaries and a cursor, never full transcripts.",
         "canBeReferencedInPrompt": true,
         "icon": "$(play)",
         "tags": [
@@ -744,10 +776,53 @@
               "type": "array",
               "maxItems": 100,
               "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "profileId",
+                  "caseId"
+                ],
+                "properties": {
+                  "profileId": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "suiteId": {
+                    "type": "string",
+                    "maxLength": 512,
+                    "description": "Optional disambiguator. Use @inline for a Profile-inline Scenario."
+                  },
+                  "caseId": {
+                    "type": "string",
+                    "maxLength": 512
+                  }
+                }
+              },
+              "description": "Stable selector objects using ids returned by turnstage_find_tests. Use either selectors or top-level profileId/caseId, not both."
+            },
+            "exactSelectors": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
                 "type": "string",
                 "maxLength": 512
               },
-              "description": "Optional explicit test ids. An empty array is not meaningful."
+              "description": "Compatibility-only exact Test Explorer ids copied verbatim from turnstage_find_tests. Never invent or reconstruct these ids. Do not combine with selectors or top-level profileId/caseId."
+            },
+            "profileId": {
+              "type": "string",
+              "maxLength": 512,
+              "description": "Stable Profile id returned by turnstage_find_tests. Must be paired with caseId."
+            },
+            "suiteId": {
+              "type": "string",
+              "maxLength": 512,
+              "description": "Optional suite id used only to disambiguate profileId/caseId. Use @inline to select a Profile-inline Scenario."
+            },
+            "caseId": {
+              "type": "string",
+              "maxLength": 512,
+              "description": "Stable case id returned by turnstage_find_tests. Must be paired with profileId."
             },
             "repetitions": {
               "type": "integer",
@@ -1085,15 +1160,18 @@
           "properties": {
             "runId": {
               "type": "string",
-              "maxLength": 512
+              "maxLength": 512,
+              "description": "Exactly one runId or evidenceId is required for failure, performance, stability, and comparison modes. Do not provide this field in configuration mode."
             },
             "evidenceId": {
               "type": "string",
-              "maxLength": 512
+              "maxLength": 512,
+              "description": "Exactly one evidenceId or runId is required for failure, performance, stability, and comparison modes. Do not provide this field in configuration mode."
             },
             "profile": {
               "type": "string",
-              "maxLength": 512
+              "maxLength": 512,
+              "description": "Required as the only selector in configuration mode; omit it in all other modes."
             },
             "mode": {
               "enum": [
@@ -1102,80 +1180,10 @@
                 "stability",
                 "comparison",
                 "configuration"
-              ]
+              ],
+              "description": "Use configuration with profile only. All other modes require exactly one runId or evidenceId."
             }
-          },
-          "oneOf": [
-            {
-              "properties": {
-                "mode": {
-                  "enum": [
-                    "configuration"
-                  ]
-                }
-              },
-              "required": [
-                "mode",
-                "profile"
-              ],
-              "not": {
-                "anyOf": [
-                  {
-                    "required": [
-                      "runId"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "evidenceId"
-                    ]
-                  }
-                ]
-              }
-            },
-            {
-              "properties": {
-                "mode": {
-                  "enum": [
-                    "failure",
-                    "performance",
-                    "stability",
-                    "comparison"
-                  ]
-                }
-              },
-              "required": [
-                "mode"
-              ],
-              "oneOf": [
-                {
-                  "required": [
-                    "runId"
-                  ],
-                  "not": {
-                    "required": [
-                      "evidenceId"
-                    ]
-                  }
-                },
-                {
-                  "required": [
-                    "evidenceId"
-                  ],
-                  "not": {
-                    "required": [
-                      "runId"
-                    ]
-                  }
-                }
-              ],
-              "not": {
-                "required": [
-                  "profile"
-                ]
-              }
-            }
-          ]
+          }
         }
       },
       {
@@ -1407,7 +1415,8 @@
               "items": {
                 "type": "string",
                 "maxLength": 512
-              }
+              },
+              "description": "Required for disclose; omit for record."
             },
             "rubricIds": {
               "type": "array",
@@ -1421,37 +1430,14 @@
             },
             "grantId": {
               "type": "string",
-              "maxLength": 512
+              "maxLength": 512,
+              "description": "Required for record; omit for disclose."
             },
             "review": {
-              "type": "object"
+              "type": "object",
+              "description": "Required for record; omit for disclose."
             }
-          },
-          "oneOf": [
-            {
-              "properties": {
-                "action": {
-                  "const": "disclose"
-                }
-              },
-              "required": [
-                "action",
-                "evidenceIds"
-              ]
-            },
-            {
-              "properties": {
-                "action": {
-                  "const": "record"
-                }
-              },
-              "required": [
-                "action",
-                "grantId",
-                "review"
-              ]
-            }
-          ]
+          }
         }
       }
     ],

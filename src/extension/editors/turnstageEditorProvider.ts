@@ -241,21 +241,21 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           if (!this.scenarioTests) throw new Error('Campaign runtime is unavailable.');
           const run = await this.scenarioTests.getCampaignRun(document.uri, message.runId);
           if (!run || run.campaignId !== message.campaignId) throw new Error('Campaign run was not found.');
-          const summary = { campaign: run.campaignName, status: run.status, plan: run.plan, coverage: run.coverage, diff: run.diff ? { regressions: run.diff.regressions, improvements: run.diff.improvements, changed: run.diff.changed, entries: run.diff.entries.slice(0, 100) } : undefined, outcomes: run.cases.map((item) => ({ case: item.scenarioId, outcome: item.outcome, stability: item.stability, completedAttempts: item.completedAttempts, requestedAttempts: item.requestedAttempts })) };
-          await openCopilotChat(`Review this sanitized TurnStage Campaign summary. Explain deterministic regressions, instability, incomplete samples, coverage gaps, and practical next actions. Do not act as an LLM judge and do not change formal outcomes: ${JSON.stringify(summary)}`);
+          const summary = { campaign: run.campaignName, status: run.status, plan: run.plan, coverage: run.coverage, diff: run.diff ? { regressions: run.diff.regressions, improvements: run.diff.improvements, changed: run.diff.changed, entries: run.diff.entries.slice(0, 20) } : undefined, outcomes: run.cases.slice(0, 100).map((item) => ({ case: item.scenarioId, outcome: item.outcome, stability: item.stability, completedAttempts: item.completedAttempts, requestedAttempts: item.requestedAttempts })) };
+          await openCopilotChat(`@turnstage /compare Review this sanitized Campaign summary. Explain deterministic regressions, instability, incomplete samples, coverage gaps, and practical next actions. Do not act as an LLM judge and do not change formal outcomes: ${boundedCopilotContext(summary)}`);
           return;
         }
         if (message.type === 'copilot.diagnose') {
-          await openCopilotChat(`Use #turnstage_analyze_run to diagnose TurnStage evidence ${JSON.stringify(message.evidenceId)} in ${message.mode} mode. Explain the deterministic evidence first, distinguish facts from hypotheses, and suggest only safe profile changes.`);
+          await openCopilotChat(`@turnstage /diagnose Diagnose TurnStage evidence ${JSON.stringify(message.evidenceId)} in ${message.mode} mode. Explain deterministic evidence first, distinguish facts from hypotheses, and suggest only safe profile changes.`);
           return;
         }
         if (message.type === 'copilot.qualityReview') {
-          await openCopilotChat(`Use #turnstage_review_response_quality to start an Advisory AI review for these explicitly selected TurnStage evidence ids: ${message.evidenceIds.map((id) => JSON.stringify(id)).join(', ')}. Show the disclosure confirmation before reading response content. This review must not change the formal test outcome.`);
+          await openCopilotChat(`@turnstage /evidence Start an Advisory AI response-quality review for these explicitly selected TurnStage evidence ids: ${message.evidenceIds.map((id) => JSON.stringify(id)).join(', ')}. Show the disclosure confirmation before reading response content. This review must not change the formal test outcome.`);
           return;
         }
         if (message.type === 'copilot.profileDoctor') {
-          const connectionEvidence = latestConnectionResult ? JSON.stringify(latestConnectionResult) : 'unavailable';
-          await openCopilotChat(`Use #turnstage_analyze_run in configuration mode as a Profile Doctor for TurnStage profile ${JSON.stringify(document.uri.toString())}. Combine its deterministic validation result with this sanitized Connection Doctor evidence: ${connectionEvidence}. Explain the observed protocol, HTTP status, mapping counts, terminal state, and bounded timing findings before proposing safe profile-only changes. Do not propose secret, proxy, VPN, or certificate changes.`);
+          const connectionEvidence = latestConnectionResult ? boundedCopilotContext(latestConnectionResult, 4_000) : 'unavailable';
+          await openCopilotChat(`@turnstage /configure Act as Profile Doctor for TurnStage profile ${JSON.stringify(document.uri.toString())}. Combine deterministic validation with this sanitized Connection Doctor evidence: ${connectionEvidence}. Explain the observed protocol, HTTP status, mapping counts, terminal state, and bounded timing findings before proposing safe profile-only changes. Do not propose secret, proxy, VPN, or certificate changes.`);
           return;
         }
         if (message.type === 'output.open') { this.output.show(true); return; }
@@ -634,6 +634,11 @@ function headerValue(headers: Record<string, string> | undefined, name: string):
 
 async function openCopilotChat(query: string): Promise<void> {
   await vscode.commands.executeCommand('workbench.action.chat.open', { query, isPartialQuery: false });
+}
+
+function boundedCopilotContext(value: unknown, maxCharacters = 6_000): string {
+  const serialized = JSON.stringify(value);
+  return serialized.length <= maxCharacters ? serialized : `${serialized.slice(0, maxCharacters)}…`;
 }
 
 function configuredLocale(): string {

@@ -267,6 +267,13 @@ reports or Recorded Runs, even in a Trusted Workspace. They retain only a
 bounded in-memory aggregate evidence capsule per selected case. If Workspace
 Trust is lost while a Copilot run is active, TurnStage cancels the active
 session and discards the invocation evidence before returning a result.
+Copilot must select a run by exact Test Explorer ids returned by discovery or
+by stable selector objects containing a Profile id and case id. Compatibility
+callers place exact ids in the separate `exactSelectors` input. Multiple stable
+selectors are resolved in one bounded discovery pass and deduplicated. Mixed
+top-level and array selection, missing fields, ambiguity, or unknown selectors
+fail before preflight confirmation or network work; an optional suite id (or
+the reserved `@inline` selector) resolves duplicate case ids.
 
 Fault Lab settings are fixed numeric fields with strict bounds and are passed
 only to isolated contract-test sessions. They cannot execute code, rewrite a
@@ -318,6 +325,22 @@ payloads are not returned to the Webview, persisted, logged, exported, or sent
 to Copilot. Its result is advisory and cannot relabel a formal test outcome.
 
 ## Copilot diagnosis and remediation boundary
+
+The stable `@turnstage` Chat participant is an orchestration surface over the
+nine existing TurnStage tools, not a broader agent permission. Each slash
+command receives a fixed subset of those tools; external tools, arbitrary file
+edits, and shell execution are never offered. One request is capped at four
+model rounds and six tool calls. A network run or Profile apply can occur only
+once per request, while Advisory review permits one explicit disclosure step
+and one record step. Existing tool confirmations and Workspace Trust checks
+remain authoritative.
+
+Cross-turn Chat metadata stores only bounded run, Profile, Evidence, Failure,
+and Case IDs plus formal outcome, diagnostic status, failure code, and invoked
+tool names. It never stores the user's prompt, model explanation, tool JSON,
+response transcript, request or response payload, header, full URL, credential,
+secret, or Profile patch. TurnStage logging records only command, status, tool
+count, bounded failure code, and duration.
 
 TurnStage's run diagnosis is deterministic host logic over bounded timing,
 outcome, error category, and evidence references. Copilot explains that result;

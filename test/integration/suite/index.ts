@@ -90,6 +90,13 @@ async function assertManifestCapabilities(extension: vscode.Extension<unknown>):
     'turnstage.adversarialConcurrency',
     'turnstage.logLevel',
   ]);
+  const participants = extension.packageJSON.contributes?.chatParticipants as Array<{ id?: string; name?: string; isSticky?: boolean; commands?: Array<{ name?: string }> }> | undefined;
+  assert.deepEqual(participants?.map((participant) => ({ id: participant.id, name: participant.name, isSticky: participant.isSticky, commands: participant.commands?.map((command) => command.name) })), [{
+    id: 'turnstage.chat',
+    name: 'turnstage',
+    isSticky: true,
+    commands: ['diagnose', 'run', 'compare', 'configure', 'evidence'],
+  }]);
 }
 
 async function assertSecretStorageCommandPath(): Promise<void> {

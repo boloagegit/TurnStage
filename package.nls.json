@@ -1,5 +1,11 @@
 {
   "extension.description": "Config-driven AI chat simulation and stream testing for VS Code",
+  "chatParticipant.description": "Run, diagnose, compare, and improve TurnStage tests with bounded evidence and confirmed tools.",
+  "chatParticipant.command.diagnose": "Diagnose a run, failure, performance issue, or profile configuration.",
+  "chatParticipant.command.run": "Find, validate, and run an explicit TurnStage test selection.",
+  "chatParticipant.command.compare": "Compare bounded baseline and candidate evidence.",
+  "chatParticipant.command.configure": "Diagnose and safely remediate a TurnStage profile.",
+  "chatParticipant.command.evidence": "Inspect evidence, review response quality, or draft a regression.",
   "command.category": "TurnStage",
   "command.initializeWorkspace": "Initialize Workspace",
   "command.initializeUser": "Initialize User Profiles",

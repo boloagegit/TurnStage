@@ -19,6 +19,7 @@ import {
   type RunPreflight,
   type RunTestsInput,
   type SafeOutcome,
+  type StableRunSelector,
   type ValidateTestsInput,
   type AnalyzeRunInput,
   type ApplyProfilePatchInput,
@@ -69,7 +70,7 @@ const INVOCATION_MESSAGES: Record<CopilotToolName, string> = {
 
 const ALLOWED_KEYS: Record<CopilotToolName, readonly string[]> = {
   [COPILOT_TOOL_NAMES.findTests]: ['query', 'profileId', 'suiteId', 'caseId', 'tag', 'changedFiles', 'includeUnbound', 'includeSteps', 'cursor', 'limit'],
-  [COPILOT_TOOL_NAMES.runTests]: ['selectors', 'repetitions', 'failFast', 'expectedIntegrity', 'cursor', 'limit'],
+  [COPILOT_TOOL_NAMES.runTests]: ['selectors', 'exactSelectors', 'profileId', 'suiteId', 'caseId', 'repetitions', 'failFast', 'expectedIntegrity', 'cursor', 'limit'],
   [COPILOT_TOOL_NAMES.inspectFailure]: ['runId', 'failureId', 'includeEvents', 'cursor', 'limit'],
   [COPILOT_TOOL_NAMES.draftRegression]: ['runId', 'failureId', 'draft', 'sourceEvidenceId'],
   [COPILOT_TOOL_NAMES.validateTests]: ['profileId', 'suiteId', 'caseId', 'expectedIntegrity', 'cursor', 'limit'],
@@ -294,10 +295,20 @@ function parseInput(name: CopilotToolName, raw: unknown): ToolInput {
         includeSteps: optionalBoolean(raw.includeSteps),
       };
     case COPILOT_TOOL_NAMES.runTests: {
-      const selectors = raw.selectors === undefined ? undefined : parseStringArray(raw.selectors, COPILOT_LIMITS.maxSelectors, 'selector');
+      const stableOrLegacySelectors = raw.selectors === undefined ? undefined : parseRunSelectors(raw.selectors);
+      const exactSelectors = raw.exactSelectors === undefined ? undefined : parseStringArray(raw.exactSelectors, COPILOT_LIMITS.maxSelectors, 'exact selector');
+      if (stableOrLegacySelectors && exactSelectors) throw new InputError('Use selectors or exactSelectors, not both.');
+      const selectors = stableOrLegacySelectors ?? exactSelectors;
       if (selectors !== undefined && selectors.length === 0) throw new InputError('selectors must contain at least one test id when provided.');
+      const profileId = optionalId(raw.profileId);
+      const suiteId = optionalId(raw.suiteId);
+      const caseId = optionalId(raw.caseId);
+      const hasStableSelector = profileId !== undefined || suiteId !== undefined || caseId !== undefined;
+      if (selectors && hasStableSelector) throw new InputError('Use either selectors or profileId/caseId, not both.');
+      if (!selectors && !hasStableSelector) throw new InputError('Provide explicit selectors or a profileId and caseId.');
+      if (hasStableSelector && (!profileId || !caseId)) throw new InputError('profileId and caseId are both required for stable test selection.');
       const repetitions = raw.repetitions === undefined ? undefined : boundedInteger(raw.repetitions, 1, COPILOT_LIMITS.maxRepetitions, 'repetitions');
-      return { ...pageInput, selectors, repetitions, failFast: optionalBoolean(raw.failFast), expectedIntegrity: raw.expectedIntegrity === undefined ? undefined : parseIntegrityLock(raw.expectedIntegrity) };
+      return { ...pageInput, selectors, profileId, suiteId, caseId, repetitions, failFast: optionalBoolean(raw.failFast), expectedIntegrity: raw.expectedIntegrity === undefined ? undefined : parseIntegrityLock(raw.expectedIntegrity) };
     }
     case COPILOT_TOOL_NAMES.inspectFailure:
       return { ...pageInput, runId: requiredId(raw.runId, 'runId'), failureId: optionalId(raw.failureId), includeEvents: optionalBoolean(raw.includeEvents) };
@@ -565,6 +576,18 @@ function requiredSlug(value: unknown, field: string): string { const id = requir
 function requiredFingerprint(value: unknown, field: string): string { if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) throw new InputError(`${field} must be a SHA-256 fingerprint.`); return value; }
 function boundedInteger(value: unknown, min: number, max: number, field: string): number { if (!Number.isInteger(value) || Number(value) < min || Number(value) > max) throw new InputError(`${field} must be an integer from ${min} to ${max}.`); return Number(value); }
 function parseStringArray(value: unknown, maxItems: number, field: string, maxLength: number = COPILOT_LIMITS.maxInputString): string[] { if (!Array.isArray(value) || value.length > maxItems) throw new InputError(`${field} must contain at most ${maxItems} values.`); return value.map((item, index) => requiredText(item, `${field}[${index}]`, maxLength)); }
+function parseRunSelectors(value: unknown): Array<string | StableRunSelector> {
+  if (!Array.isArray(value) || value.length > COPILOT_LIMITS.maxSelectors) throw new InputError(`selectors must contain at most ${COPILOT_LIMITS.maxSelectors} values.`);
+  return value.map((item, index) => {
+    if (typeof item === 'string') return requiredText(item, `selector[${index}]`, COPILOT_LIMITS.maxInputString);
+    if (!isRecord(item) || Object.keys(item).some((key) => !['profileId', 'suiteId', 'caseId'].includes(key))) throw new InputError(`selector[${index}] must be an exact test id or a stable profileId/caseId object.`);
+    return {
+      profileId: requiredId(item.profileId, `selector[${index}].profileId`),
+      caseId: requiredId(item.caseId, `selector[${index}].caseId`),
+      suiteId: optionalId(item.suiteId),
+    };
+  });
+}
 function isBoundedValue(value: unknown, depth = 0, ancestors = new WeakSet<object>(), nodes = { count: 0 }, maxNodes = 2_000, maxDepth = 8): boolean {
   if (++nodes.count > maxNodes || depth > maxDepth) return false;
   if (value === undefined || value === null || typeof value === 'boolean') return true;

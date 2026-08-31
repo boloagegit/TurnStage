@@ -61,8 +61,22 @@ export interface IntegrityLock {
   caseFingerprints?: Record<string, string>;
 }
 
+export interface StableRunSelector {
+  profileId: string;
+  /** Optional suite disambiguator. Use @inline for a Profile-inline Scenario. */
+  suiteId?: string;
+  caseId: string;
+}
+
 export interface RunTestsInput extends PageInput {
-  selectors?: string[];
+  /** Prefer stable selector objects. Legacy exact Test Explorer ids remain supported. */
+  selectors?: Array<string | StableRunSelector>;
+  /** Stable single-case selector. profileId and caseId must be supplied together. */
+  profileId?: string;
+  /** Optional suite disambiguator. Use @inline for a Profile-inline Scenario. */
+  suiteId?: string;
+  /** Stable single-case selector. profileId and caseId must be supplied together. */
+  caseId?: string;
   repetitions?: number;
   failFast?: boolean;
   expectedIntegrity?: IntegrityLock;
