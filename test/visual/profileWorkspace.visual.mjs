@@ -196,10 +196,15 @@ try {
   assert.ok((await assistantMessage.getByRole('status').innerText()).includes('Opened raw event #6 in Debug.'), 'Inspect message must show visible action feedback');
   await page.screenshot({ path: resolve(artifactDirectory, 'inspect-message-debug-dark.png'), fullPage: true });
   await page.getByRole('tab', { name: 'Raw Events' }).click();
+  await page.getByRole('combobox', { name: 'Conversation turn' }).selectOption('all');
   const firstEventRow = page.getByRole('listbox', { name: 'Raw Events' }).getByRole('option').first();
   const secondEventRow = page.getByRole('listbox', { name: 'Raw Events' }).getByRole('option').nth(1);
+  const fourthEventRow = page.getByRole('listbox', { name: 'Raw Events' }).getByRole('option').nth(3);
   assert.ok((await firstEventRow.innerText()).includes('Δ—'), 'The first raw event must show that no previous-event gap exists');
   assert.ok((await secondEventRow.innerText()).includes('Δ601 ms'), 'Raw event rows must show the interval from the complete source stream');
+  assert.ok((await firstEventRow.innerText()).includes('T1.1') && (await fourthEventRow.innerText()).includes('T2.1'), 'Conversation-wide events must expose their owning turn and per-turn sequence');
+  assert.ok((await fourthEventRow.innerText()).includes('Δ—'), 'The first event in each turn must reset its event gap');
+  assert.deepEqual(await page.getByRole('combobox', { name: 'Conversation turn' }).locator('option').allTextContents(), ['All turns', 'Turn 1 (3)', 'Turn 2 (3)'], 'Turn filter must expose every retained conversation turn');
   assert.equal(await firstEventRow.getAttribute('data-disclosure-state'), 'collapsed', 'Event rows must expose their collapsed state');
   await firstEventRow.click();
   await page.getByRole('region', { name: 'Event payload' }).waitFor();
@@ -253,9 +258,11 @@ try {
   assert.equal(await campaignCard.getByRole('button', { name: 'Summarize with Copilot' }).count(), 1, 'Copilot analysis must stay a distinct advisory action');
   assert.equal(await campaignCard.evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Campaign controls must not overflow the settings pane');
   await campaignCard.screenshot({ path: resolve(artifactDirectory, 'campaign-regression-dark.png') });
-  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run', type: 'test.operation', operation: { action: 'runAll', state: 'running' } } })));
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run', type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 100, completedCases: 24, totalAttempts: 125, completedAttempts: 31, activeCaseNames: ['Prompt boundary', 'Tool policy'] } } } })));
   const activeTestRun = page.locator('.test-operation-status--running');
   await activeTestRun.waitFor();
+  assert.ok((await activeTestRun.innerText()).includes('24 / 100 cases · 31 / 125 attempts'), 'Run all feedback must expose measurable case and attempt progress');
+  assert.equal(await activeTestRun.getByRole('progressbar').getAttribute('value'), '24', 'Run all feedback must use a determinate progress value after planning');
   assert.equal(await page.getByRole('button', { name: 'Running all…' }).isDisabled(), true, 'An active Red Team run must disable duplicate starts');
   assert.equal(await page.getByRole('button', { name: 'Stop test run' }).locator('.codicon-debug-stop').count(), 1, 'An active Red Team run must expose a distinct stop action');
   await activeTestRun.screenshot({ path: resolve(artifactDirectory, 'adversarial-run-active-dark.png') });

@@ -48,6 +48,8 @@ describe('adversarial suites', () => {
     expect(isSafeAdversarialSuitePath('.vscode/turnstage/tests/security.adversarial.jsonc')).toBe(true);
     expect(isSafeAdversarialSuitePath('.vscode/turnstage/tests/security.adversarial.csv')).toBe(true);
     expect(isSafeAdversarialSuitePath('../security.adversarial.csv')).toBe(false);
-    expect(isSafeAdversarialSuitePath('tests/security.csv')).toBe(false);
+    expect(isSafeAdversarialSuitePath('tests/security.csv')).toBe(true);
+    expect(isSafeAdversarialSuitePath(`external:${crypto.randomUUID()}:security.csv`)).toBe(true);
+    expect(isSafeAdversarialSuitePath('external:not-a-grant:security.csv')).toBe(false);
   });
 });

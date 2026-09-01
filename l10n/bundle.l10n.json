@@ -383,6 +383,7 @@
   "Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .json, or .csv path.": "Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .json, or .csv path.",
   "Adversarial suite paths must be unique.": "Adversarial suite paths must be unique.",
   "Adversarial suites must be an array with at most 100 workspace-relative paths.": "Adversarial suites must be an array with at most 100 workspace-relative paths.",
+  "Adversarial suites must contain at most 100 workspace-relative or locally authorized external sources.": "Adversarial suites must contain at most 100 workspace-relative or locally authorized external sources.",
   "Adversarial timeoutMs must be an integer from 1000 to 300000.": "Adversarial timeoutMs must be an integer from 1000 to 300000.",
   "An adversarial case requires at least one prohibited effect.": "An adversarial case requires at least one prohibited effect.",
   "CSV template exported.": "CSV template exported.",
@@ -573,5 +574,9 @@
   "No active TurnStage test run is available to stop.": "No active TurnStage test run is available to stop.",
   "Only a safe suite linked by this Profile can be opened.": "Only a safe suite linked by this Profile can be opened.",
   "Test runtime is unavailable.": "Test runtime is unavailable.",
-  "The linked suite cannot be resolved because this Profile is not inside a workspace folder.": "The linked suite cannot be resolved because this Profile is not inside a workspace folder."
+  "The linked suite cannot be resolved because this Profile is not inside a workspace folder.": "The linked suite cannot be resolved because this Profile is not inside a workspace folder.",
+  "Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .adversarial.json, or .csv path.": "Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .adversarial.json, or .csv path.",
+  "Linked suites must be an adversarial JSONC/JSON file or a CSV file.": "Linked suites must be an adversarial JSONC/JSON file or a CSV file.",
+  "The selected suite reference is invalid.": "The selected suite reference is invalid.",
+  "This external suite is not authorized on this machine. Link the file again.": "This external suite is not authorized on this machine. Link the file again."
 }

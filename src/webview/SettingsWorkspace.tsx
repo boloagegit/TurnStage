@@ -521,7 +521,7 @@ function ScenarioTestsSection({ view, profile, patch, post, testResults, campaig
         </div></details>
       </div>
       {undo && <div className="settings-undo" role="status"><span>{undo.label}</span><button type="button" onClick={() => { save(undo.scenarios); setUndo(undefined); }}>{t('Undo')}</button><IconButton type="button" icon="clear-all" label={t('Dismiss undo')} onClick={() => setUndo(undefined)} /></div>}
-      {(profile.tests?.adversarialSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.adversarialSuites!.map((path, index) => <li key={`${path}-${index}`}><code title={path}>{path}</code><div className="adversarial-linked-suite-actions"><IconButton type="button" icon="go-to-file" label={t('Open linked suite {path}', { path })} onClick={() => post({ type: 'adversarial.openLinkedSuite', path })} /><IconButton type="button" icon="trash" label={t('Unlink suite {path}', { path })} onClick={() => patch(['tests', 'adversarialSuites'], profile.tests!.adversarialSuites!.filter((_, itemIndex) => itemIndex !== index))} /></div></li>)}</ul></div>}
+      {(profile.tests?.adversarialSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.adversarialSuites!.map((path, index) => { const label = linkedSuiteLabel(path); return <li key={`${path}-${index}`}><code title={path}>{label}</code><div className="adversarial-linked-suite-actions"><IconButton type="button" icon="go-to-file" label={t('Open linked suite {path}', { path: label })} onClick={() => post({ type: 'adversarial.openLinkedSuite', path })} /><IconButton type="button" icon="trash" label={t('Unlink suite {path}', { path: label })} onClick={() => patch(['tests', 'adversarialSuites'], profile.tests!.adversarialSuites!.filter((_, itemIndex) => itemIndex !== index))} /></div></li>; })}</ul></div>}
       {!adversarialEntries.length ? <div className="settings-empty settings-empty--action"><span>{t('No inline adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <AdversarialCaseTable entries={adversarialEntries} expandedCaseId={expandedCaseId} onToggle={(id) => setExpandedCaseId(expandedCaseId === id ? undefined : id)} onChange={(index, value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(index, value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={(index, scenario) => { if (expandedCaseId === scenario.id) setExpandedCaseId(undefined); saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); }} />}
       <p className="settings-footnote">{t('Linked CSV stays the source of truth and uses one row per turn. JSONC remains the lossless format for suite-level defaults and metadata.')}</p>
     </section>
@@ -597,14 +597,25 @@ function TestOperationStatus({ operation }: { operation?: TestOperationSnapshot 
       : operation.state === 'completed' ? 'Test run completed'
         : operation.state === 'cancelled' ? 'Test run cancelled'
           : 'Test run failed';
-  const detail = active ? 'Results update here as each Profile finishes. You can keep using the editor.'
+  const progress = operation.progress;
+  const progressDetail = progress ? t('{completed} / {total} cases · {completedAttempts} / {totalAttempts} attempts', {
+    completed: formatNumber(progress.completedCases),
+    total: formatNumber(progress.totalCases),
+    completedAttempts: formatNumber(progress.completedAttempts),
+    totalAttempts: formatNumber(progress.totalAttempts),
+  }) : undefined;
+  const detail = active ? progressDetail ?? 'Preparing the bounded test plan…'
     : operation.state === 'completed' ? 'The latest results and evidence links are ready.'
       : operation.state === 'cancelled' ? 'Completed attempts remain available; unfinished work is not treated as passed.'
         : 'Open TurnStage Output for diagnostic details.';
+  const activeCaseDetail = active && progress?.activeCaseNames?.length ? t('Active: {cases}', { cases: progress.activeCaseNames.join(', ') }) : undefined;
+  const percentage = progress?.totalCases ? Math.round((progress.completedCases / progress.totalCases) * 100) : undefined;
   return <div className={`test-operation-status test-operation-status--${operation.state}`} role="status" aria-live="polite" aria-atomic="true">
     <ProductIcon name={icon} className={active ? 'test-operation-status__active-icon' : ''} />
-    <div><strong>{t(title)}</strong><span>{t(detail)}</span>{operation.detail && <small>{operation.detail}</small>}</div>
-    {active && <progress aria-label={t('Test run progress')} />}
+    <div><strong>{t(title)}</strong><span>{t(detail)}</span>{activeCaseDetail && <small>{activeCaseDetail}</small>}{operation.detail && <small>{operation.detail}</small>}</div>
+    {active && (percentage === undefined
+      ? <progress aria-label={t('Test run progress')} />
+      : <progress value={progress!.completedCases} max={progress!.totalCases} aria-label={t('Test run progress')} aria-valuetext={progressDetail}>{percentage}%</progress>)}
   </div>;
 }
 
@@ -1014,6 +1025,12 @@ function isLoopbackUrl(value: unknown): boolean {
     const hostname = new URL(value).hostname.replace(/^\[|\]$/g, '').toLowerCase();
     return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
   } catch { return false; }
+}
+
+function linkedSuiteLabel(path: string): string {
+  if (!path.startsWith('external:')) return path;
+  const encoded = path.split(':').at(-1) ?? 'external.csv';
+  try { return t('{name} · external file', { name: decodeURIComponent(encoded) }); } catch { return t('External suite'); }
 }
 
 export default SettingsWorkspace;

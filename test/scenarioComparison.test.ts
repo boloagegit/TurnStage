@@ -20,7 +20,7 @@ function evidence(text: string, id: string, createdAt: number, title = 'Conversa
     followups: [],
     metadata: { clientRequestId: `request-${id}` },
   }];
-  snapshot.normalizedEvents = [{ version: 1, type: 'content.text.delta', sequence: createdAt, receivedAt: createdAt, rawSequence: createdAt, text }];
+  snapshot.normalizedEvents = [{ version: 1, type: 'content.text.delta', sequence: createdAt, turnId: `turn-${id}`, turnIndex: 0, turnSequence: 1, receivedAt: createdAt, rawSequence: createdAt, text }];
   return { profileId: 'profile', scenarioId: 'scenario', snapshot, networkEntries: [] };
 }
 

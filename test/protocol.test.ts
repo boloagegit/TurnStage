@@ -69,6 +69,8 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'workspaceTrust.changed', trusted: 'yes' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'test.results', results: [] }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running' } }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 100, completedCases: 24, totalAttempts: 120, completedAttempts: 31, activeCaseNames: ['Case 25'] } } }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 10, completedCases: 11, totalAttempts: 10, completedAttempts: 0 } } }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'unknown' } }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'test.timeline', evidenceId: 'evidence-1', timeline: { version: 1, baseTime: 0, entries: [], completeness: 'missing', missingPhases: ['request'], truncated: false } }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.timeline', evidenceId: 'evidence-1', timeline: 'untrusted' }, 'editor-1')).toBe(false);

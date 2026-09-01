@@ -217,9 +217,9 @@ export class ProfileValidator {
     const scenarios = profile.tests?.scenarios ?? [];
     const adversarialSuites = profile.tests?.adversarialSuites;
     if (adversarialSuites !== undefined) {
-      if (!Array.isArray(adversarialSuites) || adversarialSuites.length > 100) out.push(issue(tree, ['tests', 'adversarialSuites'], localize('Adversarial suites must be an array with at most 100 workspace-relative paths.')));
+      if (!Array.isArray(adversarialSuites) || adversarialSuites.length > 100) out.push(issue(tree, ['tests', 'adversarialSuites'], localize('Adversarial suites must contain at most 100 workspace-relative or locally authorized external sources.')));
       else {
-        adversarialSuites.forEach((path, index) => { if (!isSafeAdversarialSuitePath(path)) out.push(issue(tree, ['tests', 'adversarialSuites', index], localize('Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .json, or .csv path.'))); });
+        adversarialSuites.forEach((path, index) => { if (!isSafeAdversarialSuitePath(path)) out.push(issue(tree, ['tests', 'adversarialSuites', index], localize('Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .adversarial.json, or .csv path.'))); });
         if (duplicates(adversarialSuites).length) out.push(issue(tree, ['tests', 'adversarialSuites'], localize('Adversarial suite paths must be unique.')));
       }
     }

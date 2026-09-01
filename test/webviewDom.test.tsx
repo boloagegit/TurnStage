@@ -535,6 +535,21 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByText(/Gap 85 ms/)).toBeTruthy();
   });
 
+  it('classifies retained events by conversation turn and resets gap timing at each turn', () => {
+    const events = [
+      { sequence: 1, turnId: 'turn-a', turnIndex: 0, turnSequence: 1, receivedAt: 1000, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {} },
+      { sequence: 2, turnId: 'turn-a', turnIndex: 0, turnSequence: 2, receivedAt: 1040, elapsedMs: 40, protocol: 'sse', raw: '{}', data: {} },
+      { sequence: 3, turnId: 'turn-b', turnIndex: 1, turnSequence: 1, receivedAt: 2000, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {} },
+    ];
+    render(<VirtualEvents items={events} kind="raw" eventDeltas={eventTimeDeltas(events)} label="Raw Events" />);
+
+    const rows = screen.getAllByRole('option');
+    expect(rows[0].textContent).toContain('T1.1');
+    expect(rows[1].textContent).toContain('Δ40 ms');
+    expect(rows[2].textContent).toContain('T2.1');
+    expect(rows[2].textContent).toContain('Δ—');
+  });
+
   it('keeps a small event list stable when selecting later events', async () => {
     const user = userEvent.setup();
     const items = Array.from({ length: 10 }, (_, index) => ({ sequence: index + 1, receivedAt: index + 1, elapsedMs: index, protocol: 'sse', raw: '{}', data: { index } }));
@@ -748,12 +763,15 @@ describe('Webview DOM behavior', () => {
     const user = userEvent.setup();
     const post = vi.fn();
     const linked: TurnStageProfile = { ...profile, tests: { scenarios: [], adversarialSuites: ['tests/safety.adversarial.csv'] } };
-    render(<AdversarialWorkspace profile={linked} post={post} testOperation={{ action: 'runAll', state: 'running' }} />);
+    render(<AdversarialWorkspace profile={linked} post={post} testOperation={{ action: 'runAll', state: 'running', progress: { totalCases: 100, completedCases: 24, totalAttempts: 120, completedAttempts: 31, activeCaseNames: ['Prompt boundary'] } }} />);
 
     await user.click(screen.getByRole('button', { name: 'Open linked suite tests/safety.adversarial.csv' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.openLinkedSuite', path: 'tests/safety.adversarial.csv' });
     expect(screen.getByRole('button', { name: 'Unlink suite tests/safety.adversarial.csv' })).toBeTruthy();
     expect(screen.getByRole('status').textContent).toContain('Running all TurnStage tests');
+    expect(screen.getByRole('status').textContent).toContain('24 / 100 cases · 31 / 120 attempts');
+    expect(screen.getByRole('status').textContent).toContain('Active: Prompt boundary');
+    expect(screen.getByRole('progressbar').getAttribute('value')).toBe('24');
     expect((screen.getByRole('button', { name: 'Running all…' }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(screen.getByRole('button', { name: 'Stop test run' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.cancel' });

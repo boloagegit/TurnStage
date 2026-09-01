@@ -27,6 +27,7 @@ import { analyzeConnectionProbe } from '../connection/protocolProbe';
 import { loadFixture } from '../runtime/fixtureLoader';
 import type { ScenarioTestController } from '../testing/scenarioTestController';
 import { parseAdversarialJsonl, serializeAdversarialJsonl, serializeCampaignResultsJsonl } from '../testing/adversarialJsonl';
+import { ExternalAdversarialSuiteRepository, isExternalAdversarialSuiteReference } from '../testing/externalAdversarialSuite';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -37,6 +38,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private readonly secrets: SecretService;
   private readonly uriPolicy = new UriPolicy();
   private readonly visualRegression: VisualRegressionService;
+  private readonly externalAdversarialSuites: ExternalAdversarialSuiteRepository;
   private readonly controllers = new Map<string, SessionController>();
   private readonly pendingDisposals = new Set<Promise<void>>();
   private readonly sectionPosters = new Map<string, Set<(section: WorkspaceSection) => Thenable<boolean>>>();
@@ -48,7 +50,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private readonly pendingCampaignRuns = new Set<Promise<unknown>>();
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
   private readonly latestTestOperations = new Map<string, TestOperationSnapshot>();
-  constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel, private readonly environments = new EnvironmentRepository(context.globalStorageUri), visualRegression?: VisualRegressionService, private readonly scenarioTests?: ScenarioTestController) { this.runs = new LocalRunRepository(context, output); this.secrets = new SecretService(context); this.visualRegression = visualRegression ?? new VisualRegressionService(context); }
+  constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel, private readonly environments = new EnvironmentRepository(context.globalStorageUri), visualRegression?: VisualRegressionService, private readonly scenarioTests?: ScenarioTestController) { this.runs = new LocalRunRepository(context, output); this.secrets = new SecretService(context); this.visualRegression = visualRegression ?? new VisualRegressionService(context); this.externalAdversarialSuites = new ExternalAdversarialSuiteRepository(context); }
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     const resourceTitle = panel.title;
@@ -216,8 +218,11 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           if (!profile) throw new Error(localize('Profile could not be parsed.'));
           if (!canOpenLinkedAdversarialSuite(profile, message.path)) throw new Error(localize('Only a safe suite linked by this Profile can be opened.'));
           const folder = vscode.workspace.getWorkspaceFolder(document.uri);
-          if (!folder) throw new Error(localize('The linked suite cannot be resolved because this Profile is not inside a workspace folder.'));
-          const uri = vscode.Uri.joinPath(folder.uri, ...message.path.split('/'));
+          const external: boolean = isExternalAdversarialSuiteReference(message.path);
+          const uri = external
+            ? this.externalAdversarialSuites.resolve(document.uri, message.path)
+            : folder ? vscode.Uri.joinPath(folder.uri, ...message.path.split('/')) : undefined;
+          if (!uri) throw new Error(localize('This external suite is not authorized on this machine. Link the file again.'));
           await vscode.workspace.fs.stat(uri);
           await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
           return;
@@ -228,11 +233,17 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           if (current?.state === 'running' || current?.state === 'cancelling') throw new Error(localize('A TurnStage test run is already active.'));
           const action: TestOperationAction = message.type === 'test.runAll' ? 'runAll' : message.status === 'failed' ? 'rerunFailed' : message.status === 'unstable' ? 'rerunUnstable' : 'rerunIncomplete';
           await postTestOperation({ action, state: 'running' }, message.requestId);
+          let progress: TestOperationSnapshot['progress'];
+          const onProgress = (next: NonNullable<TestOperationSnapshot['progress']>): void => {
+            progress = next;
+            const currentState = this.latestTestOperations.get(documentKey)?.state;
+            void postTestOperation({ action, state: currentState === 'cancelling' ? 'cancelling' : 'running', progress: next });
+          };
           try {
-            const state = message.type === 'test.runAll' ? await this.scenarioTests.runAll() : await this.scenarioTests.rerunLatest(document.uri, message.status);
-            await postTestOperation({ action, state }, message.requestId);
+            const state = message.type === 'test.runAll' ? await this.scenarioTests.runAll(onProgress) : await this.scenarioTests.rerunLatest(document.uri, message.status, onProgress);
+            await postTestOperation({ action, state, ...(progress ? { progress } : {}) }, message.requestId);
           } catch (error) {
-            await postTestOperation({ action, state: 'failed' }, message.requestId);
+            await postTestOperation({ action, state: 'failed', ...(progress ? { progress } : {}) }, message.requestId);
             throw error;
           }
           return;
@@ -240,7 +251,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         if (message.type === 'test.cancel') {
           const active = this.latestTestOperations.get(documentKey);
           if (!active || active.state !== 'running' || !this.scenarioTests?.cancelActiveManualRun()) throw new Error(localize('No active TurnStage test run is available to stop.'));
-          await postTestOperation({ action: active.action, state: 'cancelling' }, message.requestId);
+          await postTestOperation({ action: active.action, state: 'cancelling', ...(active.progress ? { progress: active.progress } : {}) }, message.requestId);
           return;
         }
         if (message.type === 'test.timeline.open') {
@@ -583,16 +594,18 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     if (linking) {
       const profileFolder = vscode.workspace.getWorkspaceFolder(document.uri);
       const suiteFolder = vscode.workspace.getWorkspaceFolder(uri);
-      if (!profileFolder || profileFolder.uri.toString() !== suiteFolder?.uri.toString()) throw new Error(localize('Linked suites must be inside the same workspace folder as the profile.'));
-      const relative = vscode.workspace.asRelativePath(uri, false).replaceAll('\\', '/');
-      if (!isSafeAdversarialSuitePath(relative)) throw new Error(localize('Linked suites must use a safe workspace-relative *.adversarial.jsonc, *.json, or *.csv path.'));
-      if (action === 'linkJsonc' && /\.csv$/iu.test(relative)) throw new Error(localize('The legacy JSONC link action cannot link CSV files.'));
-      const parsed = parseAdversarialSource(relative, await readBoundedTextFile(uri));
+      const sameFolder = Boolean(profileFolder && profileFolder.uri.toString() === suiteFolder?.uri.toString());
+      const sourcePath = uri.path;
+      if (!/(?:\.adversarial\.(?:jsonc|json)|\.csv)$/iu.test(sourcePath)) throw new Error(localize('Linked suites must be an adversarial JSONC/JSON file or a CSV file.'));
+      if (action === 'linkJsonc' && /\.csv$/iu.test(sourcePath)) throw new Error(localize('The legacy JSONC link action cannot link CSV files.'));
+      const parsed = parseAdversarialSource(sourcePath, await readBoundedTextFile(uri));
       if (!parsed.suite || parsed.issues.length) throw new Error(parsed.issues.slice(0, 20).join('\n') || localize('The selected adversarial suite is invalid.'));
       const scenarios = parsed.scenarios;
       this.assertAdversarialScenariosCompatible(profile, scenarios);
+      const reference = sameFolder ? vscode.workspace.asRelativePath(uri, false).replaceAll('\\', '/') : await this.externalAdversarialSuites.grant(document.uri, uri);
+      if (!isSafeAdversarialSuitePath(reference)) throw new Error(localize('The selected suite reference is invalid.'));
       const paths = profile.tests?.adversarialSuites ?? [];
-      if (!paths.includes(relative)) await this.patchDocument(document, ['tests', 'adversarialSuites'], [...paths, relative]);
+      if (!paths.includes(reference)) await this.patchDocument(document, ['tests', 'adversarialSuites'], [...paths, reference]);
       return completedOperation(localize('Linked {count} adversarial cases.', { count: String(scenarios.length) }), uri);
     }
     const contents = await readBoundedTextFile(uri);

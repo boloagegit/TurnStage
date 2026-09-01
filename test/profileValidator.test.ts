@@ -129,7 +129,7 @@ describe('ProfileValidator', () => {
     };
     const messages = new ProfileValidator().validate(profile).map((entry) => entry.message);
     expect(messages).toEqual(expect.arrayContaining([
-      'Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .json, or .csv path.',
+      'Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .adversarial.json, or .csv path.',
       'Adversarial suite paths must be unique.',
       'A single-turn adversarial case must contain exactly one step.',
       'Adversarial steps exceed maxTurns and will not be truncated.',

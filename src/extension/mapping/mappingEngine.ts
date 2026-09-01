@@ -56,7 +56,18 @@ export class MappingEngine {
         if (!match(compiled, raw)) continue;
         ruleIds.push(rule.id);
         const extracted = extract(rule.emit, raw) as Record<string, unknown>;
-        events.push({ version: 1, ...extracted, type: String(extracted.type), sequence: raw.sequence, receivedAt: raw.receivedAt, rawSequence: raw.sequence, mappingRuleId: rule.id });
+        events.push({
+          version: 1,
+          ...extracted,
+          type: String(extracted.type),
+          sequence: raw.sequence,
+          ...(raw.turnId === undefined ? {} : { turnId: raw.turnId }),
+          ...(raw.turnIndex === undefined ? {} : { turnIndex: raw.turnIndex }),
+          ...(raw.turnSequence === undefined ? {} : { turnSequence: raw.turnSequence }),
+          receivedAt: raw.receivedAt,
+          rawSequence: raw.sequence,
+          mappingRuleId: rule.id,
+        });
         if (this.stream.mappingMode !== 'allMatches' && !rule.continue) break;
       } catch (error) { errors.push({ ruleId: rule.id, message: error instanceof Error ? error.message : String(error) }); }
     }

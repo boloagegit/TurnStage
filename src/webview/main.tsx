@@ -16,7 +16,7 @@ declare function acquireVsCodeApi<T = unknown>(): { postMessage(message: unknown
 export type EventMappingFilter = 'all' | 'matched' | 'unmatched';
 export type EventIssueFilter = 'all' | 'valid' | 'parse-error' | 'mapping-error';
 export type EventTerminalFilter = 'all' | 'terminal' | 'non-terminal';
-export interface EventFilterState { query: string; eventType: string; mapping: EventMappingFilter; issue: EventIssueFilter; terminal: EventTerminalFilter }
+export interface EventFilterState { query: string; turn: string; eventType: string; mapping: EventMappingFilter; issue: EventIssueFilter; terminal: EventTerminalFilter }
 export interface InspectorEventFilters { raw: EventFilterState; normalized: EventFilterState }
 const MAPPING_FILTERS = new Set<EventMappingFilter>(['all', 'matched', 'unmatched']);
 const ISSUE_FILTERS = new Set<EventIssueFilter>(['all', 'valid', 'parse-error', 'mapping-error']);
@@ -31,7 +31,7 @@ type NetworkDetailTab = typeof networkDetailTabs[number];
 const inspectorTabs = ['Network', 'Raw Events', 'Normalized', 'Metrics', 'Errors', 'Runs'] as const; type InspectorTab = typeof inspectorTabs[number];
 export const DEFAULT_SPLIT_PERCENT = 64;
 export const ACCESSIBLE_EVENT_WINDOW_SIZE = 200;
-export const DEFAULT_EVENT_FILTERS: EventFilterState = { query: '', eventType: 'all', mapping: 'all', issue: 'all', terminal: 'all' };
+export const DEFAULT_EVENT_FILTERS: EventFilterState = { query: '', turn: 'all', eventType: 'all', mapping: 'all', issue: 'all', terminal: 'all' };
 export interface NetworkInspectorState { query: string; selectedId?: string; detailTab: NetworkDetailTab }
 export interface WebviewState { version?: number; sessionId?: string; section?: WorkspaceSection; configurationSection?: SettingsSectionId; rightPaneMode?: RightPaneMode; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number; selectedNetworkId?: string; activeEvidenceId?: string; chatViewport?: ChatViewportState; eventFilters?: Partial<InspectorEventFilters>; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; expandedAdversarialCaseId?: string; networkInspector?: Partial<NetworkInspectorState>; acceptedForms?: string[] }
 type VsCodeApi = { postMessage(message: unknown): void; getState(): WebviewState | undefined; setState(state: WebviewState): void };
@@ -126,7 +126,8 @@ function App(): React.JSX.Element {
     setRightPaneMode('debug');
     setInspectorTab('Raw Events');
     setSelectedRawSequence(sequence);
-    setEventFilters((current) => ({ ...current, raw: { ...DEFAULT_EVENT_FILTERS } }));
+    const turn = typeof message?.metadata?.clientRequestId === 'string' ? message.metadata.clientRequestId : 'all';
+    setEventFilters((current) => ({ ...current, raw: { ...DEFAULT_EVENT_FILTERS, turn } }));
     setMessageActionFeedback({
       actionId: 'message.inspectRaw',
       sourceMessageId: messageId,
@@ -466,15 +467,17 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
   const eventDeltas = useMemo(() => eventKind === 'raw' ? eventTimeDeltas(data) : undefined, [data, eventKind]);
   const terminalRawSequences = useMemo(() => terminalSequences(snapshot?.normalizedEvents ?? []), [snapshot?.normalizedEvents]);
   const types = useMemo(() => [...new Set(data.map((item) => eventLabel(item)))].sort(), [data]);
+  const turns = useMemo(() => eventTurnOptions(data), [data]);
   const filtered = useMemo(() => data.filter((item) => eventMatchesFilters(item, filters, eventKind, terminalRawSequences)), [data, eventKind, filters, terminalRawSequences]);
   const updateFilters = (patch: Partial<EventFilterState>) => onEventFiltersChange({ ...eventFilters, [eventKind]: { ...filters, ...patch } });
-  const filtersActive = filters.query !== '' || filters.eventType !== 'all' || filters.mapping !== 'all' || filters.issue !== 'all' || filters.terminal !== 'all';
+  const filtersActive = filters.query !== '' || filters.turn !== 'all' || filters.eventType !== 'all' || filters.mapping !== 'all' || filters.issue !== 'all' || filters.terminal !== 'all';
   const panelContent = effectiveTab === 'Network'
     ? <NetworkInspector entries={networkEntries} legacyRequestPreview={requestPreview} selectedEntryId={selectedNetworkId} state={networkInspector} onStateChange={onNetworkInspectorChange} />
     : effectiveTab === 'Raw Events' || effectiveTab === 'Normalized'
       ? <div className="event-inspector">
         <div className="event-filters">
           <label className="event-search"><span className="sr-only">{t('Search events')}</span><input type="search" value={filters.query} placeholder={t('Search events')} aria-label={t('Search events')} disabled={!interactive} onChange={(event) => updateFilters({ query: event.target.value })} /></label>
+          <label className="event-turn-filter"><span className="sr-only">{t('Conversation turn')}</span><select value={turns.some((turn) => turn.key === filters.turn) ? filters.turn : 'all'} aria-label={t('Conversation turn')} onChange={(event) => updateFilters({ turn: event.target.value })} disabled={!interactive}><option value="all">{t('All turns')}</option>{turns.map((turn) => <option key={turn.key} value={turn.key}>{turn.label} ({formatNumber(turn.count)})</option>)}</select></label>
           <details className="event-filter-more">
             <summary>{t(filtersActive ? 'Filters active' : 'Filters')}</summary>
             <div>
@@ -607,16 +610,20 @@ export function eventTimeDeltas(items: Array<Record<string, any>>): ReadonlyMap<
   const deltas = new Map<number, number | undefined>();
   let previousElapsed: number | undefined;
   let previousReceived: number | undefined;
+  let previousTurn: string | undefined;
   for (const item of items) {
     const sequence = eventSequence(item);
+    const turn = eventTurnKey(item);
     const elapsed = typeof item.elapsedMs === 'number' && Number.isFinite(item.elapsedMs) ? item.elapsedMs : undefined;
     const received = typeof item.receivedAt === 'number' && Number.isFinite(item.receivedAt) ? item.receivedAt : undefined;
-    const delta = elapsed !== undefined && previousElapsed !== undefined && elapsed >= previousElapsed
+    const sameTurn = previousTurn === turn;
+    const delta = sameTurn && elapsed !== undefined && previousElapsed !== undefined && elapsed >= previousElapsed
       ? elapsed - previousElapsed
-      : received !== undefined && previousReceived !== undefined && received >= previousReceived ? received - previousReceived : undefined;
+      : sameTurn && received !== undefined && previousReceived !== undefined && received >= previousReceived ? received - previousReceived : undefined;
     if (sequence !== undefined) deltas.set(sequence, delta);
     previousElapsed = elapsed;
     previousReceived = received;
+    previousTurn = turn;
   }
   return deltas;
 }
@@ -721,13 +728,14 @@ export function VirtualEvents({ items, kind = 'raw', eventDeltas, terminalRawSeq
         const itemIndex = visibleStart + index;
         const status = eventRowStatus(item, kind, terminalRawSequences);
         const eventDelta = itemSequence === undefined ? undefined : eventDeltas?.get(itemSequence);
+        const turnLabel = eventTurnShortLabel(item);
         return <button type="button" role="option" id={eventRowId(item, itemIndex)} aria-selected={selected} aria-controls={eventDetailId(kind, item, itemIndex)} aria-setsize={items.length} aria-posinset={itemIndex + 1} data-disclosure-state={selected ? 'expanded' : 'collapsed'} tabIndex={itemIndex === rovingIndex ? 0 : -1} title={t('View event payload')} className={`event-row ${eventDeltas ? 'event-row--with-delta' : ''} ${selected ? 'selected' : ''}`.trim()} key={`${item.sequence}-${eventLabel(item)}-${index}`} onClick={() => selectEventAt(itemIndex)} onKeyDown={(event) => handleEventKeyDown(event, itemIndex)}>
-          <span className="event-disclosure"><ProductIcon name={selected ? 'chevron-down' : 'chevron-right'} /></span><span>#{formatNumber(item.sequence)}</span><strong>{eventLabel(item)}</strong><span className={`event-status event-status--${status.kind}`} title={t(status.label)} aria-label={t(status.label)}><ProductIcon name={status.icon} /></span><span className="event-time-total"><span className="sr-only">{t('Total elapsed')}</span>+{formatDuration(item.elapsedMs ?? 0)}</span>{eventDeltas && <span className="event-time-gap"><span className="sr-only">{t('Since previous event')}</span>Δ{eventDelta === undefined ? '—' : formatDuration(eventDelta)}</span>}
+          <span className="event-disclosure"><ProductIcon name={selected ? 'chevron-down' : 'chevron-right'} /></span><span className="event-turn" title={eventTurnDescription(item)}>{turnLabel}</span><strong>{eventLabel(item)}</strong><span className={`event-status event-status--${status.kind}`} title={t(status.label)} aria-label={t(status.label)}><ProductIcon name={status.icon} /></span><span className="event-time-total"><span className="sr-only">{t('Total elapsed')}</span>+{formatDuration(item.elapsedMs ?? 0)}</span>{eventDeltas && <span className="event-time-gap"><span className="sr-only">{t('Since previous event')}</span>Δ{eventDelta === undefined ? '—' : formatDuration(eventDelta)}</span>}
         </button>;
       })}</div></div>}
     </div>
     {selectedItem && <section id={selectedDetailId} className="event-detail" aria-labelledby={`${selectedDetailId}-heading`}>
-      <header><div><strong id={`${selectedDetailId}-heading`}>{t('Event payload')}</strong><span>{eventLabel(selectedItem)} · #{formatNumber(selectedItem.sequence)} · {t('Total {duration}', { duration: formatDuration(selectedItem.elapsedMs ?? 0) })}{eventDeltas ? ` · ${t('Gap {duration}', { duration: selectedDelta === undefined ? '—' : formatDuration(selectedDelta) })}` : ''}</span></div>{onCreateMapping && <button onClick={() => onCreateMapping(selectedItem as RawStreamEvent)}>{t('Create mapping draft')}</button>}</header>
+      <header><div><strong id={`${selectedDetailId}-heading`}>{t('Event payload')}</strong><span>{eventLabel(selectedItem)} · {eventTurnDescription(selectedItem)} · {t('Total {duration}', { duration: formatDuration(selectedItem.elapsedMs ?? 0) })}{eventDeltas ? ` · ${t('Gap {duration}', { duration: selectedDelta === undefined ? '—' : formatDuration(selectedDelta) })}` : ''}</span></div>{onCreateMapping && <button onClick={() => onCreateMapping(selectedItem as RawStreamEvent)}>{t('Create mapping draft')}</button>}</header>
       <JsonBlock value={selectedItem} />
     </section>}
   </div>;
@@ -813,12 +821,34 @@ function focusAfterRender(callback: () => void): void {
 
 function eventLabel(item: Record<string, any>): string { return String(item.type ?? item.sse?.event ?? 'message'); }
 function eventSequence(item: Record<string, any>): number | undefined { return typeof item.rawSequence === 'number' ? item.rawSequence : typeof item.sequence === 'number' ? item.sequence : undefined; }
+export function eventTurnKey(item: Record<string, any>): string { return typeof item.turnId === 'string' && item.turnId ? item.turnId : typeof item.turnIndex === 'number' ? `index:${item.turnIndex}` : 'legacy'; }
+export function eventTurnOptions(items: Array<Record<string, any>>): Array<{ key: string; label: string; count: number }> {
+  const counts = new Map<string, { key: string; label: string; count: number; order: number }>();
+  for (const item of items) {
+    const key = eventTurnKey(item);
+    const current = counts.get(key);
+    if (current) current.count += 1;
+    else counts.set(key, { key, label: typeof item.turnIndex === 'number' ? t('Turn {turn}', { turn: formatNumber(item.turnIndex + 1) }) : t('Unassigned'), count: 1, order: typeof item.turnIndex === 'number' ? item.turnIndex : Number.MAX_SAFE_INTEGER });
+  }
+  return [...counts.values()].sort((left, right) => left.order - right.order || left.label.localeCompare(right.label)).map(({ key, label, count }) => ({ key, label, count }));
+}
+function eventTurnShortLabel(item: Record<string, any>): string {
+  if (typeof item.turnIndex !== 'number') return `#${formatNumber(item.sequence)}`;
+  const localSequence = typeof item.turnSequence === 'number' ? item.turnSequence : item.sequence;
+  return `T${formatNumber(item.turnIndex + 1)}.${formatNumber(localSequence)}`;
+}
+function eventTurnDescription(item: Record<string, any>): string {
+  if (typeof item.turnIndex !== 'number') return t('Unassigned · event #{sequence}', { sequence: formatNumber(item.sequence) });
+  const localSequence = typeof item.turnSequence === 'number' ? item.turnSequence : item.sequence;
+  return t('Turn {turn} · event {event} · global #{sequence}', { turn: formatNumber(item.turnIndex + 1), event: formatNumber(localSequence), sequence: formatNumber(item.sequence) });
+}
 
 const TERMINAL_EVENT_TYPES = new Set(['stream.completed', 'stream.failed', 'stream.aborted']);
 export function normalizeEventFilterState(value: unknown): EventFilterState {
   const candidate = value && typeof value === 'object' ? value as Partial<EventFilterState> : {};
   return {
     query: typeof candidate.query === 'string' ? candidate.query.slice(0, 512) : '',
+    turn: typeof candidate.turn === 'string' && candidate.turn.length <= 512 ? candidate.turn : 'all',
     eventType: typeof candidate.eventType === 'string' && candidate.eventType.length <= 256 ? candidate.eventType : 'all',
     mapping: MAPPING_FILTERS.has(candidate.mapping as EventMappingFilter) ? candidate.mapping as EventMappingFilter : 'all',
     issue: ISSUE_FILTERS.has(candidate.issue as EventIssueFilter) ? candidate.issue as EventIssueFilter : 'all',
@@ -890,6 +920,7 @@ function isTerminalEvent(item: Record<string, any>, kind: 'raw' | 'normalized', 
 }
 
 export function eventMatchesFilters(item: Record<string, any>, filters: EventFilterState, kind: 'raw' | 'normalized', terminalRawSequences: ReadonlySet<number>): boolean {
+  if (filters.turn !== 'all' && eventTurnKey(item) !== filters.turn) return false;
   if (filters.eventType !== 'all' && eventLabel(item) !== filters.eventType) return false;
   const query = filters.query.trim().toLocaleLowerCase();
   if (query && !safeJson(item).toLocaleLowerCase().includes(query)) return false;

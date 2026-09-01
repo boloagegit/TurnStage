@@ -36,7 +36,14 @@ export interface MappingTestResult {
 
 export type TestOperationAction = 'runAll' | 'rerunFailed' | 'rerunUnstable' | 'rerunIncomplete';
 export type TestOperationState = 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
-export interface TestOperationSnapshot { action: TestOperationAction; state: TestOperationState; detail?: string }
+export interface TestOperationProgress {
+  totalCases: number;
+  completedCases: number;
+  totalAttempts: number;
+  completedAttempts: number;
+  activeCaseNames?: string[];
+}
+export interface TestOperationSnapshot { action: TestOperationAction; state: TestOperationState; detail?: string; progress?: TestOperationProgress }
 
 export type WebviewMessage = Envelope & (
   | { type: 'webview.ready' }
@@ -245,7 +252,8 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'test.operation': return isRecord(message.operation)
       && ['runAll', 'rerunFailed', 'rerunUnstable', 'rerunIncomplete'].includes(String(message.operation.action))
       && ['running', 'cancelling', 'completed', 'cancelled', 'failed'].includes(String(message.operation.state))
-      && optionalBoundedString(message.operation.detail);
+      && optionalBoundedString(message.operation.detail)
+      && (message.operation.progress === undefined || isTestOperationProgress(message.operation.progress));
     case 'test.results': return Array.isArray(message.results) && message.results.length <= 10_000 && isStructuredValue(message.results, MAX_HOST_VALUE_NODES);
     case 'campaign.dashboard': return isRecord(message.dashboard) && isStructuredValue(message.dashboard, MAX_HOST_VALUE_NODES);
     case 'campaign.preview': return isBoundedString(message.campaignId) && [message.selectedCases, message.plannedAttempts, message.plannedRequests, message.maximumDurationMs, message.maxConcurrency].every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0) && Array.isArray(message.warnings) && message.warnings.length <= 100 && message.warnings.every((entry) => isBoundedString(entry, 4096));
@@ -256,6 +264,14 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'workspaceTrust.changed': return typeof message.trusted === 'boolean';
     default: return false;
   }
+}
+
+function isTestOperationProgress(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const counts = [value.totalCases, value.completedCases, value.totalAttempts, value.completedAttempts];
+  if (!counts.every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0 && Number(entry) <= 100_000)) return false;
+  if (Number(value.completedCases) > Number(value.totalCases) || Number(value.completedAttempts) > Number(value.totalAttempts)) return false;
+  return value.activeCaseNames === undefined || (Array.isArray(value.activeCaseNames) && value.activeCaseNames.length <= 8 && value.activeCaseNames.every((entry) => isBoundedString(entry, 256)));
 }
 
 function isEvidenceLocation(value: unknown): boolean {

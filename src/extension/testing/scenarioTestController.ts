@@ -41,6 +41,8 @@ import { attachCampaignBaseline, createCampaignPlan, createCampaignRunRecord, ty
 import { CampaignRepository } from './campaignRepository';
 import { digestValue } from './provenance';
 import { logAt, startLogOperation } from '../logging';
+import type { TestOperationProgress } from '../../shared/protocol';
+import { ExternalAdversarialSuiteRepository } from './externalAdversarialSuite';
 
 type TestData =
   | { type: 'profile'; uri: vscode.Uri; profileId: string }
@@ -86,6 +88,7 @@ interface ScenarioRunScope {
   };
   /** Throws when the final immutable execution snapshot is stale. */
   validateIntegrity?: (material: ScenarioIntegrityMaterial) => void;
+  progress?: (progress: TestOperationProgress) => void;
 }
 
 interface CompletedScenario {
@@ -192,6 +195,7 @@ export class ScenarioTestController implements vscode.Disposable {
   private readonly reports: ScenarioReportService;
   private readonly runGroups: ScenarioRunGroupRepository;
   private readonly campaigns: CampaignRepository;
+  private readonly externalAdversarialSuites: ExternalAdversarialSuiteRepository;
   private readonly resultsEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; results: AdversarialResultSummary[] }>();
   readonly onDidChangeResults = this.resultsEmitter.event;
   private readonly campaignEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; dashboard: CampaignDashboardV1 }>();
@@ -214,6 +218,7 @@ export class ScenarioTestController implements vscode.Disposable {
     this.reports = new ScenarioReportService(output, visualRegression, String(context.extension.packageJSON.version ?? 'unknown'), copilotArtifacts);
     this.runGroups = new ScenarioRunGroupRepository(context, output);
     this.campaigns = new CampaignRepository(context, output);
+    this.externalAdversarialSuites = new ExternalAdversarialSuiteRepository(context);
     this.controller = vscode.tests.createTestController('turnstage.contracts', localize('TurnStage Conversation Contracts'));
     this.controller.resolveHandler = async () => this.refresh();
     this.controller.createRunProfile(localize('Run Conversation Contracts'), vscode.TestRunProfileKind.Run, async (request, token) => { await this.run(request, token); }, true);
@@ -380,12 +385,14 @@ export class ScenarioTestController implements vscode.Disposable {
     return this.campaigns.getRun(entry.profile.id, runId);
   }
   getLatestRunSummaries(): readonly ScenarioControllerRunSummary[] { return this.latestRunSummaries.map((summary) => ({ ...summary, counts: summary.counts ? { ...summary.counts } : undefined })); }
-  async runAll(): Promise<'completed' | 'cancelled'> {
+  async runAll(): Promise<'completed' | 'cancelled'>;
+  async runAll(onProgress: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'>;
+  async runAll(onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
     if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
     const cancellation = new vscode.CancellationTokenSource();
     this.activeManualRun = cancellation;
     try {
-      const snapshot = await this.run(new vscode.TestRunRequest(), cancellation.token);
+      const snapshot = await this.run(new vscode.TestRunRequest(), cancellation.token, {}, { progress: onProgress });
       return snapshot.cancelled ? 'cancelled' : 'completed';
     } finally {
       if (this.activeManualRun === cancellation) this.activeManualRun = undefined;
@@ -393,7 +400,7 @@ export class ScenarioTestController implements vscode.Disposable {
     }
   }
 
-  async rerunLatest(uri: vscode.Uri, status: 'failed' | 'unstable' | 'incomplete'): Promise<'completed' | 'cancelled'> {
+  async rerunLatest(uri: vscode.Uri, status: 'failed' | 'unstable' | 'incomplete', onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
     if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
     const latest = this.getLatestResults(uri).filter((result) => status === 'failed'
       ? result.outcome !== 'resisted'
@@ -413,7 +420,7 @@ export class ScenarioTestController implements vscode.Disposable {
     const cancellation = new vscode.CancellationTokenSource();
     this.activeManualRun = cancellation;
     try {
-      const snapshot = await this.runSelection({ itemIds }, cancellation.token);
+      const snapshot = await this.runSelection({ itemIds }, cancellation.token, { progress: onProgress });
       return snapshot.cancelled ? 'cancelled' : 'completed';
     } finally {
       if (this.activeManualRun === cancellation) this.activeManualRun = undefined;
@@ -579,7 +586,7 @@ export class ScenarioTestController implements vscode.Disposable {
       }
       for (const suitePath of entry.profile.tests?.adversarialSuites ?? []) {
         try {
-          const loaded = await loadAdversarialSuite(entry.uri, suitePath);
+          const loaded = await loadAdversarialSuite(entry.uri, suitePath, (reference) => this.externalAdversarialSuites.resolve(entry.uri, reference));
           const compatibilityError = validateAdversarialScenariosAgainstProfile(entry.profile, loaded.scenarios)[0];
           if (compatibilityError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
           const suiteItem = this.controller.createTestItem(`${entry.uri.toString()}::suite::${loaded.suite.id}`, loaded.suite.name, loaded.uri);
@@ -649,6 +656,7 @@ export class ScenarioTestController implements vscode.Disposable {
     const persistedGroups: Array<{ profileId: string; id: string; retention: number }> = [];
     let retainCopilotEvidence = false;
     const operation = startLogOperation(this.output, 'test', scope.campaign ? 'campaign-batch' : scope.runId ? 'copilot-batch' : 'batch');
+    let cancelProgressTimer: (() => void) | undefined;
     const trustCancellation = scope.runId ? createTrustAwareCancellation(token) : undefined;
     const effectiveToken = trustCancellation?.token ?? token;
     try {
@@ -681,6 +689,42 @@ export class ScenarioTestController implements vscode.Disposable {
         requests: batchPlan.plannedRequests,
         concurrency: batchPlan.maxConcurrency,
       });
+      const plannedAttemptsByJob = new Map(batchPlan.cases.map((item) => [item.key, item.requestedAttempts]));
+      let completedCases = 0;
+      let completedAttempts = 0;
+      const completedAttemptsByJob = new Map<string, number>();
+      const activeCases = new Map<string, string>();
+      let lastProgressAt = 0;
+      let progressTimer: ReturnType<typeof setTimeout> | undefined;
+      cancelProgressTimer = () => { if (progressTimer) clearTimeout(progressTimer); progressTimer = undefined; };
+      const publishProgress = (force = false): void => {
+        if (!scope.progress) return;
+        const now = Date.now();
+        const emit = () => {
+          lastProgressAt = Date.now();
+          progressTimer = undefined;
+          scope.progress?.({
+            totalCases: jobs.length,
+            completedCases: Math.min(jobs.length, completedCases),
+            totalAttempts: batchPlan.plannedAttempts,
+            completedAttempts: Math.min(batchPlan.plannedAttempts, completedAttempts),
+            activeCaseNames: [...activeCases.values()].slice(0, 8),
+          });
+        };
+        if (force || now - lastProgressAt >= 100) {
+          if (progressTimer) clearTimeout(progressTimer);
+          emit();
+        } else if (!progressTimer) progressTimer = setTimeout(emit, Math.max(1, 100 - (now - lastProgressAt)));
+      };
+      const markAttemptComplete = (job: ScenarioJob): void => {
+        const planned = plannedAttemptsByJob.get(job.item.id) ?? 1;
+        const current = completedAttemptsByJob.get(job.item.id) ?? 0;
+        if (current >= planned) return;
+        completedAttemptsByJob.set(job.item.id, current + 1);
+        completedAttempts += 1;
+        publishProgress();
+      };
+      publishProgress(true);
       if (!batchPlan.valid || !batchPlan.withinBudget) {
         operation.fail({ reason: 'budget-rejected', issues: batchPlan.issues.length });
         throw new Error(batchPlan.issues.map((issue) => issue.message).join('\n'));
@@ -719,8 +763,13 @@ export class ScenarioTestController implements vscode.Disposable {
             const index = cursor++;
             const preparedJob = prepared[index];
             if (!preparedJob) return;
-            const result = await this.runJob(preparedJob.job, run, effectiveToken, selection, preparedJob.loaded, runEvidenceIds, persistedGroups, Boolean(scope.runId), scope.campaign);
-            if (result) completed.push(result);
+            activeCases.set(preparedJob.job.item.id, String(preparedJob.job.item.label));
+            publishProgress(true);
+            let result: CompletedScenario | undefined;
+            try { result = await this.runJob(preparedJob.job, run, effectiveToken, selection, preparedJob.loaded, runEvidenceIds, persistedGroups, Boolean(scope.runId), scope.campaign, () => markAttemptComplete(preparedJob.job)); }
+            finally { activeCases.delete(preparedJob.job.item.id); }
+            if (result) { completed.push(result); completedCases += 1; }
+            publishProgress(true);
           }
         }));
       }
@@ -840,6 +889,8 @@ export class ScenarioTestController implements vscode.Disposable {
       const failures = completed.filter((item) => item.record.status !== 'passed').length;
       if (effectiveToken.isCancellationRequested) operation.cancel({ completedCases: completed.length, failedCases: failures });
       else operation.complete({ completedCases: completed.length, failedCases: failures });
+      cancelProgressTimer();
+      publishProgress(true);
       return {
         summaries: snapshotSummaries.map((summary) => ({ ...summary, counts: summary.counts ? { ...summary.counts } : undefined })),
         results: snapshotResults,
@@ -856,6 +907,7 @@ export class ScenarioTestController implements vscode.Disposable {
         }
       }
       trustCancellation?.dispose();
+      cancelProgressTimer?.();
       run.end();
     }
   }
@@ -886,7 +938,7 @@ export class ScenarioTestController implements vscode.Disposable {
     return [...new Set(ids)].flatMap((id) => found.get(id) ? [found.get(id)!] : []);
   }
 
-  private async runJob(job: ScenarioJob, run: vscode.TestRun, token: vscode.CancellationToken, selection: ScenarioRunSelection, loaded: LoadedScenario, runEvidenceIds: string[], persistedGroups: Array<{ profileId: string; id: string; retention: number }>, protectEvidence: boolean, campaign?: NonNullable<ScenarioRunScope['campaign']>): Promise<CompletedScenario | undefined> {
+  private async runJob(job: ScenarioJob, run: vscode.TestRun, token: vscode.CancellationToken, selection: ScenarioRunSelection, loaded: LoadedScenario, runEvidenceIds: string[], persistedGroups: Array<{ profileId: string; id: string; retention: number }>, protectEvidence: boolean, campaign?: NonNullable<ScenarioRunScope['campaign']>, onAttemptComplete?: () => void): Promise<CompletedScenario | undefined> {
     const startedAt = Date.now();
     run.started(job.item);
     let session: SessionController | undefined;
@@ -898,12 +950,13 @@ export class ScenarioTestController implements vscode.Disposable {
         const baselineScenario = withoutAssertions(withTargetControls(scenario, scenario.comparison.baseline.controls));
         const baselineSession = await this.createSession(job.uri, loaded.profile, selectEnvironment(loaded.environments, scenario.comparison.baseline.environment ?? loaded.profile.environment));
         let baseline: ScenarioRunResult;
-        try { baseline = await runScenario(loaded.profile.id, baselineScenario, baselineSession, token); }
+        try { baseline = await runScenario(loaded.profile.id, baselineScenario, baselineSession, token); onAttemptComplete?.(); }
         finally { await baselineSession.disposeAndWait(); }
         if (token.isCancellationRequested) { run.skipped(job.item); return undefined; }
         const candidateScenario = withTargetControls(scenario, scenario.comparison.candidate.controls);
         session = await this.createSession(job.uri, loaded.profile, selectEnvironment(loaded.environments, scenario.comparison.candidate.environment ?? loaded.profile.environment), scenario.faults);
         const candidate = await runScenario(loaded.profile.id, candidateScenario, session, token);
+        onAttemptComplete?.();
         const comparison = compareScenarioEvidence(baseline.evidence, candidate.evidence, scenario.comparison);
         const baselineCheck: ScenarioCheckResult = {
           id: 'comparison.baseline-valid',
@@ -941,6 +994,7 @@ export class ScenarioTestController implements vscode.Disposable {
             cancellation: token,
             openingRequestsPerAttempt: loaded.profile.opening?.mode === 'request' ? 1 : 0,
             onAttemptComplete: async (record, attempt) => {
+              onAttemptComplete?.();
               if (attempt.result) {
                 // Attempt capsules remain bounded and evictable. The aggregate
                 // case capsule below contains the complete repetition result
@@ -967,6 +1021,7 @@ export class ScenarioTestController implements vscode.Disposable {
         } else {
           session = await this.createSession(job.uri, loaded.profile, loaded.environment, scenario.faults);
           const single = await runScenario(loaded.profile.id, scenario, session, token);
+          onAttemptComplete?.();
           const checks = [...single.checks, ...evaluatePerformance(scenario.performance, single)];
           result = { ...single, checks, passed: single.passed && checks.every((check) => check.passed) };
         }
@@ -1029,7 +1084,7 @@ export class ScenarioTestController implements vscode.Disposable {
     const firstError = issues.find((issue) => issue.severity === 'error');
     if (!parsed.profile || firstError) throw new Error(firstError?.message ?? localize('Profile could not be parsed.'));
     const scenario = suitePath
-      ? (await loadAdversarialSuite(uri, suitePath)).scenarios.find((candidate) => candidate.id === scenarioId)
+      ? (await loadAdversarialSuite(uri, suitePath, (reference) => this.externalAdversarialSuites.resolve(uri, reference))).scenarios.find((candidate) => candidate.id === scenarioId)
       : parsed.profile.tests?.scenarios.find((candidate) => candidate.id === scenarioId);
     if (!scenario) throw new Error(localize('Scenario {id} was not found.', { id: scenarioId }));
     const available = environments.map((entry) => entry.environment);

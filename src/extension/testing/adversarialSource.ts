@@ -10,7 +10,7 @@ export interface ParsedAdversarialSource {
 
 /** Parse a linked adversarial source without rewriting or converting its file. */
 export function parseAdversarialSource(path: string, text: string): ParsedAdversarialSource {
-  if (/\.adversarial\.csv$/iu.test(path)) {
+  if (/\.csv$/iu.test(path)) {
     const parsed = parseAdversarialCsv(text);
     const issues = parsed.issues.map((issue) => `${path}:${issue.row}${issue.column ? `:${issue.column}` : ''}: ${issue.message}`);
     if (issues.length) return { scenarios: [], issues };
@@ -26,14 +26,14 @@ export function parseAdversarialSource(path: string, text: string): ParsedAdvers
 }
 
 function csvSuiteId(path: string): string {
-  const base = path.split('/').at(-1)?.replace(/\.adversarial\.csv$/iu, '') ?? 'csv';
+  const base = path.split('/').at(-1)?.replace(/(?:\.adversarial)?\.csv$/iu, '') ?? 'csv';
   const slug = base.toLocaleLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-+|-+$/gu, '').slice(0, 48) || 'csv';
   return `${slug}-${stableHash(path.toLocaleLowerCase())}`;
 }
 
 function csvSuiteName(path: string): string {
   const file = path.split('/').at(-1) ?? path;
-  const name = file.replace(/\.adversarial\.csv$/iu, '').replace(/[-_]+/gu, ' ').trim();
+  const name = file.replace(/(?:\.adversarial)?\.csv$/iu, '').replace(/[-_]+/gu, ' ').trim();
   return name || file;
 }
 

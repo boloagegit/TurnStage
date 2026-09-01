@@ -241,10 +241,15 @@ describe('SessionController end-to-end functional flow', () => {
 
     await controller.send('下一句', { kind: 'manual' });
     expect(controller.requestPreview).toMatchObject({ variantId: 'continuation', body: expect.objectContaining({ cid }) });
-    expect(controller.snapshot.rawEvents).toHaveLength(5);
-    expect(controller.snapshot.normalizedEvents).toHaveLength(5);
+    expect(controller.snapshot.rawEvents).toHaveLength(10);
+    expect(controller.snapshot.normalizedEvents).toHaveLength(10);
+    expect(controller.snapshot.rawEvents.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(controller.snapshot.rawEvents.slice(0, 5).every((event) => event.turnIndex === 0 && event.turnId && event.turnSequence === event.sequence)).toBe(true);
+    expect(controller.snapshot.rawEvents.slice(5).every((event, index) => event.turnIndex === 1 && event.turnId && event.turnSequence === index + 1)).toBe(true);
+    expect(new Set(controller.snapshot.rawEvents.map((event) => event.turnId)).size).toBe(2);
     expect(savedRuns).toHaveLength(2);
     expect(savedRuns.every((run) => run.rawEvents?.length === 5)).toBe(true);
+    expect(savedRuns.every((run) => run.snapshot?.rawEvents.length === 5)).toBe(true);
     expect(controller.snapshot.messages.at(-3)?.timing).toEqual(firstAssistantTiming);
     expect(controller.snapshot.messages.at(-1)?.timing).toMatchObject({ ttft: expect.any(Number), totalDuration: expect.any(Number) });
     expect(controller.snapshot.messages.at(-1)?.timing).not.toBe(controller.snapshot.messages.at(-3)?.timing);

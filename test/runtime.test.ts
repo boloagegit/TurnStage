@@ -323,6 +323,35 @@ describe('isActive and SessionController.finalizeTurn', () => {
     expect(controller.snapshot.droppedMessageCount).toBe(1);
   });
 
+  it('assigns conversation-wide event identity without mutating transport-local sequence values', async () => {
+    const { SessionController } = await import('../src/extension/runtime/sessionController');
+    const controller = new SessionController(
+      { version: 1, id: 'event-identity-test', name: 'Event identity', conversation: { send: { method: 'POST', url: 'https://example.test' } }, stream: { transport: 'sse', mappings: [] } },
+      {} as never,
+      { version: 1, id: 'env', name: 'Environment', variables: {} },
+      {} as never,
+      { get: vi.fn() } as never,
+      { save: vi.fn() } as never,
+      vi.fn(),
+      { appendLine: vi.fn() } as never,
+    );
+    const internals = controller as unknown as {
+      finalized: boolean;
+      nextEventSequence: number;
+      currentTurn: { clientRequestId: string; startedAt: number; turnIndex: number };
+      acceptRaw: (raw: RawStreamEvent) => Promise<boolean>;
+    };
+    internals.finalized = false;
+    internals.nextEventSequence = 6;
+    internals.currentTurn = { clientRequestId: 'turn-2', startedAt: 1000, turnIndex: 1 };
+    const transportEvent: RawStreamEvent = { sequence: 2, receivedAt: 1020, elapsedMs: 20, protocol: 'sse', raw: '{}', data: {} };
+
+    await internals.acceptRaw(transportEvent);
+
+    expect(transportEvent.sequence).toBe(2);
+    expect(controller.snapshot.rawEvents[0]).toMatchObject({ sequence: 6, turnId: 'turn-2', turnIndex: 1, turnSequence: 2 });
+  });
+
   it('lets extension deactivation await active-turn finalization and run persistence', async () => {
     vi.mock('vscode', () => ({ workspace: { isTrusted: true, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), getWorkspaceFolder: () => undefined } }));
     const { SessionController } = await import('../src/extension/runtime/sessionController');

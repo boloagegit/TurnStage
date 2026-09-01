@@ -20,6 +20,7 @@ const DEFAULT_IGNORE_PATHS = [
   'events.normalized[*].sequence',
   'events.normalized[*].receivedAt',
   'events.normalized[*].rawSequence',
+  'events.normalized[*].turnId',
 ];
 const comparisonRoots = new Set(['session', 'messages', 'events', 'errors', 'network']);
 

@@ -23,6 +23,9 @@ describe('linked adversarial sources', () => {
       id: 'gradual-override', steps: [{ id: 'context' }, { id: 'attack' }],
       adversarial: { mode: 'multiTurn', maxTurns: 2, repetitions: 3, forbid: { content: ['protected-marker'], tools: true } },
     });
+    const genericName = parseAdversarialSource('/Users/example/security.csv', source);
+    expect(genericName.issues).toEqual([]);
+    expect(genericName.suite?.name).toBe('security');
   });
 
   it('reports CSV locations without returning a partial suite', () => {

@@ -383,6 +383,7 @@
   "Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .json, or .csv path.": "對抗式套件路徑必須是安全的工作區相對 .adversarial.jsonc、.json 或 .csv 路徑。",
   "Adversarial suite paths must be unique.": "對抗式套件路徑不得重複。",
   "Adversarial suites must be an array with at most 100 workspace-relative paths.": "對抗式套件必須是最多 100 個工作區相對路徑的陣列。",
+  "Adversarial suites must contain at most 100 workspace-relative or locally authorized external sources.": "對抗式套件最多可包含 100 個工作區相對來源或本機已授權的外部來源。",
   "Adversarial timeoutMs must be an integer from 1000 to 300000.": "對抗式 timeoutMs 必須是 1000 到 300000 的整數。",
   "An adversarial case requires at least one prohibited effect.": "對抗式案例至少需要一個禁止效果。",
   "CSV template exported.": "CSV 範本已匯出。",
@@ -573,5 +574,9 @@
   "No active TurnStage test run is available to stop.": "目前沒有可停止的 TurnStage 測試。",
   "Only a safe suite linked by this Profile can be opened.": "只能開啟此 Profile 已連結且路徑安全的測試套件。",
   "Test runtime is unavailable.": "測試執行階段目前無法使用。",
-  "The linked suite cannot be resolved because this Profile is not inside a workspace folder.": "此 Profile 不在工作區資料夾內，因此無法解析已連結的測試套件。"
+  "The linked suite cannot be resolved because this Profile is not inside a workspace folder.": "此 Profile 不在工作區資料夾內，因此無法解析已連結的測試套件。",
+  "Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .adversarial.json, or .csv path.": "對抗式測試套件路徑必須是安全的工作區相對 .adversarial.jsonc、.adversarial.json 或 .csv 路徑。",
+  "Linked suites must be an adversarial JSONC/JSON file or a CSV file.": "連結的測試套件必須是對抗式 JSONC／JSON 檔案或 CSV 檔案。",
+  "The selected suite reference is invalid.": "選取的測試套件參照無效。",
+  "This external suite is not authorized on this machine. Link the file again.": "此電腦尚未授權這個外部測試套件，請重新連結該檔案。"
 }

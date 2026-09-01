@@ -26,6 +26,7 @@ export interface TurnStageProfile {
 export interface ProfileTestsDefinition {
   scenarios: ScenarioDefinition[];
   /** Workspace-relative, Git-friendly adversarial JSONC or CSV source files. */
+  /** Workspace-relative sources or opaque, locally authorized external file references. */
   adversarialSuites?: string[];
   /** Optional explicit, workspace-relative CI report output. */
   reporting?: ScenarioReportingDefinition;
@@ -711,6 +712,12 @@ export interface InteractionContext {
 
 export interface RawStreamEvent {
   sequence: number;
+  /** Stable request identity for grouping events within a conversation. */
+  turnId?: string;
+  /** Zero-based turn position within the current conversation. */
+  turnIndex?: number;
+  /** Transport-local sequence before TurnStage assigns a conversation-wide sequence. */
+  turnSequence?: number;
   receivedAt: number;
   elapsedMs: number;
   protocol: 'sse' | 'ndjson' | 'json' | 'text-stream' | 'fixture';
@@ -726,6 +733,9 @@ export interface NormalizedEvent {
   version: 1;
   type: string;
   sequence: number;
+  turnId?: string;
+  turnIndex?: number;
+  turnSequence?: number;
   receivedAt: number;
   rawSequence?: number;
   mappingRuleId?: string;
@@ -807,6 +817,8 @@ export type NetworkExchangeKind = 'opening' | 'stream' | 'stop';
 export type NetworkExchangeState = 'pending' | 'streaming' | 'completed' | 'failed' | 'aborted';
 export interface NetworkExchange {
   id: string;
+  turnId?: string;
+  turnIndex?: number;
   kind: NetworkExchangeKind;
   attempt: number;
   method: string;

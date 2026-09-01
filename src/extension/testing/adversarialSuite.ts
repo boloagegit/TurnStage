@@ -9,6 +9,7 @@ import type {
 import { isSafeReportDirectory } from './scenarioConfig';
 import { isSafeAssertionRegex } from './assertionEvaluator';
 import { validateSourceBinding } from './impactMapping';
+import { isExternalAdversarialSuiteReference } from './externalAdversarialSuiteReference';
 
 export const MAX_ADVERSARIAL_CASES_PER_SUITE = 500;
 export const MAX_ADVERSARIAL_TURNS_PER_CASE = 10;
@@ -178,7 +179,9 @@ export function createAdversarialSuite(id: string, name: string, scenarios: read
 export function serializeAdversarialSuite(suite: AdversarialSuiteDefinition): string { return `${JSON.stringify(suite, null, 2)}\n`; }
 
 export function isSafeAdversarialSuitePath(value: unknown): value is string {
-  return typeof value === 'string' && /\.adversarial\.(?:jsonc|json|csv)$/i.test(value) && isSafeReportDirectory(value);
+  if (typeof value !== 'string') return false;
+  if (value.startsWith('external:')) return isExternalAdversarialSuiteReference(value);
+  return /(?:\.adversarial\.(?:jsonc|json)|\.csv)$/i.test(value) && isSafeReportDirectory(value);
 }
 
 function normalizeCase(suite: AdversarialSuiteDefinition, testCase: AdversarialSuiteCaseDefinition): ScenarioDefinition {

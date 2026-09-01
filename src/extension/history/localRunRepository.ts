@@ -272,6 +272,16 @@ function sanitizeRawEvents(value: unknown): RawStreamEvent[] | undefined {
     const record = asRecord(item);
     if (!record || !Object.prototype.hasOwnProperty.call(record, 'data') || !isNonNegativeNumber(record.sequence) || !isTimestamp(record.receivedAt) || !isNonNegativeNumber(record.elapsedMs) || typeof record.protocol !== 'string' || !rawProtocols.has(record.protocol as RawStreamEvent['protocol']) || typeof record.raw !== 'string') return undefined;
     const event: RawStreamEvent = { sequence: record.sequence, receivedAt: record.receivedAt, elapsedMs: record.elapsedMs, protocol: record.protocol as RawStreamEvent['protocol'], raw: record.raw, data: record.data };
+    if (record.turnId !== undefined) {
+      if (typeof record.turnId !== 'string' || !record.turnId.length || record.turnId.length > 512) return undefined;
+      event.turnId = record.turnId;
+    }
+    for (const key of ['turnIndex', 'turnSequence'] as const) {
+      if (record[key] !== undefined) {
+        if (!isNonNegativeNumber(record[key])) return undefined;
+        event[key] = record[key];
+      }
+    }
     if (record.sse !== undefined) {
       const sse = sanitizeSse(record.sse);
       if (!sse) return undefined;
@@ -313,6 +323,9 @@ function sanitizeNormalizedEvents(value: unknown): NormalizedEvent[] | undefined
     if (!record || record.version !== 1 || !isNonEmptyString(record.type) || !isNonNegativeNumber(record.sequence) || !isTimestamp(record.receivedAt)) return undefined;
     if (record.rawSequence !== undefined && !isNonNegativeNumber(record.rawSequence)) return undefined;
     if (record.mappingRuleId !== undefined && typeof record.mappingRuleId !== 'string') return undefined;
+    if (record.turnId !== undefined && (typeof record.turnId !== 'string' || !record.turnId.length || record.turnId.length > 512)) return undefined;
+    if (record.turnIndex !== undefined && !isNonNegativeNumber(record.turnIndex)) return undefined;
+    if (record.turnSequence !== undefined && !isNonNegativeNumber(record.turnSequence)) return undefined;
     events.push({ ...record, version: 1, type: record.type, sequence: record.sequence, receivedAt: record.receivedAt } as NormalizedEvent);
   }
   return events;
