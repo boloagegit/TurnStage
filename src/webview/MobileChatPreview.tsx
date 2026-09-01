@@ -21,10 +21,12 @@ import { IconButton, ProductIcon } from './Icon';
 import { SafeMarkdown } from './SafeMarkdown';
 import { captureChatScreenshot, copyChatScreenshotToClipboard } from './chatScreenshot';
 import { resolveComposer, resolveMessageActions, resolveMessageActionVisibility, resolveStreaming, type ResolvedStreaming } from './uiConfig';
+import { advanceGraphemeBoundary, calculateRevealStep, resolveRevealPacing } from './streamingReveal';
 import { isSafeRegexPattern } from '../shared/regexSafety';
 import './mobileChatPreview.css';
 
 export const CHAT_SCROLL_BOTTOM_THRESHOLD = 48;
+export const DEFAULT_VISIBLE_CHAT_MESSAGES = 200;
 
 export const CHAT_VIEWPORT_PRESETS = [
   { id: 'mobile-s', label: 'Mobile S', width: 320, height: 568 },
@@ -130,9 +132,12 @@ export function MobileChatPreview({
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
   const [capturingVisual, setCapturingVisual] = useState<'baseline' | 'compare'>();
   const [screenshotStatus, setScreenshotStatus] = useState('');
-  const snapshotMessages = snapshot?.messages ?? EMPTY_MESSAGES;
+  const allSnapshotMessages = snapshot?.messages ?? EMPTY_MESSAGES;
+  const [visibleMessageLimit, setVisibleMessageLimit] = useState(DEFAULT_VISIBLE_CHAT_MESSAGES);
+  const hiddenMessageCount = Math.max(0, allSnapshotMessages.length - visibleMessageLimit);
+  const snapshotMessages = useMemo(() => hiddenMessageCount ? allSnapshotMessages.slice(hiddenMessageCount) : allSnapshotMessages, [allSnapshotMessages, hiddenMessageCount]);
   const messageTagEventIndex = useMemo(() => createMessageTagEventIndex(snapshot), [snapshot?.rawEvents, snapshot?.normalizedEvents]);
-  const messageContentKey = getMessageContentKey(snapshotMessages);
+  const messageContentKey = useMemo(() => getMessageContentKey(snapshotMessages), [snapshotMessages]);
   const trusted = snapshot?.trusted === true;
   const opening = snapshot?.opening ?? staticOpening(profile);
   const statusText = previewStatus(snapshot, active, continuationBlocked);
@@ -151,6 +156,13 @@ export function MobileChatPreview({
     width: `${Math.round(logicalWidth * previewScale)}px`,
     height: `${Math.round(logicalHeight * previewScale)}px`
   } as CSSProperties;
+
+  useEffect(() => { setVisibleMessageLimit(DEFAULT_VISIBLE_CHAT_MESSAGES); }, [snapshot?.sessionId]);
+  useEffect(() => {
+    if (!selectedMessageId || hiddenMessageCount === 0) return;
+    const index = allSnapshotMessages.findIndex((message) => message.id === selectedMessageId);
+    if (index >= 0 && index < hiddenMessageCount) setVisibleMessageLimit(Math.min(1_000, allSnapshotMessages.length - index));
+  }, [allSnapshotMessages, hiddenMessageCount, selectedMessageId]);
 
   const updateViewport = (next: ChatViewportState) => {
     setUncontrolledViewport(next);
@@ -348,6 +360,7 @@ export function MobileChatPreview({
         <div className="mobile-chat-preview__content">
           {profile.controls && profile.controls.length > 0 && <MobileControls profile={profile} snapshot={snapshot} active={active} trusted={trusted} post={post} />}
           <div ref={messagesRef} className="mobile-chat-preview__messages" role="log" aria-label={t('Conversation messages')} aria-live="polite" aria-relevant="additions text">
+            {hiddenMessageCount > 0 && <button className="mobile-chat-preview__load-history" type="button" onClick={() => setVisibleMessageLimit((current) => Math.min(1_000, current + DEFAULT_VISIBLE_CHAT_MESSAGES))}>{t('Show {count} earlier messages', { count: formatNumber(Math.min(DEFAULT_VISIBLE_CHAT_MESSAGES, hiddenMessageCount)) })}</button>}
             {snapshot?.sessionState === 'notStarted' && profile.opening?.mode === 'request' && <StartSessionCard post={post} trusted={trusted} headingId={`${previewId}-start-heading`} />}
             {snapshot?.sessionState === 'failed' && profile.opening?.mode === 'request' && <OpeningError profile={profile} snapshot={snapshot} post={post} trusted={trusted} headingId={`${previewId}-opening-error-heading`} />}
             {opening && componentVisible(profile, 'opening') && <OpeningCard profile={profile} opening={opening} active={active} trusted={trusted} setDraft={setDraft} send={send} post={post} headingId={`${previewId}-opening-heading`} />}
@@ -623,7 +636,7 @@ function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post,
     {message.role !== 'user' && <span className="mobile-chat-preview__message-avatar" aria-hidden="true">{profile.name.trim().charAt(0).toUpperCase() || 'T'}</span>}
     <span className="mobile-chat-preview__message-heading"><strong>{roleLabel}</strong><MessageStatus state={message.status} />{messageTags.length > 0 && <span className="mobile-chat-preview__message-tags" aria-label={t('Message tags')}>{messageTags.map((tag) => <span className={`mobile-chat-preview__message-tag mobile-chat-preview__message-tag--${tag.tone}`} key={tag.id}>{tag.label}</span>)}</span>}</span>
     <div className="mobile-chat-preview__message-body">
-      {parts.map((part, index) => <MobileMessagePart key={`${part.type}-${index}`} profile={profile} part={part} messageId={message.id} citations={citations} post={post} trusted={trusted} accepted={acceptedForms?.has(formInstanceKey(message.id, part) ?? '')} trailingStreaming={streamingAssistant && index === trailingTextPartIndex ? streaming : undefined} />)}
+      {parts.map((part, index) => <MobileMessagePart key={`${part.type}-${index}`} profile={profile} part={part} messageId={message.id} citations={citations} post={post} trusted={trusted} accepted={acceptedForms?.has(formInstanceKey(message.id, part) ?? '')} streaming={message.role === 'assistant' ? streaming : undefined} streamingActive={streamingAssistant && index === trailingTextPartIndex} />)}
       {streamingAssistant && trailingTextPartIndex < 0 && <StreamingIndicator streaming={streaming} />}
       {componentVisible(profile, 'citations') && citations.length > 0 && <CitationList profile={profile} citations={citations} post={post} trusted={trusted} />}
       {componentVisible(profile, 'responseActions') && message.status === 'completed' && actions.length > 0 && <div className="mobile-chat-preview__action-row" role="group" aria-label={t('Response actions')}>{primaryActions.map((action) => <ResponseActionButton key={action.id} action={action} messageId={message.id} trusted={trusted} setDraft={setDraft} post={post} onSelectMessage={onSelectMessage} />)}{overflowActions.length > 0 && <details className="mobile-chat-preview__overflow"><summary>{t('More actions')}</summary><div>{overflowActions.map((action) => <ResponseActionButton key={action.id} action={action} messageId={message.id} trusted={trusted} setDraft={setDraft} post={post} onSelectMessage={onSelectMessage} />)}</div></details>}</div>}
@@ -756,9 +769,9 @@ export function resizeComposerTextarea(textarea: HTMLTextAreaElement | null): vo
   textarea.style.overflowY = contentHeight > maximum ? 'auto' : 'hidden';
 }
 
-function MobileMessagePart({ profile, part, messageId, citations, post, trusted, accepted, trailingStreaming }: { profile: TurnStageProfile; part: MessagePart; messageId: string; citations: Citation[]; post: PostMessage; trusted: boolean; accepted?: boolean; trailingStreaming?: ResolvedStreaming }): React.JSX.Element | null {
-  if (part.type === 'text') return <MobileText text={part.text ?? ''} trailingStreaming={trailingStreaming} />;
-  if (part.type === 'markdown') return <div className="mobile-chat-preview__text"><SafeMarkdown text={part.text ?? ''} copyLabel={t('Copy code')} onOpenLink={(uri) => post({ type: 'uri.open', uri })} />{trailingStreaming ? <StreamingIndicator streaming={trailingStreaming} /> : null}</div>;
+function MobileMessagePart({ profile, part, messageId, citations, post, trusted, accepted, streaming, streamingActive }: { profile: TurnStageProfile; part: MessagePart; messageId: string; citations: Citation[]; post: PostMessage; trusted: boolean; accepted?: boolean; streaming?: ResolvedStreaming; streamingActive: boolean }): React.JSX.Element | null {
+  if (part.type === 'text') return <MobileText text={part.text ?? ''} streaming={streaming} streamingActive={streamingActive} />;
+  if (part.type === 'markdown') return <MobileMarkdown text={part.text ?? ''} post={post} streaming={streaming} streamingActive={streamingActive} />;
   if (part.type === 'citation-reference') {
     if (!componentVisible(profile, 'citations')) return null;
     const citationId = typeof part.citationId === 'string' ? part.citationId : '';
@@ -788,14 +801,95 @@ function MobileMessagePart({ profile, part, messageId, citations, post, trusted,
   return null;
 }
 
-function MobileText({ text, trailingStreaming }: { text: string; trailingStreaming?: ResolvedStreaming }): React.JSX.Element {
-  const blocks = text.split(/```/);
+function MobileMarkdown({ text, post, streaming, streamingActive }: { text: string; post: PostMessage; streaming?: ResolvedStreaming; streamingActive: boolean }): React.JSX.Element {
+  const visibleText = useStreamingRevealText(text, streamingActive, streaming);
+  return <div className="mobile-chat-preview__text" data-reveal-mode={streaming?.reveal ?? 'instant'}><SafeMarkdown text={visibleText} copyLabel={t('Copy code')} onOpenLink={(uri) => post({ type: 'uri.open', uri })} />{streamingActive && streaming ? <StreamingIndicator streaming={streaming} /> : null}</div>;
+}
+
+function MobileText({ text, streaming, streamingActive }: { text: string; streaming?: ResolvedStreaming; streamingActive: boolean }): React.JSX.Element {
+  const visibleText = useStreamingRevealText(text, streamingActive, streaming);
+  const blocks = visibleText.split(/```/);
   const trailingBlock = blocks.map((block, index) => index % 2 === 0 && Boolean(block)).lastIndexOf(true);
-  return <div className="mobile-chat-preview__text">{blocks.map((block, index) => index % 2
+  return <div className="mobile-chat-preview__text" data-reveal-mode={streaming?.reveal ?? 'instant'}>{blocks.map((block, index) => index % 2
     ? <pre key={index}><code>{block.replace(/^\w+\n/, '')}</code></pre>
-    : block ? <p key={index}>{block}{index === trailingBlock && trailingStreaming ? <StreamingIndicator streaming={trailingStreaming} /> : null}</p> : null)}
-    {trailingStreaming && trailingBlock < 0 ? <StreamingIndicator streaming={trailingStreaming} /> : null}
+    : block ? <p key={index}>{block}{index === trailingBlock && streamingActive && streaming ? <StreamingIndicator streaming={streaming} /> : null}</p> : null)}
+    {streamingActive && streaming && trailingBlock < 0 ? <StreamingIndicator streaming={streaming} /> : null}
   </div>;
+}
+
+function useStreamingRevealText(text: string, active: boolean, streaming?: ResolvedStreaming): string {
+  const configured = streaming !== undefined;
+  const adaptive = Boolean(streaming && streaming.reveal === 'adaptive');
+  const maxVisualLagMs = streaming?.maxVisualLagMs ?? 600;
+  const [presentationBypass, setPresentationBypass] = useState(() => shouldBypassStreamingReveal());
+  const pacing = resolveRevealPacing(streaming?.pace ?? 'balanced');
+  const [visibleLength, setVisibleLength] = useState(() => adaptive && active && !presentationBypass
+    ? advanceGraphemeBoundary(text, 0, pacing.initialGraphemes)
+    : text.length);
+  const targetRef = useRef(text);
+  const deadlineRef = useRef(nowMs() + maxVisualLagMs);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const media = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : undefined;
+    const sync = () => setPresentationBypass(shouldBypassStreamingReveal());
+    document.addEventListener('visibilitychange', sync);
+    media?.addEventListener?.('change', sync);
+    return () => {
+      document.removeEventListener('visibilitychange', sync);
+      media?.removeEventListener?.('change', sync);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const previousTarget = targetRef.current;
+    const appendOnly = text.startsWith(previousTarget);
+    targetRef.current = text;
+    if (!adaptive || !active || presentationBypass || !configured) {
+      setVisibleLength(text.length);
+      return;
+    }
+    if (!appendOnly) {
+      deadlineRef.current = nowMs() + maxVisualLagMs;
+      setVisibleLength(advanceGraphemeBoundary(text, 0, pacing.initialGraphemes));
+      return;
+    }
+    setVisibleLength((current) => {
+      const boundedCurrent = Math.min(current, text.length);
+      if (text.length > boundedCurrent && boundedCurrent >= previousTarget.length) {
+        deadlineRef.current = nowMs() + maxVisualLagMs;
+        return advanceGraphemeBoundary(text, boundedCurrent, pacing.initialGraphemes);
+      }
+      return boundedCurrent;
+    });
+  }, [active, adaptive, configured, maxVisualLagMs, pacing.initialGraphemes, presentationBypass, text]);
+
+  useEffect(() => {
+    if (!adaptive || !active || presentationBypass || !configured) return undefined;
+    const timer = window.setInterval(() => {
+      setVisibleLength((current) => {
+        const target = targetRef.current;
+        const backlog = Math.max(0, target.length - current);
+        if (backlog === 0) return current;
+        const elapsed = Math.max(0, maxVisualLagMs - Math.max(0, deadlineRef.current - nowMs()));
+        const step = Math.max(pacing.minimumGraphemes, calculateRevealStep(backlog, maxVisualLagMs, pacing.intervalMs, elapsed));
+        return advanceGraphemeBoundary(target, current, step);
+      });
+    }, pacing.intervalMs);
+    return () => window.clearInterval(timer);
+  }, [active, adaptive, configured, maxVisualLagMs, pacing.intervalMs, pacing.minimumGraphemes, presentationBypass]);
+
+  return text.slice(0, Math.min(visibleLength, text.length));
+}
+
+function shouldBypassStreamingReveal(): boolean {
+  if (typeof document === 'undefined') return true;
+  if (document.hidden || document.body.classList.contains('vscode-using-screen-reader') || document.body.classList.contains('vscode-reduce-motion')) return true;
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function nowMs(): number {
+  return typeof performance === 'undefined' ? Date.now() : performance.now();
 }
 
 function JsonPreview({ value }: { value: unknown }): React.JSX.Element {

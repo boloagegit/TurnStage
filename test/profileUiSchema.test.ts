@@ -85,7 +85,7 @@ function matchesSchema(value: unknown, node: SchemaNode): boolean {
 const validUi: UiDefinition = {
   layout: { preset: 'split-inspector', inspectorPosition: 'right', inspectorWidth: 360 },
   composer: { placeholder: 'Enter a test message...', multiline: true, enterBehavior: 'send', shiftEnterBehavior: 'newline', showStopWhileStreaming: true },
-  streaming: { effect: 'dots', speedMs: 1200, intensityPercent: 80 },
+  streaming: { reveal: 'adaptive', indicator: 'dots', pace: 'balanced', maxVisualLagMs: 600, speedMs: 1200, intensityPercent: 80 },
   locks: { whileTurnActive: { disable: ['composer', 'actor'], allow: ['stop', 'message.copy'] } },
   components: {
     progress: { visible: true, label: 'Progress', collapsible: true, defaultCollapsed: false, icon: 'activity' },
@@ -115,8 +115,12 @@ describe('profile UI schema', () => {
 
     const streaming = propertySchema(uiSchema, 'streaming');
     expect(streaming).toMatchObject({ type: 'object', additionalProperties: false });
-    expect(Object.keys(streaming.properties ?? {})).toEqual(['effect', 'speedMs', 'intensityPercent']);
+    expect(Object.keys(streaming.properties ?? {})).toEqual(['reveal', 'indicator', 'effect', 'pace', 'maxVisualLagMs', 'speedMs', 'intensityPercent']);
+    expect(propertySchema(streaming, 'reveal').enum).toEqual(['instant', 'event', 'adaptive']);
+    expect(propertySchema(streaming, 'indicator').enum).toEqual(['none', 'caret', 'dots', 'shimmer']);
     expect(propertySchema(streaming, 'effect').enum).toEqual(['none', 'caret', 'dots', 'shimmer']);
+    expect(propertySchema(streaming, 'pace').enum).toEqual(['calm', 'balanced', 'fast']);
+    expect(propertySchema(streaming, 'maxVisualLagMs')).toEqual({ type: 'integer', minimum: 100, maximum: 2000 });
     expect(propertySchema(streaming, 'speedMs')).toEqual({ type: 'integer', minimum: 400, maximum: 4000 });
     expect(propertySchema(streaming, 'intensityPercent')).toEqual({ type: 'integer', minimum: 10, maximum: 100 });
 
@@ -169,6 +173,10 @@ describe('profile UI schema', () => {
     ['a misspelled lock field', { ...validUi, locks: { whileTurnActive: { disablee: ['composer'] } } }],
     ['a wrong composer type', { ...validUi, composer: { multiline: 'yes' } }],
     ['an unsupported streaming effect', { ...validUi, streaming: { effect: 'typewriter' } }],
+    ['an unsupported streaming indicator', { ...validUi, streaming: { indicator: 'pulse' } }],
+    ['an unsupported content reveal mode', { ...validUi, streaming: { reveal: 'typewriter' } }],
+    ['an unsupported content reveal pace', { ...validUi, streaming: { pace: 'rushed' } }],
+    ['a visual lag below the supported range', { ...validUi, streaming: { maxVisualLagMs: 50 } }],
     ['a streaming speed below the supported range', { ...validUi, streaming: { speedMs: 100 } }],
     ['a fractional streaming intensity', { ...validUi, streaming: { intensityPercent: 50.5 } }],
     ['a wrong component metadata type', { ...validUi, components: { panel: { visible: 'yes' } } }],

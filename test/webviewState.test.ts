@@ -2,17 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { normalizeNetworkInspectorState, normalizeScrollPosition, normalizeWebviewState, shouldApplyProfileInspectorDefault } from '../src/webview/main';
 
 describe('Webview UI checkpoint', () => {
-  it('restores a bounded v2 checkpoint without accepting arbitrary scroll keys', () => {
+  it('restores a bounded v4 checkpoint without accepting arbitrary scroll keys', () => {
     const restored = normalizeWebviewState({
-      version: 2,
+      version: 4,
       section: 'security',
       configurationSection: 'security',
       rightPaneMode: 'configure',
+      redTeamSection: 'campaigns',
+      selectedCampaignId: 'campaign-1',
       inspectorTab: 'Runs',
       splitPercent: 92,
       splitCustomized: true,
       selectedRawSequence: 9,
       expandedAdversarialCaseId: 'case-1',
+      adversarialCaseCollection: { query: 'privacy', mode: 'multiTurn', source: 'linked:tests/security.csv', tag: 'security', sort: 'name', page: 3, pageSize: 50 },
+      adversarialResultCollection: { query: 'leak', outcome: 'attackSucceeded', stability: 'unstable', page: 2, pageSize: 50 },
       acceptedForms: ['message-1:contact', 'message-1:contact'],
       collapsedEventTurns: { raw: ['turn-1', 'turn-1'], normalized: ['turn-2'] },
       scrollPositions: { chat: 423.6, 'configure.security': 812, arbitrary: 999, 'events.raw': Number.POSITIVE_INFINITY },
@@ -20,15 +24,19 @@ describe('Webview UI checkpoint', () => {
     });
 
     expect(restored).toMatchObject({
-      version: 2,
+      version: 4,
       section: 'security',
       configurationSection: 'security',
       rightPaneMode: 'configure',
+      redTeamSection: 'campaigns',
+      selectedCampaignId: 'campaign-1',
       inspectorTab: 'Runs',
       splitPercent: 90,
       splitCustomized: true,
       selectedRawSequence: 9,
       expandedAdversarialCaseId: 'case-1',
+      adversarialCaseCollection: { query: 'privacy', mode: 'multiTurn', source: 'linked:tests/security.csv', tag: 'security', sort: 'name', page: 3, pageSize: 50 },
+      adversarialResultCollection: { query: 'leak', outcome: 'attackSucceeded', stability: 'unstable', page: 2, pageSize: 50 },
       acceptedForms: ['message-1:contact'],
       collapsedEventTurns: { raw: ['turn-1'], normalized: ['turn-2'] },
       scrollPositions: { chat: 424, 'configure.security': 812 },
@@ -58,8 +66,10 @@ describe('Webview UI checkpoint', () => {
       networkInspector: { query: 'q'.repeat(600), selectedId: 'x'.repeat(513), detailTab: 'Unknown' }
     });
     expect(restored).toEqual({
-      version: 2,
+      version: 4,
       scrollPositions: { chat: 0, adversarial: 10_000_000 },
+      adversarialCaseCollection: { query: '', mode: 'all', source: 'all', tag: 'all', sort: 'sourceOrder', page: 0, pageSize: 25 },
+      adversarialResultCollection: { query: '', outcome: 'all', stability: 'all', page: 0, pageSize: 25 },
       networkInspector: { query: 'q'.repeat(512), detailTab: 'Headers' },
       collapsedEventTurns: { raw: ['ok'], normalized: [] },
       acceptedForms: ['ok']

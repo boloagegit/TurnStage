@@ -33,6 +33,79 @@ const address = server.address();
 assert.ok(address && typeof address === 'object');
 const browser = await chromium.launch(executablePath ? { headless: true, executablePath } : { headless: true });
 
+async function assertRedTeamTabVisual(navigation, label) {
+  const selected = navigation.getByRole('tab', { selected: true });
+  await selected.hover();
+  const style = await selected.evaluate((element) => {
+    const navigationElement = element.closest('.red-team-section-nav');
+    const computed = getComputedStyle(element);
+    return {
+      appearance: computed.appearance,
+      backgroundColor: computed.backgroundColor,
+      backgroundImage: computed.backgroundImage,
+      borderBottomColor: computed.borderBottomColor,
+      boxShadow: computed.boxShadow,
+      navigationBackgroundColor: navigationElement ? getComputedStyle(navigationElement).backgroundColor : '',
+    };
+  });
+  assert.equal(style.appearance, 'none', `${label}: Red Team tabs must opt out of native button painting`);
+  assert.equal(style.backgroundColor, style.navigationBackgroundColor, `${label}: the selected and hovered Red Team tab must use the navigation surface instead of a dark button fill`);
+  assert.equal(style.backgroundImage, 'none', `${label}: the selected Red Team tab must not paint a background image`);
+  assert.equal(style.boxShadow, 'none', `${label}: the selected Red Team tab must not paint a selection block through a shadow`);
+  assert.notEqual(style.borderBottomColor, 'rgba(0, 0, 0, 0)', `${label}: the selected Red Team tab must keep a visible focus underline`);
+}
+
+async function assertAdversarialResultLayout(table, label) {
+  const rows = await table.locator('tbody > tr').evaluateAll((elements) => elements.map((row) => {
+    const cells = [...row.cells];
+    const repeatabilityCell = cells[2];
+    const actionCell = cells[4];
+    const repeatabilityLayout = repeatabilityCell?.querySelector('.adversarial-result-cell-stack');
+    const actionLayout = actionCell?.querySelector('.adversarial-result-actions');
+    const controls = actionLayout ? [...actionLayout.children].map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom };
+    }) : [];
+    const repeatabilityBounds = repeatabilityCell?.getBoundingClientRect();
+    const actionBounds = actionCell?.getBoundingClientRect();
+    const repeatabilityContent = repeatabilityLayout ? [...repeatabilityLayout.querySelectorAll(':scope > span, :scope > small, :scope > details, :scope > details > summary > span')].map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return { left: bounds.left, right: bounds.right };
+    }) : [];
+    return {
+      firstCellDisplay: cells[0] ? getComputedStyle(cells[0]).display : '',
+      repeatabilityCellDisplay: repeatabilityCell ? getComputedStyle(repeatabilityCell).display : '',
+      repeatabilityRight: repeatabilityBounds?.right ?? 0,
+      repeatabilityOverflow: repeatabilityLayout ? getComputedStyle(repeatabilityLayout).overflow : '',
+      repeatabilityContent,
+      actionLeft: actionBounds?.left ?? 0,
+      actionRight: actionBounds?.right ?? 0,
+      actionFits: actionLayout ? actionLayout.scrollWidth <= actionLayout.clientWidth + 1 : false,
+      controls,
+    };
+  }));
+  assert.ok(rows.length > 0, `${label}: result layout check requires rendered rows`);
+  for (const [index, row] of rows.entries()) {
+    assert.equal(row.firstCellDisplay, 'table-cell', `${label}: row ${index + 1} case cell must preserve native table layout`);
+    assert.equal(row.repeatabilityCellDisplay, 'table-cell', `${label}: row ${index + 1} repeatability cell must preserve native table layout`);
+    assert.ok(row.repeatabilityRight <= row.actionLeft + 1, `${label}: row ${index + 1} repeatability and action columns must not overlap`);
+    assert.equal(row.repeatabilityOverflow, 'hidden', `${label}: row ${index + 1} repeatability content must clip at its own column boundary`);
+    for (const [contentIndex, content] of row.repeatabilityContent.entries()) {
+      assert.ok(content.right <= row.repeatabilityRight + 1, `${label}: row ${index + 1} repeatability item ${contentIndex + 1} must stay inside the Repeatability column`);
+    }
+    assert.equal(row.actionFits, true, `${label}: row ${index + 1} action layout must fit inside its table cell`);
+    for (const [controlIndex, control] of row.controls.entries()) {
+      assert.ok(control.left >= row.actionLeft - 1 && control.right <= row.actionRight + 1, `${label}: row ${index + 1} action ${controlIndex + 1} must stay inside the Actions column`);
+    }
+    const timelineControl = row.controls[1];
+    const moreControl = row.controls[2];
+    assert.ok(timelineControl && moreControl, `${label}: row ${index + 1} must expose timeline and more-actions controls`);
+    assert.ok(Math.abs(timelineControl.top - moreControl.top) <= 1, `${label}: row ${index + 1} secondary actions must share one compact row`);
+    const secondaryGap = moreControl.left - timelineControl.right;
+    assert.ok(secondaryGap >= -1 && secondaryGap <= 8, `${label}: row ${index + 1} secondary actions must remain a compact group; received ${secondaryGap}px`);
+  }
+}
+
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const pageErrors = [];
@@ -254,10 +327,18 @@ try {
   await page.screenshot({ path: resolve(artifactDirectory, 'scenario-contract-settings-dark.png'), fullPage: true });
   await page.getByRole('tab', { name: 'Red Team' }).click();
   await page.getByRole('heading', { level: 1, name: 'Adversarial testing' }).waitFor();
+  const redTeamNavigation = page.getByRole('tablist', { name: 'Red Team sections' });
+  assert.equal(await redTeamNavigation.getByRole('tab').count(), 4, 'Red Team must expose four stable sub-tabs for campaigns, cases, results, and timeline');
+  assert.ok((await redTeamNavigation.innerText()).includes('Campaigns') && (await redTeamNavigation.innerText()).includes('Timeline'), 'Red Team landmarks must use recognizable section names');
+  await assertRedTeamTabVisual(redTeamNavigation, 'Dark theme');
+  await redTeamNavigation.screenshot({ path: resolve(artifactDirectory, 'red-team-section-navigation-dark.png') });
+  await redTeamNavigation.getByRole('tab', { name: /Campaigns:/ }).click();
   const campaignCard = page.locator('.campaign-card').filter({ hasText: 'Release safety' });
   await campaignCard.scrollIntoViewIfNeeded();
   assert.equal(await page.getByRole('heading', { name: 'Test campaigns' }).count(), 1, 'Scenario configuration must expose bounded test campaigns');
   assert.equal(await campaignCard.getByText('Completed', { exact: true }).count(), 1, 'Campaign status must be visible without opening a detail page');
+  assert.equal(await campaignCard.getByRole('spinbutton', { name: 'Concurrent cases' }).inputValue(), '2', 'Campaigns must expose their bounded case-level concurrency in the GUI');
+  assert.equal(await campaignCard.getByText('Concurrency 2 / 8', { exact: true }).count(), 1, 'Campaign history must show the concurrency used by the run');
   assert.equal(await campaignCard.getByText('1 regression', { exact: true }).count(), 1, 'Campaign baseline regressions must be visible at a glance');
   assert.equal(await campaignCard.getByText(/Resisted.*Attack succeeded/i).count(), 1, 'Campaign regression must explain the baseline-to-current transition');
   assert.equal(await campaignCard.getByRole('button', { name: 'Preview plan' }).count(), 1, 'Campaign preview must remain distinct from execution');
@@ -267,15 +348,18 @@ try {
   assert.equal(await campaignCard.getByRole('button', { name: 'Summarize with Copilot' }).count(), 1, 'Copilot analysis must stay a distinct advisory action');
   assert.equal(await campaignCard.evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Campaign controls must not overflow the settings pane');
   await campaignCard.screenshot({ path: resolve(artifactDirectory, 'campaign-regression-dark.png') });
-  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run', type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 100, completedCases: 24, totalAttempts: 125, completedAttempts: 31, activeCaseNames: ['Prompt boundary', 'Tool policy'] } } } })));
+  await redTeamNavigation.getByRole('tab', { name: /Results:/ }).click();
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run', type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 100, completedCases: 24, totalAttempts: 125, completedAttempts: 31, maxConcurrency: 3, activeCaseNames: ['Prompt boundary', 'Tool policy'] } } } })));
   const activeTestRun = page.locator('.test-operation-status--running');
   await activeTestRun.waitFor();
   assert.ok((await activeTestRun.innerText()).includes('24 / 100 cases · 31 / 125 attempts'), 'Run all feedback must expose measurable case and attempt progress');
+  assert.ok((await activeTestRun.innerText()).includes('Concurrency: 2 active · limit 3 / 8'), 'Run all feedback must expose active workers and the configured concurrency limit');
   assert.equal(await activeTestRun.getByRole('progressbar').getAttribute('value'), '24', 'Run all feedback must use a determinate progress value after planning');
   assert.equal(await page.getByRole('button', { name: 'Running all…' }).isDisabled(), true, 'An active Red Team run must disable duplicate starts');
   assert.equal(await page.getByRole('button', { name: 'Stop test run' }).locator('.codicon-debug-stop').count(), 1, 'An active Red Team run must expose a distinct stop action');
   await activeTestRun.screenshot({ path: resolve(artifactDirectory, 'adversarial-run-active-dark.png') });
   await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run-complete', type: 'test.operation', operation: { action: 'runAll', state: 'completed' } } })));
+  await redTeamNavigation.getByRole('tab', { name: /Cases:/ }).click();
   const linkedCsv = page.getByText('.vscode/turnstage/tests/security-regression.adversarial.csv', { exact: true });
   await linkedCsv.scrollIntoViewIfNeeded();
   assert.equal(await linkedCsv.count(), 1, 'Red Team must show a directly linked CSV source without copying it into Profile JSONC');
@@ -286,9 +370,25 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' }).locator('.codicon-trash').count(), 1, 'Open and unlink must use distinguishable icons');
   assert.equal(await page.locator('button:visible', { hasText: 'Link suite' }).count(), 1, 'Bulk source linking must use one visible format-neutral action');
   await page.locator('.adversarial-linked-suites').screenshot({ path: resolve(artifactDirectory, 'linked-adversarial-csv-dark.png') });
+  await page.getByText('31 of 31 cases', { exact: true }).waitFor();
+  const adversarialCaseTable = page.locator('.adversarial-case-table');
+  assert.equal(await adversarialCaseTable.locator('tbody > tr').count(), 25, 'The unified catalog must mount only the first page for a large case list');
+  assert.equal(await page.getByText('Page 1 of 2', { exact: true }).count(), 1, 'Large case catalogs must expose their current page');
+  await page.getByRole('button', { name: 'Next page' }).click();
+  assert.equal(await adversarialCaseTable.getByText('Linked case 30', { exact: true }).count(), 1, 'The next page must expose later linked cases');
+  await page.locator('.adversarial-case-collection').screenshot({ path: resolve(artifactDirectory, 'adversarial-case-catalog-page-2-dark.png') });
+  await page.getByRole('button', { name: 'Previous page' }).click();
+  await page.getByRole('searchbox', { name: 'Search adversarial cases' }).fill('linked-case-30');
+  assert.equal(await page.getByText('1 of 31 cases', { exact: true }).count(), 1, 'Case search must narrow the full unified catalog');
+  assert.equal(await adversarialCaseTable.locator('tbody > tr').count(), 1, 'A filtered catalog must mount only matching rows');
+  await adversarialCaseTable.getByRole('button', { name: 'Open source' }).click();
+  assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'adversarial.openLinkedSuite'))).path, '.vscode/turnstage/tests/security-regression.adversarial.csv', 'Linked catalog rows must open their exact source');
+  await page.locator('.adversarial-case-collection').screenshot({ path: resolve(artifactDirectory, 'adversarial-case-catalog-search-dark.png') });
+  await page.getByRole('searchbox', { name: 'Search adversarial cases' }).fill('');
   const runningPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await runningPage.goto(`${url}?section=scenario-tests&campaignStatus=running`);
   await runningPage.getByRole('tab', { name: 'Red Team' }).click();
+  await runningPage.getByRole('tab', { name: /Campaigns:/ }).click();
   const runningCampaign = runningPage.locator('.campaign-card').filter({ hasText: 'Release safety' });
   await runningCampaign.waitFor();
   assert.equal(await runningCampaign.getByText('Running', { exact: true }).count(), 1, 'A running campaign must expose its current state');
@@ -307,13 +407,14 @@ try {
   const settingsMainScroll = await page.locator('.settings-main').evaluate((element) => ({ scrollLeft: element.scrollLeft, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, panelWidth: element.querySelector('.settings-panel')?.getBoundingClientRect().width, tableWrapWidth: element.querySelector('.adversarial-case-table-wrap')?.getBoundingClientRect().width }));
   assert.equal(settingsMainScroll.scrollLeft, 0, `Focusing a wide adversarial table field must not horizontally shift the entire settings pane: ${JSON.stringify(settingsMainScroll)}`);
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-repetitions-dark.png') });
+  await redTeamNavigation.getByRole('tab', { name: /Results:/ }).click();
   assert.equal(await page.getByRole('heading', { name: 'Latest adversarial results' }).count(), 1, 'Scenario configuration must expose the compact latest-result list');
-  assert.equal(await page.getByText('Attack succeeded', { exact: true }).count(), 1, 'Latest results must distinguish an attack from resistance');
-  assert.equal(await page.getByText('3/5 resisted · 5 attempts', { exact: true }).count(), 1, 'Latest results must expose the repeated-run sample at a glance');
-  assert.equal(await page.getByText('Unstable result', { exact: true }).count(), 1, 'Latest results must expose whether repeated outcomes are stable');
-  const adversarialResults = page.locator('.adversarial-result-list');
+  const adversarialResults = page.locator('.adversarial-result-table');
+  assert.equal(await adversarialResults.getByText('Attack succeeded', { exact: true }).count(), 1, 'Latest results must distinguish an attack from resistance');
+  assert.equal(await adversarialResults.getByText('3/5 resisted · 5 attempts', { exact: true }).count(), 1, 'Latest results must expose the repeated-run sample at a glance');
+  assert.equal(await adversarialResults.getByText('Unstable result', { exact: true }).count(), 1, 'Latest results must expose whether repeated outcomes are stable');
   assert.equal(await adversarialResults.getByRole('button', { name: 'Open evidence' }).count(), 2, 'Every latest result must expose one clear primary evidence action');
-  assert.equal(await adversarialResults.getByRole('button', { name: 'Review timeline' }).count(), 2, 'Every latest result must keep timeline review as the single secondary action');
+  assert.equal(await adversarialResults.getByRole('button', { name: /Review timeline|Timeline selected/ }).count(), 2, 'Every latest result must keep timeline review as the single secondary action');
   await adversarialResults.getByLabel('More actions').first().click();
   assert.equal(await adversarialResults.getByRole('button', { name: 'Diagnose with Copilot' }).count(), 1, 'The opened overflow menu must retain Copilot diagnosis without crowding the result row');
   assert.equal(await adversarialResults.getByRole('button', { name: 'Chat' }).count(), 1, 'The overflow menu must retain the Chat evidence location when available');
@@ -328,12 +429,28 @@ try {
   await page.getByLabel('Export adversarial results').click();
   assert.equal(await page.locator('.debug-pane').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Red Team configuration must not overflow the right pane horizontally');
   await adversarialResults.scrollIntoViewIfNeeded();
-  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-results-dark.png') });
-  await adversarialResults.getByRole('button', { name: 'Review timeline' }).first().click();
+  assert.equal(await adversarialResults.locator('tbody > tr').count(), 2, 'Latest results must render one compact semantic row per result');
+  assert.equal(await adversarialResults.getByRole('columnheader', { name: 'Case' }).count(), 1, 'The result table must label its case column');
+  assert.equal(await adversarialResults.getByRole('columnheader', { name: 'Outcome' }).count(), 1, 'The result table must label its outcome column');
+  assert.equal(await adversarialResults.getByRole('columnheader', { name: 'Repeatability' }).count(), 1, 'The result table must explain repeated-run samples with a named column');
+  await assertAdversarialResultLayout(adversarialResults, 'Dark theme');
+  await adversarialResults.screenshot({ path: resolve(artifactDirectory, 'adversarial-results-dark.png') });
+  const attackResult = adversarialResults.getByRole('row').filter({ hasText: 'Known two-turn probe' });
+  await attackResult.getByRole('button', { name: /Review timeline|Timeline selected/ }).click();
   const findingTimelineAction = page.getByRole('button', { name: 'Open Forbidden URL observed evidence at 1,840 ms' });
   await findingTimelineAction.waitFor();
   assert.equal(await findingTimelineAction.count(), 1, 'Red Team timeline must make the failure point directly navigable');
-  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-timeline-dark.png') });
+  const adversarialTimeline = page.locator('.adversarial-timeline-card');
+  assert.equal(await adversarialTimeline.getByText('Evidence trail', { exact: true }).count(), 1, 'Timeline must identify itself as a chronological evidence trail');
+  assert.equal(await adversarialTimeline.getByText('Decisive evidence', { exact: true }).count(), 1, 'Timeline must call out the event that determined the result');
+  assert.ok((await adversarialTimeline.innerText()).includes('Request') && (await adversarialTimeline.innerText()).includes('Stream') && (await adversarialTimeline.innerText()).includes('Decision'), 'Timeline must group events into recognizable stages');
+  await adversarialTimeline.screenshot({ path: resolve(artifactDirectory, 'adversarial-timeline-dark.png') });
+  await page.setViewportSize({ width: 720, height: 900 });
+  assert.equal(await adversarialTimeline.evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Timeline must not overflow a narrow Red Team pane');
+  const narrowTimelineEntryHeights = await adversarialTimeline.locator('.causal-timeline__entry').evaluateAll((entries) => entries.map((entry) => entry.getBoundingClientRect().height));
+  assert.ok(narrowTimelineEntryHeights.every((height) => height >= 42 && height < 100), `Narrow timeline entries must remain compact and scannable: ${JSON.stringify(narrowTimelineEntryHeights)}`);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await redTeamNavigation.getByRole('tab', { name: /Results:/ }).click();
   await adversarialResults.getByRole('button', { name: 'Open evidence' }).first().click();
   await page.getByRole('tab', { name: 'Debug' }).waitFor();
   await page.waitForFunction(() => document.querySelector('#right-pane-debug-tab')?.getAttribute('aria-selected') === 'true');
@@ -356,6 +473,20 @@ try {
   await page.getByRole('heading', { name: 'Attack succeeded: Known two-turn probe' }).waitFor();
   await page.locator('.operation-status').waitFor({ state: 'hidden' });
   await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-navigation-dark.png'), fullPage: true });
+  await page.setViewportSize({ width: 720, height: 900 });
+  const compactEvidenceSelects = page.locator('.evidence-review__navigator select');
+  assert.equal(await compactEvidenceSelects.count(), 2, 'Compact Evidence Review must preserve both selectors');
+  for (let index = 0; index < await compactEvidenceSelects.count(); index += 1) {
+    const bounds = await compactEvidenceSelects.nth(index).boundingBox();
+    assert.ok(bounds && bounds.height >= 30, 'Compact Evidence Review selectors must keep an unclipped control height');
+  }
+  assert.equal(await page.locator('.evidence-review').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Compact Evidence Review must not overflow horizontally');
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-navigation-narrow-dark.png'), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: 'Close evidence review' }).click();
+  await page.locator('.evidence-review').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#right-pane-debug-tab').getAttribute('aria-selected'), 'true', 'Closing Evidence Review must preserve the current Debug context');
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-closed-dark.png'), fullPage: true });
   await page.getByRole('tab', { name: 'Configure' }).click();
   await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('scenario-tests');
   await page.locator('.scenario-advanced').filter({ hasText: 'Compare & performance' }).scrollIntoViewIfNeeded();
@@ -421,7 +552,7 @@ try {
   assert.notEqual(await page.getByLabel('Preview scale').innerText(), '100%', 'Fit reports scaling when the viewport exceeds the pane');
   await page.screenshot({ path: resolve(artifactDirectory, 'device-toolbar-laptop-fit-dark.png'), fullPage: true });
 
-  await page.goto(`${url}?active=true&effect=shimmer&speed=1400&intensity=85&draft=First%20line%0ASecond%20line%20wraps%20inside%20the%20composer%0AThird%20line`);
+  await page.goto(`${url}?active=true&indicator=shimmer&reveal=adaptive&pace=balanced&maxVisualLag=1200&largeChunk=true&speed=1400&intensity=85&draft=First%20line%0ASecond%20line%20wraps%20inside%20the%20composer%0AThird%20line`);
   await waitForProfile();
   const composer = page.getByRole('textbox', { name: 'Message' });
   const composerSizing = await composer.evaluate((element) => {
@@ -430,7 +561,12 @@ try {
   });
   assert.ok(composerSizing.height > composerSizing.minimum, 'Multiline composer must grow beyond its single-line minimum');
   assert.equal(await page.locator('.mobile-chat-preview__stream-indicator[data-effect="shimmer"]').count(), 1, 'Streaming Assistant must render the configured shimmer indicator');
+  const adaptiveText = page.locator('[data-reveal-mode="adaptive"]').last();
+  assert.equal((await adaptiveText.innerText()).includes('END_OF_LARGE_EVENT'), false, 'A large single event must begin with a progressive visual reveal');
   await page.screenshot({ path: resolve(artifactDirectory, 'streaming-shimmer-multiline-dark.png'), fullPage: true });
+  await page.waitForTimeout(1350);
+  assert.equal((await adaptiveText.innerText()).includes('END_OF_LARGE_EVENT'), true, 'Adaptive reveal must catch up within the configured visual lag');
+  await page.screenshot({ path: resolve(artifactDirectory, 'streaming-adaptive-complete-dark.png'), fullPage: true });
 
   await page.goto(`${url}?draft=First%20line%0ASecond%20line%20wraps%20inside%20the%20composer%0AThird%20line`);
   await waitForProfile();
@@ -444,17 +580,21 @@ try {
   assert.notEqual(await composerControl.evaluate((element) => getComputedStyle(element).borderColor), idleComposerBorder, 'Composer focus must use the VS Code focus border');
   await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'input-focus-vscode-dark.png') });
 
-  await page.goto(`${url}?section=chat-ui&effect=dots&speed=1200&intensity=80`);
+  await page.goto(`${url}?section=chat-ui&indicator=dots&reveal=adaptive&pace=fast&maxVisualLag=500&speed=1200&intensity=80`);
   await page.getByRole('heading', { level: 1, name: 'Chat UI' }).waitFor();
   assert.equal(await page.getByText('Loading profile…').count(), 0, 'Chat UI settings must not remain on Loading profile…');
   assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'true', 'A configuration command opens Configure in the right pane');
   assert.equal(await page.locator('.preview-pane').count(), 1, 'A configuration command must not replace the Chat preview');
-  assert.equal(await page.getByLabel('Assistant streaming effect').inputValue(), 'dots');
+  assert.equal(await page.getByLabel('Assistant content reveal', { exact: true }).inputValue(), 'adaptive');
+  assert.equal(await page.getByLabel('Assistant content reveal pace').inputValue(), 'fast');
+  assert.equal(await page.getByLabel('Assistant maximum visual lag').inputValue(), '500');
+  assert.equal(await page.getByLabel('Assistant streaming indicator').inputValue(), 'dots');
   assert.equal(await page.getByLabel('Assistant streaming animation speed').inputValue(), '1200');
   assert.equal(await page.getByLabel('Assistant streaming intensity').inputValue(), '80');
   await page.getByLabel('Message action toolbar visibility').selectOption('interaction');
   await page.locator('.mobile-chat-preview__message-toolbar--interaction').first().waitFor();
   assert.deepEqual(await latestProfilePatch(page, 'ui.messageActionVisibility'), { path: ['ui', 'messageActionVisibility'], value: 'interaction' }, 'Chat UI settings must patch the profile and update the live message toolbar');
+  await page.getByLabel('Assistant streaming indicator').scrollIntoViewIfNeeded();
   await page.screenshot({ path: resolve(artifactDirectory, 'chat-ui-streaming-settings-dark.png'), fullPage: true });
 
   await page.goto(url);
@@ -495,6 +635,7 @@ try {
   assert.equal(await page.getByRole('tab', { name: 'Runs' }).getAttribute('aria-selected'), 'true', 'A saved inspector tab must win over the Profile initial Metrics tab after Webview recreation');
   await page.setViewportSize({ width: 1000, height: 600 });
   await page.getByRole('tab', { name: 'Red Team' }).click();
+  await page.getByRole('tab', { name: /Cases:/ }).click();
   const adversarialTable = page.locator('.adversarial-case-table');
   await adversarialTable.getByRole('button', { name: 'Edit', exact: true }).click();
   await adversarialTable.getByRole('button', { name: 'Close editor', exact: true }).waitFor();
@@ -507,6 +648,7 @@ try {
   await page.reload();
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'The saved right-panel mode must survive recreation');
+  assert.equal(await page.getByRole('tab', { name: /Cases:/ }).getAttribute('aria-selected'), 'true', 'The saved Red Team sub-tab must survive recreation');
   assert.equal(await page.locator('.adversarial-case-table').getByRole('button', { name: 'Close editor', exact: true }).count(), 1, 'The expanded adversarial case must survive recreation');
   assert.equal(await page.locator('.red-team-workspace .settings-main').evaluate((element) => element.scrollTop), savedRedTeamScroll, 'The Red Team reading position must survive recreation');
 
@@ -598,11 +740,16 @@ try {
   await page.emulateMedia({ forcedColors: 'none' });
 
   await page.getByRole('tab', { name: 'Red Team' }).click();
+  await page.getByRole('tab', { name: /Results:/ }).click();
   await page.getByRole('heading', { name: 'Latest adversarial results' }).waitFor();
-  const lightAdversarialResults = page.locator('.adversarial-result-list');
+  const lightAdversarialResults = page.locator('.adversarial-result-table');
   await lightAdversarialResults.scrollIntoViewIfNeeded();
+  await assertRedTeamTabVisual(page.getByRole('tablist', { name: 'Red Team sections' }), 'Light theme');
+  await assertAdversarialResultLayout(lightAdversarialResults, 'Light theme');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-results-light.png') });
   await page.emulateMedia({ forcedColors: 'active' });
+  await assertRedTeamTabVisual(page.getByRole('tablist', { name: 'Red Team sections' }), 'High contrast theme');
+  await assertAdversarialResultLayout(lightAdversarialResults, 'High contrast theme');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-results-high-contrast.png') });
   await page.emulateMedia({ forcedColors: 'none' });
   await lightAdversarialResults.getByRole('button', { name: 'Open evidence' }).first().click();
@@ -612,6 +759,29 @@ try {
   await page.emulateMedia({ forcedColors: 'active' });
   await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-summary-high-contrast.png'), fullPage: true });
   await page.emulateMedia({ forcedColors: 'none' });
+
+  const deltaPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await deltaPage.goto(url);
+  await deltaPage.locator('.mobile-chat-preview__app-header strong').waitFor();
+  await deltaPage.evaluate(() => {
+    const { snapshot, dispatch } = globalThis.__turnstageHarness;
+    const { messages, rawEvents, normalizedEvents, ...core } = snapshot;
+    void rawEvents;
+    void normalizedEvents;
+    dispatch(JSON.parse(JSON.stringify({
+      type: 'session.delta',
+      delta: {
+        baseSessionId: snapshot.sessionId,
+        core: { ...core, turnState: 'streaming', metrics: { ...core.metrics, eventCount: 7 } },
+        rawEvents: { retainFromSequence: 1, append: [{ sequence: 7, turnId: 'visual-turn-2', turnIndex: 1, turnSequence: 4, receivedAt: 5_000, elapsedMs: 4_000, protocol: 'sse', sse: { event: 'message' }, raw: 'event: message', data: { text: 'Incremental stream update.' } }] },
+        normalizedEvents: { retainFromSequence: 1, append: [{ version: 1, type: 'content.text.delta', sequence: 7, rawSequence: 7, turnId: 'visual-turn-2', turnIndex: 1, turnSequence: 4, receivedAt: 5_000, text: 'Incremental stream update.' }] },
+        messages: { removeIds: [], upsert: [{ ...messages.at(-1), status: 'streaming', completedAt: undefined, parts: [{ type: 'text', text: 'Incremental stream update.' }] }] },
+      },
+    })));
+  });
+  await deltaPage.getByText('Incremental stream update.', { exact: true }).waitFor();
+  assert.equal(await deltaPage.locator('[data-message-id="assistant-1"][data-status="streaming"]').count(), 1, 'A session delta must update the existing streamed message without remounting the full session');
+  await deltaPage.close();
 
   const zoomViewport = { width: 720, height: 450 };
   const zoomPage = await browser.newPage({ viewport: zoomViewport, deviceScaleFactor: 2 });
@@ -635,7 +805,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

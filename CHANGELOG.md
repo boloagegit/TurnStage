@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.22.0
+
+- Reworked the Red Team workspace for large suites with bounded catalog loading, compact filtering and pagination, clearer result actions, causal evidence navigation, and explicit campaign or run progress without rendering every case at once.
+- Added incremental session updates and bounded progressive message rendering so long conversations, dense event histories, tab restoration, and multi-turn evidence remain responsive while preserving the complete canonical session state.
+- Added adaptive Assistant response reveal for large provider events, with configurable pace, maximum visual lag, and independent caret, dots, or shimmer indicators. Existing `effect` settings remain compatible; Evidence, TTFT, events, and formal test outcomes are never delayed by the presentation layer.
+- Expanded validation, localization, accessibility, high-frequency event, Unicode, mock-server, Extension Host, visual-matrix, and million-character performance coverage. Hidden Webviews, terminal states, reduced motion, screen readers, timeouts, cancellations, and incomplete evidence continue to fail or flush safely rather than becoming false passes.
+
 ## 0.19.0
 
 - Renamed the broad Evidence workspace to Debug and kept Network, Raw Events, Normalized Events, Metrics, Errors, and Runs together under the clearer diagnostic label. Existing persisted workspace state continues to normalize safely.

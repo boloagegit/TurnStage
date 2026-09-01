@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import axe from 'axe-core';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AdversarialResultSummary, ChatMessage, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
@@ -21,7 +21,7 @@ beforeAll(() => {
   vi.stubGlobal('ResizeObserver', TestResizeObserver);
 });
 
-afterEach(() => { cleanup(); document.body.classList.remove('vscode-using-screen-reader'); setLocale('en', 'ltr'); });
+afterEach(() => { cleanup(); vi.useRealTimers(); document.body.classList.remove('vscode-using-screen-reader', 'vscode-reduce-motion'); setLocale('en', 'ltr'); });
 
 function eventRows(scope: HTMLElement | Document = document): HTMLElement[] {
   return within(scope as HTMLElement).getAllByRole('treeitem').filter((row) => row.getAttribute('aria-level') === '2');
@@ -398,6 +398,19 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByLabelText('Assistant message, Completed').textContent).toContain('🧪🚀🙂');
   });
 
+  it('progressively mounts long conversations in bounded 200-message windows', async () => {
+    const messages = Array.from({ length: 450 }, (_, index) => assistantMessage(`assistant-${index + 1}`, `Response ${index + 1}`));
+    const { container } = render(<MobileChatPreview {...mobileProps({ snapshot: { ...snapshot, messages } })} />);
+
+    expect(container.querySelectorAll('.mobile-chat-preview__message')).toHaveLength(200);
+    expect(screen.getByText('Response 450')).toBeTruthy();
+    expect(screen.queryByText('Response 250')).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Show 200 earlier messages' }));
+    expect(container.querySelectorAll('.mobile-chat-preview__message')).toHaveLength(400);
+    expect(screen.getByText('Response 51')).toBeTruthy();
+    expect(screen.queryByText('Response 50')).toBeNull();
+  });
+
   it('auto-grows the multiline composer, caps its height, and shrinks after clearing', () => {
     const textarea = document.createElement('textarea');
     document.body.append(textarea);
@@ -455,6 +468,78 @@ describe('Webview DOM behavior', () => {
 
     rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...snapshot, turnState: 'streaming', messages: [user] }, active: true })} />);
     expect(document.querySelector('.mobile-chat-preview__stream-indicator')).toBeNull();
+  });
+
+  it('reveals a large Assistant event progressively and flushes canonical content on completion', () => {
+    vi.useFakeTimers();
+    const content = `First visible words ${'payload '.repeat(80)}`;
+    const assistant: ChatMessage = { ...assistantMessage('assistant-adaptive', content), status: 'streaming', completedAt: undefined };
+    const props = mobileProps({ profile: { ...profile, ui: { ...profile.ui, streaming: { reveal: 'adaptive', pace: 'balanced', maxVisualLagMs: 600 } } }, snapshot: { ...snapshot, turnState: 'streaming', messages: [assistant] }, active: true });
+    const { rerender } = render(<MobileChatPreview {...props} />);
+    const revealed = document.querySelector('[data-reveal-mode="adaptive"]') as HTMLElement;
+    expect(revealed.textContent?.length).toBeGreaterThan(0);
+    expect(revealed.textContent?.length).toBeLessThan(content.length);
+
+    act(() => vi.advanceTimersByTime(72));
+    expect(revealed.textContent?.length).toBeGreaterThan(3);
+    expect(revealed.textContent?.length).toBeLessThan(content.length);
+
+    rerender(<MobileChatPreview {...mobileProps({ ...props, snapshot: { ...snapshot, turnState: 'completed', messages: [{ ...assistant, status: 'completed', completedAt: 2_000 }] }, active: false })} />);
+    expect(revealed.textContent).toContain(content);
+  });
+
+  it('shows the first graphemes immediately when a pending response receives one large event', () => {
+    const pending: ChatMessage = { ...assistantMessage('assistant-first-event', ''), status: 'pending', completedAt: undefined };
+    const configuredProfile = { ...profile, ui: { ...profile.ui, streaming: { reveal: 'adaptive' as const, pace: 'balanced' as const } } };
+    const { rerender } = render(<MobileChatPreview {...mobileProps({ profile: configuredProfile, snapshot: { ...snapshot, turnState: 'waitingStart', messages: [pending] }, active: true })} />);
+    const content = '第一個大型事件一次帶回完整內容';
+    rerender(<MobileChatPreview {...mobileProps({ profile: configuredProfile, snapshot: { ...snapshot, turnState: 'streaming', messages: [{ ...pending, status: 'streaming', parts: [{ type: 'text', text: content }] }] }, active: true })} />);
+    const revealed = document.querySelector('[data-reveal-mode="adaptive"]') as HTMLElement;
+    expect(revealed.textContent).toContain('第一個');
+    expect(revealed.textContent).not.toContain(content);
+  });
+
+  it('keeps revealing when provider updates arrive faster than the visual frame interval', () => {
+    vi.useFakeTimers();
+    const configuredProfile = { ...profile, ui: { ...profile.ui, streaming: { reveal: 'adaptive' as const, pace: 'balanced' as const, maxVisualLagMs: 600 } } };
+    const base: ChatMessage = { ...assistantMessage('assistant-dense-events', ''), status: 'streaming', completedAt: undefined };
+    const { rerender } = render(<MobileChatPreview {...mobileProps({ profile: configuredProfile, snapshot: { ...snapshot, turnState: 'streaming', messages: [base] }, active: true })} />);
+    for (let index = 1; index <= 8; index += 1) {
+      const content = 'event payload '.repeat(index * 10);
+      rerender(<MobileChatPreview {...mobileProps({ profile: configuredProfile, snapshot: { ...snapshot, turnState: 'streaming', messages: [{ ...base, parts: [{ type: 'text', text: content }] }] }, active: true })} />);
+      act(() => vi.advanceTimersByTime(32));
+    }
+    const revealed = document.querySelector('[data-reveal-mode="adaptive"]') as HTMLElement;
+    expect(revealed.textContent?.length).toBeGreaterThan(20);
+    expect(revealed.textContent?.length).toBeLessThan('event payload '.repeat(80).length);
+  });
+
+  it('flushes pending visual content when the Webview becomes hidden', () => {
+    vi.useFakeTimers();
+    const content = 'Hidden page content '.repeat(40);
+    const assistant: ChatMessage = { ...assistantMessage('assistant-hidden', content), status: 'streaming', completedAt: undefined };
+    render(<MobileChatPreview {...mobileProps({ profile: { ...profile, ui: { ...profile.ui, streaming: { reveal: 'adaptive' } } }, snapshot: { ...snapshot, turnState: 'streaming', messages: [assistant] }, active: true })} />);
+    const revealed = document.querySelector('[data-reveal-mode="adaptive"]') as HTMLElement;
+    expect(revealed.textContent).not.toContain(content);
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(revealed.textContent).toContain(content);
+    delete (document as Document & { hidden?: boolean }).hidden;
+  });
+
+  it.each(['instant', 'event'] as const)('renders the full provider snapshot in %s reveal mode', (reveal) => {
+    const content = 'No synthetic character animation '.repeat(20);
+    const assistant: ChatMessage = { ...assistantMessage(`assistant-${reveal}`, content), status: 'streaming', completedAt: undefined };
+    render(<MobileChatPreview {...mobileProps({ profile: { ...profile, ui: { ...profile.ui, streaming: { reveal } } }, snapshot: { ...snapshot, turnState: 'streaming', messages: [assistant] }, active: true })} />);
+    expect((document.querySelector(`[data-reveal-mode="${reveal}"]`) as HTMLElement).textContent).toContain(content);
+  });
+
+  it('does not visually delay streaming content for screen readers', () => {
+    document.body.classList.add('vscode-using-screen-reader');
+    const content = '完整內容'.repeat(40);
+    const assistant: ChatMessage = { ...assistantMessage('assistant-accessible', content), status: 'streaming', completedAt: undefined };
+    render(<MobileChatPreview {...mobileProps({ profile: { ...profile, ui: { ...profile.ui, streaming: { reveal: 'adaptive' } } }, snapshot: { ...snapshot, turnState: 'streaming', messages: [assistant] }, active: true })} />);
+    expect((document.querySelector('[data-reveal-mode="adaptive"]') as HTMLElement).textContent).toContain(content);
   });
 
   it('clears the composer immediately when Enter sends a trimmed non-empty message', async () => {
@@ -724,8 +809,10 @@ describe('Webview DOM behavior', () => {
     const post = vi.fn();
     render(<SettingsWorkspace section="chat-ui" onSectionChange={vi.fn()} profile={profile} post={post} />);
 
-    await user.selectOptions(screen.getByLabelText('Assistant streaming effect'), 'dots');
-    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'streaming', 'effect'], value: 'dots' });
+    await user.selectOptions(screen.getByLabelText('Assistant content reveal'), 'event');
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'streaming', 'reveal'], value: 'event' });
+    await user.selectOptions(screen.getByLabelText('Assistant streaming indicator'), 'dots');
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'streaming', 'indicator'], value: 'dots' });
 
     const speed = screen.getByLabelText('Assistant streaming animation speed');
     await user.clear(speed);
@@ -754,11 +841,16 @@ describe('Webview DOM behavior', () => {
   it('authors, bulk-transfers, and opens evidence for adversarial cases', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
-    const { container } = render(<AdversarialWorkspace profile={profile} post={post} testResults={[{
+    const results: AdversarialResultSummary[] = [{
       profileId: profile.id, scenarioId: 'known-attack', scenarioName: 'Known attack', outcome: 'attackSucceeded', durationMs: 420,
       attemptedTurns: 1, completedTurns: 1, plannedTurns: 2, findingCount: 1, issueCount: 0, evidenceId: 'evidence-1',
       primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'network', networkId: 'network-1' }, { kind: 'normalizedEvent', sequence: 3 }],
-    }]} />);
+    }];
+    function Harness(): React.JSX.Element {
+      const [section, setSection] = useState<'results' | 'cases' | 'campaigns' | 'timeline'>('cases');
+      return <AdversarialWorkspace profile={profile} post={post} testResults={results} activeSection={section} onActiveSectionChange={setSection} />;
+    }
+    const { container } = render(<Harness />);
 
     await user.click(screen.getByRole('button', { name: 'Import CSV' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'importCsv' });
@@ -768,9 +860,13 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'linkSuite' });
     await user.click(screen.getAllByRole('button', { name: 'Add case' })[0]!);
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['tests', 'scenarios'], value: [expect.objectContaining({ id: 'adversarial-1', adversarial: expect.objectContaining({ mode: 'singleTurn', timeoutMs: 60000 }) })] }));
-    expect(screen.getByText('Attack succeeded')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Review timeline' }));
-    expect(post).toHaveBeenCalledWith({ type: 'test.timeline.open', evidenceId: 'evidence-1' });
+    await user.click(screen.getByRole('button', { name: 'Diagnose profile with Copilot' }));
+    expect(post).toHaveBeenCalledWith({ type: 'copilot.profileDoctor' });
+    const redTeamNavigation = screen.getByRole('tablist', { name: 'Red Team sections' });
+    expect(within(redTeamNavigation).getByRole('tab', { name: 'Campaigns: 0' })).toBeTruthy();
+    expect(within(redTeamNavigation).getByRole('tab', { name: 'Cases: 0' })).toBeTruthy();
+    await user.click(within(redTeamNavigation).getByRole('tab', { name: 'Results: 1' }));
+    expect(screen.getAllByText('Attack succeeded').length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: 'Open evidence' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'message', messageId: 'assistant-1' } });
     await user.click(screen.getByRole('button', { name: 'Diagnose with Copilot' }));
@@ -783,21 +879,89 @@ describe('Webview DOM behavior', () => {
     await user.click(screen.getByRole('button', { name: 'HTML report' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.report.export', format: 'html' });
     expect((screen.getByRole('button', { name: 'Evidence Bundle' }) as HTMLButtonElement).disabled).toBe(true);
-    await user.click(screen.getByRole('button', { name: 'Diagnose profile with Copilot' }));
-    expect(post).toHaveBeenCalledWith({ type: 'copilot.profileDoctor' });
+    await user.click(screen.getByRole('button', { name: 'Review timeline' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.timeline.open', evidenceId: 'evidence-1' });
+  });
+
+  it('keeps a 100-case linked catalog searchable and bounds rendered rows to one page', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const linkedProfile: TurnStageProfile = { ...profile, tests: { scenarios: [], adversarialSuites: ['tests/security.adversarial.csv'] } };
+    const catalog = { entries: Array.from({ length: 100 }, (_, index) => ({
+      sourcePath: 'tests/security.adversarial.csv', suiteId: 'security', suiteName: 'Security suite', scenarioId: `case-${index + 1}`, scenarioName: `Case ${index + 1}`, tags: index % 2 ? ['privacy'] : ['security'], mode: index % 3 ? 'singleTurn' as const : 'multiTurn' as const, turns: index % 3 ? 1 : 2, maxTurns: index % 3 ? 1 : 3, repetitions: 2, timeoutMs: 60_000, prohibit: { content: 1, events: 0, urls: true, ctas: false, tools: false },
+    })), total: 100, truncated: false, issues: [] };
+    function Harness(): React.JSX.Element {
+      const [collection, setCollection] = useState({ query: '', mode: 'all' as const, source: 'all', tag: 'all', sort: 'sourceOrder' as const, page: 0, pageSize: 25 as const });
+      return <AdversarialWorkspace profile={linkedProfile} post={post} activeSection="cases" linkedCaseCatalog={catalog} caseCollection={collection} onCaseCollectionChange={setCollection} />;
+    }
+    const { container } = render(<Harness />);
+
+    expect(container.querySelectorAll('.adversarial-case-table tbody > tr').length).toBe(25);
+    expect(screen.getByText('100 of 100 cases')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    expect(screen.getByText('Case 26')).toBeTruthy();
+    expect(screen.getByText('Page 2 of 4')).toBeTruthy();
+    await user.type(screen.getByRole('searchbox', { name: 'Search adversarial cases' }), 'case-100');
+    expect(container.querySelectorAll('.adversarial-case-table tbody > tr').length).toBe(1);
+    expect(screen.getByText('Case 100')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Open source' }));
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.openLinkedSuite', path: 'tests/security.adversarial.csv' });
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.catalog.request' });
+  });
+
+  it('bounds 500 Red Team results and keeps its sub-tabs keyboard navigable', async () => {
+    const user = userEvent.setup();
+    const results: AdversarialResultSummary[] = Array.from({ length: 500 }, (_, index) => ({
+      profileId: profile.id,
+      scenarioId: `case-${index + 1}`,
+      scenarioName: `Case ${index + 1}`,
+      outcome: index % 2 ? 'resisted' : 'attackSucceeded',
+      durationMs: index + 1,
+      attemptedTurns: 1,
+      completedTurns: 1,
+      plannedTurns: 1,
+      findingCount: index % 2 ? 0 : 1,
+      issueCount: 0,
+      evidenceId: `evidence-${index + 1}`,
+      primaryLocation: { kind: 'message', messageId: `assistant-${index + 1}` },
+      availableLocations: [],
+    }));
+    function Harness(): React.JSX.Element {
+      const [section, setSection] = useState<'results' | 'cases' | 'campaigns' | 'timeline'>('results');
+      const [collection, setCollection] = useState({ query: '', outcome: 'all' as const, stability: 'all' as const, page: 0, pageSize: 25 as const });
+      return <AdversarialWorkspace profile={profile} post={vi.fn()} testResults={results} activeSection={section} onActiveSectionChange={setSection} resultCollection={collection} onResultCollectionChange={setCollection} />;
+    }
+    const { container } = render(<Harness />);
+
+    expect(container.querySelectorAll('.adversarial-result-table tbody > tr')).toHaveLength(25);
+    expect(screen.getByText('Showing 1–25 of 500')).toBeTruthy();
+    const resultsTab = screen.getByRole('tab', { name: 'Results: 500' });
+    resultsTab.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: 'Cases: 0' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tabpanel').id).toBe('red-team-cases');
+    await user.click(screen.getByRole('tab', { name: 'Results: 500' }));
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    expect(screen.getByText('Case 26')).toBeTruthy();
+    await user.type(screen.getByRole('searchbox', { name: 'Search results' }), 'case-500');
+    expect(container.querySelectorAll('.adversarial-result-table tbody > tr')).toHaveLength(1);
+    expect(screen.getByText('Case 500')).toBeTruthy();
   });
 
   it('opens a linked suite with a distinct action and exposes persistent test-run feedback', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
     const linked: TurnStageProfile = { ...profile, tests: { scenarios: [], adversarialSuites: ['tests/safety.adversarial.csv'] } };
-    render(<AdversarialWorkspace profile={linked} post={post} testOperation={{ action: 'runAll', state: 'running', progress: { totalCases: 100, completedCases: 24, totalAttempts: 120, completedAttempts: 31, activeCaseNames: ['Prompt boundary'] } }} />);
+    const operation = { action: 'runAll' as const, state: 'running' as const, progress: { totalCases: 100, completedCases: 24, totalAttempts: 120, completedAttempts: 31, maxConcurrency: 3, activeCaseNames: ['Prompt boundary'] } };
+    const { rerender } = render(<AdversarialWorkspace profile={linked} post={post} activeSection="cases" testOperation={operation} />);
 
     await user.click(screen.getByRole('button', { name: 'Open linked suite tests/safety.adversarial.csv' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.openLinkedSuite', path: 'tests/safety.adversarial.csv' });
     expect(screen.getByRole('button', { name: 'Unlink suite tests/safety.adversarial.csv' })).toBeTruthy();
+    rerender(<AdversarialWorkspace profile={linked} post={post} activeSection="results" testOperation={operation} />);
     expect(screen.getByRole('status').textContent).toContain('Running all TurnStage tests');
     expect(screen.getByRole('status').textContent).toContain('24 / 100 cases · 31 / 120 attempts');
+    expect(screen.getByRole('status').textContent).toContain('Concurrency: 1 active · limit 3 / 8');
     expect(screen.getByRole('status').textContent).toContain('Active: Prompt boundary');
     expect(screen.getByRole('progressbar').getAttribute('value')).toBe('24');
     expect((screen.getByRole('button', { name: 'Running all…' }) as HTMLButtonElement).disabled).toBe(true);
@@ -808,7 +972,7 @@ describe('Webview DOM behavior', () => {
   it('restores Red Team expansion and scroll checkpoints', () => {
     const configured = { ...profile, tests: { scenarios: [{ id: 'case-1', name: 'Restored case', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } }] } } as TurnStageProfile;
     const onScrollTopChange = vi.fn();
-    const { container } = render(<AdversarialWorkspace profile={configured} post={vi.fn()} expandedCaseId="case-1" onExpandedCaseIdChange={vi.fn()} scrollTop={480} onScrollTopChange={onScrollTopChange} />);
+    const { container } = render(<AdversarialWorkspace profile={configured} post={vi.fn()} activeSection="cases" expandedCaseId="case-1" onExpandedCaseIdChange={vi.fn()} scrollTop={480} onScrollTopChange={onScrollTopChange} />);
     const scrollContainer = container.querySelector('.settings-main') as HTMLDivElement;
 
     expect(screen.getByRole('button', { name: 'Close editor' }).getAttribute('aria-expanded')).toBe('true');
@@ -822,7 +986,7 @@ describe('Webview DOM behavior', () => {
     const user = userEvent.setup();
     const post = vi.fn();
     const configured: TurnStageProfile = { ...profile, tests: { scenarios: [], campaigns: [{ id: 'release', name: 'Release safety', selectors: { tags: ['security'] }, runPolicy: { repetitions: 5, maxConcurrency: 2, maxRequests: 100 }, coverageTags: ['security', 'privacy'] }] } };
-    render(<AdversarialWorkspace profile={configured} post={post} campaignDashboard={{ profileId: profile.id, campaigns: [{ definition: configured.tests!.campaigns![0]!, latest: {
+    render(<AdversarialWorkspace profile={configured} post={post} activeSection="campaigns" campaignDashboard={{ profileId: profile.id, campaigns: [{ definition: configured.tests!.campaigns![0]!, latest: {
       format: 'turnstage-campaign-run', version: 1, id: 'run-1', campaignId: 'release', campaignName: 'Release safety', profileId: profile.id, createdAt: 1, updatedAt: 2, status: 'cancelled', sourceDigest: 'a'.repeat(64),
       plan: { selectedCases: 1, plannedAttempts: 5, plannedTurns: 5, plannedRequests: 5, maximumDurationMs: 10_000, maxConcurrency: 2 },
       cases: [{ key: `${profile.id}/red/jailbreak`, profileId: profile.id, suiteId: 'red', scenarioId: 'jailbreak', scenarioName: 'Jailbreak', tags: ['security'], requestedAttempts: 5, completedAttempts: 2, plannedTurns: 5, outcome: 'attackSucceeded', sampleComplete: false }],
@@ -831,6 +995,12 @@ describe('Webview DOM behavior', () => {
     } }] }} />);
 
     expect(screen.getByText('1 regression')).toBeTruthy();
+    expect((screen.getByRole('spinbutton', { name: 'Concurrent cases' }) as HTMLInputElement).value).toBe('2');
+    expect(screen.getByText('Concurrency 2 / 8')).toBeTruthy();
+    await user.clear(screen.getByRole('spinbutton', { name: 'Concurrent cases' }));
+    await user.type(screen.getByRole('spinbutton', { name: 'Concurrent cases' }), '7');
+    await user.tab();
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['tests', 'campaigns'], value: [expect.objectContaining({ runPolicy: expect.objectContaining({ maxConcurrency: 7 }) })] });
     await user.click(screen.getByRole('button', { name: 'Preview plan' }));
     expect(post).toHaveBeenCalledWith({ type: 'campaign.preview', campaignId: 'release' });
     await user.click(screen.getByRole('button', { name: 'Resume' }));
@@ -845,7 +1015,7 @@ describe('Webview DOM behavior', () => {
     const user = userEvent.setup();
     const post = vi.fn();
     const definition: NonNullable<NonNullable<TurnStageProfile['tests']>['campaigns']>[number] = { id: 'release', name: 'Release safety', selectors: { caseIds: ['case'] } };
-    render(<AdversarialWorkspace profile={{ ...profile, tests: { scenarios: [], campaigns: [definition] } }} post={post} campaignDashboard={{ profileId: profile.id, campaigns: [{ definition, latest: {
+    render(<AdversarialWorkspace profile={{ ...profile, tests: { scenarios: [], campaigns: [definition] } }} post={post} activeSection="campaigns" campaignDashboard={{ profileId: profile.id, campaigns: [{ definition, latest: {
       format: 'turnstage-campaign-run', version: 1, id: 'run-1', campaignId: 'release', campaignName: 'Release safety', profileId: profile.id, createdAt: 1, updatedAt: 2, status: 'running', sourceDigest: 'a'.repeat(64),
       plan: { selectedCases: 1, plannedAttempts: 1, plannedTurns: 1, plannedRequests: 1, maximumDurationMs: 10_000, maxConcurrency: 1 },
       cases: [{ key: `${profile.id}/inline/case`, profileId: profile.id, scenarioId: 'case', scenarioName: 'Case', tags: [], requestedAttempts: 1, completedAttempts: 0, plannedTurns: 1, sampleComplete: false }],
@@ -890,7 +1060,7 @@ describe('Webview DOM behavior', () => {
       { id: 'headers', phase: 'headers', status: 'normal', label: 'Response headers 200', at: 1_120, elapsedMs: 120, location: { kind: 'network', networkId: 'network-1' } },
       { id: 'timeout', phase: 'error', status: 'failure', label: 'IdleTimeoutError', at: 6_120, elapsedMs: 5_120, location: { kind: 'rawEvent', sequence: 4 } },
     ] } satisfies EvidenceTimelineSummary;
-    render(<><EvidenceSummary result={result} /><AdversarialWorkspace profile={profile} post={vi.fn()} testResults={[result]} activeEvidenceId="evidence-1" timeline={<CausalTimeline timeline={timeline} onOpen={onOpen} />} /></>);
+    render(<><EvidenceSummary result={result} /><AdversarialWorkspace profile={profile} post={vi.fn()} activeSection="timeline" testResults={[result]} activeEvidenceId="evidence-1" timeline={<CausalTimeline timeline={timeline} onOpen={onOpen} />} /></>);
     expect(screen.getByRole('heading', { name: 'Attack succeeded: Known attack' })).toBeTruthy();
     expect(screen.getAllByText('Attack succeeded').length).toBeGreaterThan(0);
     expect(screen.getByText('Tool interaction was observed.')).toBeTruthy();
@@ -901,8 +1071,13 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByRole('group', { name: 'Open evidence location' }).querySelector('details')).toBeTruthy();
     expect(within(screen.getByRole('group', { name: 'Open evidence location' })).getByText('Raw Events')).toBeTruthy();
     expect(screen.getAllByText('Causal timeline').length).toBeGreaterThan(0);
+    expect(screen.getByText('Evidence trail')).toBeTruthy();
     expect(screen.getByText('3 events · Partial evidence')).toBeTruthy();
     expect(screen.getByText('Evidence is incomplete: Terminal.')).toBeTruthy();
+    expect(screen.getAllByText('Request').length).toBeGreaterThan(0);
+    expect(screen.getByText('Decision')).toBeTruthy();
+    expect(screen.getByText('+5,000 ms')).toBeTruthy();
+    expect(screen.getByText('Decisive evidence')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Open IdleTimeoutError evidence at 5,120 ms' }));
     expect(onOpen).toHaveBeenCalledWith({ kind: 'rawEvent', sequence: 4 });
   });
@@ -932,7 +1107,7 @@ describe('Webview DOM behavior', () => {
     expect((screen.getByRole('button', { name: 'Next test case' }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByRole('button', { name: 'Export this case as HTML' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Timeline' }));
-    await user.click(screen.getByRole('button', { name: 'Back to adversarial results' }));
+    await user.click(screen.getByRole('button', { name: 'Close evidence review' }));
     expect(onReviewTimeline).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
   });
@@ -941,7 +1116,7 @@ describe('Webview DOM behavior', () => {
     const user = userEvent.setup();
     const post = vi.fn();
     const configured = { ...profile, tests: { scenarios: [{ id: 'case-1', name: 'Delete me', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } }] } } as TurnStageProfile;
-    render(<AdversarialWorkspace profile={configured} post={post} />);
+    render(<AdversarialWorkspace profile={configured} post={post} activeSection="cases" />);
     await user.click(screen.getByRole('button', { name: 'Delete scenario Delete me' }));
     expect(screen.getByRole('status').textContent).toContain('Deleted case Delete me.');
     await user.click(screen.getByRole('button', { name: 'Undo' }));

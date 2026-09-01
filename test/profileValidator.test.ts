@@ -394,7 +394,7 @@ describe('ProfileValidator', () => {
     const profile = validProfile();
     profile.ui = {
       layout: { preset: 'wide' as 'compact', inspectorPosition: 'left' as 'right', inspectorWidth: 120.5 },
-      streaming: { effect: 'typewriter' as 'caret', speedMs: 399, intensityPercent: 100.5 },
+      streaming: { reveal: 'typewriter' as 'adaptive', indicator: 'pulse' as 'caret', effect: 'typewriter' as 'caret', pace: 'rushed' as 'fast', maxVisualLagMs: 99.5, speedMs: 399, intensityPercent: 100.5 },
       messageActions: ['request.send'],
       messageActionVisibility: 'hover' as 'always',
       messageTags: [
@@ -410,6 +410,10 @@ describe('ProfileValidator', () => {
       'Unknown Inspector position: left.',
       'Inspector width must be an integer from 240 to 960.',
       'Unknown Assistant streaming effect: typewriter.',
+      'Unknown Assistant streaming indicator: pulse.',
+      'Unknown Assistant content reveal mode: typewriter.',
+      'Unknown Assistant content reveal pace: rushed.',
+      'Assistant maximum visual lag must be an integer from 100 to 2000 milliseconds.',
       'Assistant streaming speed must be an integer from 400 to 4000 milliseconds.',
       'Assistant streaming intensity must be an integer from 10 to 100 percent.',
       'Unknown action id: request.send.',

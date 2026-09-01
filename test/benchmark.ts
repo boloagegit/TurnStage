@@ -5,11 +5,13 @@
  * no precomputed or representative numbers.
  */
 import { bench, describe } from 'vitest';
-import type { RawStreamEvent, StreamDefinition } from '../src/shared/types';
+import type { ChatMessage, RawStreamEvent, SessionSnapshot, StreamDefinition } from '../src/shared/types';
 import { MappingEngine } from '../src/extension/mapping/mappingEngine';
 import { NdjsonParser, SseParser } from '../src/extension/transport/streamParser';
 import { EventBuffer } from '../src/extension/runtime/eventBuffer';
 import { createSnapshot, reduceEvent } from '../src/extension/runtime/reducer';
+import { applySessionDelta, SessionDeltaTracker } from '../src/shared/sessionDelta';
+import { advanceGraphemeBoundary, calculateRevealStep } from '../src/webview/streamingReveal';
 
 const sseChunks = [
   'event: message\ndata: {"text":"first"}\n\n',
@@ -38,6 +40,14 @@ const mappingEvent: RawStreamEvent = {
   raw: '{"kind":"delta","text":"benchmark"}',
   data: { kind: 'delta', text: 'benchmark' },
 };
+const benchmarkMessages: ChatMessage[] = Array.from({ length: 500 }, (_, index) => ({ id: `message-${index + 1}`, role: 'assistant', status: 'completed', createdAt: index, parts: [{ type: 'text', text: `Response ${index + 1}` }], citations: [], actions: [], followups: [] }));
+const benchmarkRawEvents: RawStreamEvent[] = Array.from({ length: 5_000 }, (_, index) => ({ ...mappingEvent, sequence: index + 1 }));
+const benchmarkSnapshot: SessionSnapshot = { sessionId: 'benchmark', sessionState: 'ready', turnState: 'streaming', messages: benchmarkMessages, rawEvents: benchmarkRawEvents, normalizedEvents: benchmarkRawEvents.map((event) => ({ version: 1, type: 'content.text.delta', sequence: event.sequence, rawSequence: event.sequence, receivedAt: event.receivedAt, text: 'x' })), metrics: { eventCount: 5_000, byteCount: 5_000, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0 }, errors: [], droppedEventCount: 0, trusted: true, controls: {} };
+const benchmarkNextSnapshot: SessionSnapshot = { ...benchmarkSnapshot, messages: [...benchmarkMessages.slice(0, -1), { ...benchmarkMessages.at(-1)!, status: 'streaming', parts: [{ type: 'text', text: 'Response 500 streamed' }] }], rawEvents: [...benchmarkRawEvents, { ...mappingEvent, sequence: 5_001 }], normalizedEvents: [...benchmarkSnapshot.normalizedEvents, { version: 1, type: 'content.text.delta', sequence: 5_001, rawSequence: 5_001, receivedAt: 5_001, text: 'x' }] };
+const benchmarkTracker = new SessionDeltaTracker();
+benchmarkTracker.checkpoint({ snapshot: benchmarkSnapshot, runs: [], networkEntries: [] });
+const benchmarkDelta = benchmarkTracker.next({ snapshot: benchmarkNextSnapshot, runs: [], networkEntries: [] })!;
+const largeRevealText = '回'.repeat(1_000_000);
 
 describe('TurnStage stream benchmarks', () => {
   bench('parse representative SSE chunks', () => {
@@ -86,5 +96,25 @@ describe('TurnStage stream benchmarks', () => {
       mappingRuleId: 'delta',
       text: 'x',
     });
+  });
+
+  bench('apply one incremental update to 5,000 events and 500 messages', () => {
+    applySessionDelta(benchmarkSnapshot, benchmarkDelta);
+  });
+
+  bench('serialize one bounded session delta', () => {
+    JSON.stringify(benchmarkDelta);
+  });
+
+  bench('serialize the equivalent full session snapshot', () => {
+    JSON.stringify(benchmarkNextSnapshot);
+  });
+
+  bench('plan and segment a one-million-character adaptive reveal', () => {
+    let position = 0;
+    for (let elapsed = 0; position < largeRevealText.length && elapsed <= 600; elapsed += 36) {
+      const step = calculateRevealStep(largeRevealText.length - position, 600, 36, elapsed);
+      position = advanceGraphemeBoundary(largeRevealText, position, step);
+    }
   });
 });

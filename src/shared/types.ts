@@ -677,7 +677,16 @@ export interface StreamDefinition {
 export interface UiDefinition {
   layout?: { preset?: 'chat-only' | 'split-inspector' | 'chat-with-metrics' | 'compact'; inspectorPosition?: 'right' | 'bottom'; inspectorWidth?: number };
   composer?: { placeholder?: string; multiline?: boolean; enterBehavior?: 'send' | 'newline'; shiftEnterBehavior?: 'send' | 'newline'; showStopWhileStreaming?: boolean };
-  streaming?: { effect?: 'none' | 'caret' | 'dots' | 'shimmer'; speedMs?: number; intensityPercent?: number };
+  streaming?: {
+    reveal?: 'instant' | 'event' | 'adaptive';
+    indicator?: 'none' | 'caret' | 'dots' | 'shimmer';
+    /** @deprecated Use indicator. Retained so existing profiles remain valid. */
+    effect?: 'none' | 'caret' | 'dots' | 'shimmer';
+    pace?: 'calm' | 'balanced' | 'fast';
+    maxVisualLagMs?: number;
+    speedMs?: number;
+    intensityPercent?: number;
+  };
   locks?: { whileTurnActive?: { disable?: string[]; allow?: string[] } };
   components?: Record<string, { visible?: boolean; label?: string; collapsible?: boolean; defaultCollapsed?: boolean; [key: string]: unknown }>;
   messageActions?: string[];
@@ -908,6 +917,29 @@ export interface SessionSnapshot {
   controls: Record<string, unknown>;
   replay?: ReplaySnapshot;
   remoteSessions?: RemoteSessionReference[];
+}
+
+/** Bounded incremental update used after a full session.snapshot checkpoint. */
+export type SessionSnapshotCore = Omit<SessionSnapshot, 'messages' | 'rawEvents' | 'normalizedEvents'>;
+export interface SessionEventDelta<T> {
+  /** Drop buffered events older than this sequence before appending. */
+  retainFromSequence?: number;
+  append: T[];
+}
+export interface SessionMessageDelta {
+  removeIds: string[];
+  upsert: ChatMessage[];
+}
+export interface SessionDelta {
+  baseSessionId: string;
+  core: SessionSnapshotCore;
+  rawEvents: SessionEventDelta<RawStreamEvent>;
+  normalizedEvents: SessionEventDelta<NormalizedEvent>;
+  messages: SessionMessageDelta;
+  runs?: LocalRunSummary[];
+  requestPreviewChanged?: boolean;
+  requestPreview?: unknown;
+  networkEntries?: NetworkExchange[];
 }
 
 export interface ReplaySnapshot {

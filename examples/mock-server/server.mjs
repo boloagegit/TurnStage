@@ -16,8 +16,53 @@ const sse = (event, data) => `event: ${event}\ndata: ${typeof data === 'string' 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const contractSessions = new Map();
 const intermittentAttempts = new Map();
+const concurrencyProbe = {
+  active: 0,
+  maxActive: 0,
+  activeByMessage: new Map(),
+  maxActiveByMessage: new Map(),
+  intervals: [],
+};
 const requiredString = (body, key) => typeof body[key] === 'string' && Boolean(body[key].trim());
 const invalidFields = (response, fields) => json(response, 400, { code: 'INVALID_REQUEST', fields });
+
+function resetConcurrencyProbe() {
+  concurrencyProbe.active = 0;
+  concurrencyProbe.maxActive = 0;
+  concurrencyProbe.activeByMessage.clear();
+  concurrencyProbe.maxActiveByMessage.clear();
+  concurrencyProbe.intervals.length = 0;
+}
+
+function beginConcurrencyProbe(response, body) {
+  const message = typeof body.message === 'string' ? body.message.slice(0, 200) : '<missing-message>';
+  const interval = { message, startedAt: Date.now(), endedAt: undefined };
+  concurrencyProbe.active += 1;
+  concurrencyProbe.maxActive = Math.max(concurrencyProbe.maxActive, concurrencyProbe.active);
+  const messageActive = (concurrencyProbe.activeByMessage.get(message) ?? 0) + 1;
+  concurrencyProbe.activeByMessage.set(message, messageActive);
+  concurrencyProbe.maxActiveByMessage.set(message, Math.max(concurrencyProbe.maxActiveByMessage.get(message) ?? 0, messageActive));
+  concurrencyProbe.intervals.push(interval);
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    interval.endedAt = Date.now();
+    concurrencyProbe.active = Math.max(0, concurrencyProbe.active - 1);
+    concurrencyProbe.activeByMessage.set(message, Math.max(0, (concurrencyProbe.activeByMessage.get(message) ?? 1) - 1));
+  };
+  response.once('finish', finish);
+  response.once('close', finish);
+}
+
+function concurrencyProbeSnapshot() {
+  return {
+    active: concurrencyProbe.active,
+    maxActive: concurrencyProbe.maxActive,
+    maxActiveByMessage: Object.fromEntries(concurrencyProbe.maxActiveByMessage),
+    intervals: concurrencyProbe.intervals.map((interval) => ({ ...interval })),
+  };
+}
 
 async function handleContractOpening(response, body, mode) {
   const missing = ['actorId', 'taskId', 'blockId'].filter((key) => !requiredString(body, key));
@@ -91,8 +136,11 @@ function handleContractStop(response, body) {
 
 const server = http.createServer(async (request, response) => {
   if (request.method !== 'POST') return json(response, 405, { code: 'METHOD_NOT_ALLOWED' });
+  if (request.url === '/__turnstage_test/concurrency/reset') { resetConcurrencyProbe(); return json(response, 200, concurrencyProbeSnapshot()); }
+  if (request.url === '/__turnstage_test/concurrency/metrics') return json(response, 200, concurrencyProbeSnapshot());
   const body = await readBody(request); if (!body) return json(response, 400, { code: 'INVALID_JSON' });
   const mode = request.headers['x-turnstage-mode'] ?? body.mode ?? 'normal';
+  if (request.url === '/basic/chat/stream') beginConcurrencyProbe(response, body);
   if (request.url === '/v1/chat/opening') return handleContractOpening(response, body, mode);
   if (request.url === '/v1/chat/stream') return handleContractStream(request, response, body, mode);
   if (request.url === '/v1/chat/stop') return handleContractStop(response, body);

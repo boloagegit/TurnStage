@@ -13,6 +13,7 @@ export type ProductIconName =
   | 'chevron-down'
   | 'chevron-right'
   | 'circle-filled'
+  | 'close'
   | 'clear-all'
   | 'copy'
   | 'desktop-download'
@@ -51,6 +52,7 @@ const codicons: Record<ProductIconName, string> = {
   'chevron-down': 'chevron-down',
   'chevron-right': 'chevron-right',
   'circle-filled': 'circle-filled',
+  close: 'close',
   'clear-all': 'clear-all',
   copy: 'copy',
   'desktop-download': 'desktop-download',

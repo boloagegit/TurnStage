@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { IconButton } from './Icon';
 import './safeMarkdown.css';
 
@@ -213,7 +213,7 @@ export function parseSafeMarkdownInline(source: string, depth = 0): InlineNode[]
 
 /** Render a bounded Markdown subset without ever constructing HTML strings. */
 export function SafeMarkdown({ text, className = '', onCopyCode, onOpenLink, copyLabel = 'Copy code' }: SafeMarkdownProps): React.JSX.Element {
-  const blocks = parseSafeMarkdown(text);
+  const blocks = useMemo(() => parseSafeMarkdown(text), [text]);
   const classes = ['safe-markdown', className].filter(Boolean).join(' ');
   return <div className={classes}>{blocks.map((block, index) => <SafeMarkdownBlockView key={`${block.type}-${index}`} block={block} onCopyCode={onCopyCode} onOpenLink={onOpenLink} copyLabel={copyLabel} />)}</div>;
 }

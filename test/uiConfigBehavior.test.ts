@@ -50,9 +50,10 @@ describe('profile-driven UI behavior', () => {
   });
 
   it('resolves bounded Assistant streaming effects and parameters', () => {
-    expect(resolveStreaming()).toEqual({ effect: 'caret', speedMs: 900, intensityPercent: 70 });
-    expect(resolveStreaming({ streaming: { effect: 'dots', speedMs: 1_200, intensityPercent: 80 } })).toEqual({ effect: 'dots', speedMs: 1_200, intensityPercent: 80 });
-    expect(resolveStreaming({ streaming: { effect: 'typewriter' as 'caret', speedMs: 100, intensityPercent: 250 } })).toEqual({ effect: 'caret', speedMs: 400, intensityPercent: 100 });
+    expect(resolveStreaming()).toEqual({ reveal: 'adaptive', indicator: 'caret', pace: 'balanced', maxVisualLagMs: 600, effect: 'caret', speedMs: 900, intensityPercent: 70 });
+    expect(resolveStreaming({ streaming: { reveal: 'event', indicator: 'dots', pace: 'fast', maxVisualLagMs: 800, speedMs: 1_200, intensityPercent: 80 } })).toEqual({ reveal: 'event', indicator: 'dots', pace: 'fast', maxVisualLagMs: 800, effect: 'dots', speedMs: 1_200, intensityPercent: 80 });
+    expect(resolveStreaming({ streaming: { reveal: 'unknown' as 'adaptive', indicator: 'typewriter' as 'caret', pace: 'rushed' as 'fast', maxVisualLagMs: 10, speedMs: 100, intensityPercent: 250 } })).toEqual({ reveal: 'adaptive', indicator: 'caret', pace: 'balanced', maxVisualLagMs: 100, effect: 'caret', speedMs: 400, intensityPercent: 100 });
+    expect(resolveStreaming({ streaming: { effect: 'shimmer' } })).toMatchObject({ indicator: 'shimmer', effect: 'shimmer' });
   });
 
   it('uses the declared message action order and applies role capabilities', () => {

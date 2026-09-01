@@ -1,5 +1,5 @@
-import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import type { MappingTestResult, TestOperationSnapshot, WebviewPayload } from '../shared/protocol';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { AdversarialCaseCatalog, LinkedAdversarialCaseSummary, MappingTestResult, TestOperationSnapshot, WebviewPayload } from '../shared/protocol';
 import type { AdversarialForbidDefinition, AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TestCampaignDefinition, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
@@ -12,6 +12,68 @@ import './settingsWorkspace.css';
  * that add the protocol envelope outside of the React tree.
  */
 export type SettingsWorkspacePost = (message: WebviewPayload) => void;
+
+export type AdversarialCaseModeFilter = 'all' | 'singleTurn' | 'multiTurn';
+export type AdversarialCaseSort = 'sourceOrder' | 'name' | 'mode';
+export interface AdversarialCaseCollectionState {
+  query: string;
+  mode: AdversarialCaseModeFilter;
+  source: string;
+  tag: string;
+  sort: AdversarialCaseSort;
+  page: number;
+  pageSize: 25 | 50 | 100;
+}
+export const DEFAULT_ADVERSARIAL_CASE_COLLECTION: AdversarialCaseCollectionState = { query: '', mode: 'all', source: 'all', tag: 'all', sort: 'sourceOrder', page: 0, pageSize: 25 };
+
+export const RED_TEAM_SECTIONS = ['results', 'cases', 'campaigns', 'timeline'] as const;
+export type RedTeamSectionId = typeof RED_TEAM_SECTIONS[number];
+export type AdversarialResultOutcomeFilter = 'all' | AdversarialResultSummary['outcome'];
+export type AdversarialResultStabilityFilter = 'all' | 'stable-pass' | 'stable-fail' | 'unstable' | 'inconclusive' | 'single-run';
+export interface AdversarialResultCollectionState {
+  query: string;
+  outcome: AdversarialResultOutcomeFilter;
+  stability: AdversarialResultStabilityFilter;
+  page: number;
+  pageSize: 25 | 50 | 100;
+}
+export const DEFAULT_ADVERSARIAL_RESULT_COLLECTION: AdversarialResultCollectionState = { query: '', outcome: 'all', stability: 'all', page: 0, pageSize: 25 };
+
+export function normalizeAdversarialResultCollectionState(value: unknown): AdversarialResultCollectionState {
+  const candidate = value && typeof value === 'object' ? value as Partial<AdversarialResultCollectionState> : {};
+  const outcomes: AdversarialResultOutcomeFilter[] = ['all', 'resisted', 'attackSucceeded', 'indeterminate', 'infrastructureError'];
+  const stability: AdversarialResultStabilityFilter[] = ['all', 'stable-pass', 'stable-fail', 'unstable', 'inconclusive', 'single-run'];
+  return {
+    query: typeof candidate.query === 'string' ? candidate.query.slice(0, 512) : '',
+    outcome: outcomes.includes(candidate.outcome as AdversarialResultOutcomeFilter) ? candidate.outcome as AdversarialResultOutcomeFilter : 'all',
+    stability: stability.includes(candidate.stability as AdversarialResultStabilityFilter) ? candidate.stability as AdversarialResultStabilityFilter : 'all',
+    page: Number.isSafeInteger(candidate.page) && Number(candidate.page) >= 0 ? Math.min(19, Number(candidate.page)) : 0,
+    pageSize: candidate.pageSize === 50 || candidate.pageSize === 100 ? candidate.pageSize : 25,
+  };
+}
+
+export function filterAdversarialResults(results: readonly AdversarialResultSummary[], collection: AdversarialResultCollectionState): AdversarialResultSummary[] {
+  const query = collection.query.trim().toLocaleLowerCase();
+  return results.filter((result) => {
+    if (collection.outcome !== 'all' && result.outcome !== collection.outcome) return false;
+    const stability = result.repetitions?.stability ?? 'single-run';
+    if (collection.stability !== 'all' && stability !== collection.stability) return false;
+    return !query || `${result.scenarioName}\u001f${result.scenarioId}`.toLocaleLowerCase().includes(query);
+  });
+}
+
+export function normalizeAdversarialCaseCollectionState(value: unknown): AdversarialCaseCollectionState {
+  const candidate = value && typeof value === 'object' ? value as Partial<AdversarialCaseCollectionState> : {};
+  return {
+    query: typeof candidate.query === 'string' ? candidate.query.slice(0, 512) : '',
+    mode: ['all', 'singleTurn', 'multiTurn'].includes(String(candidate.mode)) ? candidate.mode as AdversarialCaseModeFilter : 'all',
+    source: typeof candidate.source === 'string' && candidate.source.length <= 4096 ? candidate.source : 'all',
+    tag: typeof candidate.tag === 'string' && candidate.tag.length <= 256 ? candidate.tag : 'all',
+    sort: ['sourceOrder', 'name', 'mode'].includes(String(candidate.sort)) ? candidate.sort as AdversarialCaseSort : 'sourceOrder',
+    page: Number.isSafeInteger(candidate.page) && Number(candidate.page) >= 0 ? Math.min(399, Number(candidate.page)) : 0,
+    pageSize: candidate.pageSize === 50 || candidate.pageSize === 100 ? candidate.pageSize : 25,
+  };
+}
 
 export const SETTINGS_SECTIONS = [
   { id: 'general', label: 'General', description: 'Profile identity and runtime context.' },
@@ -140,7 +202,7 @@ export function SettingsWorkspace({
   </div>;
 }
 
-export function AdversarialWorkspace({ profile, post, testResults = [], campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, scrollTop, onScrollTopChange, expandedCaseId, onExpandedCaseIdChange }: {
+export function AdversarialWorkspace({ profile, post, testResults = [], campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, scrollTop, onScrollTopChange, activeSection = 'results', onActiveSectionChange = () => undefined, selectedCampaignId, onSelectedCampaignIdChange, expandedCaseId, onExpandedCaseIdChange, linkedCaseCatalog, caseCollection = DEFAULT_ADVERSARIAL_CASE_COLLECTION, onCaseCollectionChange = () => undefined, resultCollection = DEFAULT_ADVERSARIAL_RESULT_COLLECTION, onResultCollectionChange = () => undefined }: {
   profile: TurnStageProfile;
   post: SettingsWorkspacePost;
   testResults?: AdversarialResultSummary[];
@@ -151,12 +213,43 @@ export function AdversarialWorkspace({ profile, post, testResults = [], campaign
   trusted?: boolean;
   scrollTop?: number;
   onScrollTopChange?: (value: number) => void;
+  activeSection?: RedTeamSectionId;
+  onActiveSectionChange?: (section: RedTeamSectionId) => void;
+  selectedCampaignId?: string;
+  onSelectedCampaignIdChange?: (id: string | undefined) => void;
   expandedCaseId?: string;
   onExpandedCaseIdChange?: (id: string | undefined) => void;
+  linkedCaseCatalog?: AdversarialCaseCatalog;
+  caseCollection?: AdversarialCaseCollectionState;
+  onCaseCollectionChange?: (state: AdversarialCaseCollectionState) => void;
+  resultCollection?: AdversarialResultCollectionState;
+  onResultCollectionChange?: (state: AdversarialResultCollectionState) => void;
 }): React.JSX.Element {
   const patch = (path: PatchPath, value: unknown) => post({ type: 'profile.patch', path, value });
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inlineCaseCount = profile.tests?.scenarios?.filter((scenario) => scenario.adversarial).length ?? 0;
+  const campaignCount = profile.tests?.campaigns?.length ?? 0;
+  const suiteSignature = (profile.tests?.adversarialSuites ?? []).join('\u001f');
   useRestoredScrollPosition(scrollRef, 'adversarial', scrollTop);
+  useEffect(() => { post({ type: 'adversarial.catalog.request' }); }, [post, suiteSignature]);
+  const selectSection = (section: RedTeamSectionId) => {
+    onActiveSectionChange(section);
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    requestAnimationFrame(() => document.getElementById(`red-team-${section}`)?.focus());
+  };
+  const handleSectionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, section: RedTeamSectionId) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const currentIndex = RED_TEAM_SECTIONS.indexOf(section);
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? RED_TEAM_SECTIONS.length - 1
+        : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + RED_TEAM_SECTIONS.length) % RED_TEAM_SECTIONS.length;
+    const nextSection = RED_TEAM_SECTIONS[nextIndex]!;
+    selectSection(nextSection);
+    requestAnimationFrame(() => document.getElementById(`red-team-${nextSection}-tab`)?.focus());
+  };
   return <div className="settings-workspace settings-workspace--embedded red-team-workspace">
     <header className="settings-header settings-header--embedded" aria-label={t('Red Team toolbar')}>
       <div className="red-team-title"><strong>{t('Red Team')}</strong><span>{t('Bounded adversarial cases, results, and causal evidence.')}</span></div>
@@ -169,9 +262,15 @@ export function AdversarialWorkspace({ profile, post, testResults = [], campaign
       <section className="settings-panel red-team-panel" aria-labelledby="red-team-panel-title" tabIndex={-1}>
         <div className="settings-panel-heading">
           <div className="settings-panel-title"><h1 id="red-team-panel-title">{t('Adversarial testing')}</h1><p className="settings-section-description">{t('Author known attacks, run bounded samples, and inspect causal evidence without changing formal outcomes.')}</p></div>
-          <span className="settings-section-count">{t('{count} inline cases', { count: formatNumber(profile.tests?.scenarios?.filter((scenario) => scenario.adversarial).length ?? 0) })}</span>
+          <span className="settings-section-count">{t('{count} inline cases', { count: formatNumber(inlineCaseCount) })}</span>
         </div>
-        <ScenarioTestsSection view="adversarial" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={timeline} trusted={trusted} expandedCaseId={expandedCaseId} onExpandedCaseIdChange={onExpandedCaseIdChange} />
+        <nav className="red-team-section-nav" aria-label={t('Red Team sections')} role="tablist">
+          <button id="red-team-results-tab" type="button" role="tab" tabIndex={activeSection === 'results' ? 0 : -1} aria-controls="red-team-results" aria-label={`${t('Results')}: ${formatNumber(testResults.length)}`} aria-selected={activeSection === 'results'} onClick={() => selectSection('results')} onKeyDown={(event) => handleSectionKeyDown(event, 'results')}><span>{t('Results')}</span><strong>{formatNumber(testResults.length)}</strong></button>
+          <button id="red-team-cases-tab" type="button" role="tab" tabIndex={activeSection === 'cases' ? 0 : -1} aria-controls="red-team-cases" aria-label={`${t('Cases')}: ${formatNumber(inlineCaseCount)}`} aria-selected={activeSection === 'cases'} onClick={() => selectSection('cases')} onKeyDown={(event) => handleSectionKeyDown(event, 'cases')}><span>{t('Cases')}</span><strong>{formatNumber(inlineCaseCount)}</strong></button>
+          <button id="red-team-campaigns-tab" type="button" role="tab" tabIndex={activeSection === 'campaigns' ? 0 : -1} aria-controls="red-team-campaigns" aria-label={`${t('Campaigns')}: ${formatNumber(campaignCount)}`} aria-selected={activeSection === 'campaigns'} onClick={() => selectSection('campaigns')} onKeyDown={(event) => handleSectionKeyDown(event, 'campaigns')}><span>{t('Campaigns')}</span><strong>{formatNumber(campaignCount)}</strong></button>
+          <button id="red-team-timeline-tab" type="button" role="tab" tabIndex={activeSection === 'timeline' ? 0 : -1} aria-controls="red-team-timeline" aria-label={`${t('Timeline')}: ${activeEvidenceId ? t('Selected') : '—'}`} aria-selected={activeSection === 'timeline'} onClick={() => selectSection('timeline')} onKeyDown={(event) => handleSectionKeyDown(event, 'timeline')}><span>{t('Timeline')}</span><strong>{activeEvidenceId ? t('Selected') : '—'}</strong></button>
+        </nav>
+        <ScenarioTestsSection view="adversarial" adversarialSection={activeSection} onAdversarialSectionChange={selectSection} profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={timeline} trusted={trusted} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={onSelectedCampaignIdChange} expandedCaseId={expandedCaseId} onExpandedCaseIdChange={onExpandedCaseIdChange} linkedCaseCatalog={linkedCaseCatalog} caseCollection={caseCollection} onCaseCollectionChange={onCaseCollectionChange} resultCollection={resultCollection} onResultCollectionChange={onResultCollectionChange} />
       </section>
     </div>
   </div>;
@@ -418,13 +517,16 @@ const performanceMetricOptions: Array<{ id: ScenarioPerformanceMetric; label: st
   { id: 'metrics.maxEventGap', label: 'Maximum event gap' },
 ];
 
-function ScenarioTestsSection({ view, profile, patch, post, testResults, campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, expandedCaseId: controlledExpandedCaseId, onExpandedCaseIdChange }: { view: 'contracts' | 'adversarial'; profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; campaignDashboard?: CampaignDashboardV1; testOperation?: TestOperationSnapshot; activeEvidenceId?: string; timeline?: React.ReactNode; trusted?: boolean; expandedCaseId?: string; onExpandedCaseIdChange?: (id: string | undefined) => void }): React.JSX.Element {
+function ScenarioTestsSection({ view, adversarialSection = 'results', onAdversarialSectionChange, profile, patch, post, testResults, campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, selectedCampaignId: controlledSelectedCampaignId, onSelectedCampaignIdChange, expandedCaseId: controlledExpandedCaseId, onExpandedCaseIdChange, linkedCaseCatalog, caseCollection = DEFAULT_ADVERSARIAL_CASE_COLLECTION, onCaseCollectionChange = () => undefined, resultCollection = DEFAULT_ADVERSARIAL_RESULT_COLLECTION, onResultCollectionChange = () => undefined }: { view: 'contracts' | 'adversarial'; adversarialSection?: RedTeamSectionId; onAdversarialSectionChange?: (section: RedTeamSectionId) => void; profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; campaignDashboard?: CampaignDashboardV1; testOperation?: TestOperationSnapshot; activeEvidenceId?: string; timeline?: React.ReactNode; trusted?: boolean; selectedCampaignId?: string; onSelectedCampaignIdChange?: (id: string | undefined) => void; expandedCaseId?: string; onExpandedCaseIdChange?: (id: string | undefined) => void; linkedCaseCatalog?: AdversarialCaseCatalog; caseCollection?: AdversarialCaseCollectionState; onCaseCollectionChange?: (state: AdversarialCaseCollectionState) => void; resultCollection?: AdversarialResultCollectionState; onResultCollectionChange?: (state: AdversarialResultCollectionState) => void }): React.JSX.Element {
   const scenarios = profile.tests?.scenarios ?? [];
   const qualityRubrics = profile.tests?.qualityRubrics ?? [];
   const [undo, setUndo] = useState<{ label: string; scenarios: ScenarioDefinition[] }>();
   const [uncontrolledExpandedCaseId, setUncontrolledExpandedCaseId] = useState<string>();
+  const [uncontrolledSelectedCampaignId, setUncontrolledSelectedCampaignId] = useState<string>();
   const expandedCaseId = onExpandedCaseIdChange ? controlledExpandedCaseId : uncontrolledExpandedCaseId;
+  const selectedCampaignId = onSelectedCampaignIdChange ? controlledSelectedCampaignId : uncontrolledSelectedCampaignId;
   const setExpandedCaseId = (id: string | undefined) => { setUncontrolledExpandedCaseId(id); onExpandedCaseIdChange?.(id); };
+  const setSelectedCampaignId = (id: string | undefined) => { setUncontrolledSelectedCampaignId(id); onSelectedCampaignIdChange?.(id); };
   const adversarialEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => scenario.adversarial);
   const contractEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => !scenario.adversarial);
   useEffect(() => {
@@ -464,19 +566,41 @@ function ScenarioTestsSection({ view, profile, patch, post, testResults, campaig
     saveQualityRubrics([...qualityRubrics, { id, name: t('Quality rubric {number}', { number: formatNumber(ordinal) }), criteria: [{ id: 'criterion-1', label: t('Criterion 1'), description: t('Describe the observable quality expected from the disclosed response.') }] }]);
   };
   const campaigns = profile.tests?.campaigns ?? [];
+  const selectedCampaignIndex = Math.max(0, campaigns.findIndex((campaign) => campaign.id === selectedCampaignId));
+  const selectedCampaign = campaigns[selectedCampaignIndex];
   const testRunActive = testOperation?.state === 'running' || testOperation?.state === 'cancelling';
+  const filteredResults = useMemo(() => filterAdversarialResults(testResults, resultCollection), [resultCollection, testResults]);
+  const resultPageCount = Math.max(1, Math.ceil(filteredResults.length / resultCollection.pageSize));
+  const resultPage = Math.min(resultCollection.page, resultPageCount - 1);
+  const visibleResults = filteredResults.slice(resultPage * resultCollection.pageSize, (resultPage + 1) * resultCollection.pageSize);
+  const updateResultCollection = (patchValue: Partial<AdversarialResultCollectionState>, resetPage = true) => onResultCollectionChange({ ...resultCollection, ...patchValue, ...(resetPage ? { page: 0 } : {}) });
+  useEffect(() => {
+    if (resultPage !== resultCollection.page) onResultCollectionChange({ ...resultCollection, page: resultPage });
+  }, [resultCollection, resultPage]);
+  const activeTimelineResult = testResults.find((result) => result.evidenceId === activeEvidenceId || result.repetitions?.attempts?.some((attempt) => attempt.evidenceId === activeEvidenceId));
+  const reviewTimeline = (evidenceId: string) => {
+    post({ type: 'test.timeline.open', evidenceId });
+    onAdversarialSectionChange?.('timeline');
+  };
   const saveCampaigns = (value: TestCampaignDefinition[] | undefined) => profile.tests ? patch(['tests', 'campaigns'], value) : patch(['tests'], { scenarios: [], ...(value ? { campaigns: value } : {}) });
   const addCampaign = () => {
     const ordinal = campaigns.length + 1;
     const id = uniqueId(new Set(campaigns.map((campaign) => campaign.id)), `campaign-${ordinal}`);
     saveCampaigns([...campaigns, { id, name: t('Campaign {number}', { number: formatNumber(ordinal) }), selectors: { tagMode: 'all' }, runPolicy: { repetitions: 1, maxConcurrency: 3, maxRequests: 1000, maxDurationMs: 3_600_000 } }]);
+    setSelectedCampaignId(id);
   };
   return <div className="settings-section-stack">
-    {view === 'adversarial' && <>
-    <section className="settings-card" aria-labelledby="test-campaigns-heading">
+    {view === 'adversarial' && adversarialSection === 'campaigns' && <section id="red-team-campaigns" className="settings-card red-team-section" role="tabpanel" aria-labelledby="red-team-campaigns-tab test-campaigns-heading" tabIndex={-1}>
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="test-campaigns-heading">{t('Test campaigns')}</h2><p className="settings-card-description">{t('Create a bounded, repeatable selection of existing cases. Campaign history stores metadata only; raw prompts and evidence remain session-scoped.')}</p></div><button type="button" disabled={campaigns.length >= 50} onClick={addCampaign}>{t('Add campaign')}</button></div>
-      {!campaigns.length ? <div className="settings-empty settings-empty--action"><span>{t('No test campaigns configured.')}</span><button type="button" onClick={addCampaign}>{t('Add campaign')}</button></div> : <div className="campaign-list">
-        {campaigns.map((campaign, index) => {
+      {!campaigns.length ? <div className="settings-empty settings-empty--action"><span>{t('No test campaigns configured.')}</span><button type="button" onClick={addCampaign}>{t('Add campaign')}</button></div> : <div className="campaign-master-detail">
+        <div className="campaign-selector" role="listbox" aria-label={t('Test campaigns')}>{campaigns.map((campaign) => {
+          const latest = campaignDashboard?.campaigns.find((item) => item.definition.id === campaign.id)?.latest;
+          const selected = campaign.id === selectedCampaign?.id;
+          return <button key={campaign.id} type="button" role="option" aria-selected={selected} className={selected ? 'is-selected' : undefined} onClick={() => setSelectedCampaignId(campaign.id)}><span><strong>{campaign.name || campaign.id}</strong><code>{campaign.id}</code></span>{latest ? <small className={`campaign-status campaign-status--${latest.status}`}>{t(localizeHumanized(latest.status))}</small> : <small className="campaign-status">{t('Not run')}</small>}</button>;
+        })}</div>
+        <div className="campaign-list">{selectedCampaign ? (() => {
+          const campaign = selectedCampaign;
+          const index = selectedCampaignIndex;
           const dashboard = campaignDashboard?.campaigns.find((item) => item.definition.id === campaign.id);
           const latest = dashboard?.latest;
           const update = (value: TestCampaignDefinition) => saveCampaigns(replaceAt(campaigns, index, value));
@@ -485,12 +609,13 @@ function ScenarioTestsSection({ view, profile, patch, post, testResults, campaig
             <div className="settings-form-grid">
               <SettingField label={t('Name')} id={`campaign-${index}-name`}><PatchInput id={`campaign-${index}-name`} value={campaign.name} onCommit={(name) => update({ ...campaign, name })} /></SettingField>
               <NumberSettingField label={t('Repetitions per adversarial case')} id={`campaign-${index}-repetitions`} value={campaign.runPolicy?.repetitions} placeholder="1" min={1} max={100} hint={t('Conversation contracts run once; adversarial cases use this sample size.')} onCommit={(repetitions) => update({ ...campaign, runPolicy: { ...(campaign.runPolicy ?? {}), repetitions } })} />
+              <NumberSettingField label={t('Concurrent cases')} id={`campaign-${index}-concurrency`} value={campaign.runPolicy?.maxConcurrency} placeholder="3" min={1} max={8} hint={t('Cases may run in parallel. Turns and repeated attempts within one case remain sequential.')} onCommit={(value) => update({ ...campaign, runPolicy: { ...(campaign.runPolicy ?? {}), maxConcurrency: value === undefined ? undefined : Math.round(value) } })} />
               <ListPatchField label={t('Case IDs')} id={`campaign-${index}-cases`} value={campaign.selectors?.caseIds ?? []} placeholder="jailbreak-basic, leakage-check" hint={t('Leave empty to select by suite or tags.')} onCommit={(caseIds) => update({ ...campaign, selectors: { ...(campaign.selectors ?? {}), caseIds: caseIds.length ? caseIds : undefined } })} />
               <ListPatchField label={t('Suite IDs')} id={`campaign-${index}-suites`} value={campaign.selectors?.suiteIds ?? []} placeholder="security-regression" hint={t('Optional exact suite IDs.')} onCommit={(suiteIds) => update({ ...campaign, selectors: { ...(campaign.selectors ?? {}), suiteIds: suiteIds.length ? suiteIds : undefined } })} />
               <ListPatchField label={t('Selector tags')} id={`campaign-${index}-tags`} value={campaign.selectors?.tags ?? []} placeholder="security, release" hint={t('All tags must match unless tag mode is changed in JSONC.')} onCommit={(tags) => update({ ...campaign, selectors: { ...(campaign.selectors ?? {}), tags: tags.length ? tags : undefined } })} />
               <ListPatchField label={t('Coverage tags')} id={`campaign-${index}-coverage`} value={campaign.coverageTags ?? []} placeholder="prompt-boundary, privacy" hint={t('Missing required tags are reported before and after execution.')} onCommit={(coverageTags) => update({ ...campaign, coverageTags: coverageTags.length ? coverageTags : undefined })} />
             </div>
-            {latest && <div className={`campaign-summary${latest.diff?.regressions ? ' has-regressions' : ''}`} role="status"><span>{t('{completed}/{planned} cases complete', { completed: formatNumber(latest.cases.filter((item) => item.sampleComplete).length), planned: formatNumber(latest.plan.selectedCases) })}</span><span>{t('{percent}% coverage', { percent: formatNumber(latest.coverage.percent) })}</span>{latest.diff ? <span className={latest.diff.regressions ? 'is-regression' : ''}>{t(latest.diff.regressions === 1 ? '{count} regression' : '{count} regressions', { count: formatNumber(latest.diff.regressions) })}</span> : null}</div>}
+            {latest && <div className={`campaign-summary${latest.diff?.regressions ? ' has-regressions' : ''}`} role="status"><span>{t('{completed}/{planned} cases complete', { completed: formatNumber(latest.cases.filter((item) => item.sampleComplete).length), planned: formatNumber(latest.plan.selectedCases) })}</span><span>{t('Concurrency {limit} / 8', { limit: formatNumber(latest.plan.maxConcurrency) })}</span><span>{t('{percent}% coverage', { percent: formatNumber(latest.coverage.percent) })}</span>{latest.diff ? <span className={latest.diff.regressions ? 'is-regression' : ''}>{t(latest.diff.regressions === 1 ? '{count} regression' : '{count} regressions', { count: formatNumber(latest.diff.regressions) })}</span> : null}</div>}
             {latest?.diff?.entries.some((item) => item.transition === 'regressed') ? <ul className="campaign-regressions">{latest.diff.entries.filter((item) => item.transition === 'regressed').slice(0, 20).map((item) => <li key={item.key}><code>{item.scenarioId}</code><span>{t(localizeHumanized(item.baselineOutcome ?? 'unknown'))} → {t(localizeHumanized(item.currentOutcome ?? 'unknown'))}</span></li>)}</ul> : null}
             <div className="campaign-actions" role="group" aria-label={t('Campaign actions for {name}', { name: campaign.name })}>
               <button type="button" onClick={() => post({ type: 'campaign.preview', campaignId: campaign.id })}>{t('Preview plan')}</button>
@@ -501,10 +626,10 @@ function ScenarioTestsSection({ view, profile, patch, post, testResults, campaig
               {latest ? <details><summary>{t('More')}</summary><div><button type="button" onClick={() => post({ type: 'campaign.exportResults', campaignId: campaign.id, runId: latest.id })}>{t('Export results JSONL')}</button><button type="button" onClick={() => post({ type: 'campaign.copilotSummary', campaignId: campaign.id, runId: latest.id })}>{t('Summarize with Copilot')}</button><button type="button" className="danger" onClick={() => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index))}>{t('Delete campaign')}</button></div></details> : <button type="button" className="danger" onClick={() => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index))}>{t('Delete campaign')}</button>}
             </div>
           </article>;
-        })}
+        })() : null}</div>
       </div>}
-    </section>
-    <section className="settings-card" aria-labelledby="adversarial-tests-heading">
+    </section>}
+    {view === 'adversarial' && adversarialSection === 'cases' && <section id="red-team-cases" className="settings-card red-team-section" role="tabpanel" aria-labelledby="red-team-cases-tab adversarial-tests-heading" tabIndex={-1}>
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-tests-heading">{t('Adversarial tests')}</h2><p className="settings-card-description">{t('Replay known attack messages and record whether observable prohibited effects occurred. Timeout and incomplete evidence never count as resistance.')}</p></div><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div>
       <div className="copilot-profile-doctor"><div><strong>{t('Profile Doctor')}</strong><span>{t('Ask Copilot to explain validation, timeout, streaming, and mapping configuration evidence without exposing secrets.')}</span></div><button type="button" onClick={() => post({ type: 'copilot.profileDoctor' })}>{t('Diagnose profile with Copilot')}</button></div>
       <div className="adversarial-file-actions" role="group" aria-label={t('Bulk adversarial test files')}>
@@ -523,33 +648,32 @@ function ScenarioTestsSection({ view, profile, patch, post, testResults, campaig
       </div>
       {undo && <div className="settings-undo" role="status"><span>{undo.label}</span><button type="button" onClick={() => { save(undo.scenarios); setUndo(undefined); }}>{t('Undo')}</button><IconButton type="button" icon="clear-all" label={t('Dismiss undo')} onClick={() => setUndo(undefined)} /></div>}
       {(profile.tests?.adversarialSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.adversarialSuites!.map((path, index) => { const label = linkedSuiteLabel(path); return <li key={`${path}-${index}`}><code title={path}>{label}</code><div className="adversarial-linked-suite-actions"><IconButton type="button" icon="go-to-file" label={t('Open linked suite {path}', { path: label })} onClick={() => post({ type: 'adversarial.openLinkedSuite', path })} /><IconButton type="button" icon="trash" label={t('Unlink suite {path}', { path: label })} onClick={() => patch(['tests', 'adversarialSuites'], profile.tests!.adversarialSuites!.filter((_, itemIndex) => itemIndex !== index))} /></div></li>; })}</ul></div>}
-      {!adversarialEntries.length ? <div className="settings-empty settings-empty--action"><span>{t('No inline adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <AdversarialCaseTable entries={adversarialEntries} expandedCaseId={expandedCaseId} onToggle={(id) => setExpandedCaseId(expandedCaseId === id ? undefined : id)} onChange={(index, value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(index, value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={(index, scenario) => { if (expandedCaseId === scenario.id) setExpandedCaseId(undefined); saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); }} />}
+      {!adversarialEntries.length && !(linkedCaseCatalog?.entries.length) ? <div className="settings-empty settings-empty--action"><span>{t(profile.tests?.adversarialSuites?.length && !linkedCaseCatalog ? 'Loading linked adversarial cases…' : 'No adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <AdversarialCaseTable entries={adversarialEntries} linkedEntries={linkedCaseCatalog?.entries ?? []} catalog={linkedCaseCatalog} collection={caseCollection} onCollectionChange={onCaseCollectionChange} onRefresh={() => post({ type: 'adversarial.catalog.request', force: true })} expandedCaseId={expandedCaseId} onToggle={(id) => setExpandedCaseId(expandedCaseId === id ? undefined : id)} onChange={(index, value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(index, value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={(index, scenario) => { if (expandedCaseId === scenario.id) setExpandedCaseId(undefined); saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); }} onOpenSource={(path) => post({ type: 'adversarial.openLinkedSuite', path })} />}
       <p className="settings-footnote">{t('Linked CSV stays the source of truth and uses one row per turn. JSONC remains the lossless format for suite-level defaults and metadata.')}</p>
-    </section>
-    <section className="settings-card" aria-labelledby="adversarial-results-heading">
-      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-results-heading">{t('Latest adversarial results')}</h2><p className="settings-card-description">{t('Run from Test Explorer, then open the exact Chat, Network, or Events evidence for a result.')}</p></div><div className="adversarial-rerun-actions" role="group" aria-label={t('Run adversarial tests')}><button type="button" className="primary" disabled={testRunActive} aria-busy={testOperation?.action === 'runAll' && testRunActive} onClick={() => post({ type: 'test.runAll' })}>{t(testOperation?.action === 'runAll' && testRunActive ? 'Running all…' : 'Run all')}</button><button type="button" disabled={testRunActive || !testResults.some((result) => result.outcome !== 'resisted')} onClick={() => post({ type: 'test.rerun', status: 'failed' })}>{t(testOperation?.action === 'rerunFailed' && testRunActive ? 'Rerunning failures…' : 'Rerun failures')}</button><details><summary>{t('More reruns')}</summary><div><button type="button" disabled={testRunActive || !testResults.some((result) => result.repetitions?.stability === 'unstable')} onClick={() => post({ type: 'test.rerun', status: 'unstable' })}>{t('Unstable')}</button><button type="button" disabled={testRunActive || !testResults.some((result) => result.repetitions?.sampleComplete === false)} onClick={() => post({ type: 'test.rerun', status: 'incomplete' })}>{t('Incomplete')}</button></div></details><details className="adversarial-export-actions"><summary aria-label={t('Export adversarial results')} title={t('Export adversarial results')}><ProductIcon name="export" /></summary><div><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'html' })}>{t('HTML report')}</button><button type="button" disabled={!testResults.length || !trusted} onClick={() => post({ type: 'test.evidenceBundle.export' })}>{t('Evidence Bundle')}</button><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'json' })}>{t('JSON report')}</button><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'junit' })}>{t('JUnit XML')}</button></div></details>{testRunActive && <IconButton type="button" className="danger-subtle" icon="stop" label={t(testOperation?.state === 'cancelling' ? 'Stopping test run…' : 'Stop test run')} disabled={testOperation?.state === 'cancelling'} onClick={() => post({ type: 'test.cancel' })} />}</div></div>
+    </section>}
+    {view === 'adversarial' && adversarialSection === 'results' && <section id="red-team-results" className="settings-card red-team-section" role="tabpanel" aria-labelledby="red-team-results-tab adversarial-results-heading" tabIndex={-1}>
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-results-heading">{t('Latest adversarial results')}</h2><p className="settings-card-description">{t('Run from Test Explorer, then open the exact Chat, Network, or Events evidence for a result.')}</p></div><div className="adversarial-rerun-actions" role="group" aria-label={t('Run adversarial tests')}><button type="button" className="primary" disabled={testRunActive} aria-busy={testOperation?.action === 'runAll' && testRunActive} onClick={() => post({ type: 'test.runAll' })}>{t(testOperation?.action === 'runAll' && testRunActive ? 'Running all…' : 'Run all')}</button><button type="button" className="adversarial-rerun-secondary" disabled={testRunActive || !testResults.some((result) => result.outcome !== 'resisted')} onClick={() => post({ type: 'test.rerun', status: 'failed' })}>{t(testOperation?.action === 'rerunFailed' && testRunActive ? 'Rerunning failures…' : 'Rerun failures')}</button><details className="adversarial-rerun-more"><summary aria-label={t('More reruns')} title={t('More reruns')}><ProductIcon name="debug-restart" /></summary><div><button type="button" disabled={testRunActive || !testResults.some((result) => result.repetitions?.stability === 'unstable')} onClick={() => post({ type: 'test.rerun', status: 'unstable' })}>{t('Unstable')}</button><button type="button" disabled={testRunActive || !testResults.some((result) => result.repetitions?.sampleComplete === false)} onClick={() => post({ type: 'test.rerun', status: 'incomplete' })}>{t('Incomplete')}</button></div></details><details className="adversarial-export-actions"><summary aria-label={t('Export adversarial results')} title={t('Export adversarial results')}><ProductIcon name="export" /></summary><div><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'html' })}>{t('HTML report')}</button><button type="button" disabled={!testResults.length || !trusted} onClick={() => post({ type: 'test.evidenceBundle.export' })}>{t('Evidence Bundle')}</button><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'json' })}>{t('JSON report')}</button><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'junit' })}>{t('JUnit XML')}</button></div></details>{testRunActive && <IconButton type="button" className="danger-subtle" icon="stop" label={t(testOperation?.state === 'cancelling' ? 'Stopping test run…' : 'Stop test run')} disabled={testOperation?.state === 'cancelling'} onClick={() => post({ type: 'test.cancel' })} />}</div></div>
       <TestOperationStatus operation={testOperation} />
-      {!testResults.length ? <p className="settings-empty">{t('No adversarial results in this Extension Host session.')}</p> : <ul className="adversarial-result-list">{testResults.map((result) => <li key={`${result.scenarioId}-${result.evidenceId}`}>
-        <div className="adversarial-result-identity"><strong>{result.scenarioName}</strong><code>{result.scenarioId}</code></div>
-        <span className={`adversarial-outcome adversarial-outcome--${result.outcome}`}><ProductIcon name={result.outcome === 'resisted' ? 'check' : result.outcome === 'attackSucceeded' ? 'target' : 'warning'} />{t(adversarialOutcomeText(result.outcome))}</span>
-        <span className="adversarial-result-sample">{result.repetitions ? <>
-          <span>{t('{resisted}/{requested} resisted · {completed} attempts', { resisted: formatNumber(result.repetitions.counts.resisted), requested: formatNumber(result.repetitions.requestedAttempts), completed: formatNumber(result.repetitions.completedAttempts) })}</span>
-          <small>{t(adversarialStabilityText(result.repetitions.stability))}{result.repetitions.sampleComplete ? '' : ` · ${t('Incomplete sample')}`}</small>
-        </> : t('{completed}/{planned} turns', { completed: formatNumber(result.completedTurns), planned: formatNumber(result.plannedTurns) })}</span>
-        <span>{formatNumber(result.durationMs)} ms</span>
-        <div className="adversarial-result-actions">
-          <button type="button" className="primary" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location: result.primaryLocation })}>{t('Open evidence')}</button>
-          <button type="button" aria-pressed={activeEvidenceId === result.evidenceId} onClick={() => post({ type: 'test.timeline.open', evidenceId: result.evidenceId })}>{activeEvidenceId === result.evidenceId ? t('Timeline selected') : t('Review timeline')}</button>
-          <details><summary aria-label={t('More actions')} title={t('More actions')}><ProductIcon name="ellipsis" /></summary><div><button type="button" onClick={() => post({ type: 'copilot.diagnose', evidenceId: result.evidenceId, mode: result.repetitions ? 'stability' : 'failure' })}>{t('Diagnose with Copilot')}</button>{(result.availableLocations.length ? result.availableLocations : [result.primaryLocation]).map((location) => <button key={`${result.evidenceId}-${location.kind}`} type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })}>{t(evidenceLocationText(location.kind))}</button>)}<button type="button" onClick={() => post({ type: 'copilot.qualityReview', evidenceIds: [result.evidenceId] })}>{t('Advisory quality review')}</button></div></details>
-        </div>
-        {result.reliability && <ReliabilitySummary summary={result.reliability} />}
-      </li>)}</ul>}
-    </section>
-    <section className="settings-card adversarial-timeline-card" aria-labelledby="adversarial-timeline-heading">
-      <div className="settings-card-heading"><div><h2 id="adversarial-timeline-heading">{t('Causal timeline')}</h2><p className="settings-card-description">{t('Select Review timeline on a result to load its bounded request, stream, finding, and terminal evidence.')}</p></div></div>
+      {testResults.length > 0 && <div className="adversarial-result-toolbar" role="group" aria-label={t('Filter adversarial results')}>
+        <label className="adversarial-result-search"><span>{t('Search results')}</span><input type="search" value={resultCollection.query} placeholder={t('Case name or ID')} onChange={(event) => updateResultCollection({ query: event.target.value })} /></label>
+        <label><span>{t('Outcome')}</span><select value={resultCollection.outcome} onChange={(event) => updateResultCollection({ outcome: event.target.value as AdversarialResultOutcomeFilter })}><option value="all">{t('All outcomes')}</option><option value="resisted">{t('Resisted')}</option><option value="attackSucceeded">{t('Attack succeeded')}</option><option value="indeterminate">{t('Indeterminate')}</option><option value="infrastructureError">{t('Infrastructure error')}</option></select></label>
+        <label><span>{t('Stability')}</span><select value={resultCollection.stability} onChange={(event) => updateResultCollection({ stability: event.target.value as AdversarialResultStabilityFilter })}><option value="all">{t('All samples')}</option><option value="stable-pass">{t('Stable pass')}</option><option value="stable-fail">{t('Stable fail')}</option><option value="unstable">{t('Unstable')}</option><option value="inconclusive">{t('Inconclusive')}</option><option value="single-run">{t('Single run')}</option></select></label>
+      </div>}
+      {!testResults.length ? <p className="settings-empty">{t('No adversarial results in this Extension Host session.')}</p> : !filteredResults.length ? <p className="settings-empty">{t('No results match the current filters.')}</p> : <>
+        <div className="adversarial-result-table-wrap"><table className="adversarial-result-table"><thead><tr><th scope="col">{t('Case')}</th><th scope="col">{t('Outcome')}</th><th scope="col">{t('Repeatability')}</th><th scope="col">{t('Duration')}</th><th scope="col" className="adversarial-result-table__actions-heading">{t('Actions')}</th></tr></thead><tbody>{visibleResults.map((result) => <tr className={activeTimelineResult === result ? 'is-timeline-selected' : undefined} key={`${result.scenarioId}-${result.evidenceId}`}>
+          <td><div className="adversarial-result-cell-stack"><strong>{result.scenarioName}</strong><code>{result.scenarioId}</code></div></td>
+          <td><span className={`adversarial-outcome adversarial-outcome--${result.outcome}`}><ProductIcon name={result.outcome === 'resisted' ? 'check' : result.outcome === 'attackSucceeded' ? 'target' : 'warning'} />{t(adversarialOutcomeText(result.outcome))}</span></td>
+          <td><div className="adversarial-result-cell-stack">{result.repetitions ? <><span>{t('{resisted}/{requested} resisted · {completed} attempts', { resisted: formatNumber(result.repetitions.counts.resisted), requested: formatNumber(result.repetitions.requestedAttempts), completed: formatNumber(result.repetitions.completedAttempts) })}</span><small>{t(adversarialStabilityText(result.repetitions.stability))}{result.repetitions.sampleComplete ? '' : ` · ${t('Incomplete sample')}`}</small></> : <span>{t('{completed}/{planned} turns', { completed: formatNumber(result.completedTurns), planned: formatNumber(result.plannedTurns) })}</span>}{result.reliability && <ReliabilitySummary summary={result.reliability} />}</div></td>
+          <td className="adversarial-result-table__duration">{formatNumber(result.durationMs)} ms</td>
+          <td><div className="adversarial-result-actions"><button type="button" className="primary" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location: result.primaryLocation })}>{t('Open evidence')}</button><IconButton type="button" icon="list-tree" label={activeTimelineResult === result ? t('Timeline selected') : t('Review timeline')} aria-pressed={activeTimelineResult === result} onClick={() => reviewTimeline(result.evidenceId)} /><details><summary aria-label={t('More actions')} title={t('More actions')}><ProductIcon name="ellipsis" /></summary><div><button type="button" onClick={() => post({ type: 'copilot.diagnose', evidenceId: result.evidenceId, mode: result.repetitions ? 'stability' : 'failure' })}>{t('Diagnose with Copilot')}</button>{(result.availableLocations.length ? result.availableLocations : [result.primaryLocation]).map((location) => <button key={`${result.evidenceId}-${location.kind}`} type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })}>{t(evidenceLocationText(location.kind))}</button>)}<button type="button" onClick={() => post({ type: 'copilot.qualityReview', evidenceIds: [result.evidenceId] })}>{t('Advisory quality review')}</button></div></details></div></td>
+        </tr>)}</tbody></table></div>
+        <div className="adversarial-result-pagination"><span>{t('Showing {start}–{end} of {total}', { start: formatNumber(resultPage * resultCollection.pageSize + 1), end: formatNumber(Math.min(filteredResults.length, (resultPage + 1) * resultCollection.pageSize)), total: formatNumber(filteredResults.length) })}</span><label><span>{t('Rows')}</span><select value={resultCollection.pageSize} onChange={(event) => updateResultCollection({ pageSize: Number(event.target.value) as 25 | 50 | 100 })}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label><IconButton type="button" icon="arrow-left" label={t('Previous page')} disabled={resultPage === 0} onClick={() => updateResultCollection({ page: resultPage - 1 }, false)} /><span>{t('Page {current} of {total}', { current: formatNumber(resultPage + 1), total: formatNumber(resultPageCount) })}</span><IconButton type="button" icon="arrow-right" label={t('Next page')} disabled={resultPage >= resultPageCount - 1} onClick={() => updateResultCollection({ page: resultPage + 1 }, false)} /></div>
+      </>}
+    </section>}
+    {view === 'adversarial' && adversarialSection === 'timeline' && <section id="red-team-timeline" className="settings-card red-team-section adversarial-timeline-card" role="tabpanel" aria-labelledby="red-team-timeline-tab adversarial-timeline-heading" tabIndex={-1}>
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-timeline-heading">{t('Causal timeline')}</h2><p className="settings-card-description">{t('Select Review timeline on a result to load its bounded request, stream, finding, and terminal evidence.')}</p></div>{activeTimelineResult && <div className="adversarial-timeline-context"><span className={`adversarial-outcome adversarial-outcome--${activeTimelineResult.outcome}`}>{t(adversarialOutcomeText(activeTimelineResult.outcome))}</span><strong>{activeTimelineResult.scenarioName}</strong><small>{formatNumber(activeTimelineResult.durationMs)} ms</small></div>}</div>
       {timeline ?? <p className="settings-empty">{activeEvidenceId ? t('Causal evidence is unavailable for the selected result.') : t('Select a result to review its causal timeline.')}</p>}
-    </section>
-    </>}
+    </section>}
     {view === 'contracts' && <>
     <section className="settings-card" aria-labelledby="scenario-reporting-heading">
       <SectionHeading id="scenario-reporting-heading" title={t('CI reports')} description={t('Write sanitized contract summaries after Test Explorer runs.')} />
@@ -610,47 +734,158 @@ function TestOperationStatus({ operation }: { operation?: TestOperationSnapshot 
       : operation.state === 'cancelled' ? 'Completed attempts remain available; unfinished work is not treated as passed.'
         : 'Open TurnStage Output for diagnostic details.';
   const activeCaseDetail = active && progress?.activeCaseNames?.length ? t('Active: {cases}', { cases: progress.activeCaseNames.join(', ') }) : undefined;
+  const concurrencyDetail = progress ? active
+    ? t('Concurrency: {active} active · limit {limit} / 8', { active: formatNumber(progress.activeCaseNames?.length ?? 0), limit: formatNumber(progress.maxConcurrency) })
+    : t('Concurrency limit: {limit} / 8', { limit: formatNumber(progress.maxConcurrency) })
+    : undefined;
   const percentage = progress?.totalCases ? Math.round((progress.completedCases / progress.totalCases) * 100) : undefined;
   return <div className={`test-operation-status test-operation-status--${operation.state}`} role="status" aria-live="polite" aria-atomic="true">
     <ProductIcon name={icon} className={active ? 'test-operation-status__active-icon' : ''} />
-    <div><strong>{t(title)}</strong><span>{t(detail)}</span>{activeCaseDetail && <small>{activeCaseDetail}</small>}{operation.detail && <small>{operation.detail}</small>}</div>
+    <div><strong>{t(title)}</strong><span>{t(detail)}</span>{concurrencyDetail && <small>{concurrencyDetail}</small>}{activeCaseDetail && <small>{activeCaseDetail}</small>}{operation.detail && <small>{operation.detail}</small>}</div>
     {active && (percentage === undefined
       ? <progress aria-label={t('Test run progress')} />
       : <progress value={progress!.completedCases} max={progress!.totalCases} aria-label={t('Test run progress')} aria-valuetext={progressDetail}>{percentage}%</progress>)}
   </div>;
 }
 
-function AdversarialCaseTable({ entries, expandedCaseId, onToggle, onChange, onDestructiveChange, onDelete }: {
+interface AdversarialCaseRow {
+  key: string;
+  source: 'inline' | 'linked';
+  sourceKey: string;
+  sourceLabel: string;
+  scenarioId: string;
+  scenarioName: string;
+  tags: string[];
+  mode: 'singleTurn' | 'multiTurn';
+  turns: number;
+  maxTurns: number;
+  repetitions: number;
+  timeoutMs: number;
+  rules: string;
+  scenario?: ScenarioDefinition;
+  index?: number;
+  sourcePath?: string;
+}
+
+function AdversarialCaseTable({ entries, linkedEntries, catalog, collection, onCollectionChange, onRefresh, expandedCaseId, onToggle, onChange, onDestructiveChange, onDelete, onOpenSource }: {
   entries: Array<{ scenario: ScenarioDefinition; index: number }>;
+  linkedEntries: LinkedAdversarialCaseSummary[];
+  catalog?: AdversarialCaseCatalog;
+  collection: AdversarialCaseCollectionState;
+  onCollectionChange: (state: AdversarialCaseCollectionState) => void;
+  onRefresh: () => void;
   expandedCaseId?: string;
   onToggle: (id: string) => void;
   onChange: (index: number, value: ScenarioDefinition) => void;
   onDestructiveChange: (index: number, value: ScenarioDefinition, label: string) => void;
   onDelete: (index: number, scenario: ScenarioDefinition) => void;
+  onOpenSource: (path: string) => void;
 }): React.JSX.Element {
-  return <div className="adversarial-case-table-wrap" tabIndex={0} aria-label={t('Adversarial case settings table')}>
-    <table className="adversarial-case-table">
+  const rows = useMemo<AdversarialCaseRow[]>(() => [
+    ...entries.map(({ scenario, index }) => {
+      const definition = scenario.adversarial!;
+      return {
+        key: `inline:${scenario.id}:${index}`,
+        source: 'inline' as const,
+        sourceKey: 'inline',
+        sourceLabel: t('Inline'),
+        scenarioId: scenario.id,
+        scenarioName: scenario.name || scenario.id,
+        tags: scenario.tags ?? [],
+        mode: definition.mode ?? (scenario.steps.length > 1 ? 'multiTurn' : 'singleTurn'),
+        turns: scenario.steps.length,
+        maxTurns: definition.maxTurns ?? Math.max(1, scenario.steps.length),
+        repetitions: definition.repetitions ?? 1,
+        timeoutMs: definition.timeoutMs ?? 60_000,
+        rules: adversarialRuleSummary(definition.forbid),
+        scenario,
+        index,
+      };
+    }),
+    ...linkedEntries.map((entry) => ({
+      key: `linked:${entry.sourcePath}:${entry.scenarioId}`,
+      source: 'linked' as const,
+      sourceKey: `linked:${entry.sourcePath}`,
+      sourceLabel: entry.suiteName || linkedSuiteLabel(entry.sourcePath),
+      scenarioId: entry.scenarioId,
+      scenarioName: entry.scenarioName || entry.scenarioId,
+      tags: entry.tags,
+      mode: entry.mode,
+      turns: entry.turns,
+      maxTurns: entry.maxTurns,
+      repetitions: entry.repetitions,
+      timeoutMs: entry.timeoutMs,
+      rules: linkedAdversarialRuleSummary(entry),
+      sourcePath: entry.sourcePath,
+    })),
+  ], [entries, linkedEntries]);
+  const sourceOptions = useMemo(() => [...new Map(rows.filter((row) => row.source === 'linked').map((row) => [row.sourceKey, row.sourceLabel])).entries()], [rows]);
+  const tagOptions = useMemo(() => [...new Set(rows.flatMap((row) => row.tags))].sort((left, right) => left.localeCompare(right)).slice(0, 100), [rows]);
+  const filtered = useMemo(() => {
+    const query = collection.query.trim().toLocaleLowerCase();
+    const selected = rows.filter((row) => {
+      if (collection.mode !== 'all' && row.mode !== collection.mode) return false;
+      if (collection.source !== 'all' && row.sourceKey !== collection.source) return false;
+      if (collection.tag !== 'all' && !row.tags.includes(collection.tag)) return false;
+      return !query || `${row.scenarioName} ${row.scenarioId} ${row.tags.join(' ')} ${row.rules} ${row.sourceLabel}`.toLocaleLowerCase().includes(query);
+    });
+    if (collection.sort === 'name') selected.sort((left, right) => left.scenarioName.localeCompare(right.scenarioName) || left.scenarioId.localeCompare(right.scenarioId));
+    else if (collection.sort === 'mode') selected.sort((left, right) => left.mode.localeCompare(right.mode) || left.scenarioName.localeCompare(right.scenarioName));
+    return selected;
+  }, [collection.mode, collection.query, collection.sort, collection.source, collection.tag, rows]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / collection.pageSize));
+  const page = Math.min(collection.page, pageCount - 1);
+  const visible = filtered.slice(page * collection.pageSize, (page + 1) * collection.pageSize);
+  const updateCollection = (patch: Partial<AdversarialCaseCollectionState>, resetPage = true) => onCollectionChange(normalizeAdversarialCaseCollectionState({ ...collection, ...patch, ...(resetPage ? { page: 0 } : {}) }));
+  return <div className="adversarial-case-collection">
+    <div className="adversarial-case-toolbar">
+      <label className="adversarial-case-search"><span className="sr-only">{t('Search adversarial cases')}</span><input type="search" value={collection.query} placeholder={t('Search cases by name, ID, tag, or rule')} aria-label={t('Search adversarial cases')} onChange={(event) => updateCollection({ query: event.target.value })} /></label>
+      <label><span className="sr-only">{t('Case mode')}</span><select aria-label={t('Case mode')} value={collection.mode} onChange={(event) => updateCollection({ mode: event.target.value as AdversarialCaseModeFilter })}><option value="all">{t('All modes')}</option><option value="singleTurn">{t('Single turn')}</option><option value="multiTurn">{t('Multi-turn')}</option></select></label>
+      <label><span className="sr-only">{t('Case source')}</span><select aria-label={t('Case source')} value={rows.some((row) => row.sourceKey === collection.source) ? collection.source : 'all'} onChange={(event) => updateCollection({ source: event.target.value })}><option value="all">{t('All sources')}</option><option value="inline">{t('Inline')}</option>{sourceOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <details className="adversarial-case-more-filters"><summary>{t(collection.tag !== 'all' || collection.sort !== 'sourceOrder' ? 'Filters active' : 'More filters')}</summary><div>
+        <label><span>{t('Tag')}</span><select aria-label={t('Case tag')} value={tagOptions.includes(collection.tag) ? collection.tag : 'all'} onChange={(event) => updateCollection({ tag: event.target.value })}><option value="all">{t('All tags')}</option>{tagOptions.map((tag) => <option key={tag}>{tag}</option>)}</select></label>
+        <label><span>{t('Sort')}</span><select aria-label={t('Case sort order')} value={collection.sort} onChange={(event) => updateCollection({ sort: event.target.value as AdversarialCaseSort })}><option value="sourceOrder">{t('Source order')}</option><option value="name">{t('Name')}</option><option value="mode">{t('Mode')}</option></select></label>
+      </div></details>
+      <IconButton type="button" icon="refresh" label={t('Refresh linked cases')} onClick={onRefresh} />
+    </div>
+    <div className="adversarial-case-collection-status"><span>{t('{filtered} of {total} cases', { filtered: formatNumber(filtered.length), total: formatNumber(rows.length) })}</span>{catalog?.truncated && <span className="is-warning">{t('Only the first {count} linked cases are shown to protect performance.', { count: formatNumber(catalog.entries.length) })}</span>}</div>
+    {catalog?.issues.length ? <details className="adversarial-catalog-issues"><summary>{t('{count} linked source issues', { count: formatNumber(catalog.issues.length) })}</summary><ul>{catalog.issues.map((issue) => <li key={`${issue.sourcePath}:${issue.message}`}><code>{linkedSuiteLabel(issue.sourcePath)}</code><span>{issue.message}</span></li>)}</ul></details> : null}
+    <div className="adversarial-case-table-wrap" tabIndex={0} aria-label={t('Adversarial case settings table')}><table className="adversarial-case-table">
       <caption className="sr-only">{t('Adversarial case settings')}</caption>
-      <thead><tr><th scope="col">{t('Case')}</th><th scope="col">{t('Mode')}</th><th scope="col">{t('Turns')}</th><th scope="col">{t('Repetitions')}</th><th scope="col">{t('Timeout')}</th><th scope="col">{t('Prohibitions')}</th><th scope="col">{t('Actions')}</th></tr></thead>
-      <tbody>{entries.map(({ scenario, index }) => {
-        const definition = scenario.adversarial!;
-        const expanded = expandedCaseId === scenario.id;
-        const editorId = `adversarial-case-detail-${index}`;
-        return <React.Fragment key={`${scenario.id}-${index}`}>
+      <thead><tr><th scope="col">{t('Case')}</th><th scope="col">{t('Source')}</th><th scope="col">{t('Mode')}</th><th scope="col">{t('Turns')}</th><th scope="col">{t('Repetitions')}</th><th scope="col">{t('Timeout')}</th><th scope="col">{t('Prohibitions')}</th><th scope="col">{t('Actions')}</th></tr></thead>
+      <tbody>{visible.map((row) => {
+        const scenario = row.scenario;
+        const index = row.index;
+        const expanded = row.source === 'inline' && expandedCaseId === row.scenarioId;
+        const editorId = `adversarial-case-detail-${row.key.replace(/[^a-z0-9-]/giu, '-')}`;
+        return <React.Fragment key={row.key}>
           <tr className={expanded ? 'is-expanded' : undefined}>
-            <th scope="row"><span>{scenario.name || scenario.id}</span><code>{scenario.id}</code>{scenario.tags?.length ? <small>{scenario.tags.join(', ')}</small> : null}</th>
-            <td>{t((definition.mode ?? (scenario.steps.length > 1 ? 'multiTurn' : 'singleTurn')) === 'multiTurn' ? 'Multi-turn' : 'Single turn')}</td>
-            <td>{t('{current} / {maximum}', { current: formatNumber(scenario.steps.length), maximum: formatNumber(definition.maxTurns ?? Math.max(1, scenario.steps.length)) })}</td>
-            <td>{formatNumber(definition.repetitions ?? 1)}</td>
-            <td>{formatDuration(definition.timeoutMs ?? 60_000)}</td>
-            <td><span className="adversarial-case-table__rules">{adversarialRuleSummary(definition.forbid)}</span></td>
-            <td><div className="adversarial-case-table__actions"><button type="button" aria-expanded={expanded} aria-controls={editorId} onClick={() => onToggle(scenario.id)}>{t(expanded ? 'Close editor' : 'Edit')}</button><IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={() => onDelete(index, scenario)} /></div></td>
+            <th scope="row"><span>{row.scenarioName}</span><code>{row.scenarioId}</code>{row.tags.length ? <small>{row.tags.join(', ')}</small> : null}</th>
+            <td><span className={`adversarial-case-source adversarial-case-source--${row.source}`} title={row.sourcePath ? linkedSuiteLabel(row.sourcePath) : undefined}>{row.sourceLabel}</span></td>
+            <td>{t(row.mode === 'multiTurn' ? 'Multi-turn' : 'Single turn')}</td>
+            <td>{t('{current} / {maximum}', { current: formatNumber(row.turns), maximum: formatNumber(row.maxTurns) })}</td>
+            <td>{formatNumber(row.repetitions)}</td>
+            <td>{formatDuration(row.timeoutMs)}</td>
+            <td><span className="adversarial-case-table__rules">{row.rules}</span></td>
+            <td><div className="adversarial-case-table__actions">{scenario && index !== undefined ? <><button type="button" aria-expanded={expanded} aria-controls={editorId} onClick={() => onToggle(scenario.id)}>{t(expanded ? 'Close editor' : 'Edit')}</button><IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={() => onDelete(index, scenario)} /></> : row.sourcePath ? <button type="button" onClick={() => onOpenSource(row.sourcePath!)}>{t('Open source')}</button> : null}</div></td>
           </tr>
-          {expanded && <tr className="adversarial-case-table__editor-row"><td colSpan={7}><div id={editorId}><ScenarioEditor scenario={scenario} index={index} onChange={(value) => onChange(index, value)} onDestructiveChange={(value, label) => onDestructiveChange(index, value, label)} onDelete={() => onDelete(index, scenario)} /></div></td></tr>}
+          {expanded && scenario && index !== undefined && <tr className="adversarial-case-table__editor-row"><td colSpan={8}><div id={editorId}><ScenarioEditor scenario={scenario} index={index} onChange={(value) => onChange(index, value)} onDestructiveChange={(value, label) => onDestructiveChange(index, value, label)} onDelete={() => onDelete(index, scenario)} /></div></td></tr>}
         </React.Fragment>;
       })}</tbody>
-    </table>
+    </table></div>
+    {!visible.length && <div className="settings-empty">{t('No cases match the current filters.')}</div>}
+    <div className="adversarial-case-pagination" aria-label={t('Case pages')}><label>{t('Rows per page')}<select value={collection.pageSize} onChange={(event) => updateCollection({ pageSize: Number(event.target.value) as 25 | 50 | 100 })}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label><span>{t('Page {current} of {total}', { current: formatNumber(page + 1), total: formatNumber(pageCount) })}</span><div><IconButton type="button" icon="arrow-left" label={t('Previous page')} disabled={page === 0} onClick={() => updateCollection({ page: page - 1 }, false)} /><IconButton type="button" icon="arrow-right" label={t('Next page')} disabled={page >= pageCount - 1} onClick={() => updateCollection({ page: page + 1 }, false)} /></div></div>
   </div>;
+}
+
+function linkedAdversarialRuleSummary(entry: LinkedAdversarialCaseSummary): string {
+  const rules: string[] = [];
+  if (entry.prohibit.content) rules.push(t('{count} content', { count: formatNumber(entry.prohibit.content) }));
+  if (entry.prohibit.urls) rules.push(t('URLs'));
+  if (entry.prohibit.ctas) rules.push(t('CTAs'));
+  if (entry.prohibit.tools) rules.push(t('Tools'));
+  if (entry.prohibit.events) rules.push(t('{count} events', { count: formatNumber(entry.prohibit.events) }));
+  return rules.join(' · ') || t('No rules');
 }
 
 function adversarialRuleSummary(forbid: AdversarialForbidDefinition): string {
@@ -673,7 +908,7 @@ function ReliabilitySummary({ summary }: { summary: NonNullable<AdversarialResul
       upper: formatNumber(summary.resistanceInterval.upper * 100),
     });
   return <details className="adversarial-reliability">
-    <summary>{t('Reliability')} · {percent} · {t(reliabilityVerdictText(summary.verdict))}</summary>
+    <summary><span>{t('Reliability')} · {percent} · {t(reliabilityVerdictText(summary.verdict))}</span></summary>
     <dl>
       <div><dt>{t('Coverage')}</dt><dd>{formatNumber(summary.coveragePercent)}%</dd></div>
       <div><dt>{t('Resistance')}</dt><dd>{percent}</dd></div>

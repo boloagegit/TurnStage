@@ -28,6 +28,8 @@ import { loadFixture } from '../runtime/fixtureLoader';
 import type { ScenarioTestController } from '../testing/scenarioTestController';
 import { parseAdversarialJsonl, serializeAdversarialJsonl, serializeCampaignResultsJsonl } from '../testing/adversarialJsonl';
 import { ExternalAdversarialSuiteRepository, isExternalAdversarialSuiteReference } from '../testing/externalAdversarialSuite';
+import { loadLinkedAdversarialCaseCatalog } from '../testing/adversarialCatalog';
+import { SessionDeltaTracker } from '../../shared/sessionDelta';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -64,6 +66,10 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     let controller: SessionController | undefined; let documentVersion = -1; let loadTimer: ReturnType<typeof setTimeout> | undefined; let disposed = false; let latestConnectionResult: ConnectionDoctorSummary | undefined;
     let profileSnapshot: Extract<HostPayload, { type: 'profile.snapshot' }> | undefined;
     let validationSnapshot: Extract<HostPayload, { type: 'profile.validation' }> | undefined;
+    let catalogCache: { version: number; catalog: Extract<HostPayload, { type: 'adversarial.catalog' }>['catalog'] } | undefined;
+    let catalogLoad: { version: number; promise: Promise<Extract<HostPayload, { type: 'adversarial.catalog' }>['catalog']> } | undefined;
+    const sessionDeltaTracker = new SessionDeltaTracker();
+    let sessionPostChain = Promise.resolve();
     const post = async (message: HostPayload, requestId: string = crypto.randomUUID()): Promise<boolean> => {
       if (disposed) return false;
       try {
@@ -72,6 +78,19 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         if (disposed || isDisposedWebviewError(error)) return false;
         throw error;
       }
+    };
+    const postAdversarialCatalog = async (force = false, requestId?: string): Promise<void> => {
+      const version = document.version;
+      if (!force && catalogCache?.version === version) { await post({ type: 'adversarial.catalog', catalog: catalogCache.catalog }, requestId); return; }
+      const profile = this.codec.parse(document.getText()).profile;
+      if (!profile) { await post({ type: 'adversarial.catalog', catalog: { entries: [], total: 0, truncated: false, issues: [] } }, requestId); return; }
+      if (!catalogLoad || catalogLoad.version !== version) catalogLoad = { version, promise: loadLinkedAdversarialCaseCatalog(document.uri, profile, (reference) => this.externalAdversarialSuites.resolve(document.uri, reference)) };
+      const pending = catalogLoad;
+      let catalog: Extract<HostPayload, { type: 'adversarial.catalog' }>['catalog'];
+      try { catalog = await pending.promise; } finally { if (catalogLoad === pending) catalogLoad = undefined; }
+      if (disposed || document.version !== version) return;
+      catalogCache = { version, catalog };
+      await post({ type: 'adversarial.catalog', catalog }, requestId);
     };
     const documentKey = document.uri.toString();
     const postSection = (section: WorkspaceSection) => post({ type: 'workspace.section', section });
@@ -92,8 +111,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     };
     const postEvidence = async (evidence: ScenarioRunEvidence, result: ScenarioRunResult | undefined, target: { tab: InspectorTargetTab; evidenceId: string; networkId?: string; sequence?: number; messageId?: string }): Promise<boolean> => {
       if (!controller?.applyScenarioEvidence(evidence)) return false;
-      const snapshot = currentSessionSnapshot();
-      if (snapshot) await post(snapshot);
+      await postFullSession();
       if (result) await post({ type: 'test.timeline', evidenceId: target.evidenceId, timeline: buildEvidenceTimeline(result) });
       await post({ type: 'inspector.focus', ...target });
       return true;
@@ -111,10 +129,25 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       return disposal;
     };
     const currentSessionSnapshot = (): Extract<HostPayload, { type: 'session.snapshot' }> | undefined => controller ? { type: 'session.snapshot', snapshot: controller.snapshot, runs: controller.getRunSummaries(), requestPreview: controller.requestPreview, networkEntries: controller.getNetworkEntries() } : undefined;
+    const queueSessionPost = (message: Extract<HostPayload, { type: 'session.snapshot' | 'session.delta' }>): Promise<void> => {
+      sessionPostChain = sessionPostChain.then(async () => { await post(message); }).catch((error) => {
+        if (!disposed) logAt(this.output, 'error', `[editor] Failed to synchronize session: ${error instanceof Error ? error.message : String(error)}`);
+      });
+      return sessionPostChain;
+    };
+    const postFullSession = async (): Promise<void> => {
+      const payload = currentSessionSnapshot();
+      if (!payload) return;
+      sessionDeltaTracker.checkpoint(payload);
+      await queueSessionPost(payload);
+    };
     const sessionBatcher = new EventBatcher<void>(() => {
       if (disposed) return;
-      const snapshot = currentSessionSnapshot();
-      if (snapshot) void post(snapshot);
+      const payload = currentSessionSnapshot();
+      if (!payload) return;
+      const delta = sessionDeltaTracker.next(payload);
+      if (delta) queueSessionPost({ type: 'session.delta', delta });
+      else { sessionDeltaTracker.checkpoint(payload); queueSessionPost(payload); }
     }, boundedNumber(vscode.workspace.getConfiguration('turnstage').get('streamBatchIntervalMs', 32), 16, 1000, 32), Number.MAX_SAFE_INTEGER);
     const syncTurnActiveContext = () => {
       if (panel.active) void vscode.commands.executeCommand('setContext', 'turnstage.turnActive', Boolean(controller && isActive(controller.snapshot.turnState)));
@@ -168,8 +201,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       if (documentVersion !== document.version || !profileSnapshot || !validationSnapshot) { await load(); return; }
       await post(profileSnapshot);
       await post(validationSnapshot);
-      const sessionSnapshot = currentSessionSnapshot();
-      if (sessionSnapshot) await post(sessionSnapshot);
+      await postFullSession();
     };
     const scheduleLoad = () => { if (loadTimer) clearTimeout(loadTimer); loadTimer = setTimeout(() => { loadTimer = undefined; void load().catch((error) => logAt(this.output, 'error', `[editor] ${error instanceof Error ? error.stack ?? error.message : String(error)}`)); }, DOCUMENT_CHANGE_DEBOUNCE_MS); };
     const documentListener = vscode.workspace.onDidChangeTextDocument((event) => { if (event.document.uri.toString() === document.uri.toString()) scheduleLoad(); });
@@ -207,6 +239,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           return;
         }
         if (message.type === 'profile.patch') { await this.patchDocument(document, message.path, message.value); return; }
+        if (message.type === 'adversarial.catalog.request') { await postAdversarialCatalog(message.force === true, message.requestId); return; }
         if (message.type === 'adversarial.file') {
           if (!vscode.workspace.isTrusted) throw new Error(localize('This action requires a trusted workspace. Profile editing and fixture replay remain available.'));
           const operation = await this.handleAdversarialFile(document, message.action);
@@ -800,7 +833,7 @@ export function isAllowedPatchPath(path: unknown): path is Array<string | number
   if (/^stream\.mappings\.\d+\.match\.(event|path|operator|value)$/.test(key)) return true;
   if (/^ui\.layout\.(preset|inspectorPosition|inspectorWidth)$/.test(key)) return true;
   if (/^ui\.composer\.(placeholder|multiline|enterBehavior|shiftEnterBehavior|showStopWhileStreaming)$/.test(key)) return true;
-  if (/^ui\.streaming\.(effect|speedMs|intensityPercent)$/.test(key)) return true;
+  if (/^ui\.streaming\.(reveal|indicator|effect|pace|maxVisualLagMs|speedMs|intensityPercent)$/.test(key)) return true;
   if (/^ui\.components\.[a-zA-Z0-9_-]+\.(visible|label|collapsible|defaultCollapsed)$/.test(key)) return true;
   return /^ui\.locks\.whileTurnActive\.(disable|allow)$/.test(key);
 }

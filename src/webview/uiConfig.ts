@@ -5,6 +5,9 @@ export type InspectorPosition = NonNullable<NonNullable<UiDefinition['layout']>[
 export type MessageActionId = 'message.copy' | 'message.retry' | 'message.editAndResend' | 'message.inspectRaw';
 export type MessageActionVisibility = NonNullable<UiDefinition['messageActionVisibility']>;
 export type StreamingEffect = NonNullable<NonNullable<UiDefinition['streaming']>['effect']>;
+export type StreamingIndicator = NonNullable<NonNullable<UiDefinition['streaming']>['indicator']>;
+export type StreamingReveal = NonNullable<NonNullable<UiDefinition['streaming']>['reveal']>;
+export type StreamingPace = NonNullable<NonNullable<UiDefinition['streaming']>['pace']>;
 
 export const DEFAULT_MESSAGE_ACTIONS: MessageActionId[] = [
   'message.copy',
@@ -17,8 +20,15 @@ export const DEFAULT_MESSAGE_ACTION_VISIBILITY: MessageActionVisibility = 'alway
 const layoutPresets: UiLayoutPreset[] = ['chat-only', 'split-inspector', 'chat-with-metrics', 'compact'];
 const inspectorPositions: InspectorPosition[] = ['right', 'bottom'];
 const streamingEffects: StreamingEffect[] = ['none', 'caret', 'dots', 'shimmer'];
+const streamingReveals: StreamingReveal[] = ['instant', 'event', 'adaptive'];
+const streamingPaces: StreamingPace[] = ['calm', 'balanced', 'fast'];
 
 export interface ResolvedStreaming {
+  reveal: StreamingReveal;
+  indicator: StreamingIndicator;
+  pace: StreamingPace;
+  maxVisualLagMs: number;
+  /** Legacy alias used by the existing indicator renderer. */
   effect: StreamingEffect;
   speedMs: number;
   intensityPercent: number;
@@ -65,9 +75,14 @@ export function resolveComposer(ui?: UiDefinition): Required<NonNullable<UiDefin
 
 export function resolveStreaming(ui?: UiDefinition): ResolvedStreaming {
   const configured = ui?.streaming;
-  const effect = streamingEffects.includes(configured?.effect as StreamingEffect) ? configured!.effect as StreamingEffect : 'caret';
+  const configuredIndicator = configured?.indicator ?? configured?.effect;
+  const indicator = streamingEffects.includes(configuredIndicator as StreamingEffect) ? configuredIndicator as StreamingIndicator : 'caret';
   return {
-    effect,
+    reveal: streamingReveals.includes(configured?.reveal as StreamingReveal) ? configured!.reveal as StreamingReveal : 'adaptive',
+    indicator,
+    pace: streamingPaces.includes(configured?.pace as StreamingPace) ? configured!.pace as StreamingPace : 'balanced',
+    maxVisualLagMs: clampRounded(configured?.maxVisualLagMs, 100, 2_000, 600),
+    effect: indicator,
     speedMs: clampRounded(configured?.speedMs, 400, 4_000, 900),
     intensityPercent: clampRounded(configured?.intensityPercent, 10, 100, 70),
   };

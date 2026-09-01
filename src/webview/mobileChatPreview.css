@@ -312,6 +312,19 @@
   scrollbar-color: var(--mcp-border) transparent;
 }
 
+.mobile-chat-preview__load-history {
+  align-self: center;
+  margin: 0 0 var(--mcp-space-4);
+  padding: var(--mcp-space-1) var(--mcp-space-2);
+  border-color: transparent;
+  color: var(--mcp-link);
+  background: transparent;
+}
+
+.mobile-chat-preview__load-history:hover:not(:disabled) {
+  background: var(--mcp-hover);
+}
+
 .mobile-chat-preview__jump-to-latest {
   position: absolute;
   z-index: 1;
@@ -492,6 +505,8 @@
   padding: 0;
   border: 0;
   overflow-wrap: anywhere;
+  content-visibility: auto;
+  contain-intrinsic-block-size: 8rem;
 }
 
 .mobile-chat-preview__message--user {

@@ -1,4 +1,4 @@
-import type { AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from './types';
+import type { AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioEvidenceLocation, SessionDelta, SessionSnapshot, TurnStageProfile } from './types';
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -41,9 +41,34 @@ export interface TestOperationProgress {
   completedCases: number;
   totalAttempts: number;
   completedAttempts: number;
+  /** Configured case-level worker limit. Turns and repetitions within one case remain sequential. */
+  maxConcurrency: number;
   activeCaseNames?: string[];
 }
 export interface TestOperationSnapshot { action: TestOperationAction; state: TestOperationState; detail?: string; progress?: TestOperationProgress }
+
+/** Bounded, prompt-free metadata for browsing linked adversarial cases in the Webview. */
+export interface LinkedAdversarialCaseSummary {
+  sourcePath: string;
+  suiteId: string;
+  suiteName: string;
+  scenarioId: string;
+  scenarioName: string;
+  tags: string[];
+  mode: 'singleTurn' | 'multiTurn';
+  turns: number;
+  maxTurns: number;
+  repetitions: number;
+  timeoutMs: number;
+  prohibit: { content: number; events: number; urls: boolean; ctas: boolean; tools: boolean };
+}
+export interface AdversarialCaseCatalog {
+  entries: LinkedAdversarialCaseSummary[];
+  /** Exact when truncated is false; otherwise a lower bound discovered before loading stopped. */
+  total: number;
+  truncated: boolean;
+  issues: Array<{ sourcePath: string; message: string }>;
+}
 
 export type WebviewMessage = Envelope & (
   | { type: 'webview.ready' }
@@ -78,6 +103,7 @@ export type WebviewMessage = Envelope & (
   | { type: 'run.clear' }
   | { type: 'adversarial.file'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkSuite' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate' }
   | { type: 'adversarial.openLinkedSuite'; path: string }
+  | { type: 'adversarial.catalog.request'; force?: boolean }
   | { type: 'test.runAll' }
   | { type: 'test.rerun'; status: 'failed' | 'unstable' | 'incomplete' }
   | { type: 'test.cancel' }
@@ -109,6 +135,7 @@ export type HostMessage = Envelope & (
   | { type: 'profile.validation'; diagnostics: Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number }> }
   | { type: 'profile.validated'; valid: boolean }
   | { type: 'session.snapshot'; snapshot: SessionSnapshot; runs: LocalRunSummary[]; requestPreview?: unknown; networkEntries?: NetworkExchange[] }
+  | { type: 'session.delta'; delta: SessionDelta }
   | { type: 'mapping.test.result'; result: MappingTestResult }
   | { type: 'request.error'; error: { type: string; message: string } }
   | { type: 'action.feedback'; actionId: string; sourceMessageId: string; status: 'success' | 'error'; message: string }
@@ -117,6 +144,7 @@ export type HostMessage = Envelope & (
   | { type: 'run.exported'; path: string }
   | { type: 'run.history.changed'; deletedCount: number; deletedBytes: number }
   | { type: 'adversarial.operation'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkSuite' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string }
+  | { type: 'adversarial.catalog'; catalog: AdversarialCaseCatalog }
   | { type: 'test.operation'; operation: TestOperationSnapshot }
   | { type: 'test.results'; results: AdversarialResultSummary[] }
   | { type: 'campaign.dashboard'; dashboard: CampaignDashboardV1 }
@@ -204,6 +232,7 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   const message = value;
   switch (message.type) {
     case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'test.runAll': case 'test.cancel': case 'test.evidenceBundle.export': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
+    case 'adversarial.catalog.request': return message.force === undefined || typeof message.force === 'boolean';
     case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
     case 'adversarial.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
     case 'test.rerun': return ['failed', 'unstable', 'incomplete'].includes(String(message.status));
@@ -245,6 +274,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'profile.validation': return Array.isArray(message.diagnostics) && message.diagnostics.length <= 10_000 && message.diagnostics.every((item) => isRecord(item) && (item.severity === 'error' || item.severity === 'warning') && isBoundedString(item.message, MAX_TEXT_LENGTH) && Number.isInteger(item.offset) && Number(item.offset) >= 0 && Number.isInteger(item.length) && Number(item.length) >= 0);
     case 'profile.validated': return typeof message.valid === 'boolean';
     case 'session.snapshot': return isRecord(message.snapshot) && Array.isArray(message.runs) && isStructuredValue(message.snapshot, MAX_HOST_VALUE_NODES) && isStructuredValue(message.runs, MAX_HOST_VALUE_NODES) && (message.requestPreview === undefined || isStructuredValue(message.requestPreview, MAX_HOST_VALUE_NODES)) && (message.networkEntries === undefined || (Array.isArray(message.networkEntries) && isStructuredValue(message.networkEntries, MAX_HOST_VALUE_NODES)));
+    case 'session.delta': return isSessionDelta(message.delta);
     case 'mapping.test.result': return isRecord(message.result) && isStructuredValue(message.result, MAX_HOST_VALUE_NODES);
     case 'request.error': return isRecord(message.error) && isBoundedString(message.error.type) && isBoundedString(message.error.message, MAX_TEXT_LENGTH);
     case 'action.feedback': return isBoundedString(message.actionId) && isBoundedString(message.sourceMessageId) && (message.status === 'success' || message.status === 'error') && isBoundedString(message.message, MAX_TEXT_LENGTH);
@@ -253,6 +283,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'run.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH);
     case 'run.history.changed': return Number.isInteger(message.deletedCount) && Number(message.deletedCount) >= 0 && Number(message.deletedCount) <= 100 && Number.isSafeInteger(message.deletedBytes) && Number(message.deletedBytes) >= 0 && Number(message.deletedBytes) <= 100 * 1024 * 1024;
     case 'adversarial.operation': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path);
+    case 'adversarial.catalog': return isAdversarialCaseCatalog(message.catalog);
     case 'test.operation': return isRecord(message.operation)
       && ['runAll', 'rerunFailed', 'rerunUnstable', 'rerunIncomplete'].includes(String(message.operation.action))
       && ['running', 'cancelling', 'completed', 'cancelled', 'failed'].includes(String(message.operation.state))
@@ -271,11 +302,49 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
   }
 }
 
+function isAdversarialCaseCatalog(value: unknown): boolean {
+  if (!isRecord(value) || !Array.isArray(value.entries) || value.entries.length > 100 || !Number.isSafeInteger(value.total) || Number(value.total) < 0 || Number(value.total) > 50_000 || typeof value.truncated !== 'boolean') return false;
+  if (!Array.isArray(value.issues) || value.issues.length > 100 || !value.issues.every((issue) => isRecord(issue) && isBoundedString(issue.sourcePath, 4096) && isBoundedString(issue.message, 4096))) return false;
+  return value.entries.every((entry) => isRecord(entry)
+    && [entry.sourcePath, entry.suiteId, entry.suiteName, entry.scenarioId, entry.scenarioName].every((item) => isBoundedString(item, 4096))
+    && Array.isArray(entry.tags) && entry.tags.length <= 20 && entry.tags.every((tag) => isBoundedString(tag, 64))
+    && (entry.mode === 'singleTurn' || entry.mode === 'multiTurn')
+    && boundedNonNegativeInteger(entry.turns, 10) && Number(entry.turns) >= 1
+    && boundedNonNegativeInteger(entry.maxTurns, 10) && Number(entry.maxTurns) >= Number(entry.turns)
+    && boundedNonNegativeInteger(entry.repetitions, 50) && Number(entry.repetitions) >= 1
+    && boundedNonNegativeInteger(entry.timeoutMs, 300_000) && Number(entry.timeoutMs) >= 1_000
+    && isAdversarialProhibitSummary(entry.prohibit));
+}
+
+function isSessionDelta(value: unknown): boolean {
+  if (!isRecord(value) || !isBoundedId(value.baseSessionId) || !isRecord(value.core) || value.core.sessionId !== value.baseSessionId || !isStructuredValue(value.core, MAX_HOST_VALUE_NODES)) return false;
+  if (!isRecord(value.rawEvents) || !isRecord(value.normalizedEvents) || !isRecord(value.messages)) return false;
+  const validEventDelta = (candidate: Record<string, unknown>, max: number): boolean => Array.isArray(candidate.append)
+    && candidate.append.length <= max
+    && isStructuredValue(candidate.append, MAX_HOST_VALUE_NODES)
+    && (candidate.retainFromSequence === undefined || (Number.isSafeInteger(candidate.retainFromSequence) && Number(candidate.retainFromSequence) >= 0));
+  if (!validEventDelta(value.rawEvents, 10_000) || !validEventDelta(value.normalizedEvents, 10_000)) return false;
+  if (!Array.isArray(value.messages.removeIds) || value.messages.removeIds.length > 1_000 || !value.messages.removeIds.every(isBoundedId)) return false;
+  if (!Array.isArray(value.messages.upsert) || value.messages.upsert.length > 1_000 || !isStructuredValue(value.messages.upsert, MAX_HOST_VALUE_NODES)) return false;
+  if (value.runs !== undefined && (!Array.isArray(value.runs) || value.runs.length > 100 || !isStructuredValue(value.runs, MAX_HOST_VALUE_NODES))) return false;
+  if (value.requestPreviewChanged !== undefined && typeof value.requestPreviewChanged !== 'boolean') return false;
+  if (value.requestPreview !== undefined && !isStructuredValue(value.requestPreview, MAX_HOST_VALUE_NODES)) return false;
+  return value.networkEntries === undefined || (Array.isArray(value.networkEntries) && value.networkEntries.length <= 50 && isStructuredValue(value.networkEntries, MAX_HOST_VALUE_NODES));
+}
+
+function isAdversarialProhibitSummary(value: unknown): boolean {
+  return isRecord(value)
+    && Number.isSafeInteger(value.content) && Number(value.content) >= 0 && Number(value.content) <= 50
+    && Number.isSafeInteger(value.events) && Number(value.events) >= 0 && Number(value.events) <= 50
+    && ['urls', 'ctas', 'tools'].every((key) => typeof value[key] === 'boolean');
+}
+
 function isTestOperationProgress(value: unknown): boolean {
   if (!isRecord(value)) return false;
   const counts = [value.totalCases, value.completedCases, value.totalAttempts, value.completedAttempts];
   if (!counts.every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0 && Number(entry) <= 100_000)) return false;
   if (Number(value.completedCases) > Number(value.totalCases) || Number(value.completedAttempts) > Number(value.totalAttempts)) return false;
+  if (!Number.isSafeInteger(value.maxConcurrency) || Number(value.maxConcurrency) < 1 || Number(value.maxConcurrency) > 8) return false;
   return value.activeCaseNames === undefined || (Array.isArray(value.activeCaseNames) && value.activeCaseNames.length <= 8 && value.activeCaseNames.every((entry) => isBoundedString(entry, 256)));
 }
 

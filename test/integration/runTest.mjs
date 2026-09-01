@@ -32,7 +32,7 @@ try {
       vscodeExecutablePath,
       extensionDevelopmentPath: projectRoot,
       extensionTestsPath: path.join(projectRoot, 'dist', 'test', 'index.js'),
-      extensionTestsEnv: { TURNSTAGE_EXPECT_TRUST: trustMode },
+      extensionTestsEnv: { TURNSTAGE_EXPECT_TRUST: trustMode, TURNSTAGE_MOCK_BASE_URL: `http://127.0.0.1:${mockServer.port}` },
       launchArgs: [workspace, '--disable-extensions', '--user-data-dir', userDataDirectory]
     };
     if (trustMode === 'trusted') await runTests(options);

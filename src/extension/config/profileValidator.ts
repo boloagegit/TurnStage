@@ -431,6 +431,14 @@ export class ProfileValidator {
     if (inspectorWidth !== undefined && (typeof inspectorWidth !== 'number' || !Number.isInteger(inspectorWidth) || inspectorWidth < 240 || inspectorWidth > 960)) out.push(issue(tree, ['ui', 'layout', 'inspectorWidth'], localize('Inspector width must be an integer from 240 to 960.')));
     const streamingEffect = profile.ui?.streaming?.effect as unknown;
     if (streamingEffect !== undefined && !['none', 'caret', 'dots', 'shimmer'].includes(String(streamingEffect))) out.push(issue(tree, ['ui', 'streaming', 'effect'], localize('Unknown Assistant streaming effect: {value}.', { value: String(streamingEffect) })));
+    const streamingIndicator = profile.ui?.streaming?.indicator as unknown;
+    if (streamingIndicator !== undefined && !['none', 'caret', 'dots', 'shimmer'].includes(String(streamingIndicator))) out.push(issue(tree, ['ui', 'streaming', 'indicator'], localize('Unknown Assistant streaming indicator: {value}.', { value: String(streamingIndicator) })));
+    const streamingReveal = profile.ui?.streaming?.reveal as unknown;
+    if (streamingReveal !== undefined && !['instant', 'event', 'adaptive'].includes(String(streamingReveal))) out.push(issue(tree, ['ui', 'streaming', 'reveal'], localize('Unknown Assistant content reveal mode: {value}.', { value: String(streamingReveal) })));
+    const streamingPace = profile.ui?.streaming?.pace as unknown;
+    if (streamingPace !== undefined && !['calm', 'balanced', 'fast'].includes(String(streamingPace))) out.push(issue(tree, ['ui', 'streaming', 'pace'], localize('Unknown Assistant content reveal pace: {value}.', { value: String(streamingPace) })));
+    const maxVisualLagMs = profile.ui?.streaming?.maxVisualLagMs as unknown;
+    if (maxVisualLagMs !== undefined && (typeof maxVisualLagMs !== 'number' || !Number.isInteger(maxVisualLagMs) || maxVisualLagMs < 100 || maxVisualLagMs > 2000)) out.push(issue(tree, ['ui', 'streaming', 'maxVisualLagMs'], localize('Assistant maximum visual lag must be an integer from 100 to 2000 milliseconds.')));
     const streamingSpeed = profile.ui?.streaming?.speedMs as unknown;
     if (streamingSpeed !== undefined && (typeof streamingSpeed !== 'number' || !Number.isInteger(streamingSpeed) || streamingSpeed < 400 || streamingSpeed > 4000)) out.push(issue(tree, ['ui', 'streaming', 'speedMs'], localize('Assistant streaming speed must be an integer from 400 to 4000 milliseconds.')));
     const streamingIntensity = profile.ui?.streaming?.intensityPercent as unknown;

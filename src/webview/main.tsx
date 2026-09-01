@@ -1,15 +1,16 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { HostMessage, MappingTestResult, TestOperationSnapshot, WebviewPayload, WorkspaceSection } from '../shared/protocol';
+import type { AdversarialCaseCatalog, HostMessage, MappingTestResult, TestOperationSnapshot, WebviewPayload, WorkspaceSection } from '../shared/protocol';
 import { isHostMessage, isWorkspaceSection, PROTOCOL_VERSION } from '../shared/protocol';
 import type { AdversarialResultSummary, CampaignDashboardV1, ChatMessage, ConnectionDoctorSummary, EvidenceTimelineEntry, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { mappingDraftFromRawEvent } from './configEditors';
 import { ClipboardButton } from './ClipboardButton';
 import { IconButton, ProductIcon } from './Icon';
 import { CHAT_VIEWPORT_PRESETS, DEFAULT_CHAT_VIEWPORT, MobileChatPreview, type ChatViewportState, type MessageActionFeedback, type VisualFeedback } from './MobileChatPreview';
-import { AdversarialWorkspace, SETTINGS_SECTIONS, SettingsWorkspace, type SettingsSectionId } from './SettingsWorkspace';
+import { AdversarialWorkspace, DEFAULT_ADVERSARIAL_CASE_COLLECTION, DEFAULT_ADVERSARIAL_RESULT_COLLECTION, normalizeAdversarialCaseCollectionState, normalizeAdversarialResultCollectionState, RED_TEAM_SECTIONS, SETTINGS_SECTIONS, SettingsWorkspace, type AdversarialCaseCollectionState, type AdversarialResultCollectionState, type RedTeamSectionId, type SettingsSectionId } from './SettingsWorkspace';
 import { dateTimeAttribute, formatDateTime, formatDuration, formatNumber, localizeHumanized, setLocale, t } from './i18n';
 import { resolveUiLayout } from './uiConfig';
+import { applySessionDelta } from '../shared/sessionDelta';
 import './styles.css';
 
 declare function acquireVsCodeApi<T = unknown>(): { postMessage(message: unknown): void; getState(): T | undefined; setState(state: T): void };
@@ -22,9 +23,10 @@ export interface CollapsedEventTurns { raw: string[]; normalized: string[] }
 const MAPPING_FILTERS = new Set<EventMappingFilter>(['all', 'matched', 'unmatched']);
 const ISSUE_FILTERS = new Set<EventIssueFilter>(['all', 'valid', 'parse-error', 'mapping-error']);
 const TERMINAL_FILTERS = new Set<EventTerminalFilter>(['all', 'terminal', 'non-terminal']);
+const eventSearchTextCache = new WeakMap<object, string>();
 const rightPaneModes = ['debug', 'adversarial', 'configure'] as const;
 type RightPaneMode = typeof rightPaneModes[number];
-const WEBVIEW_STATE_VERSION = 2;
+const WEBVIEW_STATE_VERSION = 4;
 const scrollPositionKeys = ['chat', 'adversarial', 'events.raw', 'events.normalized', ...SETTINGS_SECTIONS.map((section) => `configure.${section.id}`)] as const;
 type ScrollPositionKey = typeof scrollPositionKeys[number];
 const networkDetailTabs = ['Headers', 'Payload', 'Response', 'Timing'] as const;
@@ -34,7 +36,7 @@ export const DEFAULT_SPLIT_PERCENT = 64;
 export const ACCESSIBLE_EVENT_WINDOW_SIZE = 200;
 export const DEFAULT_EVENT_FILTERS: EventFilterState = { query: '', turn: 'all', eventType: 'all', mapping: 'all', issue: 'all', terminal: 'all' };
 export interface NetworkInspectorState { query: string; selectedId?: string; detailTab: NetworkDetailTab }
-export interface WebviewState { version?: number; sessionId?: string; section?: WorkspaceSection; configurationSection?: SettingsSectionId; rightPaneMode?: RightPaneMode; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number; selectedNetworkId?: string; activeEvidenceId?: string; chatViewport?: ChatViewportState; eventFilters?: Partial<InspectorEventFilters>; collapsedEventTurns?: Partial<CollapsedEventTurns>; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; expandedAdversarialCaseId?: string; networkInspector?: Partial<NetworkInspectorState>; acceptedForms?: string[] }
+export interface WebviewState { version?: number; sessionId?: string; section?: WorkspaceSection; configurationSection?: SettingsSectionId; rightPaneMode?: RightPaneMode; redTeamSection?: RedTeamSectionId; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number; selectedNetworkId?: string; activeEvidenceId?: string; selectedCampaignId?: string; chatViewport?: ChatViewportState; eventFilters?: Partial<InspectorEventFilters>; collapsedEventTurns?: Partial<CollapsedEventTurns>; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; expandedAdversarialCaseId?: string; adversarialCaseCollection?: Partial<AdversarialCaseCollectionState>; adversarialResultCollection?: Partial<AdversarialResultCollectionState>; networkInspector?: Partial<NetworkInspectorState>; acceptedForms?: string[] }
 type VsCodeApi = { postMessage(message: unknown): void; getState(): WebviewState | undefined; setState(state: WebviewState): void };
 const rootElement = typeof document === 'undefined' ? undefined : document.getElementById('root');
 const instanceId = rootElement?.dataset.instanceId ?? 'test-instance';
@@ -51,12 +53,16 @@ function App(): React.JSX.Element {
   const savedSection = isWorkspaceSection(savedState?.section) ? savedState.section : 'test';
   const [configurationSection, setConfigurationSection] = useState<SettingsSectionId>(isSettingsSectionId(savedState?.configurationSection) ? savedState.configurationSection : savedSection === 'test' ? 'general' : savedSection);
   const [rightPaneMode, setRightPaneMode] = useState<RightPaneMode>(isRightPaneMode(savedState?.rightPaneMode) ? savedState.rightPaneMode : savedSection === 'test' ? 'debug' : 'configure');
+  const [redTeamSection, setRedTeamSection] = useState<RedTeamSectionId>(RED_TEAM_SECTIONS.includes(savedState?.redTeamSection as RedTeamSectionId) ? savedState!.redTeamSection as RedTeamSectionId : 'results');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(savedInspectorTab === 'Request' ? 'Network' : isInspectorTab(savedInspectorTab) ? savedInspectorTab : 'Raw Events'); const [draft, setDraft] = useState(savedState?.draft ?? ''); const [splitPercent, setSplitPercent] = useState(initialSplitPercent(savedState?.splitPercent, savedSplitCustomized)); const [splitCustomized, setSplitCustomized] = useState(savedSplitCustomized); const [selectedMessageId, setSelectedMessageId] = useState(savedState?.selectedMessageId); const [selectedRawSequence, setSelectedRawSequence] = useState(savedState?.selectedRawSequence); const [selectedNetworkId, setSelectedNetworkId] = useState(savedState?.selectedNetworkId);
   const [activeEvidenceId, setActiveEvidenceId] = useState(savedState?.activeEvidenceId);
   const [chatViewport, setChatViewport] = useState<ChatViewportState>(isChatViewportState(savedState?.chatViewport) ? savedState.chatViewport : { ...DEFAULT_CHAT_VIEWPORT });
   const [eventFilters, setEventFilters] = useState<InspectorEventFilters>(() => normalizeInspectorEventFilters(savedState?.eventFilters));
   const [collapsedEventTurns, setCollapsedEventTurns] = useState<CollapsedEventTurns>(() => normalizeCollapsedEventTurns(savedState?.collapsedEventTurns));
   const [expandedAdversarialCaseId, setExpandedAdversarialCaseId] = useState(savedState?.expandedAdversarialCaseId);
+  const [adversarialCaseCollection, setAdversarialCaseCollection] = useState<AdversarialCaseCollectionState>(() => normalizeAdversarialCaseCollectionState(savedState?.adversarialCaseCollection));
+  const [adversarialResultCollection, setAdversarialResultCollection] = useState<AdversarialResultCollectionState>(() => normalizeAdversarialResultCollectionState(savedState?.adversarialResultCollection));
+  const [selectedCampaignId, setSelectedCampaignId] = useState(savedState?.selectedCampaignId);
   const [networkInspector, setNetworkInspector] = useState<NetworkInspectorState>(() => normalizeNetworkInspectorState(savedState?.networkInspector));
   const scrollPositionsRef = useRef<Partial<Record<ScrollPositionKey, number>>>({ ...savedState?.scrollPositions });
   const stateRef = useRef<WebviewState | undefined>(undefined);
@@ -66,11 +72,13 @@ function App(): React.JSX.Element {
   const [messageActionFeedback, setMessageActionFeedback] = useState<MessageActionFeedback>();
   const [visualFeedback, setVisualFeedback] = useState<VisualFeedback>();
   const [testResults, setTestResults] = useState<AdversarialResultSummary[]>([]);
+  const [adversarialCaseCatalog, setAdversarialCaseCatalog] = useState<AdversarialCaseCatalog>();
   const [campaignDashboard, setCampaignDashboard] = useState<CampaignDashboardV1>();
   const [activeTimeline, setActiveTimeline] = useState<{ evidenceId: string; timeline: EvidenceTimelineSummary }>();
   const [connectionResult, setConnectionResult] = useState<ConnectionDoctorSummary>();
   const [profile, setProfile] = useState<TurnStageProfile>(); const [snapshot, setSnapshot] = useState<SessionSnapshot>(); const [runs, setRuns] = useState<LocalRunSummary[]>([]); const [requestPreview, setRequestPreview] = useState<unknown>(); const [networkEntries, setNetworkEntries] = useState<NetworkExchange[]>([]); const [diagnostics, setDiagnostics] = useState<Array<{ severity: string; message: string }>>([]); const [notice, setNotice] = useState(''); const [mappingTestResult, setMappingTestResult] = useState<MappingTestResult>(); const [remoteName, setRemoteName] = useState<string>(); const [, setLocaleVersion] = useState(0);
-  useEffect(() => { const listener = (event: MessageEvent<HostMessage>) => { if (!isHostMessage(event.data, instanceId)) return; const message = event.data; if (message.type === 'host.ready') { setLocale(message.locale, message.direction); setLocaleVersion((current) => current + 1); setRemoteName(message.remoteName); } else if (message.type === 'workspace.section') { if (message.section === 'test') setRightPaneMode('debug'); else { setConfigurationSection(message.section); setRightPaneMode('configure'); } requestAnimationFrame(() => document.getElementById('right-pane-panel')?.focus()); } else if (message.type === 'inspector.focus') { profileInspectorDefaultApplied.current = true; setRightPaneMode('debug'); setActiveEvidenceId(message.evidenceId); setInspectorTab(message.tab); setSelectedNetworkId(message.networkId); setSelectedRawSequence(message.sequence); setSelectedMessageId(message.messageId); if (message.tab === 'Raw Events') setEventFilters((current) => ({ ...current, raw: { ...DEFAULT_EVENT_FILTERS } })); if (message.tab === 'Normalized') setEventFilters((current) => ({ ...current, normalized: { ...DEFAULT_EVENT_FILTERS } })); setNotice(t('Opened test failure evidence.')); focusAfterRender(() => { const target = message.networkId ? document.getElementById(networkRowId(message.networkId)) : message.sequence === undefined ? document.getElementById('right-pane-panel') : document.getElementById(`inspector-event-${String(message.sequence)}`); target?.focus(); }); } else if (message.type === 'profile.snapshot') { setProfile(message.profile); setConnectionResult(undefined); } else if (message.type === 'profile.validation') setDiagnostics(message.diagnostics); else if (message.type === 'profile.validated') { if (message.valid) setNotice(t('Profile is valid.')); } else if (message.type === 'session.snapshot') { setSnapshot(message.snapshot); setRuns(message.runs); setRequestPreview(message.requestPreview); setNetworkEntries(message.networkEntries ?? []); setConnectionResult(undefined); } else if (message.type === 'mapping.test.result') setMappingTestResult(message.result); else if (message.type === 'request.error') setNotice(message.error.message); else if (message.type === 'action.feedback') setMessageActionFeedback({ actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: message.status, message: message.message }); else if (message.type === 'form.accepted') { setAcceptedForms((current) => new Set(current).add(`${message.sourceMessageId ?? ''}:${message.formId}`)); setNotice(t('Form submitted.')); } else if (message.type === 'run.imported') setNotice(t(message.duplicate ? 'Run imported as a copy from {path}' : 'Run imported from {path}', { path: message.path })); else if (message.type === 'run.exported') setNotice(t('Run exported to {path}', { path: message.path })); else if (message.type === 'run.history.changed') setNotice(t(message.deletedCount === 1 ? 'Deleted {count} recorded run.' : 'Deleted {count} recorded runs.', { count: formatNumber(message.deletedCount) })); else if (message.type === 'adversarial.operation' || message.type === 'adversarial.captured') setNotice(message.detail); else if (message.type === 'test.results') setTestResults(message.results); else if (message.type === 'test.exported') setNotice(t(message.kind === 'evidenceBundle' ? 'Evidence Bundle exported to {path}' : 'Test report exported to {path}', { path: message.path })); else if (message.type === 'campaign.dashboard') setCampaignDashboard(message.dashboard); else if (message.type === 'campaign.preview') { const summary = t('{cases} cases · {attempts} attempts · up to {requests} requests', { cases: formatNumber(message.selectedCases), attempts: formatNumber(message.plannedAttempts), requests: formatNumber(message.plannedRequests) }); setNotice(message.warnings.length ? `${summary} · ${message.warnings.join(' ')}` : summary); } else if (message.type === 'test.timeline') { setActiveEvidenceId(message.evidenceId); setActiveTimeline({ evidenceId: message.evidenceId, timeline: message.timeline }); } else if (message.type === 'connection.result') setConnectionResult(message.result); else if (message.type === 'visual.result') setVisualFeedback(message); else if (message.type === 'workspaceTrust.changed') setSnapshot((current) => current ? { ...current, trusted: message.trusted } : current); }; window.addEventListener('message', listener); post({ type: 'webview.ready' }); return () => window.removeEventListener('message', listener); }, []);
+  const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
+  useEffect(() => { const listener = (event: MessageEvent<HostMessage>) => { if (!isHostMessage(event.data, instanceId)) return; const message = event.data; if (message.type === 'host.ready') { setLocale(message.locale, message.direction); setLocaleVersion((current) => current + 1); setRemoteName(message.remoteName); } else if (message.type === 'workspace.section') { if (message.section === 'test') setRightPaneMode('debug'); else { setConfigurationSection(message.section); setRightPaneMode('configure'); } requestAnimationFrame(() => document.getElementById('right-pane-panel')?.focus()); } else if (message.type === 'inspector.focus') { profileInspectorDefaultApplied.current = true; setRightPaneMode('debug'); setActiveEvidenceId(message.evidenceId); setInspectorTab(message.tab); setSelectedNetworkId(message.networkId); setSelectedRawSequence(message.sequence); setSelectedMessageId(message.messageId); if (message.tab === 'Raw Events') setEventFilters((current) => ({ ...current, raw: { ...DEFAULT_EVENT_FILTERS } })); if (message.tab === 'Normalized') setEventFilters((current) => ({ ...current, normalized: { ...DEFAULT_EVENT_FILTERS } })); setNotice(t('Opened test failure evidence.')); focusAfterRender(() => { const target = message.networkId ? document.getElementById(networkRowId(message.networkId)) : message.sequence === undefined ? document.getElementById('right-pane-panel') : document.getElementById(`inspector-event-${String(message.sequence)}`); target?.focus(); }); } else if (message.type === 'profile.snapshot') { setProfile(message.profile); setConnectionResult(undefined); } else if (message.type === 'profile.validation') setDiagnostics(message.diagnostics); else if (message.type === 'profile.validated') { if (message.valid) setNotice(t('Profile is valid.')); } else if (message.type === 'session.snapshot') { snapshotRef.current = message.snapshot; setSnapshot(message.snapshot); setRuns(message.runs); setRequestPreview(message.requestPreview); setNetworkEntries(message.networkEntries ?? []); setConnectionResult(undefined); } else if (message.type === 'session.delta') { const next = applySessionDelta(snapshotRef.current, message.delta); if (!next) { post({ type: 'webview.ready' }); return; } snapshotRef.current = next; setSnapshot(next); if (message.delta.runs) setRuns(message.delta.runs); if (message.delta.requestPreviewChanged) setRequestPreview(message.delta.requestPreview); if (message.delta.networkEntries) setNetworkEntries(message.delta.networkEntries); setConnectionResult(undefined); } else if (message.type === 'mapping.test.result') setMappingTestResult(message.result); else if (message.type === 'request.error') setNotice(message.error.message); else if (message.type === 'action.feedback') setMessageActionFeedback({ actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: message.status, message: message.message }); else if (message.type === 'form.accepted') { setAcceptedForms((current) => new Set(current).add(`${message.sourceMessageId ?? ''}:${message.formId}`)); setNotice(t('Form submitted.')); } else if (message.type === 'run.imported') setNotice(t(message.duplicate ? 'Run imported as a copy from {path}' : 'Run imported from {path}', { path: message.path })); else if (message.type === 'run.exported') setNotice(t('Run exported to {path}', { path: message.path })); else if (message.type === 'run.history.changed') setNotice(t(message.deletedCount === 1 ? 'Deleted {count} recorded run.' : 'Deleted {count} recorded runs.', { count: formatNumber(message.deletedCount) })); else if (message.type === 'adversarial.operation' || message.type === 'adversarial.captured') setNotice(message.detail); else if (message.type === 'adversarial.catalog') setAdversarialCaseCatalog(message.catalog); else if (message.type === 'test.results') setTestResults(message.results); else if (message.type === 'test.exported') setNotice(t(message.kind === 'evidenceBundle' ? 'Evidence Bundle exported to {path}' : 'Test report exported to {path}', { path: message.path })); else if (message.type === 'campaign.dashboard') setCampaignDashboard(message.dashboard); else if (message.type === 'campaign.preview') { const summary = t('{cases} cases · {attempts} attempts · up to {requests} requests', { cases: formatNumber(message.selectedCases), attempts: formatNumber(message.plannedAttempts), requests: formatNumber(message.plannedRequests) }); setNotice(message.warnings.length ? `${summary} · ${message.warnings.join(' ')}` : summary); } else if (message.type === 'test.timeline') { setActiveEvidenceId(message.evidenceId); setActiveTimeline({ evidenceId: message.evidenceId, timeline: message.timeline }); } else if (message.type === 'connection.result') setConnectionResult(message.result); else if (message.type === 'visual.result') setVisualFeedback(message); else if (message.type === 'workspaceTrust.changed') setSnapshot((current) => { const next = current ? { ...current, trusted: message.trusted } : current; if (next) snapshotRef.current = next; return next; }); }; window.addEventListener('message', listener); post({ type: 'webview.ready' }); return () => window.removeEventListener('message', listener); }, []);
   useEffect(() => { if (!messageActionFeedback || messageActionFeedback.status === 'pending') return; const timeout = window.setTimeout(() => setMessageActionFeedback(undefined), 2400); return () => window.clearTimeout(timeout); }, [messageActionFeedback]);
   useEffect(() => { if (!notice) return; const timeout = window.setTimeout(() => setNotice(''), 3200); return () => window.clearTimeout(timeout); }, [notice]);
   const checkpointSessionId = useRef(savedState?.sessionId);
@@ -102,9 +110,9 @@ function App(): React.JSX.Element {
     scheduleStatePersist();
   }, [scheduleStatePersist]);
   useEffect(() => {
-    stateRef.current = { version: WEBVIEW_STATE_VERSION, sessionId: snapshot?.sessionId, section: rightPaneMode === 'configure' ? configurationSection : 'test', configurationSection, rightPaneMode, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, chatViewport, eventFilters, collapsedEventTurns, expandedAdversarialCaseId, networkInspector, acceptedForms: [...acceptedForms] };
-    persistState();
-  }, [snapshot?.sessionId, configurationSection, rightPaneMode, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, chatViewport, eventFilters, collapsedEventTurns, expandedAdversarialCaseId, networkInspector, acceptedForms, persistState]);
+    stateRef.current = { version: WEBVIEW_STATE_VERSION, sessionId: snapshot?.sessionId, section: rightPaneMode === 'configure' ? configurationSection : 'test', configurationSection, rightPaneMode, redTeamSection, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, selectedCampaignId, chatViewport, eventFilters, collapsedEventTurns, expandedAdversarialCaseId, adversarialCaseCollection, adversarialResultCollection, networkInspector, acceptedForms: [...acceptedForms] };
+    scheduleStatePersist();
+  }, [snapshot?.sessionId, configurationSection, rightPaneMode, redTeamSection, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, selectedCampaignId, chatViewport, eventFilters, collapsedEventTurns, expandedAdversarialCaseId, adversarialCaseCollection, adversarialResultCollection, networkInspector, acceptedForms, scheduleStatePersist]);
   useEffect(() => {
     const flushIfHidden = () => { if (document.visibilityState === 'hidden') persistState(); };
     window.addEventListener('pagehide', persistState);
@@ -152,18 +160,23 @@ function App(): React.JSX.Element {
     {diagnostics.length > 0 && <div className="validation-banner" role="alert"><strong>{t(diagnostics.length === 1 ? '{count} configuration issue.' : '{count} configuration issues.', { count: formatNumber(diagnostics.length) })}</strong> {t('Requests are blocked until errors are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></div>}
     {notice && <div className="operation-status" role="status" aria-live="polite" aria-atomic="true"><ProductIcon name="info" /><span>{notice}</span><IconButton icon="clear-all" label={t('Dismiss notification')} type="button" onClick={() => setNotice('')} /></div>}
     <section id="main-panel" tabIndex={-1} className="panel" aria-label={t('Test')}>
-      <TestWorkspace profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} testResults={testResults} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} activeTimeline={activeTimeline && activeTimeline.evidenceId === activeEvidenceId ? activeTimeline.timeline : undefined} onCloseEvidence={() => { setActiveEvidenceId(undefined); setActiveTimeline(undefined); setRightPaneMode('adversarial'); }} connectionResult={connectionResult} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} inspectorTab={inspectorTab} setInspectorTab={setInspectorTab} requestPreview={requestPreview} splitPercent={splitPercent} setSplitPercent={setSplitPercent} splitCustomized={splitCustomized} setSplitCustomized={setSplitCustomized} chatViewport={chatViewport} setChatViewport={setChatViewport} eventFilters={eventFilters} setEventFilters={setEventFilters} collapsedEventTurns={collapsedEventTurns} setCollapsedEventTurns={setCollapsedEventTurns} selectedMessageId={selectedMessageId} selectedRawSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={setMessageActionFeedback} onSelectMessage={selectMessage} onSelectEvent={selectEvent} onCreateMapping={(event) => { post({ type: 'profile.patch', path: ['stream', 'mappings'], value: [...profile.stream.mappings, mappingDraftFromRawEvent(event, profile)] }); setNotice(t('Created mapping draft from raw event #{sequence}.', { sequence: formatNumber(event.sequence) })); }} rightPaneMode={rightPaneMode} setRightPaneMode={setRightPaneMode} configurationSection={configurationSection} setConfigurationSection={setConfigurationSection} mappingTestResult={mappingTestResult} remoteName={remoteName} scrollPositions={scrollPositionsRef.current} onScrollPositionChange={updateScrollPosition} expandedAdversarialCaseId={expandedAdversarialCaseId} setExpandedAdversarialCaseId={setExpandedAdversarialCaseId} networkInspector={networkInspector} setNetworkInspector={setNetworkInspector} />
+      <TestWorkspace profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} testResults={testResults} adversarialCaseCatalog={adversarialCaseCatalog} adversarialCaseCollection={adversarialCaseCollection} setAdversarialCaseCollection={setAdversarialCaseCollection} adversarialResultCollection={adversarialResultCollection} setAdversarialResultCollection={setAdversarialResultCollection} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} activeTimeline={activeTimeline && activeTimeline.evidenceId === activeEvidenceId ? activeTimeline.timeline : undefined} onCloseEvidence={() => { setActiveEvidenceId(undefined); setActiveTimeline(undefined); }} connectionResult={connectionResult} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} inspectorTab={inspectorTab} setInspectorTab={setInspectorTab} requestPreview={requestPreview} splitPercent={splitPercent} setSplitPercent={setSplitPercent} splitCustomized={splitCustomized} setSplitCustomized={setSplitCustomized} chatViewport={chatViewport} setChatViewport={setChatViewport} eventFilters={eventFilters} setEventFilters={setEventFilters} collapsedEventTurns={collapsedEventTurns} setCollapsedEventTurns={setCollapsedEventTurns} selectedMessageId={selectedMessageId} selectedRawSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={setMessageActionFeedback} onSelectMessage={selectMessage} onSelectEvent={selectEvent} onCreateMapping={(event) => { post({ type: 'profile.patch', path: ['stream', 'mappings'], value: [...profile.stream.mappings, mappingDraftFromRawEvent(event, profile)] }); setNotice(t('Created mapping draft from raw event #{sequence}.', { sequence: formatNumber(event.sequence) })); }} rightPaneMode={rightPaneMode} setRightPaneMode={setRightPaneMode} redTeamSection={redTeamSection} setRedTeamSection={setRedTeamSection} selectedCampaignId={selectedCampaignId} setSelectedCampaignId={setSelectedCampaignId} configurationSection={configurationSection} setConfigurationSection={setConfigurationSection} mappingTestResult={mappingTestResult} remoteName={remoteName} scrollPositions={scrollPositionsRef.current} onScrollPositionChange={updateScrollPosition} expandedAdversarialCaseId={expandedAdversarialCaseId} setExpandedAdversarialCaseId={setExpandedAdversarialCaseId} networkInspector={networkInspector} setNetworkInspector={setNetworkInspector} />
     </section>
     <div className="sr-status" role="status" aria-live="polite">{terminalAnnouncement(snapshot?.turnState)}</div>
   </main>;
 }
 
-function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, configurationSection, setConfigurationSection, mappingTestResult, remoteName, scrollPositions, onScrollPositionChange, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector }: {
+function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, adversarialCaseCatalog, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, scrollPositions, onScrollPositionChange, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector }: {
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
   runs: LocalRunSummary[];
   networkEntries: NetworkExchange[];
   testResults: AdversarialResultSummary[];
+  adversarialCaseCatalog?: AdversarialCaseCatalog;
+  adversarialCaseCollection: AdversarialCaseCollectionState;
+  setAdversarialCaseCollection: (state: AdversarialCaseCollectionState) => void;
+  adversarialResultCollection: AdversarialResultCollectionState;
+  setAdversarialResultCollection: (state: AdversarialResultCollectionState) => void;
   campaignDashboard?: CampaignDashboardV1;
   activeEvidenceId?: string;
   activeTimeline?: EvidenceTimelineSummary;
@@ -199,6 +212,10 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
   onCreateMapping: (event: RawStreamEvent) => void;
   rightPaneMode: RightPaneMode;
   setRightPaneMode: (mode: RightPaneMode) => void;
+  redTeamSection: RedTeamSectionId;
+  setRedTeamSection: (section: RedTeamSectionId) => void;
+  selectedCampaignId?: string;
+  setSelectedCampaignId: (id: string | undefined) => void;
   configurationSection: SettingsSectionId;
   setConfigurationSection: (section: SettingsSectionId) => void;
   mappingTestResult?: MappingTestResult;
@@ -282,7 +299,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
   const activeEvidence = resolveActiveEvidence(testResults, activeEvidenceId);
   const replayActive = snapshot?.replay && (snapshot.replay.status === 'playing' || snapshot.replay.status === 'paused') ? snapshot.replay : undefined;
   return <div className="test-surface">
-    <div className="test-surface__header">{replayActive && <ReplayOperationStatus replay={replayActive} onOpenControls={() => { setRightPaneMode('debug'); setInspectorTab('Runs'); }} />}{activeEvidence && <EvidenceReviewBar results={testResults} selection={activeEvidence} inspectorTab={inspectorTab} onReviewTimeline={() => { setRightPaneMode('adversarial'); post({ type: 'test.timeline.open', evidenceId: activeEvidence.evidenceId }); }} onClose={onCloseEvidence} />}</div>
+    <div className="test-surface__header">{replayActive && <ReplayOperationStatus replay={replayActive} onOpenControls={() => { setRightPaneMode('debug'); setInspectorTab('Runs'); }} />}{activeEvidence && <EvidenceReviewBar results={testResults} selection={activeEvidence} inspectorTab={inspectorTab} onReviewTimeline={() => { setRightPaneMode('adversarial'); setRedTeamSection('timeline'); post({ type: 'test.timeline.open', evidenceId: activeEvidence.evidenceId }); }} onClose={onCloseEvidence} />}</div>
     <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
     <section ref={previewRef} className="preview-pane">
       <MobileChatPreview profile={profile} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} viewport={chatViewport} onViewportChange={setChatViewport} onConfigure={() => setRightPaneMode('configure')} selectedMessageId={rightPaneMode === 'debug' ? selectedMessageId : undefined} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={onMessageActionFeedback} initialMessageScrollTop={scrollPositions.chat} onMessageScrollTopChange={(value) => onScrollPositionChange('chat', value)} />
@@ -312,7 +329,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
           {rightPaneMode === 'debug'
             ? <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} collapsedEventTurns={collapsedEventTurns} onCollapsedEventTurnsChange={setCollapsedEventTurns} onCreateMapping={onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} scrollPositions={scrollPositions} onScrollPositionChange={onScrollPositionChange} networkInspector={networkInspector} onNetworkInspectorChange={setNetworkInspector} />
             : rightPaneMode === 'adversarial'
-              ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} trusted={snapshot?.trusted === true} post={post} scrollTop={scrollPositions.adversarial} onScrollTopChange={(value) => onScrollPositionChange('adversarial', value)} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} />
+              ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} trusted={snapshot?.trusted === true} post={post} scrollTop={scrollPositions.adversarial} onScrollTopChange={(value) => onScrollPositionChange('adversarial', value)} activeSection={redTeamSection} onActiveSectionChange={setRedTeamSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} linkedCaseCatalog={adversarialCaseCatalog} caseCollection={adversarialCaseCollection} onCaseCollectionChange={setAdversarialCaseCollection} resultCollection={adversarialResultCollection} onResultCollectionChange={setAdversarialResultCollection} />
               : <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} post={post} scrollStateKey={configurationSection} scrollTop={scrollPositions[`configure.${configurationSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`configure.${configurationSection}`, value)} />}
         </div>
       </aside>
@@ -346,15 +363,19 @@ export function EvidenceReviewBar({ results, selection, inspectorTab, onReviewTi
   const selectCase = (index: number) => { const result = results[index]; if (result) open(result); };
   const attemptValue = selection.attempt ? `attempt:${selection.attempt.attempt}` : 'aggregate';
   return <section className="evidence-review" aria-label={t('Evidence review')}>
-    <div className="evidence-review__navigator" role="group" aria-label={t('Evidence result navigation')}>
+    <header className="evidence-review__heading">
       <strong>{t('Evidence review')}</strong>
+      <div className="evidence-review__heading-actions">
+        <button type="button" onClick={onReviewTimeline}>{t('Timeline')}</button>
+        <IconButton type="button" icon="export" label={t('Export this case as HTML')} onClick={() => post({ type: 'test.report.export', format: 'html', evidenceId: selection.evidenceId })} />
+        <IconButton type="button" icon="close" label={t('Close evidence review')} onClick={onClose} />
+      </div>
+    </header>
+    <div className="evidence-review__navigator" role="group" aria-label={t('Evidence result navigation')}>
       <IconButton type="button" icon="arrow-left" label={t('Previous test case')} disabled={caseIndex <= 0} onClick={() => selectCase(caseIndex - 1)} />
-      <label><span className="sr-only">{t('Test case')}</span><select aria-label={t('Test case')} value={selection.result.evidenceId} onChange={(event) => { const result = results.find((candidate) => candidate.evidenceId === event.target.value); if (result) open(result); }}>{results.map((result, index) => <option value={result.evidenceId} key={result.evidenceId}>{formatNumber(index + 1)} / {formatNumber(results.length)} · {result.scenarioName} · {t(adversarialOutcomeLabel(result.outcome))}</option>)}</select></label>
+      <label className="evidence-review__case"><span className="sr-only">{t('Test case')}</span><select aria-label={t('Test case')} title={`${selection.result.scenarioName} · ${t(adversarialOutcomeLabel(selection.result.outcome))}`} value={selection.result.evidenceId} onChange={(event) => { const result = results.find((candidate) => candidate.evidenceId === event.target.value); if (result) open(result); }}>{results.map((result, index) => <option value={result.evidenceId} key={result.evidenceId}>{formatNumber(index + 1)} / {formatNumber(results.length)} · {result.scenarioName}</option>)}</select></label>
       <IconButton type="button" icon="arrow-right" label={t('Next test case')} disabled={caseIndex >= results.length - 1} onClick={() => selectCase(caseIndex + 1)} />
-      {attempts.length > 0 && <label><span className="sr-only">{t('Test attempt')}</span><select aria-label={t('Test attempt')} value={attemptValue} onChange={(event) => { if (event.target.value === 'aggregate') open(selection.result); else { const attempt = attempts.find((candidate) => `attempt:${candidate.attempt}` === event.target.value); if (attempt?.evidenceId) open(selection.result, attempt); } }}><option value="aggregate">{t('Aggregate result')}</option>{attempts.map((attempt) => <option key={attempt.attempt} value={`attempt:${attempt.attempt}`} disabled={!attempt.evidenceId}>{t('Attempt {attempt}: {outcome}', { attempt: formatNumber(attempt.attempt), outcome: t(adversarialOutcomeLabel(attempt.outcome)) })}{attempt.evidenceId ? '' : ` · ${t('Evidence unavailable')}`}</option>)}</select></label>}
-      <button type="button" onClick={onReviewTimeline}>{t('Timeline')}</button>
-      <IconButton type="button" icon="export" label={t('Export this case as HTML')} onClick={() => post({ type: 'test.report.export', format: 'html', evidenceId: selection.evidenceId })} />
-      <IconButton type="button" icon="list-tree" label={t('Back to adversarial results')} onClick={onClose} />
+      {attempts.length > 0 && <label className="evidence-review__attempt"><span className="sr-only">{t('Test attempt')}</span><select aria-label={t('Test attempt')} value={attemptValue} onChange={(event) => { if (event.target.value === 'aggregate') open(selection.result); else { const attempt = attempts.find((candidate) => `attempt:${candidate.attempt}` === event.target.value); if (attempt?.evidenceId) open(selection.result, attempt); } }}><option value="aggregate">{t('Aggregate result')}</option>{attempts.map((attempt) => <option key={attempt.attempt} value={`attempt:${attempt.attempt}`} disabled={!attempt.evidenceId}>{t('Attempt {attempt}: {outcome}', { attempt: formatNumber(attempt.attempt), outcome: t(adversarialOutcomeLabel(attempt.outcome)) })}{attempt.evidenceId ? '' : ` · ${t('Evidence unavailable')}`}</option>)}</select></label>}
     </div>
     <EvidenceSummary result={selection.result} attempt={selection.attempt} evidenceId={selection.evidenceId} />
   </section>;
@@ -413,23 +434,30 @@ export function CausalTimeline({ timeline, onOpen }: { timeline: EvidenceTimelin
   const visible = timeline.entries.slice(0, 16);
   const hiddenCount = Math.max(0, timeline.entries.length - visible.length);
   const completeness = timeline.completeness === 'complete' ? t('Complete evidence') : timeline.completeness === 'partial' ? t('Partial evidence') : t('Missing evidence');
+  const decisiveId = visible.find((entry) => entry.status === 'failure' && (entry.phase === 'finding' || entry.phase === 'error'))?.id ?? visible.find((entry) => entry.status === 'failure')?.id;
   return <details className="causal-timeline" open>
-    <summary><span>{t('Causal timeline')}</span><small>{t('{count} events · {completeness}', { count: formatNumber(timeline.entries.length), completeness })}</small></summary>
+    <summary><span>{t('Evidence trail')}</span><small>{t('{count} events · {completeness}', { count: formatNumber(timeline.entries.length), completeness })}</small></summary>
+    {timeline.missingPhases.length > 0 && <p className="causal-timeline__missing"><ProductIcon name="warning" />{t('Evidence is incomplete: {phases}.', { phases: timeline.missingPhases.map(timelinePhaseLabel).join(', ') })}</p>}
     <ol>
-      {visible.map((entry) => <TimelineEntry key={entry.id} entry={entry} onOpen={onOpen} />)}
+      {visible.map((entry, index) => <TimelineEntry key={entry.id} entry={entry} deltaMs={index === 0 ? undefined : Math.max(0, entry.elapsedMs - visible[index - 1]!.elapsedMs)} decisive={entry.id === decisiveId} onOpen={onOpen} />)}
     </ol>
     {hiddenCount > 0 && <p>{t('{count} additional timeline events are not shown.', { count: formatNumber(hiddenCount) })}</p>}
     {timeline.truncated && <p>{t('Timeline evidence reached the safe retention limit.')}</p>}
-    {timeline.missingPhases.length > 0 && <p className="causal-timeline__missing">{t('Evidence is incomplete: {phases}.', { phases: timeline.missingPhases.map(timelinePhaseLabel).join(', ') })}</p>}
   </details>;
 }
 
-function TimelineEntry({ entry, onOpen }: { entry: EvidenceTimelineEntry; onOpen: (location: ScenarioEvidenceLocation) => void }): React.JSX.Element {
-  const content = <><time>{formatDuration(entry.elapsedMs)}</time><span>{t(entry.label)}</span></>;
-  return <li className={`causal-timeline__entry causal-timeline__entry--${entry.status}`}>
+function TimelineEntry({ entry, deltaMs, decisive, onOpen }: { entry: EvidenceTimelineEntry; deltaMs?: number; decisive?: boolean; onOpen: (location: ScenarioEvidenceLocation) => void }): React.JSX.Element {
+  const content = <><span className="causal-timeline__entry-meta"><span>{timelineStageLabel(entry.phase)}</span><time>{formatDuration(entry.elapsedMs)}</time>{deltaMs === undefined ? <small>{t('Start')}</small> : <small>+{formatDuration(deltaMs)}</small>}</span><span className="causal-timeline__entry-label">{t(entry.label)}</span>{decisive && <strong>{t('Decisive evidence')}</strong>}</>;
+  return <li className={`causal-timeline__entry causal-timeline__entry--${entry.status}${decisive ? ' is-decisive' : ''}`}>
     <ProductIcon name={entry.status === 'failure' ? 'error' : entry.status === 'warning' || entry.status === 'unknown' ? 'warning' : 'circle-filled'} />
     {entry.location ? <button type="button" onClick={() => onOpen(entry.location!)} aria-label={t('Open {label} evidence at {elapsed}', { label: t(entry.label), elapsed: formatDuration(entry.elapsedMs) })}>{content}</button> : <div>{content}</div>}
   </li>;
+}
+
+function timelineStageLabel(phase: EvidenceTimelineEntry['phase']): string {
+  if (phase === 'request' || phase === 'headers') return t('Request');
+  if (phase === 'firstChunk' || phase === 'firstEvent' || phase === 'firstMappedEvent' || phase === 'ttft') return t('Stream');
+  return t('Decision');
 }
 
 function timelinePhaseLabel(phase: EvidenceTimelineSummary['missingPhases'][number]): string {
@@ -523,11 +551,13 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
   const data = effectiveTab === 'Raw Events' ? snapshot?.rawEvents ?? [] : effectiveTab === 'Normalized' ? snapshot?.normalizedEvents ?? [] : [];
   const eventKind = effectiveTab === 'Normalized' ? 'normalized' : 'raw';
   const filters = eventFilters[eventKind];
+  const deferredQuery = useDeferredValue(filters.query);
+  const effectiveFilters = deferredQuery === filters.query ? filters : { ...filters, query: deferredQuery };
   const eventDeltas = useMemo(() => eventKind === 'raw' ? eventTimeDeltas(data) : undefined, [data, eventKind]);
   const terminalRawSequences = useMemo(() => terminalSequences(snapshot?.normalizedEvents ?? []), [snapshot?.normalizedEvents]);
   const types = useMemo(() => [...new Set(data.map((item) => eventLabel(item)))].sort(), [data]);
   const turns = useMemo(() => eventTurnOptions(data), [data]);
-  const filtered = useMemo(() => data.filter((item) => eventMatchesFilters(item, filters, eventKind, terminalRawSequences)), [data, eventKind, filters, terminalRawSequences]);
+  const filtered = useMemo(() => data.filter((item) => eventMatchesFilters(item, effectiveFilters, eventKind, terminalRawSequences)), [data, effectiveFilters, eventKind, terminalRawSequences]);
   const updateFilters = (patch: Partial<EventFilterState>) => onEventFiltersChange({ ...eventFilters, [eventKind]: { ...filters, ...patch } });
   const filtersActive = filters.query !== '' || filters.turn !== 'all' || filters.eventType !== 'all' || filters.mapping !== 'all' || filters.issue !== 'all' || filters.terminal !== 'all';
   const panelContent = effectiveTab === 'Network'
@@ -1051,6 +1081,7 @@ export function normalizeWebviewState(value: unknown): WebviewState | undefined 
     ...(isWorkspaceSection(candidate.section) ? { section: candidate.section } : {}),
     ...(isSettingsSectionId(candidate.configurationSection) ? { configurationSection: candidate.configurationSection } : {}),
     ...(isRightPaneMode(candidate.rightPaneMode) ? { rightPaneMode: candidate.rightPaneMode } : {}),
+    ...(RED_TEAM_SECTIONS.includes(candidate.redTeamSection as RedTeamSectionId) ? { redTeamSection: candidate.redTeamSection as RedTeamSectionId } : {}),
     ...(typeof candidate.draft === 'string' ? { draft: candidate.draft.slice(0, 100_000) } : {}),
     ...(candidateInspectorTab === 'Request' ? { inspectorTab: 'Network' } : isInspectorTab(candidateInspectorTab) ? { inspectorTab: candidateInspectorTab } : {}),
     ...(typeof candidate.splitPercent === 'number' && Number.isFinite(candidate.splitPercent) ? { splitPercent: clampSplit(candidate.splitPercent) } : {}),
@@ -1059,17 +1090,20 @@ export function normalizeWebviewState(value: unknown): WebviewState | undefined 
     ...(typeof candidate.selectedRawSequence === 'number' && Number.isSafeInteger(candidate.selectedRawSequence) && candidate.selectedRawSequence >= 0 ? { selectedRawSequence: candidate.selectedRawSequence } : {}),
     ...boundedOptionalString('selectedNetworkId', candidate.selectedNetworkId),
     ...boundedOptionalString('activeEvidenceId', candidate.activeEvidenceId),
+    ...boundedOptionalString('selectedCampaignId', candidate.selectedCampaignId),
     ...(isChatViewportState(candidate.chatViewport) ? { chatViewport: candidate.chatViewport } : {}),
     ...(candidate.eventFilters && typeof candidate.eventFilters === 'object' ? { eventFilters: normalizeInspectorEventFilters(candidate.eventFilters) } : {}),
     ...(candidate.collapsedEventTurns && typeof candidate.collapsedEventTurns === 'object' ? { collapsedEventTurns: normalizeCollapsedEventTurns(candidate.collapsedEventTurns) } : {}),
     ...(Object.keys(scrollPositions).length ? { scrollPositions } : {}),
     ...boundedOptionalString('expandedAdversarialCaseId', candidate.expandedAdversarialCaseId),
+    ...(candidate.adversarialCaseCollection && typeof candidate.adversarialCaseCollection === 'object' ? { adversarialCaseCollection: normalizeAdversarialCaseCollectionState(candidate.adversarialCaseCollection) } : { adversarialCaseCollection: { ...DEFAULT_ADVERSARIAL_CASE_COLLECTION } }),
+    ...(candidate.adversarialResultCollection && typeof candidate.adversarialResultCollection === 'object' ? { adversarialResultCollection: normalizeAdversarialResultCollectionState(candidate.adversarialResultCollection) } : { adversarialResultCollection: { ...DEFAULT_ADVERSARIAL_RESULT_COLLECTION } }),
     ...(candidate.networkInspector && typeof candidate.networkInspector === 'object' ? { networkInspector: normalizeNetworkInspectorState(candidate.networkInspector) } : {}),
     ...(Array.isArray(candidate.acceptedForms) ? { acceptedForms: [...new Set(candidate.acceptedForms.filter((item): item is string => typeof item === 'string' && item.length <= 512))].slice(0, 500) } : {})
   };
 }
 
-function boundedOptionalString<K extends 'sessionId' | 'selectedMessageId' | 'selectedNetworkId' | 'activeEvidenceId' | 'expandedAdversarialCaseId'>(key: K, value: unknown): Partial<Record<K, string>> {
+function boundedOptionalString<K extends 'sessionId' | 'selectedMessageId' | 'selectedNetworkId' | 'activeEvidenceId' | 'expandedAdversarialCaseId' | 'selectedCampaignId'>(key: K, value: unknown): Partial<Record<K, string>> {
   return typeof value === 'string' && value.length <= 512 ? { [key]: value } as Partial<Record<K, string>> : {};
 }
 
@@ -1085,7 +1119,7 @@ export function eventMatchesFilters(item: Record<string, any>, filters: EventFil
   if (filters.turn !== 'all' && eventTurnKey(item) !== filters.turn) return false;
   if (filters.eventType !== 'all' && eventLabel(item) !== filters.eventType) return false;
   const query = filters.query.trim().toLocaleLowerCase();
-  if (query && !safeJson(item).toLocaleLowerCase().includes(query)) return false;
+  if (query && !eventSearchText(item).includes(query)) return false;
   if (kind === 'raw') {
     const matched = typeof item.mappingRuleId === 'string' && Boolean(item.mappingRuleId.trim());
     if (filters.mapping === 'matched' && !matched) return false;
@@ -1097,6 +1131,14 @@ export function eventMatchesFilters(item: Record<string, any>, filters: EventFil
   if (filters.terminal === 'terminal' && !terminal) return false;
   if (filters.terminal === 'non-terminal' && terminal) return false;
   return true;
+}
+
+function eventSearchText(item: Record<string, any>): string {
+  const cached = eventSearchTextCache.get(item);
+  if (cached !== undefined) return cached;
+  const value = safeJson(item).toLocaleLowerCase();
+  eventSearchTextCache.set(item, value);
+  return value;
 }
 
 function eventRowStatus(item: Record<string, any>, kind: 'raw' | 'normalized', terminalRawSequences: ReadonlySet<number>): { kind: string; label: string; icon: 'check' | 'warning' | 'circle-filled' | 'stop' } {

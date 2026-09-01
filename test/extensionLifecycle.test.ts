@@ -26,7 +26,8 @@ describe('Extension host editor lifecycle', () => {
     expect(editorSource).toContain('let validationSnapshot:');
     expect(editorSource).toContain('const rehydrate = async () =>');
     expect(editorSource).toContain('if (documentVersion !== document.version || !profileSnapshot || !validationSnapshot) { await load(); return; }');
-    expect(editorSource).toContain('const sessionSnapshot = currentSessionSnapshot();');
+    expect(editorSource).toContain('await postFullSession();');
+    expect(editorSource).toContain('sessionDeltaTracker.checkpoint(payload);');
     expect(editorSource).toContain("message.type === 'webview.ready'");
     expect(editorSource).toContain('await rehydrate();');
     expect(editorSource).toContain('const pendingSection = this.pendingSections.get(documentKey);');

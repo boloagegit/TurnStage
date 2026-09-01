@@ -52,13 +52,13 @@ h1 { margin: 0; font-size: 1.15rem; line-height: 1.4; } h2 { margin: 0 0 var(--t
 .panel { flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .test-surface { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
 .test-surface__header { min-width: 0; }
-.evidence-review { min-width: 0; border-block-end: 1px solid var(--vscode-editorGroup-border); background: var(--vscode-textBlockQuote-background, var(--vscode-editorWidget-background)); }
-.evidence-review__navigator { display: flex; align-items: center; gap: var(--ts-space-1); min-width: 0; min-height: calc(var(--ts-control-height) + var(--ts-space-1)); padding: var(--ts-space-1) var(--ts-space-2); border-block-end: 1px solid var(--vscode-editorWidget-border); }
-.evidence-review__navigator > strong { flex: 0 0 auto; margin-inline-end: var(--ts-space-1); font-size: .923em; }
+.evidence-review { min-width: 0; border-block-end: 1px solid var(--vscode-editorGroup-border); background: var(--vscode-textBlockQuote-background, var(--vscode-editorWidget-background)); container-type: inline-size; }
+.evidence-review__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--ts-space-2); min-height: calc(var(--ts-control-height) + var(--ts-space-1)); padding: var(--ts-space-1) var(--ts-space-2); border-block-end: 1px solid var(--vscode-editorWidget-border); }
+.evidence-review__heading > strong { min-width: 0; overflow: hidden; font-size: .923em; text-overflow: ellipsis; white-space: nowrap; }
+.evidence-review__heading-actions { display: flex; align-items: center; flex: 0 0 auto; gap: var(--ts-space-1); }
+.evidence-review__navigator { display: grid; grid-template-columns: auto minmax(14em, 1fr) auto minmax(11em, 16em); align-items: center; gap: var(--ts-space-1); min-width: 0; padding: var(--ts-space-1) var(--ts-space-2); border-block-end: 1px solid var(--vscode-editorWidget-border); }
 .evidence-review__navigator label { min-width: 0; }
-.evidence-review__navigator label:first-of-type { flex: 1 1 18em; max-width: 42em; }
-.evidence-review__navigator label:nth-of-type(2) { flex: 0 1 14em; max-width: 16em; }
-.evidence-review__navigator select { width: 100%; min-height: 26px; height: 26px; }
+.evidence-review__navigator select { width: 100%; min-height: max(30px, var(--ts-control-height)); height: auto; line-height: 1.35; }
 .evidence-review .evidence-summary { border-block-end: 0; background: transparent; }
 .runtime-operation { display: grid; grid-template-columns: auto minmax(9em, auto) auto minmax(7em, 1fr); align-items: center; gap: var(--ts-space-2); min-height: calc(var(--ts-control-height) + var(--ts-space-1)); padding: var(--ts-space-1) var(--ts-space-2); border-block-end: 1px solid var(--vscode-editorWidget-border); border-inline-start: 2px solid var(--vscode-progressBar-background); background: var(--vscode-textBlockQuote-background, var(--vscode-editorWidget-background)); color: var(--vscode-editor-foreground); }
 .runtime-operation > div:not(.runtime-operation__actions) { display: grid; min-width: 0; gap: 1px; }.runtime-operation span { overflow: hidden; font-size: .846em; text-overflow: ellipsis; white-space: nowrap; opacity: .82; }.runtime-operation progress { width: 100%; min-width: 5em; accent-color: var(--vscode-progressBar-background); }.runtime-operation__actions { display: flex; gap: var(--ts-space-1); }.runtime-operation__actions .icon-button { color: inherit; }
@@ -75,21 +75,28 @@ h1 { margin: 0; font-size: 1.15rem; line-height: 1.4; } h2 { margin: 0 0 var(--t
 .evidence-summary__more > div { position: absolute; z-index: 4; inset-block-start: calc(100% + var(--ts-space-1)); inset-inline-end: 0; display: grid; min-width: 11em; padding: var(--ts-space-1); border: 1px solid var(--vscode-dropdown-border, var(--vscode-editorWidget-border)); background: var(--vscode-dropdown-background, var(--vscode-editorWidget-background)); box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, .28)); }
 .evidence-summary__more > div button { width: 100%; justify-content: flex-start; }
 .causal-timeline { grid-column: 1 / -1; min-width: 0; border-top: 1px solid var(--vscode-editorWidget-border); }
-.causal-timeline > summary { display: flex; align-items: baseline; justify-content: space-between; gap: var(--ts-space-3); min-height: var(--ts-control-height); padding: var(--ts-space-1) 0; color: var(--vscode-foreground); }
+.causal-timeline > summary { display: flex; align-items: baseline; justify-content: space-between; gap: var(--ts-space-3); min-height: var(--ts-control-height); padding: var(--ts-space-2) 0; color: var(--vscode-foreground); }
 .causal-timeline > summary span { font-weight: 600; }
 .causal-timeline > summary small, .causal-timeline > p { color: var(--vscode-descriptionForeground); font-size: .769em; }
-.causal-timeline > ol { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.5em, 1fr)); gap: 1px; margin: 0; padding: 1px; background: var(--vscode-editorWidget-border); list-style: none; }
-.causal-timeline__entry { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--ts-space-1); min-height: calc(var(--ts-control-height) + var(--ts-space-2)); padding: var(--ts-space-2); background: var(--vscode-editor-background); }
-.causal-timeline__entry > .product-icon { margin-top: 2px; color: var(--vscode-descriptionForeground); font-size: .769em; }
+.causal-timeline > ol { display: grid; margin: 0; padding: var(--ts-space-1) 0 0; list-style: none; }
+.causal-timeline__entry { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: var(--ts-space-2); min-height: calc(var(--ts-control-height) + var(--ts-space-3)); padding: 0 0 var(--ts-space-2); background: transparent; }
+.causal-timeline__entry::after { position: absolute; z-index: 0; inset-block: 14px -2px; inset-inline-start: 7px; width: 1px; background: var(--vscode-editorWidget-border); content: ''; }
+.causal-timeline__entry:last-child::after { display: none; }
+.causal-timeline__entry > .product-icon { position: relative; z-index: 1; width: 15px; height: 15px; margin-top: 8px; padding: 2px; color: var(--vscode-descriptionForeground); background: var(--vscode-editor-background); font-size: 11px; }
 .causal-timeline__entry--failure > .product-icon { color: var(--vscode-testing-iconFailed); }
 .causal-timeline__entry--warning > .product-icon, .causal-timeline__entry--unknown > .product-icon { color: var(--vscode-testing-iconErrored, var(--vscode-editorWarning-foreground)); }
-.causal-timeline__entry > button, .causal-timeline__entry > div { display: grid; min-width: 0; gap: 2px; padding: 0; border: 0; background: transparent; color: var(--vscode-editor-foreground); text-align: start; }
-.causal-timeline__entry > button { min-height: 0; }
-.causal-timeline__entry > button:hover { color: var(--vscode-textLink-foreground); background: transparent; }
-.causal-timeline__entry time { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: .769em; font-variant-numeric: tabular-nums; }
-.causal-timeline__entry span { overflow-wrap: anywhere; }
+.causal-timeline__entry > button, .causal-timeline__entry > div { display: grid; min-width: 0; gap: 3px; min-height: 42px; padding: var(--ts-space-2); border: 1px solid var(--vscode-editorWidget-border); border-radius: 2px; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); text-align: start; }
+.causal-timeline__entry > button:hover { border-color: var(--vscode-focusBorder); background: var(--vscode-list-hoverBackground); color: var(--vscode-list-hoverForeground, var(--vscode-editor-foreground)); }
+.causal-timeline__entry.is-decisive > button, .causal-timeline__entry.is-decisive > div { border-color: var(--vscode-testing-iconFailed); background: var(--vscode-inputValidation-errorBackground, var(--vscode-editor-background)); }
+.causal-timeline__entry-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--ts-space-2); color: var(--vscode-descriptionForeground); font-size: .769em; }
+.causal-timeline__entry-meta > span { color: var(--vscode-editor-foreground); font-weight: 600; }
+.causal-timeline__entry-meta time { font-family: var(--vscode-editor-font-family); font-variant-numeric: tabular-nums; }
+.causal-timeline__entry-meta small { margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+.causal-timeline__entry-label { overflow-wrap: anywhere; }
+.causal-timeline__entry strong { color: var(--vscode-testing-iconFailed); font-size: .769em; }
 .causal-timeline > p { margin: var(--ts-space-1) 0 0; }
-.causal-timeline__missing { color: var(--vscode-testing-iconErrored, var(--vscode-editorWarning-foreground)) !important; }
+.causal-timeline__missing { display: flex; align-items: center; gap: var(--ts-space-2); margin: 0 0 var(--ts-space-2) !important; padding: var(--ts-space-2); border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-editorWarning-foreground)); color: var(--vscode-editorWarning-foreground) !important; background: var(--vscode-inputValidation-warningBackground, var(--vscode-editor-background)); }
+.causal-timeline__missing .product-icon { flex: 0 0 auto; }
 .adversarial-outcome { font-weight: 600; }
 .adversarial-outcome--resisted { color: var(--vscode-testing-iconPassed); }
 .adversarial-outcome--attackSucceeded { color: var(--vscode-testing-iconFailed); }
@@ -248,7 +255,8 @@ summary { cursor: pointer; min-height: 24px; }.sources ol { padding-inline-start
 .warning { color: var(--vscode-editorWarning-foreground); padding: 0 8px; }.empty { padding: 24px; }.skip { position: fixed; z-index: 10; inset-block-start: -100px; inset-inline-start: 8px; padding: 8px; background: var(--vscode-editor-background); color: var(--vscode-textLink-foreground); }.skip:focus { inset-block-start: 8px; }.sr-only, .sr-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .clipboard-action { display: inline-flex; align-items: center; gap: var(--ts-space-1); max-width: 100%; white-space: normal; }.clipboard-feedback { color: var(--vscode-descriptionForeground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); }.clipboard-feedback--error { color: var(--vscode-errorForeground); }
 @media (max-width: 900px) { .events-page { grid-template-columns: 1fr; overflow: auto; }.events-page > .inspector-content { min-height: 480px; border-inline-end: 0; border-bottom: 1px solid var(--vscode-editorWidget-border); }.events-page > .mapping-page { height: auto; overflow: visible; } }
-@media (max-width: 64em) { .test-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(20em, 52vh) minmax(24em, 1fr); overflow-x: hidden; overflow-y: auto; }.test-workspace--chat-only { grid-template-rows: minmax(20em, 1fr); }.splitter { display: none; }.preview-pane, .debug-pane { overflow: hidden; }.debug-pane { min-height: 24em; }.evidence-summary { grid-template-columns: auto minmax(0, 1fr); }.evidence-summary__actions { grid-column: 1 / -1; justify-content: flex-start; }.evidence-review__navigator { flex-wrap: wrap; }.evidence-review__navigator label:first-of-type { flex-basis: calc(100% - 9em); }.evidence-review__navigator label:nth-of-type(2) { flex: 1 1 10em; } }
+@media (max-width: 64em) { .test-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(20em, 52vh) minmax(24em, 1fr); overflow-x: hidden; overflow-y: auto; }.test-workspace--chat-only { grid-template-rows: minmax(20em, 1fr); }.splitter { display: none; }.preview-pane, .debug-pane { overflow: hidden; }.debug-pane { min-height: 24em; }.evidence-summary { grid-template-columns: auto minmax(0, 1fr); }.evidence-summary__actions { grid-column: 1 / -1; justify-content: flex-start; } }
+@container (max-width: 42em) { .evidence-review__navigator { grid-template-columns: auto minmax(0, 1fr) auto; }.evidence-review__attempt { grid-column: 1 / -1; } }
 .run-details { margin-top: var(--ts-space-1); color: var(--vscode-editor-foreground); }
 .run-details > summary { width: max-content; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: var(--vscode-font-size); }
 .run-details > summary:hover { color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); }

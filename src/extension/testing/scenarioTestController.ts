@@ -75,6 +75,8 @@ type LoadedScenario = {
   environments: TurnStageEnvironment[];
 };
 
+type LoadedProfileContext = Omit<LoadedScenario, 'scenario'>;
+
 interface PreparedScenarioJob {
   job: ScenarioJob;
   loaded: LoadedScenario;
@@ -698,11 +700,12 @@ export class ScenarioTestController implements vscode.Disposable {
         maxRequests: selection.maxRequests ?? (scope.runId ? MAX_COPILOT_RUN_REQUESTS : MAX_RUN_PLAN_REQUESTS),
         maxDurationMs: selection.maxDurationMs,
       });
+      const concurrency = Math.max(1, Math.min(8, batchPlan.maxConcurrency));
       operation.progress({
         cases: jobs.length,
         attempts: batchPlan.plannedAttempts,
         requests: batchPlan.plannedRequests,
-        concurrency: batchPlan.maxConcurrency,
+        concurrency,
       });
       const plannedAttemptsByJob = new Map(batchPlan.cases.map((item) => [item.key, item.requestedAttempts]));
       let completedCases = 0;
@@ -723,6 +726,7 @@ export class ScenarioTestController implements vscode.Disposable {
             completedCases: Math.min(jobs.length, completedCases),
             totalAttempts: batchPlan.plannedAttempts,
             completedAttempts: Math.min(batchPlan.plannedAttempts, completedAttempts),
+            maxConcurrency: concurrency,
             activeCaseNames: [...activeCases.values()].slice(0, 8),
           });
         };
@@ -770,7 +774,6 @@ export class ScenarioTestController implements vscode.Disposable {
           run.appendOutput(`${localize('Skipped {name}: conversation contract tests require a trusted workspace.', { name: job.item.label })}\r\n`, undefined, job.item);
         }
       } else {
-        const concurrency = Math.max(1, Math.min(8, selection.maxConcurrency ?? vscode.workspace.getConfiguration('turnstage').get<number>('adversarialConcurrency', 3)));
         run.appendOutput(`${localize('Running {count} scenarios with concurrency {concurrency}.', { count: String(jobs.length), concurrency: String(concurrency) })} ${batchPlan.plannedAttempts} attempt(s), ${batchPlan.plannedRequests} request(s) maximum.\r\n`);
         let cursor = 0;
         await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
@@ -1103,29 +1106,64 @@ export class ScenarioTestController implements vscode.Disposable {
   }
 
   private async prepareJobs(jobs: readonly ScenarioJob[]): Promise<PreparedScenarioJob[]> {
-    return Promise.all(jobs.map(async (job) => ({
-      job,
-      loaded: await this.loadScenario(job.uri, job.scenarioId, job.suitePath),
-    })));
+    const profileLoads = new Map<string, Promise<LoadedProfileContext>>();
+    const suiteLoads = new Map<string, ReturnType<typeof loadAdversarialSuite>>();
+    const prepared = new Array<PreparedScenarioJob>(jobs.length);
+    let cursor = 0;
+    const prepare = async (job: ScenarioJob): Promise<LoadedScenario> => {
+      const profileKey = job.uri.toString();
+      let profileLoad = profileLoads.get(profileKey);
+      if (!profileLoad) { profileLoad = this.loadProfileContext(job.uri); profileLoads.set(profileKey, profileLoad); }
+      const context = await profileLoad;
+      const scenario = job.suitePath
+        ? await (async () => {
+          const suiteKey = `${profileKey}\u001f${job.suitePath}`;
+          let suiteLoad = suiteLoads.get(suiteKey);
+          if (!suiteLoad) { suiteLoad = loadAdversarialSuite(job.uri, job.suitePath!, (reference) => this.externalAdversarialSuites.resolve(job.uri, reference)); suiteLoads.set(suiteKey, suiteLoad); }
+          return (await suiteLoad).scenarios.find((candidate) => candidate.id === job.scenarioId);
+        })()
+        : context.profile.tests?.scenarios.find((candidate) => candidate.id === job.scenarioId);
+      if (!scenario) throw new Error(localize('Scenario {id} was not found.', { id: job.scenarioId }));
+      if (job.suitePath) {
+        const compatibilityError = validateAdversarialScenariosAgainstProfile(context.profile, [scenario], context.environments)[0];
+        if (compatibilityError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
+      }
+      return { ...context, scenario };
+    };
+    const worker = async () => {
+      while (cursor < jobs.length) {
+        const index = cursor;
+        cursor += 1;
+        const job = jobs[index]!;
+        prepared[index] = { job, loaded: await prepare(job) };
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, jobs.length) }, () => worker()));
+    return prepared;
   }
 
   private async loadScenario(uri: vscode.Uri, scenarioId: string, suitePath?: string): Promise<LoadedScenario> {
+    const context = await this.loadProfileContext(uri);
+    const scenario = suitePath
+      ? (await loadAdversarialSuite(uri, suitePath, (reference) => this.externalAdversarialSuites.resolve(uri, reference))).scenarios.find((candidate) => candidate.id === scenarioId)
+      : context.profile.tests?.scenarios.find((candidate) => candidate.id === scenarioId);
+    if (!scenario) throw new Error(localize('Scenario {id} was not found.', { id: scenarioId }));
+    if (suitePath) {
+      const compatibilityError = validateAdversarialScenariosAgainstProfile(context.profile, [scenario], context.environments)[0];
+      if (compatibilityError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
+    }
+    return { ...context, scenario };
+  }
+
+  private async loadProfileContext(uri: vscode.Uri): Promise<LoadedProfileContext> {
     const document = await vscode.workspace.openTextDocument(uri);
     const parsed = this.codec.parse(document.getText());
     const environments = await this.environments.discover(uri);
     const issues = this.validator.validate(parsed.profile, parsed.tree, environments.map((entry) => entry.environment));
     const firstError = issues.find((issue) => issue.severity === 'error');
     if (!parsed.profile || firstError) throw new Error(firstError?.message ?? localize('Profile could not be parsed.'));
-    const scenario = suitePath
-      ? (await loadAdversarialSuite(uri, suitePath, (reference) => this.externalAdversarialSuites.resolve(uri, reference))).scenarios.find((candidate) => candidate.id === scenarioId)
-      : parsed.profile.tests?.scenarios.find((candidate) => candidate.id === scenarioId);
-    if (!scenario) throw new Error(localize('Scenario {id} was not found.', { id: scenarioId }));
     const available = environments.map((entry) => entry.environment);
-    if (suitePath) {
-      const compatibilityError = validateAdversarialScenariosAgainstProfile(parsed.profile, [scenario], available)[0];
-      if (compatibilityError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
-    }
-    return { profile: parsed.profile, scenario, environment: selectEnvironment(available, parsed.profile.environment), environments: available };
+    return { profile: parsed.profile, environment: selectEnvironment(available, parsed.profile.environment), environments: available };
   }
 
   private async createSession(uri: vscode.Uri, sourceProfile: TurnStageProfile, environment: TurnStageEnvironment, faults?: ScenarioDefinition['faults']): Promise<SessionController> {

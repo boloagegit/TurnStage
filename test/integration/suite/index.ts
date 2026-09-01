@@ -175,6 +175,9 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
   const reportDirectory = vscode.Uri.joinPath(workspaceRoot, '.turnstage', 'reports');
   const jsonUri = vscode.Uri.joinPath(reportDirectory, 'integration.turnstage-contract-results.json');
   const junitUri = vscode.Uri.joinPath(reportDirectory, 'integration.turnstage-contract-results.xml');
+  const mockBaseUrl = process.env.TURNSTAGE_MOCK_BASE_URL;
+  assert.ok(mockBaseUrl, 'The integration runner must expose the local mock-server URL');
+  if (vscode.workspace.isTrusted) await postMockProbe(`${mockBaseUrl}/__turnstage_test/concurrency/reset`);
   await vscode.commands.executeCommand('turnstage.refreshProfiles');
   await vscode.commands.executeCommand('turnstage.runContractTests');
   if (!vscode.workspace.isTrusted) {
@@ -218,10 +221,36 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
   assert.equal(csvAdversarial?.repetitions?.counts?.resisted, 2, json);
   assert.match(junit, /<testsuite[^>]+tests="3"[^>]+failures="1"/);
   assert.match(junit, /Adversarial attack succeeded/);
+  const concurrency = await postMockProbe(`${mockBaseUrl}/__turnstage_test/concurrency/metrics`) as {
+    active?: number;
+    maxActive?: number;
+    maxActiveByMessage?: Record<string, number>;
+    intervals?: Array<{ message?: string; startedAt?: number; endedAt?: number }>;
+  };
+  assert.equal(concurrency.active, 0, JSON.stringify(concurrency));
+  assert.equal(concurrency.maxActive, 3, `Run All should use the configured three case workers: ${JSON.stringify(concurrency)}`);
+  for (const [message, maximum] of Object.entries(concurrency.maxActiveByMessage ?? {})) {
+    assert.equal(maximum, 1, `Repeated requests for one case message must stay sequential (${message}): ${JSON.stringify(concurrency)}`);
+  }
+  const multiTurnMessages = new Set(['Establish context', 'Run the known fixed attack']);
+  const multiTurnIntervals = (concurrency.intervals ?? [])
+    .filter((interval) => multiTurnMessages.has(interval.message ?? ''))
+    .sort((left, right) => (left.startedAt ?? 0) - (right.startedAt ?? 0));
+  assert.equal(multiTurnIntervals.length, 6, JSON.stringify(concurrency));
+  for (let index = 1; index < multiTurnIntervals.length; index += 1) {
+    assert.ok((multiTurnIntervals[index]!.startedAt ?? 0) >= (multiTurnIntervals[index - 1]!.endedAt ?? Number.POSITIVE_INFINITY), `Turns and attempts within one multi-turn case must not overlap: ${JSON.stringify(concurrency)}`);
+  }
+  console.log(`TurnStage concurrency probe: maxActive=${concurrency.maxActive}; perMessageMax=${Math.max(...Object.values(concurrency.maxActiveByMessage ?? {}), 0)}; multiTurnRequests=${multiTurnIntervals.length}`);
   for (const forbidden of ['Integration Profile', 'Integration contract', 'Integration adversarial', 'Integration multi-turn attack', 'Integration baseline', 'Integration candidate', 'Hello from Test Explorer', 'Establish context', 'Run the known fixed attack', 'rawEvents', 'requestPreview', 'actual', 'expected']) {
     assert.equal(json.includes(forbidden), false, `JSON contract report must exclude ${forbidden}`);
     assert.equal(junit.includes(forbidden), false, `JUnit contract report must exclude ${forbidden}`);
   }
+}
+
+async function postMockProbe(url: string): Promise<unknown> {
+  const response = await fetch(url, { method: 'POST' });
+  assert.equal(response.ok, true, `Mock-server probe request failed: ${response.status} ${url}`);
+  return response.json();
 }
 
 async function assertCopilotToolBoundary(workspaceRoot: vscode.Uri): Promise<void> {
