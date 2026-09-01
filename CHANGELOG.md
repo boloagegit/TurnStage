@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.18.0
+
+- Preserved the active TurnStage workspace, Configure section, Evidence tab, Red Team expansion, Network inspector state, submitted-form state, splitter, filters, selections, viewport, and bounded reading positions when VS Code releases and recreates a hidden Profile Webview.
+- Profile layout defaults now apply only on the first open without a valid checkpoint; they no longer replace an explicitly selected Evidence tab during rehydration. New sessions still clear stale message and event selections, while same-session tab switches retain them.
+- Kept `retainContextWhenHidden` disabled to avoid retaining large hidden DOM trees. Scroll checkpoint writes are fixed-key, bounded, throttled, and flushed when the Webview becomes hidden; malformed or legacy state is normalized before use.
+- Added DOM, state-boundary, browser reload, responsive, accessibility, and Extension Development Host regression coverage for Webview recreation and tab switching.
+
 ## 0.17.0
 
 - Added direct workspace-relative `.adversarial.csv` suite linking across the Profile GUI, Test Explorer, CLI, schema, watcher, and report pipeline. A Profile can mix independent JSONC and CSV suites without conversion; CSV retains ordered multi-turn cases and per-case repetitions, while JSONC remains the lossless format for suite-only defaults and metadata.
