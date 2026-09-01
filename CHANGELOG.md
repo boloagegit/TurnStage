@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.19.0
+
+- Renamed the broad Evidence workspace to Debug and kept Network, Raw Events, Normalized Events, Metrics, Errors, and Runs together under the clearer diagnostic label. Existing persisted workspace state continues to normalize safely.
+- Added one-click opening for safe workspace-relative linked adversarial CSV, JSON, and JSONC suites. The Extension Host verifies that the requested path is an exact link from the current Profile before opening it in the editor.
+- Added persistent run, rerun, cancellation, and replay feedback across workspace tabs. Duplicate operations are rejected, Stop remains available while work is active, and cancelled or incomplete runs are never reported as completed.
+- Raw Events now show both cumulative elapsed time and the adjacent event gap, derived from the complete unfiltered stream so search and filters cannot distort timing evidence.
+- Reverified the existing incremental Assistant streaming experience with real HTTP SSE fixtures, batched Webview updates, configurable caret, dots, or shimmer indicators, progress and tool cards, Stop, replay, and reading-position preservation.
+
 ## 0.18.0
 
 - Preserved the active TurnStage workspace, Configure section, Evidence tab, Red Team expansion, Network inspector state, submitted-form state, splitter, filters, selections, viewport, and bounded reading positions when VS Code releases and recreates a hidden Profile Webview.
