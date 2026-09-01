@@ -76,6 +76,11 @@ describe('ScenarioReportService', () => {
     expect(exported).toMatchObject({ path: '/chosen/report.json' });
     expect(mock.writes).toHaveLength(1);
     expect(mock.writes[0]?.text).not.toContain('Private');
+
+    await service.exportRecords('html', [{ profileId: 'safe-profile', profileName: 'Private', scenarioId: 'selected-case', scenarioName: 'Private case', status: 'failed' }], 'turnstage-selected-case-result');
+    expect(mock.vscode.window.showSaveDialog).toHaveBeenLastCalledWith(expect.objectContaining({ defaultUri: expect.objectContaining({ path: 'turnstage-selected-case-result.html' }) }));
+    expect(mock.writes.at(-1)?.text).toContain('<!doctype html>');
+    expect(mock.writes.at(-1)?.text).not.toContain('Private case');
   });
 
   it('exports a new sanitized evidence folder with an offline HTML entry point and manifest', async () => {

@@ -4,6 +4,8 @@ import '@vscode/codicons/dist/codicon.css';
 export type ProductIconName =
   | 'add'
   | 'arrow-down'
+  | 'arrow-left'
+  | 'arrow-right'
   | 'arrow-up'
   | 'arrow-swap'
   | 'beaker'
@@ -20,6 +22,7 @@ export type ProductIconName =
   | 'device-mobile'
   | 'edit'
   | 'error'
+  | 'export'
   | 'ellipsis'
   | 'diff'
   | 'file-code'
@@ -39,6 +42,8 @@ export type ProductIconName =
 const codicons: Record<ProductIconName, string> = {
   add: 'add',
   'arrow-down': 'arrow-down',
+  'arrow-left': 'arrow-left',
+  'arrow-right': 'arrow-right',
   'arrow-up': 'arrow-up',
   'arrow-swap': 'arrow-swap',
   beaker: 'beaker',
@@ -55,6 +60,7 @@ const codicons: Record<ProductIconName, string> = {
   'device-mobile': 'device-mobile',
   edit: 'edit',
   error: 'error',
+  export: 'export',
   ellipsis: 'ellipsis',
   diff: 'diff',
   'file-code': 'file-code',

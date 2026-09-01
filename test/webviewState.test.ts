@@ -14,6 +14,7 @@ describe('Webview UI checkpoint', () => {
       selectedRawSequence: 9,
       expandedAdversarialCaseId: 'case-1',
       acceptedForms: ['message-1:contact', 'message-1:contact'],
+      collapsedEventTurns: { raw: ['turn-1', 'turn-1'], normalized: ['turn-2'] },
       scrollPositions: { chat: 423.6, 'configure.security': 812, arbitrary: 999, 'events.raw': Number.POSITIVE_INFINITY },
       networkInspector: { query: 'timeout', selectedId: 'stream-2', detailTab: 'Timing' }
     });
@@ -29,6 +30,7 @@ describe('Webview UI checkpoint', () => {
       selectedRawSequence: 9,
       expandedAdversarialCaseId: 'case-1',
       acceptedForms: ['message-1:contact'],
+      collapsedEventTurns: { raw: ['turn-1'], normalized: ['turn-2'] },
       scrollPositions: { chat: 424, 'configure.security': 812 },
       networkInspector: { query: 'timeout', selectedId: 'stream-2', detailTab: 'Timing' }
     });
@@ -51,6 +53,7 @@ describe('Webview UI checkpoint', () => {
       selectedRawSequence: -1,
       expandedAdversarialCaseId: 'x'.repeat(513),
       acceptedForms: ['ok', 42, 'x'.repeat(513)],
+      collapsedEventTurns: { raw: ['ok', 42, 'x'.repeat(513)], normalized: 'bad' },
       scrollPositions: { chat: -20, adversarial: 99_999_999 },
       networkInspector: { query: 'q'.repeat(600), selectedId: 'x'.repeat(513), detailTab: 'Unknown' }
     });
@@ -58,6 +61,7 @@ describe('Webview UI checkpoint', () => {
       version: 2,
       scrollPositions: { chat: 0, adversarial: 10_000_000 },
       networkInspector: { query: 'q'.repeat(512), detailTab: 'Headers' },
+      collapsedEventTurns: { raw: ['ok'], normalized: [] },
       acceptedForms: ['ok']
     });
     expect(normalizeScrollPosition(Number.NaN)).toBe(0);

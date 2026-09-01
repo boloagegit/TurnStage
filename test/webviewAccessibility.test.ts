@@ -108,8 +108,9 @@ describe('Inspector keyboard helpers', () => {
     expect(accessibleEventWindowStart(500, 1000)).toBe(400);
     expect(accessibleEventWindowStart(999, 1000)).toBe(800);
     expect(mainSource).toContain('event-accessibility-notice');
-    expect(mainSource).toContain('aria-setsize={items.length}');
-    expect(mainSource).toContain('aria-posinset={itemIndex + 1}');
+    expect(mainSource).toContain('role="tree"');
+    expect(mainSource).toContain('aria-setsize={row.group.items.length}');
+    expect(mainSource).toContain('aria-posinset={row.eventIndex + 1}');
     expect(mainSource).not.toContain('const visible = screenReader ? items :');
   });
 });

@@ -1098,7 +1098,31 @@ const zhTw: Record<string, string> = {
   '{resisted}/{requested} resisted · {completed} attempts': '{resisted}/{requested} 次抵抗 · 已完成 {completed} 次嘗試',
   'Tags': '標籤',
   'One tag per line': '每行一個標籤',
-  'Save conversation as adversarial test': '將對話儲存為對抗式測試'
+  'Save conversation as adversarial test': '將對話儲存為對抗式測試',
+  'Evidence review': '證據檢視',
+  'Evidence result navigation': '測試證據導覽',
+  'Previous test case': '上一個測試案例',
+  'Next test case': '下一個測試案例',
+  'Test case': '測試案例',
+  'Test attempt': '測試嘗試',
+  'Aggregate result': '彙總結果',
+  'Attempt {attempt}: {outcome}': '第 {attempt} 次：{outcome}',
+  'Evidence unavailable': '證據已無法取得',
+  'Timeline': '時間線',
+  'Export this case as HTML': '將目前證據匯出為 HTML',
+  'Back to adversarial results': '返回紅隊測試結果',
+  '{completed} turns completed · {duration}': '已完成 {completed} 個回合 · {duration}',
+  'Export adversarial results': '匯出紅隊測試結果',
+  'HTML report': 'HTML 報告',
+  'JSON report': 'JSON 報告',
+  'Evidence Bundle': '證據套件',
+  'Test report exported to {path}': '測試報告已匯出至 {path}',
+  'Evidence Bundle exported to {path}': '證據套件已匯出至 {path}',
+  'Showing event rows {start}–{end} of {total} for screen reader performance.': '為維持螢幕閱讀器效能，目前顯示第 {start}–{end} 列，共 {total} 列。',
+  '{count} issue': '{count} 個問題',
+  '{count} issues': '{count} 個問題',
+  'No terminal event': '沒有終止事件',
+  '{count} events · {duration}': '{count} 個事件 · {duration}'
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {

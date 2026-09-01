@@ -257,7 +257,7 @@ may contain visible conversation content and should be reviewed before commit.
 **TurnStage: Export Evidence Bundle** creates a new folder containing
 `index.html`, `report.json`, `junit.xml`, adversarial summary/turn/finding CSVs,
 sanitized `network.csv`, `events.csv`, `diagnostics.json`, `manifest.json`, and
-`provenance.json`. Version 4 diagnostic artifacts retain bounded timing,
+`provenance.json`. Version 6 diagnostic artifacts retain bounded timing,
 categories, evidence IDs, Profile patch digests/paths, and Advisory ratings,
 but never Profile edit content or disclosed Assistant text. The HTML is a
 self-contained, offline-readable summary with no external scripts or assets.

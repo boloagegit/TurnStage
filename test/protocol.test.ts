@@ -35,6 +35,9 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'test.cancel' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'connection.analyze' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.report.export', format: 'html', evidenceId: 'evidence-1' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.report.export', format: 'csv' }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'test.evidenceBundle.export' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'campaign.cancel', campaignId: 'release' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'campaign.cancel', campaignId: '' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'rawEvent', sequence: -1 } }, 'editor-1')).toBe(false);
@@ -68,6 +71,10 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'form.accepted', formId: 'form-1', sourceMessageId: 'message-1' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'workspaceTrust.changed', trusted: 'yes' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'test.results', results: [] }, 'editor-1')).toBe(true);
+    const boundedResult = { profileId: 'profile', scenarioId: 'case', scenarioName: 'Case', outcome: 'resisted', durationMs: 1, attemptedTurns: 1, completedTurns: 1, plannedTurns: 1, findingCount: 0, issueCount: 0, evidenceId: 'aggregate', primaryLocation: { kind: 'profile', path: 'tests.scenarios' }, availableLocations: [], repetitions: { requestedAttempts: 1, completedAttempts: 1, skippedAttempts: 0, sampleComplete: true, stability: 'stable-pass', counts: { resisted: 1, attackSucceeded: 0, indeterminate: 0, infrastructureError: 0 }, attempts: [{ attempt: 1, outcome: 'resisted', durationMs: 1, attemptedTurns: 1, completedTurns: 1, evidenceId: 'attempt-1', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [] }] } };
+    expect(isHostMessage({ ...envelope, type: 'test.results', results: [boundedResult] }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'test.results', results: [{ ...boundedResult, repetitions: { ...boundedResult.repetitions, attempts: Array.from({ length: 101 }, (_, index) => ({ ...boundedResult.repetitions.attempts[0], attempt: index + 1 })) } }] }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'test.exported', kind: 'report', path: '/tmp/report.html' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running' } }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 100, completedCases: 24, totalAttempts: 120, completedAttempts: 31, activeCaseNames: ['Case 25'] } } }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 10, completedCases: 11, totalAttempts: 10, completedAttempts: 0 } } }, 'editor-1')).toBe(false);

@@ -261,6 +261,25 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           return;
         }
         if (message.type === 'test.evidence.open') { await vscode.commands.executeCommand('turnstage.openTestEvidence', { evidenceId: message.evidenceId, location: message.location }); return; }
+        if (message.type === 'test.report.export') {
+          if (!this.scenarioTests?.hasReport()) throw new Error(localize('No conversation contract results are available. Run a scenario from Test Explorer first.'));
+          const uri = message.evidenceId
+            ? await this.scenarioTests.exportEvidenceReport(message.evidenceId, message.format)
+            : await this.scenarioTests.exportLastReport(message.format);
+          if (!uri) return;
+          await post({ type: 'test.exported', kind: 'report', path: displayExportPath(uri) }, message.requestId);
+          if (message.format === 'html') await vscode.env.openExternal(uri);
+          return;
+        }
+        if (message.type === 'test.evidenceBundle.export') {
+          if (!vscode.workspace.isTrusted) throw new Error(localize('This action requires a trusted workspace. Profile editing and fixture replay remain available.'));
+          if (!this.scenarioTests?.hasReport()) throw new Error(localize('No conversation contract results are available. Run a scenario from Test Explorer first.'));
+          const uri = await this.scenarioTests.exportEvidenceBundle();
+          if (!uri) return;
+          await post({ type: 'test.exported', kind: 'evidenceBundle', path: displayExportPath(uri) }, message.requestId);
+          await vscode.env.openExternal(vscode.Uri.joinPath(uri, 'index.html'));
+          return;
+        }
         if (message.type === 'campaign.preview') {
           if (!this.scenarioTests) throw new Error('Campaign runtime is unavailable.');
           const plan = await this.scenarioTests.previewCampaign(document.uri, message.campaignId);
@@ -793,6 +812,11 @@ export function canOpenLinkedAdversarialSuite(profile: TurnStageProfile, path: u
 
 function completedOperation(detail: string, uri: vscode.Uri): { status: 'completed'; detail: string; path: string } {
   return { status: 'completed', detail, path: uri.toString() };
+}
+
+function displayExportPath(uri: vscode.Uri): string {
+  const name = uri.path.split('/').filter(Boolean).at(-1) ?? 'export';
+  return uri.scheme === 'file' ? name : `${uri.scheme}:${name}`;
 }
 
 function cancelledOperation(): { status: 'cancelled'; detail: string } { return { status: 'cancelled', detail: localize('Operation cancelled.') }; }

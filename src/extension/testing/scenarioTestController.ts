@@ -242,6 +242,21 @@ export class ScenarioTestController implements vscode.Disposable {
   getEvidence(id: string): TestEvidenceReference | undefined { return this.evidence.get(id); }
   hasReport(): boolean { return this.reports.hasRecords(); }
   exportLastReport(format: ScenarioReportFormat): Promise<vscode.Uri | undefined> { return this.reports.exportLast(format); }
+  exportEvidenceReport(evidenceId: string, format: ScenarioReportFormat): Promise<vscode.Uri | undefined> {
+    const reference = this.evidence.get(evidenceId);
+    if (!reference?.result?.adversarial) throw new Error(localize('This test evidence is no longer available. Run the scenario again.'));
+    const summary = [...this.latestResults.values()].flat().find((candidate) => candidate.evidenceId === evidenceId || candidate.repetitions?.attempts?.some((attempt) => attempt.evidenceId === evidenceId));
+    if (!summary) throw new Error(localize('This test result is no longer available. Run the scenario again.'));
+    const record: ScenarioExecutionRecord = {
+      profileId: summary.profileId,
+      profileName: summary.profileId,
+      scenarioId: summary.scenarioId,
+      scenarioName: summary.scenarioName,
+      result: reference.result,
+      status: adversarialRecordStatus(reference.result.adversarial.outcome),
+    };
+    return this.reports.exportRecords(format, [record], `turnstage-${summary.scenarioId}-result`);
+  }
   exportEvidenceBundle(): Promise<vscode.Uri | undefined> { return this.reports.exportEvidenceBundle(); }
   getLatestResults(uri: vscode.Uri): AdversarialResultSummary[] { return this.latestResults.get(uri.toString()) ?? []; }
   async getCampaignDashboard(uri: vscode.Uri): Promise<CampaignDashboardV1> {
@@ -824,6 +839,23 @@ export class ScenarioTestController implements vscode.Disposable {
             ...evaluation.findings.flatMap((finding) => finding.locations),
             ...evaluation.issues.map((issue) => issue.location),
           ]);
+          const attemptNavigation = repetitions?.attempts.slice(0, 100).map((attempt) => {
+            const retained = attempt.evidenceId ? this.evidence.get(attempt.evidenceId) : undefined;
+            const retainedEvaluation = retained?.result?.adversarial;
+            const retainedLocations = retainedEvaluation ? uniqueEvidenceLocations([
+              ...retainedEvaluation.findings.flatMap((finding) => finding.locations),
+              ...retainedEvaluation.issues.map((issue) => issue.location),
+            ]) : [];
+            return {
+              attempt: attempt.attempt,
+              outcome: attempt.outcome,
+              durationMs: attempt.durationMs,
+              attemptedTurns: attempt.attemptedTurns,
+              completedTurns: attempt.completedTurns,
+              ...(retained && attempt.evidenceId ? { evidenceId: attempt.evidenceId } : {}),
+              ...(retained ? { primaryLocation: retainedLocations[0] ?? retained.location, availableLocations: retainedLocations } : {}),
+            };
+          });
           return [{
             profileId: item.record.profileId,
             suiteId: item.suiteId,
@@ -877,6 +909,7 @@ export class ScenarioTestController implements vscode.Disposable {
               sampleComplete: item.record.result.repetitions.sampleComplete,
               stability: item.record.result.repetitions.stability,
               counts: item.record.result.repetitions.counts,
+              attempts: attemptNavigation,
             } } : {}),
           }];
         });

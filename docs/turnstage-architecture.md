@@ -410,8 +410,10 @@ preview provides Responsive plus Mobile (375×812, 390×844, 430×932), Tablet
 retain device chrome; Web uses a centered readable conversation column. Every
 mode renders controls, opening/starter chips, messages, progress, tools, forms,
 citations, follow-ups, actions, and the composer. Debug provides Network, Raw Events, Normalized,
-Metrics, Errors, and Runs views. Reducer-owned raw sequence metadata links
-assistant messages with raw/normalized events in both directions.
+Metrics, Errors, and Runs views. Raw and normalized evidence is grouped by
+conversation turn in a fixed-row virtual tree; group collapse state is a
+bounded Webview checkpoint. Reducer-owned raw sequence metadata links assistant
+messages with raw/normalized events in both directions.
 
 Network is a bounded, live-session request inspector. It stores no host fetch
 objects: the host emits a serializable diagnostic summary for Opening, each

@@ -578,5 +578,6 @@
   "Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .adversarial.json, or .csv path.": "對抗式測試套件路徑必須是安全的工作區相對 .adversarial.jsonc、.adversarial.json 或 .csv 路徑。",
   "Linked suites must be an adversarial JSONC/JSON file or a CSV file.": "連結的測試套件必須是對抗式 JSONC／JSON 檔案或 CSV 檔案。",
   "The selected suite reference is invalid.": "選取的測試套件參照無效。",
-  "This external suite is not authorized on this machine. Link the file again.": "此電腦尚未授權這個外部測試套件，請重新連結該檔案。"
+  "This external suite is not authorized on this machine. Link the file again.": "此電腦尚未授權這個外部測試套件，請重新連結該檔案。",
+  "This test result is no longer available. Run the scenario again.": "此測試結果已無法使用，請重新執行情境。"
 }

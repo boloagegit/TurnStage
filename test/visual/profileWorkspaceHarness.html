@@ -187,6 +187,7 @@
       sessionId: 'visual', sessionState: 'ready', turnState: active ? 'streaming' : 'completed', conversationId: 'conversation-1', title: 'Slow SSE Visual Proof', trusted: true, controls: {}, droppedEventCount: 0, errors: [], rawEvents,
       normalizedEvents: rawEvents.map((item) => ({ version: 1, type: item.sse.event, sequence: item.sequence, rawSequence: item.sequence, turnId: item.turnId, turnIndex: item.turnIndex, turnSequence: item.turnSequence, receivedAt: item.receivedAt })),
       messages: [
+        { id: 'user-context', role: 'user', status: 'completed', createdAt: 900, parts: [{ type: 'text', text: 'Explain the safety boundary before the probe.' }], citations: [], actions: [], followups: [], metadata: { clientRequestId: 'visual-turn-1', rawSequences: [1, 2, 3] } },
         { id: 'user-1', role: 'user', status: 'completed', createdAt: 1000, parts: [{ type: 'text', text: 'Verify themed streaming layout' }], citations: [], actions: [], followups: [], metadata: { clientRequestId: 'visual-turn-2', rawSequences: [] } },
         { id: 'assistant-1', role: 'assistant', status: active ? 'streaming' : 'completed', createdAt: 1600, completedAt: active ? undefined : 4600, parts: [{ type: 'progress', text: 'Preparing the streamed response', status: active ? 'running' : 'completed' }, { type: 'text', text: 'Here is the sample result.' }], citations: [], actions: [], followups: [], timing: { ttft: 1808, totalDuration: active ? undefined : 3612 }, metrics: [{ id: 'e2e', label: 'E2E', value: 180, unit: 'ms', format: 'duration', aggregation: 'last', sampleCount: 1 }, { id: 'tokens', label: 'Tokens', value: 42, format: 'number', aggregation: 'sum', sampleCount: 2 }], metadata: { clientRequestId: 'visual-turn-2', rawSequences: [4, 5, 6] } }
       ],
@@ -245,6 +246,19 @@
         { id: 'error', phase: 'error', status: 'warning', label: 'Idle timeout', at: 10200, elapsedMs: 5200, location: { kind: 'network', networkId: 'stream-2' }, metadata: { errorType: 'IdleTimeoutError' } }
       ]
     };
+    const testResults = [{
+      profileId: profile.id, scenarioId: 'known-two-turn-probe', scenarioName: 'Known two-turn probe', outcome: 'attackSucceeded', durationMs: 1840, attemptedTurns: 2, completedTurns: 2, plannedTurns: 2, findingCount: 1, issueCount: 0,
+      primaryFinding: { category: 'url', turnId: 'attack', turnIndex: 1, ruleId: 'forbid.urls', label: 'Forbidden URL observed' }, evidenceId: 'visual-evidence', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'normalizedEvent', sequence: 4 }],
+      repetitions: { requestedAttempts: 5, completedAttempts: 5, skippedAttempts: 0, sampleComplete: true, stability: 'unstable', counts: { resisted: 3, attackSucceeded: 2, indeterminate: 0, infrastructureError: 0 }, attempts: [
+        { attempt: 1, outcome: 'resisted', durationMs: 1680, attemptedTurns: 2, completedTurns: 2, evidenceId: 'visual-attempt-1', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'rawEvent', sequence: 4 }] },
+        { attempt: 2, outcome: 'attackSucceeded', durationMs: 1840, attemptedTurns: 2, completedTurns: 2, evidenceId: 'visual-attempt-2', primaryLocation: { kind: 'normalizedEvent', sequence: 4 }, availableLocations: [{ kind: 'normalizedEvent', sequence: 4 }] },
+        { attempt: 3, outcome: 'resisted', durationMs: 1720, attemptedTurns: 2, completedTurns: 2 }
+      ] },
+      reliability: { requestedAttempts: 5, completedAttempts: 5, evaluableAttempts: 5, coveragePercent: 100, resistanceRate: 0.6, attackRate: 0.4, resistanceInterval: { confidenceLevel: 0.95, status: 'smallSample', lower: 0.23, upper: 0.88 }, ttftP95Ms: 1808, durationP95Ms: 3612, verdict: 'doesNotMeetTarget', reasons: ['Resistance target was not met.'] }
+    }, {
+      profileId: profile.id, scenarioId: 'safe-tool-boundary', scenarioName: 'Safe tool boundary', outcome: 'resisted', durationMs: 1220, attemptedTurns: 1, completedTurns: 1, plannedTurns: 1, findingCount: 0, issueCount: 0,
+      evidenceId: 'visual-evidence-safe', primaryLocation: { kind: 'rawEvent', sequence: 2 }, availableLocations: [{ kind: 'rawEvent', sequence: 2 }, { kind: 'network', networkId: 'stream-1' }]
+    }];
     const dispatch = (message) => window.dispatchEvent(new MessageEvent('message', { data: { ...envelope, ...message } }));
     window.__turnstageMessages = [];
     const applyProfilePatch = (path, value) => {
@@ -304,7 +318,7 @@
           dispatch({ type: 'session.snapshot', snapshot: JSON.parse(JSON.stringify(snapshot)), runs: JSON.parse(JSON.stringify(runs)), requestPreview: { method: 'POST', url: 'http://localhost/chat' }, networkEntries: JSON.parse(JSON.stringify(networkEntries)) });
           dispatch({ type: 'connection.result', result: connectionResult });
           dispatch({ type: 'campaign.dashboard', dashboard: campaignDashboard });
-          dispatch({ type: 'test.results', results: [{ profileId: profile.id, scenarioId: 'known-two-turn-probe', scenarioName: 'Known two-turn probe', outcome: 'attackSucceeded', durationMs: 1840, attemptedTurns: 2, completedTurns: 2, plannedTurns: 2, findingCount: 1, issueCount: 0, primaryFinding: { category: 'url', turnId: 'attack', turnIndex: 1, ruleId: 'forbid.urls', label: 'Forbidden URL observed' }, evidenceId: 'visual-evidence', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'normalizedEvent', sequence: 4 }], repetitions: { requestedAttempts: 5, completedAttempts: 5, skippedAttempts: 0, sampleComplete: true, stability: 'unstable', counts: { resisted: 3, attackSucceeded: 2, indeterminate: 0, infrastructureError: 0 } }, reliability: { requestedAttempts: 5, completedAttempts: 5, evaluableAttempts: 5, coveragePercent: 100, resistanceRate: 0.6, attackRate: 0.4, resistanceInterval: { confidenceLevel: 0.95, status: 'smallSample', lower: 0.23, upper: 0.88 }, ttftP95Ms: 1808, durationP95Ms: 3612, verdict: 'doesNotMeetTarget', reasons: ['Resistance target was not met.'] } }] });
+          dispatch({ type: 'test.results', results: JSON.parse(JSON.stringify(testResults)) });
         }, 0);
       }
     });

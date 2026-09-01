@@ -83,6 +83,8 @@ export type WebviewMessage = Envelope & (
   | { type: 'test.cancel' }
   | { type: 'test.timeline.open'; evidenceId: string }
   | { type: 'test.evidence.open'; evidenceId: string; location: ScenarioEvidenceLocation }
+  | { type: 'test.report.export'; format: 'json' | 'junit' | 'html'; evidenceId?: string }
+  | { type: 'test.evidenceBundle.export' }
   | { type: 'campaign.preview'; campaignId: string }
   | { type: 'campaign.run'; campaignId: string }
   | { type: 'campaign.cancel'; campaignId: string }
@@ -120,6 +122,7 @@ export type HostMessage = Envelope & (
   | { type: 'campaign.dashboard'; dashboard: CampaignDashboardV1 }
   | { type: 'campaign.preview'; campaignId: string; selectedCases: number; plannedAttempts: number; plannedRequests: number; maximumDurationMs: number; maxConcurrency: number; warnings: string[] }
   | { type: 'test.timeline'; evidenceId: string; timeline: EvidenceTimelineSummary }
+  | { type: 'test.exported'; kind: 'report' | 'evidenceBundle'; path: string }
   | { type: 'connection.result'; result: ConnectionDoctorSummary }
   | { type: 'adversarial.captured'; detail: string }
   | { type: 'visual.result'; operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselinePath: string; diffPath?: string }
@@ -200,12 +203,13 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   if (!isRecord(value) || !hasEnvelope(value, instanceId)) return false;
   const message = value;
   switch (message.type) {
-    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'test.runAll': case 'test.cancel': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
+    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'test.runAll': case 'test.cancel': case 'test.evidenceBundle.export': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
     case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
     case 'adversarial.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
     case 'test.rerun': return ['failed', 'unstable', 'incomplete'].includes(String(message.status));
     case 'test.timeline.open': return isBoundedString(message.evidenceId);
     case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
+    case 'test.report.export': return ['json', 'junit', 'html'].includes(String(message.format)) && optionalBoundedString(message.evidenceId);
     case 'campaign.preview': case 'campaign.run': case 'campaign.cancel': return isBoundedId(message.campaignId);
     case 'campaign.resume': case 'campaign.acceptBaseline': case 'campaign.exportResults': case 'campaign.copilotSummary': return isBoundedId(message.campaignId) && isBoundedId(message.runId);
     case 'copilot.diagnose': return isBoundedString(message.evidenceId) && ['failure', 'performance', 'stability', 'comparison'].includes(String(message.mode));
@@ -254,10 +258,11 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
       && ['running', 'cancelling', 'completed', 'cancelled', 'failed'].includes(String(message.operation.state))
       && optionalBoundedString(message.operation.detail)
       && (message.operation.progress === undefined || isTestOperationProgress(message.operation.progress));
-    case 'test.results': return Array.isArray(message.results) && message.results.length <= 10_000 && isStructuredValue(message.results, MAX_HOST_VALUE_NODES);
+    case 'test.results': return isAdversarialResults(message.results) && isStructuredValue(message.results, MAX_HOST_VALUE_NODES);
     case 'campaign.dashboard': return isRecord(message.dashboard) && isStructuredValue(message.dashboard, MAX_HOST_VALUE_NODES);
     case 'campaign.preview': return isBoundedString(message.campaignId) && [message.selectedCases, message.plannedAttempts, message.plannedRequests, message.maximumDurationMs, message.maxConcurrency].every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0) && Array.isArray(message.warnings) && message.warnings.length <= 100 && message.warnings.every((entry) => isBoundedString(entry, 4096));
     case 'test.timeline': return isBoundedString(message.evidenceId) && isRecord(message.timeline) && isStructuredValue(message.timeline, MAX_HOST_VALUE_NODES);
+    case 'test.exported': return (message.kind === 'report' || message.kind === 'evidenceBundle') && isBoundedString(message.path, MAX_TEXT_LENGTH);
     case 'connection.result': return isConnectionDoctorResult(message.result) && isStructuredValue(message.result, MAX_HOST_VALUE_NODES);
     case 'adversarial.captured': return isBoundedString(message.detail, MAX_TEXT_LENGTH);
     case 'visual.result': return (message.operation === 'baseline' || message.operation === 'compare') && ['saved', 'passed', 'failed'].includes(String(message.status)) && optionalBoundedString(message.baselinePath) && optionalBoundedString(message.diffPath) && (message.differencePercent === undefined || (typeof message.differencePercent === 'number' && Number.isFinite(message.differencePercent) && message.differencePercent >= 0 && message.differencePercent <= 100));
@@ -273,6 +278,45 @@ function isTestOperationProgress(value: unknown): boolean {
   if (Number(value.completedCases) > Number(value.totalCases) || Number(value.completedAttempts) > Number(value.totalAttempts)) return false;
   return value.activeCaseNames === undefined || (Array.isArray(value.activeCaseNames) && value.activeCaseNames.length <= 8 && value.activeCaseNames.every((entry) => isBoundedString(entry, 256)));
 }
+
+function isAdversarialResults(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > 500) return false;
+  return value.every((result) => {
+    if (!isRecord(result)
+      || !isBoundedString(result.profileId) || !optionalBoundedString(result.suiteId)
+      || !isBoundedString(result.scenarioId) || !isBoundedString(result.scenarioName, 4096)
+      || !['resisted', 'attackSucceeded', 'indeterminate', 'infrastructureError'].includes(String(result.outcome))
+      || !boundedNonNegativeNumber(result.durationMs)
+      || ![result.attemptedTurns, result.completedTurns, result.plannedTurns, result.findingCount, result.issueCount].every((entry) => boundedNonNegativeInteger(entry, 1_000_000))
+      || !isBoundedString(result.evidenceId) || !isEvidenceLocation(result.primaryLocation)) return false;
+    if (!Array.isArray(result.availableLocations) || result.availableLocations.length > 32 || !result.availableLocations.every(isEvidenceLocation)) return false;
+    if (result.repetitions === undefined) return true;
+    if (!isRecord(result.repetitions)) return false;
+    const repetitions = result.repetitions;
+    const counts = repetitions.counts;
+    if (!boundedNonNegativeInteger(repetitions.requestedAttempts, 100) || Number(repetitions.requestedAttempts) < 1
+      || !boundedNonNegativeInteger(repetitions.completedAttempts, Number(repetitions.requestedAttempts))
+      || !boundedNonNegativeInteger(repetitions.skippedAttempts, Number(repetitions.requestedAttempts))
+      || typeof repetitions.sampleComplete !== 'boolean'
+      || !['stable-pass', 'stable-fail', 'unstable', 'inconclusive'].includes(String(repetitions.stability))
+      || !isRecord(counts)
+      || !['resisted', 'attackSucceeded', 'indeterminate', 'infrastructureError'].every((outcome) => boundedNonNegativeInteger(counts[outcome], 100))) return false;
+    const attempts = repetitions.attempts;
+    if (attempts === undefined) return true;
+    return Array.isArray(attempts) && attempts.length <= 100 && attempts.every((attempt) => isRecord(attempt)
+      && Number.isSafeInteger(attempt.attempt) && Number(attempt.attempt) >= 1 && Number(attempt.attempt) <= 100
+      && ['resisted', 'attackSucceeded', 'indeterminate', 'infrastructureError'].includes(String(attempt.outcome))
+      && boundedNonNegativeNumber(attempt.durationMs)
+      && boundedNonNegativeInteger(attempt.attemptedTurns, 1_000_000)
+      && boundedNonNegativeInteger(attempt.completedTurns, 1_000_000)
+      && optionalBoundedString(attempt.evidenceId)
+      && (attempt.primaryLocation === undefined || isEvidenceLocation(attempt.primaryLocation))
+      && (attempt.availableLocations === undefined || (Array.isArray(attempt.availableLocations) && attempt.availableLocations.length <= 32 && attempt.availableLocations.every(isEvidenceLocation))));
+  });
+}
+
+function boundedNonNegativeInteger(value: unknown, max: number): boolean { return Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= max; }
+function boundedNonNegativeNumber(value: unknown): boolean { return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER; }
 
 function isEvidenceLocation(value: unknown): boolean {
   if (!isRecord(value) || !['network', 'rawEvent', 'normalizedEvent', 'message', 'profile'].includes(String(value.kind))) return false;

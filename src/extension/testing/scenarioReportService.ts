@@ -49,14 +49,18 @@ export class ScenarioReportService {
   hasRecords(): boolean { return this.records.length > 0; }
 
   async exportLast(format: ScenarioReportFormat): Promise<vscode.Uri | undefined> {
-    if (!this.records.length) return undefined;
+    return this.exportRecords(format, this.records, 'turnstage-contract-results');
+  }
+
+  async exportRecords(format: ScenarioReportFormat, records: readonly ScenarioExecutionRecord[], baseName: string): Promise<vscode.Uri | undefined> {
+    if (!records.length) return undefined;
     const extension = reportExtension(format);
     const uri = await vscode.window.showSaveDialog({
-      defaultUri: vscode.Uri.file(`turnstage-contract-results.${extension}`),
+      defaultUri: vscode.Uri.file(`${safeFilePart(baseName)}.${extension}`),
       filters: format === 'junit' ? { [localize('JUnit XML')]: ['xml'] } : format === 'html' ? { HTML: ['html'] } : { [localize('JSON')]: ['json'] },
     });
     if (!uri) return undefined;
-    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(serialize(format, this.records)));
+    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(serialize(format, records)));
     return uri;
   }
 

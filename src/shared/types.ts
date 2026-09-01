@@ -370,6 +370,12 @@ export interface AdversarialAttemptSummary {
   evidenceId?: string;
 }
 
+/** Bounded metadata used to navigate retained attempt evidence in the Webview. */
+export interface AdversarialAttemptNavigationSummary extends Pick<AdversarialAttemptSummary, 'attempt' | 'outcome' | 'durationMs' | 'attemptedTurns' | 'completedTurns' | 'evidenceId'> {
+  primaryLocation?: ScenarioEvidenceLocation;
+  availableLocations?: ScenarioEvidenceLocation[];
+}
+
 export interface AdversarialRepetitionSummary {
   requestedAttempts: number;
   completedAttempts: number;
@@ -398,7 +404,10 @@ export interface AdversarialResultSummary {
   evidenceId: string;
   primaryLocation: ScenarioEvidenceLocation;
   availableLocations: ScenarioEvidenceLocation[];
-  repetitions?: Pick<AdversarialRepetitionSummary, 'requestedAttempts' | 'completedAttempts' | 'skippedAttempts' | 'sampleComplete' | 'stability' | 'counts'>;
+  repetitions?: Pick<AdversarialRepetitionSummary, 'requestedAttempts' | 'completedAttempts' | 'skippedAttempts' | 'sampleComplete' | 'stability' | 'counts'> & {
+    /** At most 100 attempt navigation records; payload content is never included. */
+    attempts?: AdversarialAttemptNavigationSummary[];
+  };
   reliability?: AdversarialReliabilitySummary;
 }
 

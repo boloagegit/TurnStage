@@ -33,7 +33,8 @@ renderer and inspector.
   75%/50% zoom test the same RWD chat surface without adding fake device chrome.
   A camera action copies only the logical Chat viewport to the system clipboard
   as a PNG, ready to paste into an issue, document, or chat.
-  Messages and their raw/normalized events can be selected in either direction.
+  Messages and their raw/normalized events can be selected in either direction;
+  event evidence is grouped by conversation turn in a collapsible virtual tree.
 - Native Profile Tree resource rows with compact **Run**, **Open**, and
   **Configure Profile** actions. Profile Configuration provides eight
   profile-specific sections in the Custom Editor; Test remains the live chat

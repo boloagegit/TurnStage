@@ -578,5 +578,6 @@
   "Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .adversarial.json, or .csv path.": "Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .adversarial.json, or .csv path.",
   "Linked suites must be an adversarial JSONC/JSON file or a CSV file.": "Linked suites must be an adversarial JSONC/JSON file or a CSV file.",
   "The selected suite reference is invalid.": "The selected suite reference is invalid.",
-  "This external suite is not authorized on this machine. Link the file again.": "This external suite is not authorized on this machine. Link the file again."
+  "This external suite is not authorized on this machine. Link the file again.": "This external suite is not authorized on this machine. Link the file again.",
+  "This test result is no longer available. Run the scenario again.": "This test result is no longer available. Run the scenario again."
 }
