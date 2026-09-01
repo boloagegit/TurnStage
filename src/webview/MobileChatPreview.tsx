@@ -1,5 +1,6 @@
-import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import type { CSSProperties, FormEvent, KeyboardEvent } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import type { CSSProperties, FormEvent, KeyboardEvent, ReactNode } from 'react';
 import type { WebviewPayload } from '../shared/protocol';
 import type {
   ChatMessage,
@@ -9,6 +10,7 @@ import type {
   InteractionContext,
   MessageMetric,
   MessagePart,
+  MessageTagRule,
   SessionSnapshot,
   Starter,
   TurnState,
@@ -122,6 +124,7 @@ export function MobileChatPreview({
   const [capturingVisual, setCapturingVisual] = useState<'baseline' | 'compare'>();
   const [screenshotStatus, setScreenshotStatus] = useState('');
   const snapshotMessages = snapshot?.messages ?? EMPTY_MESSAGES;
+  const messageTagEventIndex = useMemo(() => createMessageTagEventIndex(snapshot), [snapshot?.rawEvents, snapshot?.normalizedEvents]);
   const messageContentKey = getMessageContentKey(snapshotMessages);
   const trusted = snapshot?.trusted === true;
   const opening = snapshot?.opening ?? staticOpening(profile);
@@ -315,10 +318,12 @@ export function MobileChatPreview({
         {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon="debug-restart" label={t('Restart session')} type="button" disabled={!trusted || active} onClick={() => post({ type: 'conversation.new' })} />}
       </div>
       <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
-      <IconButton icon="beaker" label={t('Save conversation as adversarial test')} type="button" disabled={!trusted || active || !snapshot?.messages.some((message) => message.role === 'user')} onClick={() => post({ type: 'adversarial.capture' })} />
-      <IconButton icon="save" label={t(capturingVisual === 'baseline' ? 'Capturing visual baseline…' : 'Save visual baseline')} type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'baseline'} onClick={() => void runVisual('baseline')} />
-      <IconButton icon="diff" label={t(capturingVisual === 'compare' ? 'Comparing visual baseline…' : 'Compare visual baseline')} type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'compare'} onClick={() => void runVisual('compare')} />
       {onConfigure && <IconButton icon="settings-gear" label={t('Configure profile')} type="button" onClick={onConfigure} />}
+      <ToolbarOverflow>
+        <button role="menuitem" type="button" disabled={!trusted || active || !snapshot?.messages.some((message) => message.role === 'user')} onClick={() => post({ type: 'adversarial.capture' })}><ProductIcon name="beaker" /><span>{t('Save conversation as adversarial test')}</span></button>
+        <button role="menuitem" type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'baseline'} onClick={() => void runVisual('baseline')}><ProductIcon name="save" /><span>{t(capturingVisual === 'baseline' ? 'Capturing visual baseline…' : 'Save visual baseline')}</span></button>
+        <button role="menuitem" type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'compare'} onClick={() => void runVisual('compare')}><ProductIcon name="diff" /><span>{t(capturingVisual === 'compare' ? 'Comparing visual baseline…' : 'Compare visual baseline')}</span></button>
+      </ToolbarOverflow>
     </header>
     <div ref={stageRef} className="mobile-chat-preview__stage">
       <div className={`mobile-chat-preview__viewport-shell mobile-chat-preview__viewport-shell--${responsive ? 'responsive' : 'fixed'}`} data-viewport-mode={responsive ? 'responsive' : 'fixed'} style={viewportStyle}>
@@ -331,7 +336,7 @@ export function MobileChatPreview({
             {snapshot?.sessionState === 'notStarted' && profile.opening?.mode === 'request' && <StartSessionCard post={post} trusted={trusted} headingId={`${previewId}-start-heading`} />}
             {snapshot?.sessionState === 'failed' && profile.opening?.mode === 'request' && <OpeningError profile={profile} snapshot={snapshot} post={post} trusted={trusted} headingId={`${previewId}-opening-error-heading`} />}
             {opening && componentVisible(profile, 'opening') && <OpeningCard profile={profile} opening={opening} active={active} trusted={trusted} setDraft={setDraft} send={send} post={post} headingId={`${previewId}-opening-heading`} />}
-      {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} post={post} send={send} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback} onActionFeedback={onMessageActionFeedback} />)}
+      {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} snapshot={snapshot} messageTagEventIndex={messageTagEventIndex} post={post} send={send} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback} onActionFeedback={onMessageActionFeedback} />)}
             {!snapshot && <p className="mobile-chat-preview__empty" role="status">{t('Loading conversation…')}</p>}
             {snapshot && snapshotMessages.length === 0 && !opening && snapshot.sessionState !== 'notStarted' && <p className="mobile-chat-preview__empty">{t('No messages yet. Send a message to begin.')}</p>}
             {continuationBlocked && <p className="mobile-chat-preview__continuation" role="status">{t('Continuation is disabled after this error. Start a new conversation to send another message.')}</p>}
@@ -345,6 +350,54 @@ export function MobileChatPreview({
     </div>
     <p className="mobile-chat-preview__status" role="status" aria-live="polite" aria-atomic="true">{screenshotStatus || statusText}</p>
   </section>;
+}
+
+function ToolbarOverflow({ children }: { children: ReactNode }): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<CSSProperties>();
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const update = () => {
+      const trigger = triggerRef.current?.querySelector('button');
+      const menu = menuRef.current;
+      if (!trigger || !menu) return;
+      const rect = trigger.getBoundingClientRect();
+      const width = Math.min(288, Math.max(200, window.innerWidth - 16));
+      const height = menu.offsetHeight;
+      const left = Math.min(Math.max(8, rect.right - width), Math.max(8, window.innerWidth - width - 8));
+      const below = rect.bottom + 2;
+      const top = below + height <= window.innerHeight - 8 ? below : Math.max(8, rect.top - height - 2);
+      setPosition({ left, top, width });
+    };
+    const frame = window.requestAnimationFrame(update);
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => { window.cancelAnimationFrame(frame); window.removeEventListener('resize', update); window.removeEventListener('scroll', update, true); };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      triggerRef.current?.querySelector('button')?.focus();
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => { window.removeEventListener('pointerdown', onPointerDown); window.removeEventListener('keydown', onKeyDown); };
+  }, [open]);
+
+  return <>
+    <span ref={triggerRef} className="mobile-chat-preview__toolbar-overflow-trigger"><IconButton icon="ellipsis" label={t('More actions')} type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((current) => !current)} /></span>
+    {open && typeof document !== 'undefined' && createPortal(<div ref={menuRef} className="webview-toolbar-menu" role="menu" aria-label={t('More actions')} style={position} onClick={(event) => { if ((event.target as Element).closest('button')) setOpen(false); }}>{children}</div>, document.body)}
+  </>;
 }
 
 /** Default export makes the component convenient to consume from a preview host. */
@@ -510,7 +563,7 @@ function stopActionLabel(turnState?: TurnState): string {
   return t('Stop conversation');
 }
 
-function MobileMessage({ profile, message, post, send, setDraft, trusted, selected, onSelectMessage, acceptedForms, actionFeedback, onActionFeedback }: { profile: TurnStageProfile; message: ChatMessage; post: PostMessage; send: SendMessage; setDraft: SetDraft; trusted: boolean; selected: boolean; onSelectMessage?: (messageId: string) => void; acceptedForms?: ReadonlySet<string>; actionFeedback?: MessageActionFeedback; onActionFeedback?: (feedback: MessageActionFeedback | undefined) => void }): React.JSX.Element {
+function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post, send, setDraft, trusted, selected, onSelectMessage, acceptedForms, actionFeedback, onActionFeedback }: { profile: TurnStageProfile; message: ChatMessage; snapshot?: SessionSnapshot; messageTagEventIndex: MessageTagEventIndex; post: PostMessage; send: SendMessage; setDraft: SetDraft; trusted: boolean; selected: boolean; onSelectMessage?: (messageId: string) => void; acceptedForms?: ReadonlySet<string>; actionFeedback?: MessageActionFeedback; onActionFeedback?: (feedback: MessageActionFeedback | undefined) => void }): React.JSX.Element {
   const parts = message.parts ?? [];
   const text = parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text ?? '').join('');
   const citations = message.citations ?? [];
@@ -527,6 +580,7 @@ function MobileMessage({ profile, message, post, send, setDraft, trusted, select
   const messageLabelValues = { role: roleLabel, status: statusLabel };
   const messageActions = resolveMessageActions(profile, message.role, Boolean(onSelectMessage));
   const messageActionVisibility = resolveMessageActionVisibility(profile.ui);
+  const messageTags = useMemo(() => resolveMessageTags(profile.ui?.messageTags, message, snapshot, messageTagEventIndex), [message, messageTagEventIndex, profile.ui?.messageTags, snapshot]);
   const feedback = actionFeedback?.sourceMessageId === message.id ? actionFeedback : undefined;
   const reportFeedback = (actionId: string, status: MessageActionFeedback['status'], feedbackMessage: string) => onActionFeedback?.({ actionId, sourceMessageId: message.id, status, message: feedbackMessage });
   const enabledMessageMetrics = new Set(profile.metrics?.messageEnabled?.length ? profile.metrics.messageEnabled : ['ttft', 'totalDuration']);
@@ -552,7 +606,7 @@ function MobileMessage({ profile, message, post, send, setDraft, trusted, select
   };
   return <article className={`mobile-chat-preview__message mobile-chat-preview__message--${message.role} ${selected ? 'mobile-chat-preview__message--selected' : ''}`} data-message-id={message.id} data-status={message.status} data-selected={selected ? 'true' : 'false'} aria-label={t('{role} message, {status}', messageLabelValues)} style={streamingStyle} tabIndex={onSelectMessage ? 0 : undefined} onClick={onMessageClick} onKeyDown={onMessageKeyDown}>
     {message.role !== 'user' && <span className="mobile-chat-preview__message-avatar" aria-hidden="true">{profile.name.trim().charAt(0).toUpperCase() || 'T'}</span>}
-    <span className="mobile-chat-preview__message-heading"><strong>{roleLabel}</strong><MessageStatus state={message.status} /></span>
+    <span className="mobile-chat-preview__message-heading"><strong>{roleLabel}</strong><MessageStatus state={message.status} />{messageTags.length > 0 && <span className="mobile-chat-preview__message-tags" aria-label={t('Message tags')}>{messageTags.map((tag) => <span className={`mobile-chat-preview__message-tag mobile-chat-preview__message-tag--${tag.tone}`} key={tag.id}>{tag.label}</span>)}</span>}</span>
     <div className="mobile-chat-preview__message-body">
       {parts.map((part, index) => <MobileMessagePart key={`${part.type}-${index}`} profile={profile} part={part} messageId={message.id} citations={citations} post={post} trusted={trusted} accepted={acceptedForms?.has(formInstanceKey(message.id, part) ?? '')} trailingStreaming={streamingAssistant && index === trailingTextPartIndex ? streaming : undefined} />)}
       {streamingAssistant && trailingTextPartIndex < 0 && <StreamingIndicator streaming={streaming} />}
@@ -572,6 +626,74 @@ function MobileMessage({ profile, message, post, send, setDraft, trusted, select
       </footer>}
     </div>
   </article>;
+}
+
+export interface ResolvedMessageTag { id: string; label: string; tone: NonNullable<MessageTagRule['tone']> }
+interface MessageTagEventIndex { raw: Map<number, unknown[]>; normalized: Map<number, unknown[]> }
+
+export function resolveMessageTags(rules: readonly MessageTagRule[] | undefined, message: ChatMessage, snapshot?: SessionSnapshot, index = createMessageTagEventIndex(snapshot)): ResolvedMessageTag[] {
+  if (!rules?.length) return [];
+  const rawSequences = Array.isArray(message.metadata?.rawSequences) ? message.metadata.rawSequences : [];
+  const sequences = new Set(rawSequences.filter((value): value is number => typeof value === 'number'));
+  const sources = {
+    message: [message] as unknown[],
+    rawEvent: [...sequences].flatMap((sequence) => index.raw.get(sequence) ?? []),
+    normalizedEvent: [...sequences].flatMap((sequence) => index.normalized.get(sequence) ?? []),
+  };
+  const tags: ResolvedMessageTag[] = [];
+  const seen = new Set<string>();
+  for (const rule of rules.slice(0, 20)) {
+    if (seen.has(rule.id) || !isSafeTagPath(rule.path)) continue;
+    const values = sources[rule.source].flatMap((source) => readTagPath(source, rule.path));
+    if (!messageTagMatches(values, rule)) continue;
+    tags.push({ id: rule.id, label: rule.label.slice(0, 48), tone: rule.tone ?? 'neutral' });
+    seen.add(rule.id);
+  }
+  return tags;
+}
+
+function createMessageTagEventIndex(snapshot?: SessionSnapshot): MessageTagEventIndex {
+  const index: MessageTagEventIndex = { raw: new Map(), normalized: new Map() };
+  for (const event of snapshot?.rawEvents ?? []) appendIndexedEvent(index.raw, event.sequence, event);
+  for (const event of snapshot?.normalizedEvents ?? []) appendIndexedEvent(index.normalized, event.rawSequence ?? event.sequence, event);
+  return index;
+}
+
+function appendIndexedEvent(index: Map<number, unknown[]>, sequence: number, event: unknown): void {
+  const current = index.get(sequence);
+  if (current) { if (current.length < 100) current.push(event); }
+  else index.set(sequence, [event]);
+}
+
+function isSafeTagPath(path: string): boolean {
+  return path.length <= 256 && /^(?!.*(?:^|\.)(?:__proto__|prototype|constructor)(?:\.|$))[A-Za-z0-9_-]+(?:\.(?:[A-Za-z0-9_-]+|\*)){0,7}$/u.test(path);
+}
+
+function readTagPath(source: unknown, path: string): unknown[] {
+  let current: unknown[] = [source];
+  for (const segment of path.split('.')) {
+    const next: unknown[] = [];
+    for (const value of current.slice(0, 100)) {
+      if (!value || typeof value !== 'object') continue;
+      if (segment === '*') {
+        const children = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
+        next.push(...children.slice(0, 100 - next.length));
+      } else if (Object.prototype.hasOwnProperty.call(value, segment)) next.push((value as Record<string, unknown>)[segment]);
+      if (next.length >= 100) break;
+    }
+    current = next;
+    if (!current.length) break;
+  }
+  return current;
+}
+
+function messageTagMatches(values: unknown[], rule: MessageTagRule): boolean {
+  if (rule.operator === 'exists') return values.some((value) => value !== undefined && value !== null);
+  if (rule.operator === 'equals') return values.some((value) => value === rule.value);
+  const expected = String(rule.value ?? '');
+  if (!expected) return false;
+  if (rule.operator === 'startsWith') return values.some((value) => typeof value === 'string' && value.startsWith(expected));
+  return values.some((value) => typeof value === 'string' && value.includes(expected));
 }
 
 function MessageMetrics({ message, metrics, showTtft, showTotalDuration }: { message: ChatMessage; metrics: MessageMetric[]; showTtft: boolean; showTotalDuration: boolean }): React.JSX.Element {

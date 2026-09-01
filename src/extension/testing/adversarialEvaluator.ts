@@ -15,7 +15,13 @@ import { isSafeAssertionRegex } from './assertionEvaluator';
 
 export interface AdversarialTurnBoundary {
   messageIds: Set<string>;
-  eventKeys: Set<string>;
+  rawEvents: SessionSnapshot['rawEvents'];
+  rawEventCount: number;
+  normalizedEvents: SessionSnapshot['normalizedEvents'];
+  normalizedEventCount: number;
+  droppedEventCount: number;
+  droppedNormalizedEventCount: number;
+  metricCounters: Record<'eventCount' | 'byteCount' | 'parseErrorCount' | 'mappingErrorCount' | 'unmatchedEventCount' | 'reconnectCount', number>;
   networkIds: Set<string>;
 }
 
@@ -30,7 +36,20 @@ const urlPattern = /https?:\/\/[^\s<>"')\]]+/giu;
 export function captureAdversarialBoundary(snapshot: SessionSnapshot, networkEntries: readonly NetworkExchange[]): AdversarialTurnBoundary {
   return {
     messageIds: new Set(snapshot.messages.map((message) => message.id)),
-    eventKeys: new Set(snapshot.normalizedEvents.map(eventKey)),
+    rawEvents: snapshot.rawEvents,
+    rawEventCount: snapshot.rawEvents.length,
+    normalizedEvents: snapshot.normalizedEvents,
+    normalizedEventCount: snapshot.normalizedEvents.length,
+    droppedEventCount: snapshot.droppedEventCount,
+    droppedNormalizedEventCount: snapshot.droppedNormalizedEventCount ?? 0,
+    metricCounters: {
+      eventCount: snapshot.metrics.eventCount,
+      byteCount: snapshot.metrics.byteCount,
+      parseErrorCount: snapshot.metrics.parseErrorCount,
+      mappingErrorCount: snapshot.metrics.mappingErrorCount,
+      unmatchedEventCount: snapshot.metrics.unmatchedEventCount,
+      reconnectCount: snapshot.metrics.reconnectCount ?? 0,
+    },
     networkIds: new Set(networkEntries.map((entry) => entry.id)),
   };
 }
@@ -56,7 +75,9 @@ export function evaluateAdversarialTurn(
 ): AdversarialTurnEvaluation {
   const forbid = mergeAdversarialForbid(definition.forbid, step.additionalForbid);
   const messages = snapshot.messages.filter((message) => message.role === 'assistant' && !boundary.messageIds.has(message.id));
-  const events = snapshot.normalizedEvents.filter((event) => !boundary.eventKeys.has(eventKey(event)));
+  const events = snapshot.normalizedEvents === boundary.normalizedEvents
+    ? snapshot.normalizedEvents.slice(boundary.normalizedEventCount)
+    : snapshot.normalizedEvents;
   const networks = networkEntries.filter((entry) => !boundary.networkIds.has(entry.id));
   const findings: AdversarialFinding[] = [];
   const issues: AdversarialIssue[] = [];
@@ -165,7 +186,6 @@ function requiresStructuredEvidence(forbid: AdversarialForbidDefinition): boolea
 }
 
 function isHttpUrl(value: string): boolean { try { const protocol = new URL(value).protocol; return protocol === 'http:' || protocol === 'https:'; } catch { return false; } }
-function eventKey(event: NormalizedEvent): string { return `${event.sequence}:${event.type}:${event.rawSequence ?? ''}:${event.mappingRuleId ?? ''}`; }
 function uniqueContentRules(values: NonNullable<AdversarialForbidDefinition['content']>): NonNullable<AdversarialForbidDefinition['content']> { const seen = new Set<string>(); return values.filter((value) => { const key = typeof value === 'string' ? `s:${value}` : `r:${value.id ?? ''}:${value.match}:${value.value}:${Boolean(value.caseSensitive)}`; if (seen.has(key)) return false; seen.add(key); return true; }); }
 function uniqueFindings(values: AdversarialFinding[]): AdversarialFinding[] { return [...new Map(values.map((value) => [value.id, value])).values()]; }
 function uniqueIssues(values: AdversarialIssue[]): AdversarialIssue[] { return [...new Map(values.map((value) => [value.id, value])).values()]; }

@@ -88,7 +88,7 @@ describe('ProfileValidator', () => {
     const profile = validProfile();
     profile.stream.mappings.push({ id: 'tool', match: { event: 'tool' }, emit: { type: 'tool.started', toolCallId: { path: '$.id' }, name: { path: '$.name' } } });
     profile.tests = {
-      adversarialSuites: ['.vscode/turnstage/tests/security.adversarial.jsonc'],
+      adversarialSuites: ['.vscode/turnstage/tests/security.adversarial.jsonc', '.vscode/turnstage/tests/security.adversarial.csv'],
       scenarios: [{
         id: 'known-attack', name: 'Known attack',
         sourceBinding: { sourceGlobs: ['src/chat/**'], riskTags: ['prompt-boundary'] },
@@ -129,7 +129,7 @@ describe('ProfileValidator', () => {
     };
     const messages = new ProfileValidator().validate(profile).map((entry) => entry.message);
     expect(messages).toEqual(expect.arrayContaining([
-      'Adversarial suite path must be a safe workspace-relative .adversarial.jsonc or .json path.',
+      'Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .json, or .csv path.',
       'Adversarial suite paths must be unique.',
       'A single-turn adversarial case must contain exactly one step.',
       'Adversarial steps exceed maxTurns and will not be truncated.',
@@ -397,6 +397,10 @@ describe('ProfileValidator', () => {
       streaming: { effect: 'typewriter' as 'caret', speedMs: 399, intensityPercent: 100.5 },
       messageActions: ['request.send'],
       messageActionVisibility: 'hover' as 'always',
+      messageTags: [
+        { id: 'duplicate', label: '', source: 'network' as 'message', path: '__proto__.value', operator: 'regex' as 'exists' },
+        { id: 'duplicate', label: 'Again', source: 'message', path: 'status', operator: 'equals' },
+      ],
     };
 
     const messages = new ProfileValidator().validate(profile).map((entry) => entry.message);
@@ -410,6 +414,12 @@ describe('ProfileValidator', () => {
       'Assistant streaming intensity must be an integer from 10 to 100 percent.',
       'Unknown action id: request.send.',
       'Unknown message action visibility: hover.',
+      'Message tag labels must contain 1 to 48 characters.',
+      'Unknown message tag source: network.',
+      'Message tag paths must be safe bounded dot paths.',
+      'Unknown message tag operator: regex.',
+      'Message tag ids must be unique, bounded identifiers.',
+      'This message tag operator requires a primitive value.',
     ]));
   });
 

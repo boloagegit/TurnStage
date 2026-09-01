@@ -40,7 +40,12 @@ export class SessionController implements vscode.Disposable {
   private runs: LocalRun[] = [];
   private lastInteraction?: { text: string; interaction: InteractionContext };
   private replayEngine?: ReplayEngine;
+  private replayTask?: Promise<void>;
   private replayMetrics?: MetricsSnapshot;
+  private readonly runStorageBytes = new Map<string, number>();
+  private activeRequest?: Promise<void>;
+  private activeStop?: Promise<void>;
+  private disposed = false;
   private currentTurn?: { clientRequestId: string; startedAt: number };
   private environmentSecretValues: string[] = [];
   private readonly remoteSessionRepository: RemoteSessionRepository;
@@ -76,6 +81,7 @@ export class SessionController implements vscode.Disposable {
     await this.loadSecretControls();
     await this.loadEnvironmentSecrets();
     this.runs = vscode.workspace.isTrusted ? (await this.runRepository.list(this.profile.id)).map((run) => this.publicRun(run)) : [];
+    this.refreshRunStorageBytes();
     this.snapshot.remoteSessions = this.profile.history?.remoteSessions?.mode === 'referenceOnly' ? this.publicRemoteSessions(this.remoteSessionRepository.list(this.remoteSessionKey())) : [];
     return this.runs;
   }
@@ -87,7 +93,7 @@ export class SessionController implements vscode.Disposable {
     const entry = candidates.filter((candidate) => candidate.kind === 'stream').at(-1) ?? (startedAt === undefined ? candidates.filter((candidate) => candidate.kind === 'opening').at(-1) : undefined);
     return entry ? structuredClone(entry) : undefined;
   }
-  getRunSummaries(): LocalRunSummary[] { return this.runs.map((run) => ({ id: run.id, profileId: run.profileId, createdAt: run.createdAt, metrics: structuredClone(run.metrics), result: structuredClone(run.result), replayable: Boolean(run.rawEvents?.length), hasSnapshot: Boolean(run.snapshot), rawEventCount: run.rawEvents?.length ?? 0, normalizedEventCount: run.normalizedEvents?.length ?? 0, messageCount: run.snapshot?.messages.length ?? 0, errorCount: run.snapshot?.errors.length ?? (run.result.type === 'failed' ? 1 : 0), request: run.request ? { method: run.request.method, url: run.request.url, variantId: run.request.variantId } : undefined })); }
+  getRunSummaries(): LocalRunSummary[] { return this.runs.map((run) => ({ id: run.id, profileId: run.profileId, createdAt: run.createdAt, metrics: structuredClone(run.metrics), result: structuredClone(run.result), replayable: Boolean(run.rawEvents?.length), hasSnapshot: Boolean(run.snapshot), rawEventCount: run.rawEvents?.length ?? 0, normalizedEventCount: run.normalizedEvents?.length ?? 0, messageCount: run.snapshot?.messages.length ?? 0, errorCount: run.snapshot?.errors.length ?? (run.result.type === 'failed' ? 1 : 0), storageBytes: this.runStorageBytes.get(run.id), request: run.request ? { method: run.request.method, url: run.request.url, variantId: run.request.variantId } : undefined })); }
   addBuiltInFixture(rawEvents: RawStreamEvent[]): void {
     const fixtureSnapshot = createSnapshot(vscode.workspace.isTrusted); fixtureSnapshot.controls = this.publicControls();
     const safeRawEvents = rawEvents.map((event) => this.publicRawEvent(event));
@@ -121,8 +127,36 @@ export class SessionController implements vscode.Disposable {
     if (!imported) return undefined;
     const safeRun = this.publicRun(imported.run);
     this.runs = [safeRun, ...this.runs.filter((item) => item.id !== safeRun.id)].slice(0, retention);
+    this.refreshRunStorageBytes();
     this.changed(true);
     return { ...imported, run: safeRun };
+  }
+  getRunStorageSummary(runId?: string): { count: number; bytes: number } {
+    const selected = runId ? this.runs.filter((run) => run.id === runId) : this.runs;
+    return { count: selected.length, bytes: selected.reduce((sum, run) => sum + (this.runStorageBytes.get(run.id) ?? 0), 0) };
+  }
+  async deleteRun(runId: string): Promise<{ deletedCount: number; deletedBytes: number }> {
+    if (isActive(this.snapshot.turnState)) throw new Error(localize('Finish or stop the current request or replay before deleting recorded runs.'));
+    const result = await this.runRepository.deleteRun(this.profile.id, runId);
+    this.runs = result.runs.map((run) => this.publicRun(run));
+    if (this.snapshot.replay?.runId === runId) this.snapshot.replay = undefined;
+    this.refreshRunStorageBytes();
+    this.changed(true);
+    return { deletedCount: result.deletedCount, deletedBytes: result.deletedBytes };
+  }
+  async clearRuns(): Promise<{ deletedCount: number; deletedBytes: number }> {
+    if (isActive(this.snapshot.turnState)) throw new Error(localize('Finish or stop the current request or replay before deleting recorded runs.'));
+    const result = await this.runRepository.clear(this.profile.id);
+    this.runs = [];
+    this.snapshot.replay = undefined;
+    this.refreshRunStorageBytes();
+    this.changed(true);
+    return { deletedCount: result.deletedCount, deletedBytes: result.deletedBytes };
+  }
+  private refreshRunStorageBytes(): void {
+    this.runStorageBytes.clear();
+    const encoder = new TextEncoder();
+    for (const run of this.runs) this.runStorageBytes.set(run.id, encoder.encode(JSON.stringify(run)).byteLength);
   }
   async setControl(id: string, value: unknown): Promise<void> {
     const definition = this.profile.controls?.find((item) => item.id === id); if (!definition) return;
@@ -214,6 +248,15 @@ export class SessionController implements vscode.Disposable {
   useConfiguredOpeningFallback(): void { this.useOpeningFallback(); }
 
   async send(text: string, interaction: InteractionContext): Promise<void> {
+    if (this.disposed) return;
+    if (this.activeRequest) return this.activeRequest;
+    const operation = this.performSend(text, interaction);
+    this.activeRequest = operation;
+    try { await operation; }
+    finally { if (this.activeRequest === operation) this.activeRequest = undefined; }
+  }
+
+  private async performSend(text: string, interaction: InteractionContext): Promise<void> {
     text = text.trim(); if (!text || isActive(this.snapshot.turnState)) return;
     if (!vscode.workspace.isTrusted) { this.snapshot.errors.push(toError(errors.trust())); this.changed(); return; }
     const clientRequestId = crypto.randomUUID();
@@ -317,6 +360,15 @@ export class SessionController implements vscode.Disposable {
 
   async retry(): Promise<void> { if (this.lastInteraction) await this.send(this.lastInteraction.text, { ...this.lastInteraction.interaction, kind: 'retry' }); }
   async abort(): Promise<void> {
+    if (this.disposed) return;
+    if (this.activeStop) return this.activeStop;
+    const operation = this.performAbort();
+    this.activeStop = operation;
+    try { await operation; }
+    finally { if (this.activeStop === operation) this.activeStop = undefined; }
+  }
+
+  private async performAbort(): Promise<void> {
     if (this.snapshot.sessionState === 'loadingOpening') {
       this.openingAbortController?.abort(errors.abort());
       this.snapshot.sessionState = 'failed';
@@ -379,7 +431,7 @@ export class SessionController implements vscode.Disposable {
   }
 
   replay(runId: string, speed: ReplaySpeed = 1): 'started' | 'active' | 'notFound' | 'unavailable' {
-    if (isActive(this.snapshot.turnState)) return 'active';
+    if (this.disposed || isActive(this.snapshot.turnState)) return 'active';
     const run = this.runs.find((item) => item.id === runId);
     if (!run) return 'notFound';
     if (!run.rawEvents?.length) return 'unavailable';
@@ -389,15 +441,50 @@ export class SessionController implements vscode.Disposable {
     this.requestPreview = run.request ? structuredClone(run.request) : undefined;
     this.rawBuffer.clear();
     this.finalized = false; this.metrics = new MetricsCollector(); this.metrics.start();
-    this.replayEngine = new ReplayEngine(run.rawEvents ?? [], speed, (raw) => this.acceptRaw(raw), (state) => { this.snapshot.replay = { runId, ...state }; this.changed(); if (state.status === 'completed' && !this.finalized) void this.finalizeTurn(run.result, false); });
-    void this.replayEngine.play();
+    const replay = new ReplayEngine(run.rawEvents ?? [], speed, (raw) => this.acceptRaw(raw, false), (state) => { this.snapshot.replay = { runId, ...state }; this.changed(); });
+    this.replayEngine = replay;
+    const task = this.playReplay(replay, run);
+    this.replayTask = task;
+    void task.then(() => { if (this.replayTask === task) this.replayTask = undefined; });
     return 'started';
   }
   pauseReplay(): void { this.replayEngine?.pause(); }
   resumeReplay(): void { this.replayEngine?.resume(); }
-  async stepReplay(): Promise<void> { await this.replayEngine?.step(); }
-  async stopReplay(): Promise<void> { this.replayEngine?.stop(); if (!this.finalized) await this.finalizeTurn({ type: 'aborted', reason: 'replay_stopped' }, false); }
+  async stepReplay(): Promise<void> {
+    const replay = this.replayEngine;
+    if (!replay) return;
+    try { await replay.step(); }
+    catch { await this.failReplay(replay); }
+  }
+  async stopReplay(): Promise<void> { const task = this.replayTask; this.replayEngine?.stop(); if (task) await task; if (!this.finalized) await this.finalizeTurn({ type: 'aborted', reason: 'replay_stopped' }, false); }
   setReplaySpeed(speed: ReplaySpeed): void { this.replayEngine?.setSpeed(speed); }
+
+  private async playReplay(replay: ReplayEngine, run: LocalRun): Promise<void> {
+    const logId = `replay-${run.id.slice(0, 8)}`;
+    logAt(this.log, 'info', `[${logId}] start profile=${quoteDiagnostic(this.profile.id)} events=${run.rawEvents?.length ?? 0}`);
+    try {
+      await replay.play();
+      if (this.replayEngine !== replay) return;
+      if (replay.getState().status === 'failed') await this.failReplay(replay, logId);
+      else if (replay.getState().status === 'completed' && !this.finalized) {
+        await this.finalizeTurn(run.result, false);
+        logAt(this.log, 'info', `[${logId}] completed events=${replay.getState().index}`);
+      }
+    } catch {
+      await this.failReplay(replay, logId);
+    }
+  }
+
+  private async failReplay(replay: ReplayEngine, logId = `replay-${this.snapshot.replay?.runId.slice(0, 8) ?? 'unknown'}`): Promise<void> {
+    if (this.replayEngine !== replay || this.finalized) return;
+    const failure = replay.getFailure();
+    logAt(this.log, 'error', `[${logId}] failed type=${errorType(failure)} index=${replay.getState().index} total=${replay.getState().total}`);
+    try {
+      await this.finalizeTurn({ type: 'failed', error: { type: 'ReplayError', message: localize('Replay failed while processing recorded events. The original run was not modified.'), retrySafe: true } }, false);
+    } catch (error) {
+      logAt(this.log, 'error', `[${logId}] finalization-failed type=${errorType(error)}`);
+    }
+  }
 
   async finalizeTurn(result: TurnResult, record = true): Promise<void> {
     if (this.finalized) return; this.finalized = true; this.abortController = undefined;
@@ -434,6 +521,7 @@ export class SessionController implements vscode.Disposable {
       const retention = this.profile.history?.localRuns?.maxRuns ?? vscode.workspace.getConfiguration('turnstage').get('runRetention', 20);
       const storedRuns = await this.runRepository.save(safeRun, retention);
       this.runs = Array.isArray(storedRuns) ? storedRuns.map((item) => this.publicRun(item)) : [safeRun, ...this.runs].slice(0, retention);
+      this.refreshRunStorageBytes();
       this.changed();
     }
     this.currentTurn = undefined;
@@ -441,15 +529,18 @@ export class SessionController implements vscode.Disposable {
 
   dispose(): void { void this.disposeAndWait(); }
   async disposeAndWait(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
     this.replayEngine?.dispose();
     this.openingAbortController?.abort(new TurnStageError('PanelDisposedError', localize('The editor panel was closed.')));
     this.stopAbortController?.abort(new TurnStageError('PanelDisposedError', localize('The editor panel was closed.')));
-    if (!isActive(this.snapshot.turnState)) return;
     this.abortController?.abort(new TurnStageError('PanelDisposedError', localize('The editor panel was closed.')));
-    await this.finalizeTurn({ type: 'aborted', reason: 'panel_disposed' });
+    if (isActive(this.snapshot.turnState)) await this.finalizeTurn({ type: 'aborted', reason: 'panel_disposed' });
+    const pending = [this.activeRequest, this.activeStop, this.replayTask].filter((operation): operation is Promise<void> => Boolean(operation));
+    if (pending.length) await Promise.allSettled(pending);
   }
 
-  private async acceptRaw(raw: RawStreamEvent): Promise<boolean> {
+  private async acceptRaw(raw: RawStreamEvent, record = true): Promise<boolean> {
     // A backend can accidentally emit duplicate terminal frames or continue
     // writing after completion. Once the turn is finalized, its persisted run
     // and visible snapshot must remain immutable.
@@ -457,7 +548,7 @@ export class SessionController implements vscode.Disposable {
     this.metrics.raw(raw);
     if (raw.data === (this.profile.stream.doneValue ?? '[DONE]')) {
       this.rawBuffer.push(this.publicRawEvent(raw)); this.snapshot.rawEvents = this.rawBuffer.all(); this.snapshot.droppedEventCount = this.rawBuffer.dropped;
-      await this.finalizeTurn({ type: 'completed' }); return false;
+      await this.finalizeTurn({ type: 'completed' }, record); return false;
     }
     const result = this.mapping.map(raw); raw.mappingRuleId = result.ruleIds.join(', ') || undefined; raw.mappingError = result.errors.map((item) => `${item.ruleId}: ${item.message}`).join('; ') || undefined;
     this.rawBuffer.push(this.publicRawEvent(raw)); this.snapshot.rawEvents = this.rawBuffer.all(); this.snapshot.droppedEventCount = this.rawBuffer.dropped;
@@ -468,9 +559,9 @@ export class SessionController implements vscode.Disposable {
       reduceEvent(this.snapshot, this.publicNormalizedEvent(event));
       this.syncActiveAssistantTiming();
       this.boundSnapshotCollections();
-      if (event.type === 'stream.completed') { await this.finalizeTurn({ type: 'completed' }); return false; }
-      if (event.type === 'stream.failed') { await this.finalizeTurn({ type: 'failed', error: this.snapshot.errors.at(-1) ?? { type: 'StreamError', message: localize('The stream failed.') } }); return false; }
-      if (event.type === 'stream.aborted') { await this.finalizeTurn({ type: 'aborted', reason: 'remote_abort' }); return false; }
+      if (event.type === 'stream.completed') { await this.finalizeTurn({ type: 'completed' }, record); return false; }
+      if (event.type === 'stream.failed') { await this.finalizeTurn({ type: 'failed', error: this.snapshot.errors.at(-1) ?? { type: 'StreamError', message: localize('The stream failed.') } }, record); return false; }
+      if (event.type === 'stream.aborted') { await this.finalizeTurn({ type: 'aborted', reason: 'remote_abort' }, record); return false; }
     }
     this.snapshot.metrics = { ...this.metrics.value }; this.changed(); return true;
   }

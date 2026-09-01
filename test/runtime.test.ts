@@ -351,6 +351,38 @@ describe('isActive and SessionController.finalizeTurn', () => {
     expect(controller.snapshot.turnState).toBe('aborted');
   });
 
+  it('aborts and drains the active transport before panel disposal completes', async () => {
+    vi.mock('vscode', () => ({ workspace: { isTrusted: true, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), getWorkspaceFolder: () => undefined } }));
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const { SessionController } = await import('../src/extension/runtime/sessionController');
+      const controller = new SessionController(
+        { version: 1, id: 'dispose-active-request', name: 'Dispose active request', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [] } },
+        {} as never,
+        { version: 1, id: 'env', name: 'Environment', variables: {} },
+        {} as never,
+        { get: vi.fn() } as never,
+        { list: vi.fn(async () => []), save: vi.fn(async () => []) } as never,
+        vi.fn(),
+        { appendLine: vi.fn() } as never,
+      );
+      const sending = controller.send('Keep streaming', { kind: 'manual' });
+      await vi.waitFor(() => expect(controller.snapshot.turnState).toBe('waitingStart'));
+
+      await controller.disposeAndWait();
+      await sending;
+
+      expect(controller.snapshot.turnState).toBe('aborted');
+      expect(controller.snapshot.metrics.abortReason).toBe('panel_disposed');
+      expect((controller as unknown as { activeRequest?: Promise<void> }).activeRequest).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('applies failed-turn partial-content and conversation-id policies', async () => {
     vi.mock('vscode', () => ({ workspace: { isTrusted: true, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), getWorkspaceFolder: () => undefined } }));
     const { SessionController } = await import('../src/extension/runtime/sessionController');
@@ -526,8 +558,9 @@ describe('isActive and SessionController.finalizeTurn', () => {
       (controller as unknown as { finalized: boolean }).finalized = false;
       (controller as unknown as { abortController: AbortController }).abortController = new AbortController();
 
-      await controller.abort();
+      await Promise.all([controller.abort(), controller.abort()]);
 
+      expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(fetchMock).toHaveBeenCalledWith('https://example.test/stop', expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ conversationId: 'conversation-42' }),

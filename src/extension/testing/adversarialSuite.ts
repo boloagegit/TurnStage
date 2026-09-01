@@ -178,7 +178,7 @@ export function createAdversarialSuite(id: string, name: string, scenarios: read
 export function serializeAdversarialSuite(suite: AdversarialSuiteDefinition): string { return `${JSON.stringify(suite, null, 2)}\n`; }
 
 export function isSafeAdversarialSuitePath(value: unknown): value is string {
-  return typeof value === 'string' && /\.adversarial\.(?:jsonc|json)$/i.test(value) && isSafeReportDirectory(value);
+  return typeof value === 'string' && /\.adversarial\.(?:jsonc|json|csv)$/i.test(value) && isSafeReportDirectory(value);
 }
 
 function normalizeCase(suite: AdversarialSuiteDefinition, testCase: AdversarialSuiteCaseDefinition): ScenarioDefinition {

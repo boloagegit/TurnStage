@@ -133,6 +133,76 @@ describe('LocalRunRepository', () => {
     expect(new Set(ids)).toEqual(new Set(Array.from({ length: 12 }, (_, index) => `concurrent-${index}`)));
   });
 
+  it('deletes one run idempotently without touching another profile', async () => {
+    const repository = makeRepository();
+    await repository.save(run('run-1', 'profile-a'), 10);
+    await repository.save(run('run-2', 'profile-a'), 10);
+    await repository.save(run('other', 'profile-b'), 10);
+
+    const deleted = await repository.deleteRun('profile-a', 'run-1');
+    expect(deleted.deletedCount).toBe(1);
+    expect(deleted.deletedBytes).toBeGreaterThan(0);
+    expect(deleted.runs.map((item) => item.id)).toEqual(['run-2']);
+    expect(await repository.list('profile-b')).toEqual([expect.objectContaining({ id: 'other' })]);
+
+    await expect(repository.deleteRun('profile-a', 'run-1')).resolves.toMatchObject({ deletedCount: 0, deletedBytes: 0 });
+  });
+
+  it('clears only the selected profile and remains safe when repeated', async () => {
+    const repository = makeRepository();
+    await repository.save(run('run-1', 'profile-a'), 10);
+    await repository.save(run('run-2', 'profile-a'), 10);
+    await repository.save(run('other', 'profile-b'), 10);
+
+    const cleared = await repository.clear('profile-a');
+    expect(cleared.deletedCount).toBe(2);
+    expect(cleared.deletedBytes).toBeGreaterThan(0);
+    expect(cleared.runs).toEqual([]);
+    expect(await repository.list('profile-a')).toEqual([]);
+    expect(await repository.list('profile-b')).toEqual([expect.objectContaining({ id: 'other' })]);
+    await expect(repository.clear('profile-a')).resolves.toEqual({ runs: [], deletedCount: 0, deletedBytes: 0 });
+  });
+
+  it('orders a concurrent save before a later delete for the same profile', async () => {
+    const repository = makeRepository();
+    const saving = repository.save(run('queued', 'profile-a'), 10);
+    const deleting = repository.deleteRun('profile-a', 'queued');
+
+    await saving;
+    await expect(deleting).resolves.toMatchObject({ deletedCount: 1, runs: [] });
+    await expect(repository.list('profile-a')).resolves.toEqual([]);
+  });
+
+  it('waits for an in-flight history write before a reopened controller lists runs', async () => {
+    const repository = makeRepository();
+    const originalWrite = mock.workspace.fs.writeFile;
+    let releaseWrite!: () => void;
+    let writeStarted!: () => void;
+    const started = new Promise<void>((resolve) => { writeStarted = resolve; });
+    const gate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    mock.workspace.fs.writeFile = async (uri: InstanceType<typeof mock.Uri>, bytes: Uint8Array) => {
+      writeStarted();
+      await gate;
+      await originalWrite(uri, bytes);
+    };
+    try {
+      const saving = repository.save(run('closing-run', 'profile-a'), 10);
+      await started;
+      const listing = repository.list('profile-a');
+      let listed = false;
+      void listing.then(() => { listed = true; });
+      await Promise.resolve();
+      expect(listed).toBe(false);
+
+      releaseWrite();
+
+      await expect(listing).resolves.toEqual([expect.objectContaining({ id: 'closing-run' })]);
+      await saving;
+    } finally {
+      mock.workspace.fs.writeFile = originalWrite;
+    }
+  });
+
   it('exports the selected run as readable JSON and suggests a stable filename', async () => {
     const repository = makeRepository();
     const selected = run('run-7', 'profile-a', { rawEvents: undefined, normalizedEvents: undefined });
@@ -348,6 +418,33 @@ describe('SessionController local-run recording', () => {
     expect(controller.snapshot.replay).toMatchObject({ runId: replayRun.id, status: 'completed', index: 1, total: 1 });
   });
 
+  it('fails a broken replay cleanly and allows a later replay without modifying the recorded run', async () => {
+    const context = extensionContext();
+    const repository = new LocalRunRepository(context as never);
+    const profile = profileWithHistory({});
+    profile.stream.mappings = [{ id: 'text', match: {}, emit: { type: 'content.text.delta', text: { path: '$.text' } } }];
+    const controller = controllerFor(profile, context, repository);
+    const replayRun = run('replay-failure', profile.id, {
+      rawEvents: [{ sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{}', data: { text: 'Recovered' } }],
+    });
+    (controller as unknown as { runs: LocalRun[] }).runs = [replayRun];
+    const internal = controller as unknown as { acceptRaw: (raw: RawStreamEvent) => Promise<boolean> };
+    const originalAccept = internal.acceptRaw.bind(controller);
+    internal.acceptRaw = async () => { throw new Error('code runtime failed'); };
+
+    expect(controller.replay(replayRun.id)).toBe('started');
+    await vi.waitFor(() => expect(controller.snapshot.turnState).toBe('failed'));
+
+    expect(controller.snapshot.replay?.status).toBe('failed');
+    expect(controller.snapshot.errors).toContainEqual(expect.objectContaining({ type: 'ReplayError' }));
+    expect(replayRun.result).toEqual({ type: 'completed' });
+
+    internal.acceptRaw = originalAccept;
+    expect(controller.replay(replayRun.id)).toBe('started');
+    await vi.waitFor(() => expect(controller.snapshot.turnState).toBe('completed'));
+    expect(controller.snapshot.replay?.status).toBe('completed');
+  });
+
   it('refuses unavailable or active replay without replacing the visible snapshot', () => {
     const context = extensionContext();
     const repository = new LocalRunRepository(context as never);
@@ -382,12 +479,36 @@ describe('SessionController local-run recording', () => {
       normalizedEventCount: 0,
       messageCount: 0,
       errorCount: 0,
+      storageBytes: undefined,
       request: { method: 'POST', url: 'https://example.test', variantId: undefined },
     }]);
     expect(controller.getRunSummaries()[0]).not.toHaveProperty('rawEvents');
     expect(controller.getRunSummaries()[0]).not.toHaveProperty('snapshot');
     expect(controller.getRunSummaries()[0]?.request).not.toHaveProperty('headers');
     expect(controller.getRunSummaries()[0]?.request).not.toHaveProperty('body');
+  });
+
+  it('deletes and clears recorded runs while refusing active request or replay state', async () => {
+    const context = extensionContext();
+    const repository = new LocalRunRepository(context as never);
+    const profile = profileWithHistory({ maxRuns: 10 });
+    await repository.save(run('run-1', profile.id), 10);
+    await repository.save(run('run-2', profile.id), 10);
+    const controller = controllerFor(profile, context, repository);
+    await controller.loadRuns();
+    expect(controller.getRunSummaries()).toHaveLength(2);
+
+    expect(controller.getRunStorageSummary()).toMatchObject({ count: 2, bytes: expect.any(Number) });
+    await expect(controller.deleteRun('run-1')).resolves.toMatchObject({ deletedCount: 1, deletedBytes: expect.any(Number) });
+    expect(controller.getRunSummaries().map((item) => item.id)).toEqual(['run-2']);
+
+    controller.snapshot.turnState = 'streaming';
+    await expect(controller.clearRuns()).rejects.toThrow('Finish or stop the current request or replay');
+    expect(await repository.list(profile.id)).toHaveLength(1);
+
+    controller.snapshot.turnState = 'completed';
+    await expect(controller.clearRuns()).resolves.toMatchObject({ deletedCount: 1, deletedBytes: expect.any(Number) });
+    expect(controller.getRunSummaries()).toEqual([]);
   });
 });
 

@@ -5,11 +5,11 @@ import axe from 'axe-core';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { ChatMessage, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
+import type { AdversarialResultSummary, ChatMessage, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 import { MobileChatPreview, resizeComposerTextarea } from '../src/webview/MobileChatPreview';
-import { ACCESSIBLE_EVENT_WINDOW_SIZE, DEFAULT_EVENT_FILTERS, eventMatchesFilters, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
+import { ACCESSIBLE_EVENT_WINDOW_SIZE, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
-import { SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
+import { AdversarialWorkspace, SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
 
 beforeAll(() => {
   class TestResizeObserver implements ResizeObserver {
@@ -130,14 +130,17 @@ describe('Webview DOM behavior', () => {
     const userMessage: ChatMessage = { id: 'user-1', role: 'user', status: 'completed', createdAt: 0, completedAt: 1, parts: [{ type: 'text', text: 'Probe' }], citations: [], actions: [], followups: [] };
     render(<MobileChatPreview {...mobileProps({ post, snapshot: { ...snapshot, messages: [userMessage, ...snapshot.messages] } })} />);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Save conversation as adversarial test' }));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Save conversation as adversarial test' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.capture' });
   });
 
-  it('uses distinct visual symbols for adversarial capture and visual baselines', () => {
+  it('uses distinct visual symbols for adversarial capture and visual baselines', async () => {
     render(<MobileChatPreview {...mobileProps()} />);
-    expect(screen.getByRole('button', { name: 'Save conversation as adversarial test' }).querySelector('.codicon-beaker')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Save visual baseline' }).querySelector('.codicon-save')).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'More actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Save conversation as adversarial test' }).querySelector('.codicon-beaker')).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Save visual baseline' }).querySelector('.codicon-save')).toBeTruthy();
   });
 
   it('supports interaction-only message actions while keeping them keyboard reachable', () => {
@@ -164,6 +167,21 @@ describe('Webview DOM behavior', () => {
     rerender(<MobileChatPreview {...mobileProps({ setDraft, onMessageActionFeedback, messageActionFeedback: { actionId: 'message.copy', sourceMessageId: 'assistant-1', status: 'success', message: 'Message copied.' } })} />);
     expect(screen.getByText('Message copied.', { selector: '.mobile-chat-preview__message-action-feedback' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Message copied.' }).querySelector('.codicon-check')).toBeTruthy();
+  });
+
+  it('shows bounded generic tags from message fields and correlated normalized events', () => {
+    const message: ChatMessage = { ...snapshot.messages[0]!, metadata: { rawSequences: [7] } };
+    const configured: TurnStageProfile = { ...profile, ui: { ...profile.ui, messageTags: [
+      { id: 'complete', label: 'Complete', source: 'message', path: 'status', operator: 'equals', value: 'completed', tone: 'success' },
+      { id: 'tool', label: 'Tool activity', source: 'normalizedEvent', path: 'type', operator: 'startsWith', value: 'tool.', tone: 'warning' },
+      { id: 'unsafe', label: 'Unsafe', source: 'message', path: '__proto__.value', operator: 'exists' },
+    ] } };
+    render(<MobileChatPreview {...mobileProps({ profile: configured, snapshot: { ...snapshot, messages: [message], normalizedEvents: [{ version: 1, type: 'tool.started', sequence: 7, rawSequence: 7, receivedAt: 2, toolCallId: 'tool-1' }] } })} />);
+
+    const tags = screen.getByLabelText('Message tags');
+    expect(tags.textContent).toContain('Complete');
+    expect(tags.textContent).toContain('Tool activity');
+    expect(tags.textContent).not.toContain('Unsafe');
   });
 
   it('scrolls and focuses the selected raw event', async () => {
@@ -295,6 +313,17 @@ describe('Webview DOM behavior', () => {
       if (descriptor) Object.defineProperty(navigator, 'clipboard', descriptor);
       else delete (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
     }
+  });
+
+  it('syntax-highlights and searches JSON data without changing its copy value', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<JsonBlock value={{ event: 'message', nested: { event: true }, count: 2 }} />);
+    expect(container.querySelectorAll('.json-token--key').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('.json-token--string').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('.json-token--number').length).toBeGreaterThan(0);
+    await user.type(screen.getByRole('searchbox', { name: 'Search JSON' }), 'event');
+    expect(screen.getByText('2 matches')).toBeTruthy();
+    expect(container.querySelectorAll('mark')).toHaveLength(2);
   });
 
   it('only follows streamed content when near the bottom and offers a jump when behind', async () => {
@@ -467,6 +496,20 @@ describe('Webview DOM behavior', () => {
     expect(accessibilityResult.violations).toEqual([]);
   });
 
+  it('keeps a small event list stable when selecting later events', async () => {
+    const user = userEvent.setup();
+    const items = Array.from({ length: 10 }, (_, index) => ({ sequence: index + 1, receivedAt: index + 1, elapsedMs: index, protocol: 'sse', raw: '{}', data: { index } }));
+    const { container } = render(<VirtualEvents items={items} label="Raw Events" />);
+    const list = container.querySelector('.virtual-list') as HTMLDivElement;
+    const scrollTo = vi.fn();
+    Object.defineProperty(list, 'scrollTo', { configurable: true, value: scrollTo });
+
+    await user.click(screen.getAllByRole('option')[9]!);
+    expect(screen.getAllByRole('option')).toHaveLength(10);
+    expect(document.getElementById('inspector-event-1')).toBeTruthy();
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
   it('filters raw events by type, mapping, health, terminal state, and text without inventing vendor semantics', () => {
     const rawEvents = [
       { sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {}, sse: { event: 'start' }, mappingRuleId: 'start' },
@@ -518,7 +561,7 @@ describe('Webview DOM behavior', () => {
         requestHeaders: { Authorization: 'Bearer local-debug-token', Accept: 'text/event-stream' }, requestBody: { message: 'Hello' }, responseHeaders: { 'content-type': 'text/event-stream' }, responseBodyPreview: 'event: start\ndata: {}', error: { type: 'IdleTimeoutError', message: 'The stream idle timeout elapsed.' }, timing: { headers: 50, firstChunk: 80, total: 30_000, timeout: 120_000, idleTimeout: 30_000 }, transferredBytes: 24, eventCount: 1,
       },
     ];
-    render(<NetworkInspector entries={entries} />);
+    const { container } = render(<NetworkInspector entries={entries} />);
 
     const list = screen.getByRole('listbox', { name: 'Network requests' });
     expect(within(list).getAllByRole('option')).toHaveLength(2);
@@ -526,7 +569,7 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByText(/IdleTimeoutError/)).toBeTruthy();
 
     await user.click(screen.getByRole('tab', { name: 'Payload' }));
-    expect(screen.getByText(/"message": "Hello"/)).toBeTruthy();
+    expect(container.querySelector('.network-detail-panel:not([hidden]) .json code')?.textContent).toContain('"message": "Hello"');
     await user.click(screen.getByRole('tab', { name: 'Response' }));
     expect(screen.getByText(/event: start/)).toBeTruthy();
     await user.click(within(list).getByRole('option', { name: /opening/i }));
@@ -613,6 +656,8 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'streaming', 'speedMs'], value: 1200 });
     await user.selectOptions(screen.getByLabelText('Message action toolbar visibility'), 'interaction');
     expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'messageActionVisibility'], value: 'interaction' });
+    await user.click(screen.getByRole('button', { name: 'Add tag rule' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'messageTags'], value: [expect.objectContaining({ id: 'tag-1', source: 'normalizedEvent', path: 'type', operator: 'equals' })] });
   });
 
   it('adds a conversation contract through the Scenarios configuration surface', async () => {
@@ -631,7 +676,7 @@ describe('Webview DOM behavior', () => {
   it('authors, bulk-transfers, and opens evidence for adversarial cases', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
-    render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={profile} post={post} testResults={[{
+    render(<AdversarialWorkspace profile={profile} post={post} testResults={[{
       profileId: profile.id, scenarioId: 'known-attack', scenarioName: 'Known attack', outcome: 'attackSucceeded', durationMs: 420,
       attemptedTurns: 1, completedTurns: 1, plannedTurns: 2, findingCount: 1, issueCount: 0, evidenceId: 'evidence-1',
       primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'network', networkId: 'network-1' }, { kind: 'normalizedEvent', sequence: 3 }],
@@ -641,11 +686,13 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'importCsv' });
     await user.click(screen.getByRole('button', { name: 'Import JSONL' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'importJsonl' });
-    await user.click(screen.getByRole('button', { name: 'Link JSONC suite' }));
-    expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'linkJsonc' });
+    await user.click(screen.getByRole('button', { name: 'Link suite' }));
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'linkSuite' });
     await user.click(screen.getAllByRole('button', { name: 'Add case' })[0]!);
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['tests', 'scenarios'], value: [expect.objectContaining({ id: 'adversarial-1', adversarial: expect.objectContaining({ mode: 'singleTurn', timeoutMs: 60000 }) })] }));
     expect(screen.getByText('Attack succeeded')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Review timeline' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.timeline.open', evidenceId: 'evidence-1' });
     await user.click(screen.getByRole('button', { name: 'Open evidence' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'message', messageId: 'assistant-1' } });
     await user.click(screen.getByRole('button', { name: 'Diagnose with Copilot' }));
@@ -662,7 +709,7 @@ describe('Webview DOM behavior', () => {
     const user = userEvent.setup();
     const post = vi.fn();
     const configured: TurnStageProfile = { ...profile, tests: { scenarios: [], campaigns: [{ id: 'release', name: 'Release safety', selectors: { tags: ['security'] }, runPolicy: { repetitions: 5, maxConcurrency: 2, maxRequests: 100 }, coverageTags: ['security', 'privacy'] }] } };
-    render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={configured} post={post} campaignDashboard={{ profileId: profile.id, campaigns: [{ definition: configured.tests!.campaigns![0]!, latest: {
+    render(<AdversarialWorkspace profile={configured} post={post} campaignDashboard={{ profileId: profile.id, campaigns: [{ definition: configured.tests!.campaigns![0]!, latest: {
       format: 'turnstage-campaign-run', version: 1, id: 'run-1', campaignId: 'release', campaignName: 'Release safety', profileId: profile.id, createdAt: 1, updatedAt: 2, status: 'cancelled', sourceDigest: 'a'.repeat(64),
       plan: { selectedCases: 1, plannedAttempts: 5, plannedTurns: 5, plannedRequests: 5, maximumDurationMs: 10_000, maxConcurrency: 2 },
       cases: [{ key: `${profile.id}/red/jailbreak`, profileId: profile.id, suiteId: 'red', scenarioId: 'jailbreak', scenarioName: 'Jailbreak', tags: ['security'], requestedAttempts: 5, completedAttempts: 2, plannedTurns: 5, outcome: 'attackSucceeded', sampleComplete: false }],
@@ -685,7 +732,7 @@ describe('Webview DOM behavior', () => {
     const user = userEvent.setup();
     const post = vi.fn();
     const definition: NonNullable<NonNullable<TurnStageProfile['tests']>['campaigns']>[number] = { id: 'release', name: 'Release safety', selectors: { caseIds: ['case'] } };
-    render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={{ ...profile, tests: { scenarios: [], campaigns: [definition] } }} post={post} campaignDashboard={{ profileId: profile.id, campaigns: [{ definition, latest: {
+    render(<AdversarialWorkspace profile={{ ...profile, tests: { scenarios: [], campaigns: [definition] } }} post={post} campaignDashboard={{ profileId: profile.id, campaigns: [{ definition, latest: {
       format: 'turnstage-campaign-run', version: 1, id: 'run-1', campaignId: 'release', campaignName: 'Release safety', profileId: profile.id, createdAt: 1, updatedAt: 2, status: 'running', sourceDigest: 'a'.repeat(64),
       plan: { selectedCases: 1, plannedAttempts: 1, plannedTurns: 1, plannedRequests: 1, maximumDurationMs: 10_000, maxConcurrency: 1 },
       cases: [{ key: `${profile.id}/inline/case`, profileId: profile.id, scenarioId: 'case', scenarioName: 'Case', tags: [], requestedAttempts: 1, completedAttempts: 0, plannedTurns: 1, sampleComplete: false }],
@@ -717,19 +764,22 @@ describe('Webview DOM behavior', () => {
 
   it('summarizes the active adversarial failure and its causal evidence before raw detail', async () => {
     const user = userEvent.setup();
-    render(<EvidenceSummary result={{
+    const onOpen = vi.fn();
+    const result = {
       profileId: profile.id, scenarioId: 'known-attack', scenarioName: 'Known attack', outcome: 'attackSucceeded', durationMs: 420,
       attemptedTurns: 2, completedTurns: 2, plannedTurns: 3, findingCount: 1, issueCount: 0, evidenceId: 'evidence-1',
       primaryFinding: { category: 'tool', turnId: 'turn-2', turnIndex: 1, ruleId: 'no-tools', label: 'Tool interaction was observed.' },
       primaryLocation: { kind: 'normalizedEvent', sequence: 4 }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }, { kind: 'network', networkId: 'network-1' }, { kind: 'rawEvent', sequence: 4 }],
       repetitions: { requestedAttempts: 5, completedAttempts: 3, skippedAttempts: 2, sampleComplete: false, stability: 'inconclusive', counts: { resisted: 2, attackSucceeded: 1, indeterminate: 0, infrastructureError: 0 } },
-    }} timeline={{ version: 1, baseTime: 1_000, completeness: 'partial', missingPhases: ['terminal'], truncated: false, entries: [
+    } satisfies AdversarialResultSummary;
+    const timeline = { version: 1, baseTime: 1_000, completeness: 'partial', missingPhases: ['terminal'], truncated: false, entries: [
       { id: 'request', phase: 'request', status: 'normal', label: 'Request sent', at: 1_000, elapsedMs: 0, location: { kind: 'network', networkId: 'network-1' } },
       { id: 'headers', phase: 'headers', status: 'normal', label: 'Response headers 200', at: 1_120, elapsedMs: 120, location: { kind: 'network', networkId: 'network-1' } },
       { id: 'timeout', phase: 'error', status: 'failure', label: 'IdleTimeoutError', at: 6_120, elapsedMs: 5_120, location: { kind: 'rawEvent', sequence: 4 } },
-    ] }} />);
+    ] } satisfies EvidenceTimelineSummary;
+    render(<><EvidenceSummary result={result} /><AdversarialWorkspace profile={profile} post={vi.fn()} testResults={[result]} activeEvidenceId="evidence-1" timeline={<CausalTimeline timeline={timeline} onOpen={onOpen} />} /></>);
     expect(screen.getByRole('heading', { name: 'Attack succeeded: Known attack' })).toBeTruthy();
-    expect(screen.getByText('Attack succeeded')).toBeTruthy();
+    expect(screen.getAllByText('Attack succeeded').length).toBeGreaterThan(0);
     expect(screen.getByText('Tool interaction was observed.')).toBeTruthy();
     expect(screen.getByText('Turn 2: turn-2 · no-tools')).toBeTruthy();
     expect(screen.getByText('2/5 resisted · 3 attempts · Inconclusive · Incomplete sample')).toBeTruthy();
@@ -737,17 +787,18 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByRole('button', { name: 'Open Normalized Events' }).classList.contains('primary')).toBe(true);
     expect(screen.getByRole('group', { name: 'Open evidence location' }).querySelector('details')).toBeTruthy();
     expect(within(screen.getByRole('group', { name: 'Open evidence location' })).getByText('Raw Events')).toBeTruthy();
-    expect(screen.getByText('Causal timeline')).toBeTruthy();
+    expect(screen.getAllByText('Causal timeline').length).toBeGreaterThan(0);
     expect(screen.getByText('3 events · Partial evidence')).toBeTruthy();
     expect(screen.getByText('Evidence is incomplete: Terminal.')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Open IdleTimeoutError evidence at 5,120 ms' }));
+    expect(onOpen).toHaveBeenCalledWith({ kind: 'rawEvent', sequence: 4 });
   });
 
   it('offers local undo after deleting a scenario', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
     const configured = { ...profile, tests: { scenarios: [{ id: 'case-1', name: 'Delete me', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } }] } } as TurnStageProfile;
-    render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={configured} post={post} />);
+    render(<AdversarialWorkspace profile={configured} post={post} />);
     await user.click(screen.getByRole('button', { name: 'Delete scenario Delete me' }));
     expect(screen.getByRole('status').textContent).toContain('Deleted case Delete me.');
     await user.click(screen.getByRole('button', { name: 'Undo' }));
@@ -821,6 +872,23 @@ describe('Webview DOM behavior', () => {
     rerender(<Replay runs={[replayable]} active={true} trusted={true} />);
     expect((screen.getByRole('button', { name: 'Replay' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('Finish or stop the current request before replaying a run.')).toBeTruthy();
+  });
+
+  it('exposes bounded per-run and clear-history actions without making them primary controls', async () => {
+    const user = userEvent.setup();
+    const replayable = localRun('replayable', [{ sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {} }]);
+    const { rerender } = render(<Replay runs={[replayable]} active={false} trusted={true} />);
+
+    expect(screen.getByLabelText('More recorded run actions')).toBeTruthy();
+    expect(screen.getByLabelText('More actions for recorded run')).toBeTruthy();
+    await user.click(screen.getByLabelText('More recorded run actions'));
+    expect((screen.getByRole('button', { name: 'Clear replay history…' }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(screen.getByLabelText('More actions for recorded run'));
+    expect((screen.getByRole('button', { name: 'Delete run…' }) as HTMLButtonElement).disabled).toBe(false);
+
+    rerender(<Replay runs={[replayable]} active={true} trusted={true} />);
+    expect((screen.getByRole('button', { name: 'Clear replay history…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Delete run…' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('keeps completed replay progress visible and announced', () => {

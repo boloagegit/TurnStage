@@ -5,7 +5,7 @@ import type { ScenarioCheckResult, ScenarioDefinition, ScenarioRunResult, TurnSt
 import type { CliExecutionResult, CliExecutionRuntime, CliRunRequest, CliVerifyRequest } from './contracts';
 import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../extension/config/profileValidator';
 import { builtInEnvironment } from '../extension/config/defaultEnvironment';
-import { normalizeAdversarialSuite, parseAdversarialSuite } from '../extension/testing/adversarialSuite';
+import { parseAdversarialSource } from '../extension/testing/adversarialSource';
 import { compareScenarioEvidence } from '../extension/testing/scenarioComparison';
 import { evaluatePerformance } from '../extension/testing/performanceEvaluator';
 import { mapChangedFilesToTests } from '../extension/testing/impactMapping';
@@ -116,9 +116,9 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
     }
     for (const suitePath of profile.tests?.adversarialSuites ?? []) {
       const path = resolveSafe(workspaceRoot, suitePath);
-      const parsed = parseAdversarialSuite(await readBoundedUtf8(path, MAX_SUITE_BYTES));
-      if (!parsed.suite || parsed.parseErrors.length || parsed.issues.length) throw new Error('Adversarial suite validation failed.');
-      const scenarios = normalizeAdversarialSuite(parsed.suite);
+      const parsed = parseAdversarialSource(suitePath, await readBoundedUtf8(path, MAX_SUITE_BYTES));
+      if (!parsed.suite || parsed.issues.length) throw new Error('Adversarial suite validation failed.');
+      const scenarios = parsed.scenarios;
       if (validateAdversarialScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new Error('Adversarial suite is incompatible with its profile.');
       for (const scenario of scenarios) {
         if (result.length >= MAX_CLI_CASES) throw new Error('The selected profiles contain too many test cases.');

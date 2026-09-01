@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import type { MappingTestInput, MappingTestResult, WebviewPayload } from '../shared/protocol';
-import type { MappingRule, RawStreamEvent, RequestVariant, TurnStageProfile } from '../shared/types';
+import type { MappingRule, MessageTagRule, RawStreamEvent, RequestVariant, TurnStageProfile } from '../shared/types';
 import { formatNumber, localizeHumanized, t } from './i18n';
 import { IconButton } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
@@ -318,6 +318,7 @@ export function UiConfigEditor({ profile, post }: { profile: TurnStageProfile; p
     </div></section>
     <section className="config-section"><div className="section-heading"><div><h3>{t('Components')}</h3><p>{t('Choose which response surfaces appear in Chat. Usage is hidden unless explicitly enabled.')}</p></div></div><div className="component-grid">{componentNames.map((name) => <Checkbox key={name} label={localizeHumanized(name)} checked={profile.ui?.components?.[name]?.visible ?? name !== 'usage'} onChange={(value) => post({ type: 'profile.patch', path: ['ui', 'components', name, 'visible'], value })} />)}</div></section>
     <MessageActionsEditor profile={profile} post={post} />
+    <MessageTagsEditor profile={profile} post={post} />
     <section className="config-section"><div className="section-heading"><div><h3>{t('Active-turn locks')}</h3><p>{t('Comma-separated component or control IDs. Stop should normally remain allowed.')}</p></div></div><div className="form-grid">
       <Field label={t('Disable while active')} hint={t('Example: {ids}', { ids: 'composer, model, newConversation' })} wide><input aria-label={t('Components disabled while active')} value={disableText} onChange={(event) => setDisableText(event.target.value)} onBlur={() => post({ type: 'profile.patch', path: ['ui', 'locks', 'whileTurnActive', 'disable'], value: parseList(disableText) })} /></Field>
       <Field label={t('Allow while active')} hint={t('Example: {ids}', { ids: 'stop, message.copy, inspector.open' })} wide><input aria-label={t('Components allowed while active')} value={allowText} onChange={(event) => setAllowText(event.target.value)} onBlur={() => post({ type: 'profile.patch', path: ['ui', 'locks', 'whileTurnActive', 'allow'], value: parseList(allowText) })} /></Field>
@@ -359,6 +360,30 @@ function MessageActionsEditor({ profile, post }: { profile: TurnStageProfile; po
         </div>;
       })}
     </div>
+  </section>;
+}
+
+function MessageTagsEditor({ profile, post }: { profile: TurnStageProfile; post: Post }): React.JSX.Element {
+  const rules = profile.ui?.messageTags ?? [];
+  const patch = (value: MessageTagRule[]) => post({ type: 'profile.patch', path: ['ui', 'messageTags'], value });
+  const update = (index: number, values: Partial<MessageTagRule>) => patch(rules.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, ...values } : rule));
+  const add = () => {
+    const used = new Set(rules.map((rule) => rule.id));
+    let suffix = rules.length + 1;
+    while (used.has(`tag-${suffix}`)) suffix += 1;
+    patch([...rules, { id: `tag-${suffix}`, label: t('Event tag'), source: 'normalizedEvent', path: 'type', operator: 'equals', value: 'tool.started', tone: 'warning' }]);
+  };
+  return <section className="config-section"><div className="section-heading"><div><h3>{t('Message tags')}</h3><p>{t('Add deterministic labels from a message or its correlated events. Rules are bounded and do not use regular expressions.')}</p></div><button type="button" disabled={rules.length >= 20} onClick={add}>{t('Add tag rule')}</button></div>
+    {rules.length ? <div className="message-tag-rule-list">{rules.map((rule, index) => <article className="message-tag-rule" key={`${rule.id}-${index}`}>
+      <div className="message-tag-rule__identity"><input aria-label={t('Tag label')} value={rule.label} maxLength={48} onChange={(event) => update(index, { label: event.target.value })} /><IconButton type="button" icon="trash" label={t('Delete tag rule {label}', { label: rule.label })} onClick={() => patch(rules.filter((_item, ruleIndex) => ruleIndex !== index))} /></div>
+      <div className="message-tag-rule__condition">
+        <label><span>{t('Source')}</span><select aria-label={t('Tag source')} value={rule.source} onChange={(event) => update(index, { source: event.target.value as MessageTagRule['source'] })}><option value="message">{t('Message')}</option><option value="normalizedEvent">{t('Normalized event')}</option><option value="rawEvent">{t('Raw event')}</option></select></label>
+        <label><span>{t('Path')}</span><input aria-label={t('Tag path')} value={rule.path} maxLength={256} placeholder="type" onChange={(event) => update(index, { path: event.target.value })} /></label>
+        <label><span>{t('Operator')}</span><select aria-label={t('Tag operator')} value={rule.operator} onChange={(event) => update(index, { operator: event.target.value as MessageTagRule['operator'] })}><option value="exists">{t('Exists')}</option><option value="equals">{t('Equals')}</option><option value="contains">{t('Contains')}</option><option value="startsWith">{t('Starts with')}</option></select></label>
+        <label><span>{t('Value')}</span><input aria-label={t('Tag value')} value={rule.value === undefined ? '' : String(rule.value)} disabled={rule.operator === 'exists'} maxLength={512} onChange={(event) => update(index, { value: parseLooseValue(event.target.value) as string | number | boolean })} /></label>
+        <label><span>{t('Tone')}</span><select aria-label={t('Tag tone')} value={rule.tone ?? 'neutral'} onChange={(event) => update(index, { tone: event.target.value as NonNullable<MessageTagRule['tone']> })}><option value="neutral">{t('Neutral')}</option><option value="info">{t('Info')}</option><option value="success">{t('Success')}</option><option value="warning">{t('Warning')}</option><option value="error">{t('Error')}</option></select></label>
+      </div>
+    </article>)}</div> : <p className="muted">{t('No message tag rules configured.')}</p>}
   </section>;
 }
 

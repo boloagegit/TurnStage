@@ -299,7 +299,9 @@ case/turn/rule counts, regular expressions, file size, concurrency, maximum
 turns, and whole-case timeout are bounded. A missing mapping, dropped evidence,
 unexpected stream end, cancellation, or timeout fails closed as Indeterminate
 or Infrastructure error. CSV import validates the full file before applying a
-Profile edit and spreadsheet-leading formula characters are escaped on export.
+Profile edit; direct CSV links are bounded, workspace-relative, validated
+before execution, and never rewritten. Spreadsheet-leading formula characters
+are escaped on export.
 Evidence Bundle CSVs contain structural metadata only; they exclude prompts,
 assistant content, request/response payloads, URLs, headers, raw events, and
 secrets.

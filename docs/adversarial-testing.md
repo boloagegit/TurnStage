@@ -85,11 +85,22 @@ To turn a useful manual probe into a regression quickly, use **Save conversation
 
 ## Bulk JSONC and CSV
 
-JSONC is the lossless, Git-managed format. A suite is `Suite → Cases → ordered Turns`; profiles link it with workspace-relative `tests.adversarialSuites` paths. Test Explorer displays linked files as Profile → Suite → Case → Turn. A suite may contain at most 500 cases, 2,000 total turns, and 10 turns per case.
+JSONC is the lossless format. A suite is `Suite → Cases → ordered Turns`; profiles link workspace-relative JSONC or CSV files with `tests.adversarialSuites`. Test Explorer displays either source as Profile → Suite → Case → Turn. A suite may contain at most 500 cases, 2,000 total turns, and 10 turns per case.
 
-CSV is a spreadsheet convenience format. It uses one row per turn and repeats case-level fields on every row. JSON arrays are used for content rules and event names so commas and multi-line prompts round-trip safely. Import validates all rows before changing the Profile. Duplicate IDs require an explicit choice to replace or retain with renamed imports; linked JSONC files must be inside the same workspace folder.
+CSV uses one row per turn and repeats case-level fields on every row. JSON arrays are used for content rules and event names so commas and multi-line prompts round-trip safely. It may be linked directly: TurnStage reads it for every discovery/run and does not convert or rewrite it. Import remains available when cases should be copied inline; it validates every row before changing the Profile. Duplicate IDs require an explicit choice to replace or retain with renamed imports. Every linked source must remain inside the same workspace folder.
 
-The GUI can import CSV, import a JSONC copy, link a JSONC suite, export inline cases as CSV or JSONC, and download a CSV template. CSV does not become the canonical storage format merely because it is convenient for authoring.
+The GUI can import CSV, import a JSONC copy, link a JSONC/JSON/CSV suite, export inline cases as CSV or JSONC, and download a CSV template. A linked CSV remains canonical for the fields its schema supports, including ordered multi-turn cases and repetitions. Use JSONC when suite defaults or metadata not represented by CSV must round-trip losslessly.
+
+A Profile may mix both formats without conversion:
+
+```jsonc
+"adversarialSuites": [
+  ".vscode/turnstage/tests/security.adversarial.jsonc",
+  ".vscode/turnstage/tests/regression.adversarial.csv"
+]
+```
+
+Each path remains an independent Suite. Keep case IDs unique across linked files so case-only CLI or Copilot selectors cannot intentionally match more than one Suite.
 
 ## Large runs and evidence
 

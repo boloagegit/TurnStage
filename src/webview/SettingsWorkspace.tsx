@@ -4,7 +4,7 @@ import type { AdversarialForbidDefinition, AdversarialResultSummary, CampaignDas
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
-import { formatNumber, localizeHumanized, t } from './i18n';
+import { formatDuration, formatNumber, localizeHumanized, t } from './i18n';
 import './settingsWorkspace.css';
 
 /**
@@ -110,11 +110,40 @@ export function SettingsWorkspace({
           {active.id === 'request' && <RequestSection profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} connectionResult={connectionResult} post={post} patch={patch} />}
           {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
           {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
-          {active.id === 'scenario-tests' && <ScenarioTestsSection profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} />}
+          {active.id === 'scenario-tests' && <ScenarioTestsSection view="contracts" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} />}
           {active.id === 'history-errors' && <HistoryErrorsSection profile={profile} snapshot={snapshot} patch={patch} />}
           {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} />}
         </section>
       </div>
+    </div>
+  </div>;
+}
+
+export function AdversarialWorkspace({ profile, post, testResults = [], campaignDashboard, activeEvidenceId, timeline }: {
+  profile: TurnStageProfile;
+  post: SettingsWorkspacePost;
+  testResults?: AdversarialResultSummary[];
+  campaignDashboard?: CampaignDashboardV1;
+  activeEvidenceId?: string;
+  timeline?: React.ReactNode;
+}): React.JSX.Element {
+  const patch = (path: PatchPath, value: unknown) => post({ type: 'profile.patch', path, value });
+  return <div className="settings-workspace settings-workspace--embedded red-team-workspace">
+    <header className="settings-header settings-header--embedded" aria-label={t('Red Team toolbar')}>
+      <div className="red-team-title"><strong>{t('Red Team')}</strong><span>{t('Bounded adversarial cases, results, and causal evidence.')}</span></div>
+      <div className="settings-header-actions" role="group" aria-label={t('Red Team actions')}>
+        <IconButton icon="file-code" label={t('Open JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
+        <IconButton icon="check" label={t('Validate')} type="button" className="settings-primary-action" onClick={() => post({ type: 'profile.validate' })} />
+      </div>
+    </header>
+    <div className="settings-main">
+      <section className="settings-panel red-team-panel" aria-labelledby="red-team-panel-title" tabIndex={-1}>
+        <div className="settings-panel-heading">
+          <div className="settings-panel-title"><h1 id="red-team-panel-title">{t('Adversarial testing')}</h1><p className="settings-section-description">{t('Author known attacks, run bounded samples, and inspect causal evidence without changing formal outcomes.')}</p></div>
+          <span className="settings-section-count">{t('{count} inline cases', { count: formatNumber(profile.tests?.scenarios?.filter((scenario) => scenario.adversarial).length ?? 0) })}</span>
+        </div>
+        <ScenarioTestsSection view="adversarial" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} timeline={timeline} />
+      </section>
     </div>
   </div>;
 }
@@ -360,10 +389,11 @@ const performanceMetricOptions: Array<{ id: ScenarioPerformanceMetric; label: st
   { id: 'metrics.maxEventGap', label: 'Maximum event gap' },
 ];
 
-function ScenarioTestsSection({ profile, patch, post, testResults, campaignDashboard }: { profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; campaignDashboard?: CampaignDashboardV1 }): React.JSX.Element {
+function ScenarioTestsSection({ view, profile, patch, post, testResults, campaignDashboard, activeEvidenceId, timeline }: { view: 'contracts' | 'adversarial'; profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; campaignDashboard?: CampaignDashboardV1; activeEvidenceId?: string; timeline?: React.ReactNode }): React.JSX.Element {
   const scenarios = profile.tests?.scenarios ?? [];
   const qualityRubrics = profile.tests?.qualityRubrics ?? [];
   const [undo, setUndo] = useState<{ label: string; scenarios: ScenarioDefinition[] }>();
+  const [expandedCaseId, setExpandedCaseId] = useState<string>();
   const adversarialEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => scenario.adversarial);
   const contractEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => !scenario.adversarial);
   const save = (next: ScenarioDefinition[]) => patch(['tests', 'scenarios'], next);
@@ -391,6 +421,7 @@ function ScenarioTestsSection({ profile, patch, post, testResults, campaignDashb
       steps: [{ id: 'turn-1', name: t('First message'), input: '' }],
       adversarial: { mode: 'singleTurn', maxTurns: 1, timeoutMs: 60_000, stopOnAttackSucceeded: true, forbid: { content: ['forbidden-marker'] } },
     }]);
+    setExpandedCaseId(id);
   };
   const saveQualityRubrics = (value: QualityRubricDefinition[] | undefined) => patch(['tests', 'qualityRubrics'], value);
   const addQualityRubric = () => {
@@ -406,6 +437,7 @@ function ScenarioTestsSection({ profile, patch, post, testResults, campaignDashb
     saveCampaigns([...campaigns, { id, name: t('Campaign {number}', { number: formatNumber(ordinal) }), selectors: { tagMode: 'all' }, runPolicy: { repetitions: 1, maxConcurrency: 3, maxRequests: 1000, maxDurationMs: 3_600_000 } }]);
   };
   return <div className="settings-section-stack">
+    {view === 'adversarial' && <>
     <section className="settings-card" aria-labelledby="test-campaigns-heading">
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="test-campaigns-heading">{t('Test campaigns')}</h2><p className="settings-card-description">{t('Create a bounded, repeatable selection of existing cases. Campaign history stores metadata only; raw prompts and evidence remain session-scoped.')}</p></div><button type="button" disabled={campaigns.length >= 50} onClick={addCampaign}>{t('Add campaign')}</button></div>
       {!campaigns.length ? <div className="settings-empty settings-empty--action"><span>{t('No test campaigns configured.')}</span><button type="button" onClick={addCampaign}>{t('Add campaign')}</button></div> : <div className="campaign-list">
@@ -446,7 +478,7 @@ function ScenarioTestsSection({ profile, patch, post, testResults, campaignDashb
           <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'importCsv' })}>{t('Import CSV')}</button>
           <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'importJsonl' })}>{t('Import JSONL')}</button>
         </div></details>
-        <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'linkJsonc' })}>{t('Link JSONC suite')}</button>
+        <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'linkSuite' })}>{t('Link suite')}</button>
         <details><summary>{t('Export')}</summary><div>
           <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'exportJsonc' })}>{t('Export JSONC')}</button>
           <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'exportCsv' })}>{t('Export CSV')}</button>
@@ -456,10 +488,8 @@ function ScenarioTestsSection({ profile, patch, post, testResults, campaignDashb
       </div>
       {undo && <div className="settings-undo" role="status"><span>{undo.label}</span><button type="button" onClick={() => { save(undo.scenarios); setUndo(undefined); }}>{t('Undo')}</button><IconButton type="button" icon="clear-all" label={t('Dismiss undo')} onClick={() => setUndo(undefined)} /></div>}
       {(profile.tests?.adversarialSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.adversarialSuites!.map((path, index) => <li key={`${path}-${index}`}><code>{path}</code><IconButton type="button" icon="trash" label={t('Unlink suite {path}', { path })} onClick={() => patch(['tests', 'adversarialSuites'], profile.tests!.adversarialSuites!.filter((_, itemIndex) => itemIndex !== index))} /></li>)}</ul></div>}
-      {!adversarialEntries.length ? <div className="settings-empty settings-empty--action"><span>{t('No inline adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <div className="scenario-list adversarial-case-list">
-        {adversarialEntries.map(({ scenario, index }) => <ScenarioEditor key={`${scenario.id}-${index}`} scenario={scenario} index={index} onChange={(value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={() => saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index))} />)}
-      </div>}
-      <p className="settings-footnote">{t('CSV uses one row per turn. JSONC suites preserve the full multi-turn structure and are the recommended Git-managed format.')}</p>
+      {!adversarialEntries.length ? <div className="settings-empty settings-empty--action"><span>{t('No inline adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <AdversarialCaseTable entries={adversarialEntries} expandedCaseId={expandedCaseId} onToggle={(id) => setExpandedCaseId((current) => current === id ? undefined : id)} onChange={(index, value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(index, value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={(index, scenario) => { if (expandedCaseId === scenario.id) setExpandedCaseId(undefined); saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); }} />}
+      <p className="settings-footnote">{t('Linked CSV stays the source of truth and uses one row per turn. JSONC remains the lossless format for suite-level defaults and metadata.')}</p>
     </section>
     <section className="settings-card" aria-labelledby="adversarial-results-heading">
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-results-heading">{t('Latest adversarial results')}</h2><p className="settings-card-description">{t('Run from Test Explorer, then open the exact Chat, Network, or Events evidence for a result.')}</p></div><div className="adversarial-rerun-actions" role="group" aria-label={t('Run adversarial tests')}><button type="button" onClick={() => post({ type: 'test.runAll' })}>{t('Run all')}</button><button type="button" disabled={!testResults.some((result) => result.outcome !== 'resisted')} onClick={() => post({ type: 'test.rerun', status: 'failed' })}>{t('Rerun failures')}</button><details><summary>{t('More reruns')}</summary><div><button type="button" disabled={!testResults.some((result) => result.repetitions?.stability === 'unstable')} onClick={() => post({ type: 'test.rerun', status: 'unstable' })}>{t('Unstable')}</button><button type="button" disabled={!testResults.some((result) => result.repetitions?.sampleComplete === false)} onClick={() => post({ type: 'test.rerun', status: 'incomplete' })}>{t('Incomplete')}</button></div></details></div></div>
@@ -472,13 +502,19 @@ function ScenarioTestsSection({ profile, patch, post, testResults, campaignDashb
         </> : t('{completed}/{planned} turns', { completed: formatNumber(result.completedTurns), planned: formatNumber(result.plannedTurns) })}</span>
         <span>{formatNumber(result.durationMs)} ms</span>
         <div className="adversarial-result-actions">
-          <button type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location: result.primaryLocation })}>{t('Open evidence')}</button>
-          <button type="button" onClick={() => post({ type: 'copilot.diagnose', evidenceId: result.evidenceId, mode: result.repetitions ? 'stability' : 'failure' })}>{t('Diagnose with Copilot')}</button>
-          <details><summary>{t('More')}</summary><div>{(result.availableLocations.length ? result.availableLocations : [result.primaryLocation]).map((location) => <button key={`${result.evidenceId}-${location.kind}`} type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })}>{t(evidenceLocationText(location.kind))}</button>)}<button type="button" onClick={() => post({ type: 'copilot.qualityReview', evidenceIds: [result.evidenceId] })}>{t('Advisory quality review')}</button></div></details>
+          <button type="button" className="primary" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location: result.primaryLocation })}>{t('Open evidence')}</button>
+          <button type="button" aria-pressed={activeEvidenceId === result.evidenceId} onClick={() => post({ type: 'test.timeline.open', evidenceId: result.evidenceId })}>{activeEvidenceId === result.evidenceId ? t('Timeline selected') : t('Review timeline')}</button>
+          <details><summary aria-label={t('More actions')} title={t('More actions')}><ProductIcon name="ellipsis" /></summary><div><button type="button" onClick={() => post({ type: 'copilot.diagnose', evidenceId: result.evidenceId, mode: result.repetitions ? 'stability' : 'failure' })}>{t('Diagnose with Copilot')}</button>{(result.availableLocations.length ? result.availableLocations : [result.primaryLocation]).map((location) => <button key={`${result.evidenceId}-${location.kind}`} type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })}>{t(evidenceLocationText(location.kind))}</button>)}<button type="button" onClick={() => post({ type: 'copilot.qualityReview', evidenceIds: [result.evidenceId] })}>{t('Advisory quality review')}</button></div></details>
         </div>
         {result.reliability && <ReliabilitySummary summary={result.reliability} />}
       </li>)}</ul>}
     </section>
+    <section className="settings-card adversarial-timeline-card" aria-labelledby="adversarial-timeline-heading">
+      <div className="settings-card-heading"><div><h2 id="adversarial-timeline-heading">{t('Causal timeline')}</h2><p className="settings-card-description">{t('Select Review timeline on a result to load its bounded request, stream, finding, and terminal evidence.')}</p></div></div>
+      {timeline ?? <p className="settings-empty">{activeEvidenceId ? t('Causal evidence is unavailable for the selected result.') : t('Select a result to review its causal timeline.')}</p>}
+    </section>
+    </>}
+    {view === 'contracts' && <>
     <section className="settings-card" aria-labelledby="scenario-reporting-heading">
       <SectionHeading id="scenario-reporting-heading" title={t('CI reports')} description={t('Write sanitized contract summaries after Test Explorer runs.')} />
       <SettingCheckbox id="settings-test-reporting-enabled" label={t('Write reports to the workspace')} checked={Boolean(profile.tests?.reporting)} onChange={(enabled) => patch(['tests', 'reporting'], enabled ? { formats: ['json'], outputDirectory: '.turnstage/reports' } : undefined)} />
@@ -512,7 +548,51 @@ function ScenarioTestsSection({ profile, patch, post, testResults, campaignDashb
       </div>}
     </section>
     <p className="settings-footnote">{t('Run these scenarios from VS Code Test Explorer. Every completed step also receives TurnStage state-invariant checks.')}</p>
+    </>}
   </div>;
+}
+
+function AdversarialCaseTable({ entries, expandedCaseId, onToggle, onChange, onDestructiveChange, onDelete }: {
+  entries: Array<{ scenario: ScenarioDefinition; index: number }>;
+  expandedCaseId?: string;
+  onToggle: (id: string) => void;
+  onChange: (index: number, value: ScenarioDefinition) => void;
+  onDestructiveChange: (index: number, value: ScenarioDefinition, label: string) => void;
+  onDelete: (index: number, scenario: ScenarioDefinition) => void;
+}): React.JSX.Element {
+  return <div className="adversarial-case-table-wrap" tabIndex={0} aria-label={t('Adversarial case settings table')}>
+    <table className="adversarial-case-table">
+      <caption className="sr-only">{t('Adversarial case settings')}</caption>
+      <thead><tr><th scope="col">{t('Case')}</th><th scope="col">{t('Mode')}</th><th scope="col">{t('Turns')}</th><th scope="col">{t('Repetitions')}</th><th scope="col">{t('Timeout')}</th><th scope="col">{t('Prohibitions')}</th><th scope="col">{t('Actions')}</th></tr></thead>
+      <tbody>{entries.map(({ scenario, index }) => {
+        const definition = scenario.adversarial!;
+        const expanded = expandedCaseId === scenario.id;
+        const editorId = `adversarial-case-detail-${index}`;
+        return <React.Fragment key={`${scenario.id}-${index}`}>
+          <tr className={expanded ? 'is-expanded' : undefined}>
+            <th scope="row"><span>{scenario.name || scenario.id}</span><code>{scenario.id}</code>{scenario.tags?.length ? <small>{scenario.tags.join(', ')}</small> : null}</th>
+            <td>{t((definition.mode ?? (scenario.steps.length > 1 ? 'multiTurn' : 'singleTurn')) === 'multiTurn' ? 'Multi-turn' : 'Single turn')}</td>
+            <td>{t('{current} / {maximum}', { current: formatNumber(scenario.steps.length), maximum: formatNumber(definition.maxTurns ?? Math.max(1, scenario.steps.length)) })}</td>
+            <td>{formatNumber(definition.repetitions ?? 1)}</td>
+            <td>{formatDuration(definition.timeoutMs ?? 60_000)}</td>
+            <td><span className="adversarial-case-table__rules">{adversarialRuleSummary(definition.forbid)}</span></td>
+            <td><div className="adversarial-case-table__actions"><button type="button" aria-expanded={expanded} aria-controls={editorId} onClick={() => onToggle(scenario.id)}>{t(expanded ? 'Close editor' : 'Edit')}</button><IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={() => onDelete(index, scenario)} /></div></td>
+          </tr>
+          {expanded && <tr className="adversarial-case-table__editor-row"><td colSpan={7}><div id={editorId}><ScenarioEditor scenario={scenario} index={index} onChange={(value) => onChange(index, value)} onDestructiveChange={(value, label) => onDestructiveChange(index, value, label)} onDelete={() => onDelete(index, scenario)} /></div></td></tr>}
+        </React.Fragment>;
+      })}</tbody>
+    </table>
+  </div>;
+}
+
+function adversarialRuleSummary(forbid: AdversarialForbidDefinition): string {
+  const rules: string[] = [];
+  if (forbid.content?.length) rules.push(t('{count} content', { count: formatNumber(forbid.content.length) }));
+  if (forbid.urls) rules.push(t('URLs'));
+  if (forbid.ctas) rules.push(t('CTAs'));
+  if (forbid.tools) rules.push(t('Tools'));
+  if (forbid.events?.length) rules.push(t('{count} events', { count: formatNumber(forbid.events.length) }));
+  return rules.length ? rules.join(' · ') : t('None');
 }
 
 function ReliabilitySummary({ summary }: { summary: NonNullable<AdversarialResultSummary['reliability']> }): React.JSX.Element {

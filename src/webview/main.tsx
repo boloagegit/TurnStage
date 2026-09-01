@@ -7,7 +7,7 @@ import { mappingDraftFromRawEvent } from './configEditors';
 import { ClipboardButton } from './ClipboardButton';
 import { IconButton, ProductIcon } from './Icon';
 import { CHAT_VIEWPORT_PRESETS, DEFAULT_CHAT_VIEWPORT, MobileChatPreview, type ChatViewportState, type MessageActionFeedback, type VisualFeedback } from './MobileChatPreview';
-import { SETTINGS_SECTIONS, SettingsWorkspace, type SettingsSectionId } from './SettingsWorkspace';
+import { AdversarialWorkspace, SETTINGS_SECTIONS, SettingsWorkspace, type SettingsSectionId } from './SettingsWorkspace';
 import { dateTimeAttribute, formatDateTime, formatDuration, formatNumber, localizeHumanized, setLocale, t } from './i18n';
 import { resolveUiLayout } from './uiConfig';
 import './styles.css';
@@ -18,7 +18,8 @@ export type EventIssueFilter = 'all' | 'valid' | 'parse-error' | 'mapping-error'
 export type EventTerminalFilter = 'all' | 'terminal' | 'non-terminal';
 export interface EventFilterState { query: string; eventType: string; mapping: EventMappingFilter; issue: EventIssueFilter; terminal: EventTerminalFilter }
 export interface InspectorEventFilters { raw: EventFilterState; normalized: EventFilterState }
-type RightPaneMode = 'debug' | 'configure';
+const rightPaneModes = ['debug', 'adversarial', 'configure'] as const;
+type RightPaneMode = typeof rightPaneModes[number];
 interface WebviewState { section?: WorkspaceSection; configurationSection?: SettingsSectionId; rightPaneMode?: RightPaneMode; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number; selectedNetworkId?: string; activeEvidenceId?: string; chatViewport?: ChatViewportState; eventFilters?: Partial<InspectorEventFilters> }
 type VsCodeApi = { postMessage(message: unknown): void; getState(): WebviewState | undefined; setState(state: WebviewState): void };
 const rootElement = typeof document === 'undefined' ? undefined : document.getElementById('root');
@@ -52,7 +53,7 @@ function App(): React.JSX.Element {
   const [activeTimeline, setActiveTimeline] = useState<{ evidenceId: string; timeline: EvidenceTimelineSummary }>();
   const [connectionResult, setConnectionResult] = useState<ConnectionDoctorSummary>();
   const [profile, setProfile] = useState<TurnStageProfile>(); const [snapshot, setSnapshot] = useState<SessionSnapshot>(); const [runs, setRuns] = useState<LocalRunSummary[]>([]); const [requestPreview, setRequestPreview] = useState<unknown>(); const [networkEntries, setNetworkEntries] = useState<NetworkExchange[]>([]); const [diagnostics, setDiagnostics] = useState<Array<{ severity: string; message: string }>>([]); const [notice, setNotice] = useState(''); const [mappingTestResult, setMappingTestResult] = useState<MappingTestResult>(); const [remoteName, setRemoteName] = useState<string>(); const [, setLocaleVersion] = useState(0);
-  useEffect(() => { const listener = (event: MessageEvent<HostMessage>) => { if (!isHostMessage(event.data, instanceId)) return; const message = event.data; if (message.type === 'host.ready') { setLocale(message.locale, message.direction); setLocaleVersion((current) => current + 1); setRemoteName(message.remoteName); } else if (message.type === 'workspace.section') { if (message.section === 'test') setRightPaneMode('debug'); else { setConfigurationSection(message.section); setRightPaneMode('configure'); } requestAnimationFrame(() => document.getElementById('right-pane-panel')?.focus()); } else if (message.type === 'inspector.focus') { setRightPaneMode('debug'); setActiveEvidenceId(message.evidenceId); setInspectorTab(message.tab); setSelectedNetworkId(message.networkId); setSelectedRawSequence(message.sequence); setSelectedMessageId(message.messageId); if (message.tab === 'Raw Events') setEventFilters((current) => ({ ...current, raw: { ...DEFAULT_EVENT_FILTERS } })); if (message.tab === 'Normalized') setEventFilters((current) => ({ ...current, normalized: { ...DEFAULT_EVENT_FILTERS } })); setNotice(t('Opened test failure evidence.')); focusAfterRender(() => { const target = message.networkId ? document.getElementById(networkRowId(message.networkId)) : message.sequence === undefined ? document.getElementById('right-pane-panel') : document.getElementById(`inspector-event-${String(message.sequence)}`); target?.focus(); }); } else if (message.type === 'profile.snapshot') { setProfile(message.profile); setConnectionResult(undefined); } else if (message.type === 'profile.validation') setDiagnostics(message.diagnostics); else if (message.type === 'profile.validated') { if (message.valid) setNotice(t('Profile is valid.')); } else if (message.type === 'session.snapshot') { setSnapshot(message.snapshot); setRuns(message.runs); setRequestPreview(message.requestPreview); setNetworkEntries(message.networkEntries ?? []); setConnectionResult(undefined); } else if (message.type === 'mapping.test.result') setMappingTestResult(message.result); else if (message.type === 'request.error') setNotice(message.error.message); else if (message.type === 'action.feedback') setMessageActionFeedback({ actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: message.status, message: message.message }); else if (message.type === 'form.accepted') { setAcceptedForms((current) => new Set(current).add(`${message.sourceMessageId ?? ''}:${message.formId}`)); setNotice(t('Form submitted.')); } else if (message.type === 'run.imported') setNotice(t(message.duplicate ? 'Run imported as a copy from {path}' : 'Run imported from {path}', { path: message.path })); else if (message.type === 'run.exported') setNotice(t('Run exported to {path}', { path: message.path })); else if (message.type === 'adversarial.operation' || message.type === 'adversarial.captured') setNotice(message.detail); else if (message.type === 'test.results') setTestResults(message.results); else if (message.type === 'campaign.dashboard') setCampaignDashboard(message.dashboard); else if (message.type === 'campaign.preview') { const summary = t('{cases} cases · {attempts} attempts · up to {requests} requests', { cases: formatNumber(message.selectedCases), attempts: formatNumber(message.plannedAttempts), requests: formatNumber(message.plannedRequests) }); setNotice(message.warnings.length ? `${summary} · ${message.warnings.join(' ')}` : summary); } else if (message.type === 'test.timeline') setActiveTimeline({ evidenceId: message.evidenceId, timeline: message.timeline }); else if (message.type === 'connection.result') setConnectionResult(message.result); else if (message.type === 'visual.result') setVisualFeedback(message); else if (message.type === 'workspaceTrust.changed') setSnapshot((current) => current ? { ...current, trusted: message.trusted } : current); }; window.addEventListener('message', listener); post({ type: 'webview.ready' }); return () => window.removeEventListener('message', listener); }, []);
+  useEffect(() => { const listener = (event: MessageEvent<HostMessage>) => { if (!isHostMessage(event.data, instanceId)) return; const message = event.data; if (message.type === 'host.ready') { setLocale(message.locale, message.direction); setLocaleVersion((current) => current + 1); setRemoteName(message.remoteName); } else if (message.type === 'workspace.section') { if (message.section === 'test') setRightPaneMode('debug'); else { setConfigurationSection(message.section); setRightPaneMode('configure'); } requestAnimationFrame(() => document.getElementById('right-pane-panel')?.focus()); } else if (message.type === 'inspector.focus') { setRightPaneMode('debug'); setActiveEvidenceId(message.evidenceId); setInspectorTab(message.tab); setSelectedNetworkId(message.networkId); setSelectedRawSequence(message.sequence); setSelectedMessageId(message.messageId); if (message.tab === 'Raw Events') setEventFilters((current) => ({ ...current, raw: { ...DEFAULT_EVENT_FILTERS } })); if (message.tab === 'Normalized') setEventFilters((current) => ({ ...current, normalized: { ...DEFAULT_EVENT_FILTERS } })); setNotice(t('Opened test failure evidence.')); focusAfterRender(() => { const target = message.networkId ? document.getElementById(networkRowId(message.networkId)) : message.sequence === undefined ? document.getElementById('right-pane-panel') : document.getElementById(`inspector-event-${String(message.sequence)}`); target?.focus(); }); } else if (message.type === 'profile.snapshot') { setProfile(message.profile); setConnectionResult(undefined); } else if (message.type === 'profile.validation') setDiagnostics(message.diagnostics); else if (message.type === 'profile.validated') { if (message.valid) setNotice(t('Profile is valid.')); } else if (message.type === 'session.snapshot') { setSnapshot(message.snapshot); setRuns(message.runs); setRequestPreview(message.requestPreview); setNetworkEntries(message.networkEntries ?? []); setConnectionResult(undefined); } else if (message.type === 'mapping.test.result') setMappingTestResult(message.result); else if (message.type === 'request.error') setNotice(message.error.message); else if (message.type === 'action.feedback') setMessageActionFeedback({ actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: message.status, message: message.message }); else if (message.type === 'form.accepted') { setAcceptedForms((current) => new Set(current).add(`${message.sourceMessageId ?? ''}:${message.formId}`)); setNotice(t('Form submitted.')); } else if (message.type === 'run.imported') setNotice(t(message.duplicate ? 'Run imported as a copy from {path}' : 'Run imported from {path}', { path: message.path })); else if (message.type === 'run.exported') setNotice(t('Run exported to {path}', { path: message.path })); else if (message.type === 'run.history.changed') setNotice(t(message.deletedCount === 1 ? 'Deleted {count} recorded run.' : 'Deleted {count} recorded runs.', { count: formatNumber(message.deletedCount) })); else if (message.type === 'adversarial.operation' || message.type === 'adversarial.captured') setNotice(message.detail); else if (message.type === 'test.results') setTestResults(message.results); else if (message.type === 'campaign.dashboard') setCampaignDashboard(message.dashboard); else if (message.type === 'campaign.preview') { const summary = t('{cases} cases · {attempts} attempts · up to {requests} requests', { cases: formatNumber(message.selectedCases), attempts: formatNumber(message.plannedAttempts), requests: formatNumber(message.plannedRequests) }); setNotice(message.warnings.length ? `${summary} · ${message.warnings.join(' ')}` : summary); } else if (message.type === 'test.timeline') { setActiveEvidenceId(message.evidenceId); setActiveTimeline({ evidenceId: message.evidenceId, timeline: message.timeline }); } else if (message.type === 'connection.result') setConnectionResult(message.result); else if (message.type === 'visual.result') setVisualFeedback(message); else if (message.type === 'workspaceTrust.changed') setSnapshot((current) => current ? { ...current, trusted: message.trusted } : current); }; window.addEventListener('message', listener); post({ type: 'webview.ready' }); return () => window.removeEventListener('message', listener); }, []);
   useEffect(() => { if (!messageActionFeedback || messageActionFeedback.status === 'pending') return; const timeout = window.setTimeout(() => setMessageActionFeedback(undefined), 2400); return () => window.clearTimeout(timeout); }, [messageActionFeedback]);
   useEffect(() => { if (!notice) return; const timeout = window.setTimeout(() => setNotice(''), 3200); return () => window.clearTimeout(timeout); }, [notice]);
   useEffect(() => { setAcceptedForms(new Set()); setSelectedMessageId(undefined); setSelectedRawSequence(undefined); setMessageActionFeedback(undefined); }, [snapshot?.sessionId]);
@@ -147,8 +148,8 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
   const workspaceRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLElement>(null);
   const layout = resolveUiLayout(profile.ui);
-  const showRightPane = layout.showInspector || rightPaneMode === 'configure' || selectedMessageId !== undefined;
-  const rightPanePosition = rightPaneMode === 'configure' ? 'right' : layout.inspectorPosition;
+  const showRightPane = layout.showInspector || rightPaneMode !== 'debug' || selectedMessageId !== undefined;
+  const rightPanePosition = rightPaneMode === 'debug' ? layout.inspectorPosition : 'right';
   const layoutSignature = `${layout.preset}:${rightPanePosition}:${layout.inspectorWidth ?? 'auto'}:${rightPaneMode}`;
   const hasConfiguredRightWidth = rightPanePosition === 'right' && layout.inspectorWidth !== undefined;
   const previousLayoutSignature = useRef(layoutSignature);
@@ -198,7 +199,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
     window.addEventListener('blur', stop, { once: true });
   };
   const trackSizes = splitTrackSizes(splitPercent, hasConfiguredRightWidth ? layout.inspectorWidth : undefined, splitCustomized);
-  const workspaceClassName = ['test-workspace', `test-workspace--${layout.preset}`, `test-workspace--inspector-${rightPanePosition}`, rightPaneMode === 'configure' ? 'test-workspace--configuration-open' : '', layout.compact ? 'test-workspace--compact' : ''].filter(Boolean).join(' ');
+  const workspaceClassName = ['test-workspace', `test-workspace--${layout.preset}`, `test-workspace--inspector-${rightPanePosition}`, rightPaneMode !== 'debug' ? 'test-workspace--configuration-open' : '', layout.compact ? 'test-workspace--compact' : ''].filter(Boolean).join(' ');
   const decrementKey = rightPanePosition === 'right' ? 'ArrowLeft' : 'ArrowUp';
   const incrementKey = rightPanePosition === 'right' ? 'ArrowRight' : 'ArrowDown';
   const selectRightPaneMode = (mode: RightPaneMode, focus = false) => {
@@ -207,7 +208,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
   };
   const activeEvidence = testResults.find((result) => result.evidenceId === activeEvidenceId);
   return <div className="test-surface">
-    <div className="test-surface__header">{activeEvidence && <EvidenceSummary result={activeEvidence} timeline={activeTimeline} />}</div>
+    <div className="test-surface__header">{activeEvidence && <EvidenceSummary result={activeEvidence} />}</div>
     <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
     <section ref={previewRef} className="preview-pane">
       <MobileChatPreview profile={profile} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} viewport={chatViewport} onViewportChange={setChatViewport} onConfigure={() => setRightPaneMode('configure')} selectedMessageId={rightPaneMode === 'debug' ? selectedMessageId : undefined} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={onMessageActionFeedback} />
@@ -223,17 +224,22 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
           <div className="right-pane-tabs" role="tablist" aria-label={t('Right panel')} onKeyDown={(event) => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
             event.preventDefault();
-            selectRightPaneMode(event.key === 'ArrowLeft' || event.key === 'Home' ? 'debug' : 'configure', true);
+            const currentIndex = rightPaneModes.indexOf(rightPaneMode);
+            const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? rightPaneModes.length - 1 : (currentIndex + (event.key === 'ArrowLeft' ? -1 : 1) + rightPaneModes.length) % rightPaneModes.length;
+            selectRightPaneMode(rightPaneModes[nextIndex]!, true);
           }}>
             <button id="right-pane-debug-tab" type="button" role="tab" tabIndex={rightPaneMode === 'debug' ? 0 : -1} aria-selected={rightPaneMode === 'debug'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('debug')}>{t('Evidence')}</button>
+            <button id="right-pane-adversarial-tab" type="button" role="tab" tabIndex={rightPaneMode === 'adversarial' ? 0 : -1} aria-selected={rightPaneMode === 'adversarial'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('adversarial')}>{t('Red Team')}</button>
             <button id="right-pane-configure-tab" type="button" role="tab" tabIndex={rightPaneMode === 'configure' ? 0 : -1} aria-selected={rightPaneMode === 'configure'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('configure')}>{t('Configure')}</button>
           </div>
-          <span>{rightPaneMode === 'debug' ? t('{count} raw events', { count: formatNumber(snapshot?.rawEvents.length ?? 0) }) : t('Edits profile JSONC')}</span>
+          <span>{rightPaneMode === 'debug' ? t('{count} raw events', { count: formatNumber(snapshot?.rawEvents.length ?? 0) }) : rightPaneMode === 'adversarial' ? t('{count} adversarial cases', { count: formatNumber(profile.tests?.scenarios?.filter((scenario) => scenario.adversarial).length ?? 0) }) : t('Edits profile JSONC')}</span>
         </header>
         <div id="right-pane-panel" className="right-pane-panel" role="tabpanel" aria-labelledby={`right-pane-${rightPaneMode}-tab`} tabIndex={-1}>
           {rightPaneMode === 'debug'
             ? <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} onCreateMapping={onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} />
-            : <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} post={post} />}
+            : rightPaneMode === 'adversarial'
+              ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} post={post} />
+              : <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} post={post} />}
         </div>
       </aside>
     </>}
@@ -241,7 +247,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
   </div>;
 }
 
-export function EvidenceSummary({ result, timeline }: { result: AdversarialResultSummary; timeline?: EvidenceTimelineSummary }): React.JSX.Element {
+export function EvidenceSummary({ result }: { result: AdversarialResultSummary }): React.JSX.Element {
   const detail = result.primaryFinding ?? result.primaryIssue;
   const repetitions = result.repetitions;
   const locations = [result.primaryLocation, ...result.availableLocations].filter((location, index, all) => all.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(location)) === index);
@@ -273,7 +279,6 @@ export function EvidenceSummary({ result, timeline }: { result: AdversarialResul
         <div>{additionalLocations.map((location, index) => <button key={`${result.evidenceId}-${location.kind}-more-${index}`} type="button" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })}>{t(evidenceLocationLabel(location.kind))}</button>)}</div>
       </details>}
     </div>
-    {timeline && <CausalTimeline timeline={timeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location })} />}
   </section>;
 }
 
@@ -316,7 +321,64 @@ function adversarialStabilityLabel(stability: NonNullable<AdversarialResultSumma
 
 export function JsonBlock({ value }: { value: unknown }): React.JSX.Element {
   const text = safeJson(value);
-  return <pre className="json"><code>{text}</code><ClipboardButton text={text} label={t('Copy JSON')} /></pre>;
+  const [query, setQuery] = useState('');
+  const matches = useMemo(() => countTextMatches(text, query), [query, text]);
+  const tokens = useMemo(() => tokenizeJson(text), [text]);
+  return <div className="json-view">
+    <div className="json-toolbar">
+      <label><span className="sr-only">{t('Search JSON')}</span><input type="search" value={query} placeholder={t('Search JSON')} aria-label={t('Search JSON')} onChange={(event) => setQuery(event.target.value)} /></label>
+      <span role="status" aria-live="polite">{query ? matches ? t('{count} matches', { count: formatNumber(matches) }) : t('No matches') : t('JSON data')}</span>
+    </div>
+    <pre className="json"><code>{tokens.map((token, index) => <span className={token.kind ? `json-token json-token--${token.kind}` : undefined} key={`${token.start}-${index}`}>{highlightText(token.text, query, token.start)}</span>)}</code><ClipboardButton text={text} label={t('Copy JSON')} /></pre>
+  </div>;
+}
+
+type JsonTokenKind = 'key' | 'string' | 'number' | 'boolean' | 'null' | 'punctuation';
+interface JsonToken { start: number; text: string; kind?: JsonTokenKind }
+
+function tokenizeJson(text: string): JsonToken[] {
+  const tokens: JsonToken[] = [];
+  const pattern = /"(?:\\.|[^"\\])*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b|[{}[\],:]/gu;
+  let cursor = 0;
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index;
+    if (start > cursor) tokens.push({ start: cursor, text: text.slice(cursor, start) });
+    const token = match[0];
+    let kind: JsonTokenKind;
+    if (token.startsWith('"')) kind = /^\s*:/u.test(text.slice(start + token.length)) ? 'key' : 'string';
+    else if (/^-?\d/u.test(token)) kind = 'number';
+    else if (token === 'true' || token === 'false') kind = 'boolean';
+    else if (token === 'null') kind = 'null';
+    else kind = 'punctuation';
+    tokens.push({ start, text: token, kind });
+    cursor = start + token.length;
+  }
+  if (cursor < text.length) tokens.push({ start: cursor, text: text.slice(cursor) });
+  return tokens;
+}
+
+function highlightText(text: string, query: string, offset: number): React.ReactNode {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return text;
+  const lower = text.toLocaleLowerCase();
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  for (let match = lower.indexOf(needle); match >= 0; match = lower.indexOf(needle, cursor)) {
+    if (match > cursor) parts.push(text.slice(cursor, match));
+    parts.push(<mark key={`${offset + match}-${parts.length}`}>{text.slice(match, match + needle.length)}</mark>);
+    cursor = match + needle.length;
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts;
+}
+
+function countTextMatches(text: string, query: string): number {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return 0;
+  const lower = text.toLocaleLowerCase();
+  let count = 0;
+  for (let cursor = lower.indexOf(needle); cursor >= 0; cursor = lower.indexOf(needle, cursor + needle.length)) count += 1;
+  return count;
 }
 
 function safeJson(value: unknown): string {
@@ -444,9 +506,17 @@ export function NetworkInspector({ entries, legacyRequestPreview, selectedEntryI
 
 function NetworkDetailContent({ entry, tab }: { entry: NetworkExchange; tab: NetworkDetailTab }): React.JSX.Element {
   if (tab === 'Payload') return entry.requestBody === undefined ? <p className="muted network-detail-empty">{t('No request payload.')}</p> : <JsonBlock value={entry.requestBody} />;
-  if (tab === 'Response') return <div className="network-response"><pre>{entry.responseBodyPreview || t('No response body captured.')}</pre>{entry.responseBodyTruncated && <p className="warning">{t('Response preview was truncated at the safety limit.')}</p>}</div>;
+  if (tab === 'Response') {
+    const parsed = parseJsonPreview(entry.responseBodyPreview);
+    return <div className="network-response">{parsed.ok ? <JsonBlock value={parsed.value} /> : <pre>{entry.responseBodyPreview || t('No response body captured.')}</pre>}{entry.responseBodyTruncated && <p className="warning">{t('Response preview was truncated at the safety limit.')}</p>}</div>;
+  }
   if (tab === 'Timing') return <dl className="network-properties"><NetworkProperty label={t('Started')} value={formatDateTime(entry.startedAt)} /><NetworkProperty label={t('Headers')} value={optionalDuration(entry.timing.headers)} /><NetworkProperty label={t('First chunk')} value={optionalDuration(entry.timing.firstChunk)} /><NetworkProperty label={t('Total')} value={optionalDuration(entry.timing.total)} /><NetworkProperty label={t('Request timeout')} value={optionalDuration(entry.timing.timeout)} /><NetworkProperty label={t('Idle timeout')} value={optionalDuration(entry.timing.idleTimeout)} />{entry.timing.retryDelay !== undefined && <NetworkProperty label={t('Retry delay')} value={formatDuration(entry.timing.retryDelay)} />}</dl>;
   return <div className="network-headers"><dl className="network-properties"><NetworkProperty label={t('Request URL')} value={entry.url} /><NetworkProperty label={t('Request method')} value={entry.method} /><NetworkProperty label={t('Status')} value={entry.status === undefined ? localizeHumanized(entry.state) : String(entry.status)} /><NetworkProperty label={t('Request type')} value={t(networkKindLabel(entry.kind))} />{entry.variantId && <NetworkProperty label={t('Variant')} value={entry.variantId} />}</dl>{entry.correlation && <section><h4>{t('Correlation')}</h4><dl className="network-properties">{entry.correlation.traceId && <NetworkProperty label={t('Trace ID')} value={entry.correlation.traceId} />}{entry.correlation.spanId && <NetworkProperty label={t('Span ID')} value={entry.correlation.spanId} />}{entry.correlation.traceFlags && <NetworkProperty label={t('Trace flags')} value={entry.correlation.traceFlags} />}{entry.correlation.requestId && <NetworkProperty label={entry.correlation.requestIdHeader ?? t('Request ID')} value={entry.correlation.requestId} />}</dl></section>}<NetworkHeaderGroup title={t('Request headers')} headers={entry.requestHeaders} /><NetworkHeaderGroup title={t('Response headers')} headers={entry.responseHeaders ?? {}} />{entry.error && <section><h4>{t('Error')}</h4><JsonBlock value={entry.error} /></section>}</div>;
+}
+
+function parseJsonPreview(value: string | undefined): { ok: true; value: unknown } | { ok: false } {
+  if (!value || !/^[\s]*[{[]/u.test(value)) return { ok: false };
+  try { return { ok: true, value: JSON.parse(value) as unknown }; } catch { return { ok: false }; }
 }
 
 function NetworkHeaderGroup({ title, headers }: { title: string; headers: Record<string, string> }): React.JSX.Element { const items = Object.entries(headers); return <section><h4>{title}</h4>{items.length ? <dl className="network-header-list">{items.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{isSensitiveHeaderName(name) ? '••••••••' : value}</dd></div>)}</dl> : <p className="muted">{t('No headers captured.')}</p>}</section>; }
@@ -478,8 +548,9 @@ export function VirtualEvents({ items, kind = 'raw', terminalRawSequences = new 
   const viewportEnd = viewportStart + Math.ceil(height / rowHeight);
   const selectedInViewport = selectedIndex >= 0 && selectedIndex >= Math.max(0, viewportStart - 2) && selectedIndex <= viewportEnd + 2;
   const accessibleAnchor = selectedInViewport ? selectedIndex : Math.max(activeIndex, viewportStart);
-  const visibleStart = screenReader ? accessibleEventWindowStart(accessibleAnchor, items.length, ACCESSIBLE_EVENT_WINDOW_SIZE) : start;
-  const visibleCount = screenReader ? ACCESSIBLE_EVENT_WINDOW_SIZE : Math.ceil(height / rowHeight) + 8;
+  const virtualized = !screenReader && items.length > ACCESSIBLE_EVENT_WINDOW_SIZE;
+  const visibleStart = screenReader ? accessibleEventWindowStart(accessibleAnchor, items.length, ACCESSIBLE_EVENT_WINDOW_SIZE) : virtualized ? start : 0;
+  const visibleCount = screenReader ? ACCESSIBLE_EVENT_WINDOW_SIZE : virtualized ? Math.ceil(height / rowHeight) + 8 : items.length;
   const visible = items.slice(visibleStart, visibleStart + visibleCount);
   const rovingIndex = selectedIndex >= 0 ? selectedIndex : items.length ? Math.min(Math.max(activeIndex, 0), items.length - 1) : -1;
 
@@ -494,16 +565,23 @@ export function VirtualEvents({ items, kind = 'raw', terminalRawSequences = new 
   }, []);
 
   useEffect(() => {
-    if (selectedIndex < 0) return;
-    const nextTop = Math.max(0, selectedIndex * rowHeight - rowHeight * 2);
+    if (selectedSequence === undefined || selectedIndex < 0) return;
     const list = listRef.current;
-    if (list) {
+    if (!list) return;
+    const rowTop = selectedIndex * rowHeight;
+    const rowBottom = rowTop + rowHeight;
+    const viewportTop = list.scrollTop;
+    const viewportBottom = viewportTop + (list.clientHeight || height);
+    let nextTop = viewportTop;
+    if (rowTop < viewportTop) nextTop = rowTop;
+    else if (rowBottom > viewportBottom) nextTop = Math.max(0, rowBottom - (list.clientHeight || height));
+    if (nextTop !== viewportTop) {
       if (typeof list.scrollTo === 'function') list.scrollTo({ top: nextTop });
       else list.scrollTop = nextTop;
+      setTop(nextTop);
     }
-    setTop(nextTop);
-    focusAfterRender(() => document.getElementById(`inspector-event-${String(effectiveSelectedSequence)}`)?.focus());
-  }, [effectiveSelectedSequence, selectedIndex]);
+    focusAfterRender(() => document.getElementById(`inspector-event-${String(selectedSequence)}`)?.focus());
+  }, [height, selectedIndex, selectedSequence]);
 
   useEffect(() => {
     setActiveIndex((current) => selectedIndex >= 0 ? selectedIndex : items.length ? Math.min(Math.max(current, 0), items.length - 1) : 0);
@@ -560,7 +638,7 @@ export function Replay({ runs, replay, remoteSessions, active, trusted }: { runs
   const playing = replay?.status === 'playing'; const paused = replay?.status === 'paused'; const loaded = Boolean(replay?.runId) && (playing || paused || replay?.status === 'stopped'); const progress = replay?.total ? Math.round((replay.index / replay.total) * 100) : 0;
   const requestActive = active && !playing && !paused;
   const changeSpeed = (value: ReplaySnapshot['speed']) => { setSpeed(value); if (replay?.runId) post({ type: 'run.replay.speed', speed: value }); };
-  return <div className="content-page replay-page"><header className="page-heading"><div><h2>{t('Recorded runs')}</h2><p>{t('Replay raw events through the same mapping and reducer pipeline.')}</p></div><div className="page-heading-actions"><IconButton icon="desktop-download" label={t('Import run')} disabled={!trusted || active} onClick={() => post({ type: 'run.import' })} /></div></header>{remoteSessions && remoteSessions.length > 0 && <section className="remote-sessions" aria-labelledby="remote-sessions-heading"><div className="section-heading"><div><h3 id="remote-sessions-heading">{t('Remote session references')}</h3><p>{t('Reference-only history keeps metadata locally; applying one does not fetch or expose remote messages.')}</p></div></div><ul>{remoteSessions.map((session) => <li key={session.conversationId}><div><strong>{session.title}</strong><span><code>{session.conversationId}</code> · {session.actorId ?? t('No actor')} · {session.environmentId ?? t('No environment')} · <time dateTime={dateTimeAttribute(session.createdAt)}>{formatDateTime(session.createdAt)}</time></span></div><button disabled={active} onClick={() => post({ type: 'history.remote.apply', conversationId: session.conversationId })}>{t('Apply')}</button></li>)}</ul></section>}<section className="replay-deck" aria-label={t('Replay controls')}><div className="transport-controls"><button disabled={!playing} onClick={() => post({ type: 'run.replay.pause' })}>{t('Pause')}</button><button className={paused ? 'primary' : undefined} disabled={!paused} onClick={() => post({ type: 'run.replay.resume' })}>{t('Resume')}</button><button disabled={!loaded} onClick={() => post({ type: 'run.replay.stop' })}>{t('Stop')}</button><button disabled={!paused} onClick={() => post({ type: 'run.replay.step' })}>{t('Step')}</button></div><label>{t('Playback speed')}<select value={speed} onChange={(event) => changeSpeed(Number(event.target.value) as ReplaySnapshot['speed'])}>{[0.25, 0.5, 1, 2, 4].map((value) => <option key={value} value={value}>{formatNumber(value)}×</option>)}</select></label><div className="replay-progress" role="status" aria-live="polite"><div><strong>{replay ? localizeHumanized(replay.status) : t('Ready')}</strong><span>{replay ? t('{current} / {total} events', { current: formatNumber(replay.index), total: formatNumber(replay.total) }) : t('Select a run to begin')}</span></div><progress value={progress} max={100} aria-label={t('Replay progress')}>{progress}%</progress></div>{requestActive && <p className="replay-blocked">{t('Finish or stop the current request before replaying a run.')}</p>}</section>{runs.length ? <ul className="run-list">{runs.map((run) => { const replayable = run.replayable; const replaying = replay?.runId === run.id && (playing || paused); return <li className={replay?.runId === run.id ? 'active-run' : ''} key={run.id}><div><strong>{formatDateTime(run.createdAt)}</strong><span>{localizeHumanized(run.result.type)} · {t('{count} events', { count: formatNumber(run.metrics.eventCount) })} · {formatDuration(run.metrics.totalDuration ?? 0)}</span><RunSummaryDetails run={run} />{!replayable && <span className="run-availability"><ProductIcon name="warning" />{t('Not replayable: raw events were not recorded.')}</span>}{replayable && !run.hasSnapshot && <span className="run-availability"><ProductIcon name="info" />{t('Replay starts without recorded chat context.')}</span>}</div><div className="actions"><button className={replayable ? 'primary' : undefined} disabled={active || !replayable} onClick={() => post({ type: 'run.replay.play', runId: run.id, speed })}>{t(replaying ? 'Replaying' : 'Replay')}</button><button disabled={!trusted} onClick={() => post({ type: 'run.export', runId: run.id })}>{t('Export')}</button></div></li>; })}</ul> : <div className="empty-state"><strong>{t('No recorded runs')}</strong><p>{t('Completed, failed, and aborted turns appear here.')}</p></div>}</div>;
+  return <div className="content-page replay-page"><header className="page-heading"><div><h2>{t('Recorded runs')}</h2><p>{t('Replay raw events through the same mapping and reducer pipeline.')}</p></div><div className="page-heading-actions"><IconButton icon="desktop-download" label={t('Import run')} disabled={!trusted || active} onClick={() => post({ type: 'run.import' })} /><details className="page-heading-more"><summary aria-label={t('More recorded run actions')} title={t('More recorded run actions')}><ProductIcon name="ellipsis" /></summary><div><button type="button" className="danger-subtle" disabled={!trusted || active || !runs.length} onClick={() => post({ type: 'run.clear' })}>{t('Clear replay history…')}</button></div></details></div></header>{remoteSessions && remoteSessions.length > 0 && <section className="remote-sessions" aria-labelledby="remote-sessions-heading"><div className="section-heading"><div><h3 id="remote-sessions-heading">{t('Remote session references')}</h3><p>{t('Reference-only history keeps metadata locally; applying one does not fetch or expose remote messages.')}</p></div></div><ul>{remoteSessions.map((session) => <li key={session.conversationId}><div><strong>{session.title}</strong><span><code>{session.conversationId}</code> · {session.actorId ?? t('No actor')} · {session.environmentId ?? t('No environment')} · <time dateTime={dateTimeAttribute(session.createdAt)}>{formatDateTime(session.createdAt)}</time></span></div><button disabled={active} onClick={() => post({ type: 'history.remote.apply', conversationId: session.conversationId })}>{t('Apply')}</button></li>)}</ul></section>}<section className="replay-deck" aria-label={t('Replay controls')}><div className="transport-controls"><button disabled={!playing} onClick={() => post({ type: 'run.replay.pause' })}>{t('Pause')}</button><button className={paused ? 'primary' : undefined} disabled={!paused} onClick={() => post({ type: 'run.replay.resume' })}>{t('Resume')}</button><button disabled={!loaded} onClick={() => post({ type: 'run.replay.stop' })}>{t('Stop')}</button><button disabled={!paused} onClick={() => post({ type: 'run.replay.step' })}>{t('Step')}</button></div><label>{t('Playback speed')}<select value={speed} onChange={(event) => changeSpeed(Number(event.target.value) as ReplaySnapshot['speed'])}>{[0.25, 0.5, 1, 2, 4].map((value) => <option key={value} value={value}>{formatNumber(value)}×</option>)}</select></label><div className="replay-progress" role="status" aria-live="polite"><div><strong>{replay ? localizeHumanized(replay.status) : t('Ready')}</strong><span>{replay ? t('{current} / {total} events', { current: formatNumber(replay.index), total: formatNumber(replay.total) }) : t('Select a run to begin')}</span></div><progress value={progress} max={100} aria-label={t('Replay progress')}>{progress}%</progress></div>{requestActive && <p className="replay-blocked">{t('Finish or stop the current request before replaying a run.')}</p>}</section>{runs.length ? <ul className="run-list">{runs.map((run) => { const replayable = run.replayable; const replaying = replay?.runId === run.id && (playing || paused); return <li className={replay?.runId === run.id ? 'active-run' : ''} key={run.id}><div><strong>{formatDateTime(run.createdAt)}</strong><span>{localizeHumanized(run.result.type)} · {t('{count} events', { count: formatNumber(run.metrics.eventCount) })} · {formatDuration(run.metrics.totalDuration ?? 0)}</span><RunSummaryDetails run={run} />{!replayable && <span className="run-availability"><ProductIcon name="warning" />{t('Not replayable: raw events were not recorded.')}</span>}{replayable && !run.hasSnapshot && <span className="run-availability"><ProductIcon name="info" />{t('Replay starts without recorded chat context.')}</span>}</div><div className="run-actions"><button className={replayable ? 'primary' : undefined} disabled={active || !replayable} onClick={() => post({ type: 'run.replay.play', runId: run.id, speed })}>{t(replaying ? 'Replaying' : 'Replay')}</button><details><summary aria-label={t('More actions for recorded run')} title={t('More actions for recorded run')}><ProductIcon name="ellipsis" /></summary><div><button type="button" disabled={!trusted} onClick={() => post({ type: 'run.export', runId: run.id })}>{t('Export')}</button><button type="button" className="danger-subtle" disabled={!trusted || active} onClick={() => post({ type: 'run.delete', runId: run.id })}>{t('Delete run…')}</button></div></details></div></li>; })}</ul> : <div className="empty-state"><strong>{t('No recorded runs')}</strong><p>{t('Completed, failed, and aborted turns appear here.')}</p></div>}</div>;
 }
 
 function RunSummaryDetails({ run }: { run: LocalRunSummary }): React.JSX.Element {
@@ -720,7 +798,7 @@ function evidenceLocationLabel(kind: AdversarialResultSummary['primaryLocation']
 }
 
 function isRightPaneMode(value: unknown): value is RightPaneMode {
-  return value === 'debug' || value === 'configure';
+  return rightPaneModes.includes(value as RightPaneMode);
 }
 
 export function clampSplit(value: number): number { return Math.min(90, Math.max(10, Number.isFinite(value) ? value : DEFAULT_SPLIT_PERCENT)); }

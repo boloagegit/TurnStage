@@ -17,7 +17,7 @@ const starterBehaviors = new Set<Starter['behavior']>(['send', 'fill', 'action']
 const followupBehaviors = starterBehaviors;
 const actionAppearances = new Set<NonNullable<ResponseAction['appearance']>>(['primary', 'secondary', 'link']);
 const citationKinds = new Set<NonNullable<Citation['kind']>>(['url', 'file', 'symbol', 'artifact']);
-const replayStatuses = new Set<ReplaySnapshot['status']>(['idle', 'playing', 'paused', 'completed', 'stopped']);
+const replayStatuses = new Set<ReplaySnapshot['status']>(['idle', 'playing', 'paused', 'completed', 'stopped', 'failed']);
 const replaySpeeds = new Set<ReplaySnapshot['speed']>([0.25, 0.5, 1, 2, 4]);
 const MAX_STORED_RUNS = 100;
 const MAX_STORED_EVENTS = 10_000;
@@ -35,6 +35,12 @@ export interface LocalRunImportResult {
   duplicate: boolean;
 }
 
+export interface LocalRunMutationResult {
+  runs: LocalRun[];
+  deletedCount: number;
+  deletedBytes: number;
+}
+
 export class LocalRunRepository {
   private readonly warnedReads = new Set<string>();
 
@@ -44,8 +50,13 @@ export class LocalRunRepository {
 
   async list(profileId: string): Promise<LocalRun[]> {
     if (!isNonEmptyString(profileId)) return [];
+    const uri = this.uri(profileId);
+    await (localSaveQueues.get(uri.toString()) ?? Promise.resolve());
+    return this.read(profileId, uri);
+  }
+
+  private async read(profileId: string, uri = this.uri(profileId)): Promise<LocalRun[]> {
     try {
-      const uri = this.uri(profileId);
       if ((await vscode.workspace.fs.stat(uri)).size > MAX_RUN_STORAGE_BYTES) { this.warnRead(profileId, 'size-limit'); return []; }
       const bytes = await vscode.workspace.fs.readFile(uri);
       if (bytes.byteLength > MAX_RUN_STORAGE_BYTES) { this.warnRead(profileId, 'size-limit'); return []; }
@@ -73,7 +84,7 @@ export class LocalRunRepository {
     return withQueue(localSaveQueues, uri.toString(), async () => {
       const safeRun = sanitizeLocalRun(run, profileId);
       if (!safeRun) return [];
-      const runs = [safeRun, ...(await this.list(profileId)).filter((item) => item.id !== safeRun.id)].slice(0, normalizeRetention(retention));
+      const runs = [safeRun, ...(await this.read(profileId, uri)).filter((item) => item.id !== safeRun.id)].slice(0, normalizeRetention(retention));
       await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, '..'));
       // VS Code's workspace.fs adapters and the repository fakes do not expose a
       // common atomic replace contract. The in-process queue makes this
@@ -82,6 +93,39 @@ export class LocalRunRepository {
       await vscode.workspace.fs.writeFile(uri, bytes);
       return sanitizeLocalRuns(JSON.parse(new TextDecoder().decode(bytes)) as unknown, profileId);
     });
+  }
+
+  async deleteRun(profileId: string, runId: string): Promise<LocalRunMutationResult> {
+    if (!isNonEmptyString(profileId) || !isNonEmptyString(runId)) return { runs: [], deletedCount: 0, deletedBytes: 0 };
+    const uri = this.uri(profileId);
+    return withQueue(localSaveQueues, uri.toString(), async () => {
+      const existing = await this.read(profileId, uri);
+      const removed = existing.filter((run) => run.id === runId);
+      if (!removed.length) return { runs: existing, deletedCount: 0, deletedBytes: 0 };
+      const runs = existing.filter((run) => run.id !== runId);
+      await this.write(uri, runs);
+      const deletedBytes = encodedRunBytes(removed);
+      if (this.output) logAt(this.output, 'info', () => `[storage] local run deleted profile=${safeLogToken(profileId)} count=${removed.length} bytes=${deletedBytes}`);
+      return { runs, deletedCount: removed.length, deletedBytes };
+    });
+  }
+
+  async clear(profileId: string): Promise<LocalRunMutationResult> {
+    if (!isNonEmptyString(profileId)) return { runs: [], deletedCount: 0, deletedBytes: 0 };
+    const uri = this.uri(profileId);
+    return withQueue(localSaveQueues, uri.toString(), async () => {
+      const existing = await this.read(profileId, uri);
+      if (!existing.length) return { runs: [], deletedCount: 0, deletedBytes: 0 };
+      await this.write(uri, []);
+      const deletedBytes = encodedRunBytes(existing);
+      if (this.output) logAt(this.output, 'info', () => `[storage] local run history cleared profile=${safeLogToken(profileId)} count=${existing.length} bytes=${deletedBytes}`);
+      return { runs: [], deletedCount: existing.length, deletedBytes };
+    });
+  }
+
+  private async write(uri: vscode.Uri, runs: LocalRun[]): Promise<void> {
+    await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, '..'));
+    await vscode.workspace.fs.writeFile(uri, encodeBoundedRuns(runs));
   }
 
   async export(run: LocalRun): Promise<vscode.Uri | undefined> {
@@ -122,7 +166,7 @@ export class LocalRunRepository {
     if (!safeRun) throw new Error(localize('The selected run contains invalid or unsupported data.'));
     const storageUri = this.uri(profileId);
     const stored = await withQueue(localSaveQueues, storageUri.toString(), async () => {
-      const existing = await this.list(profileId);
+      const existing = await this.read(profileId, storageUri);
       const duplicate = existing.some((run) => run.id === safeRun.id);
       const imported = duplicate ? { ...safeRun, id: crypto.randomUUID() } : safeRun;
       const runs = [imported, ...existing.filter((run) => run.id !== imported.id)].slice(0, normalizeRetention(retention));
@@ -157,6 +201,8 @@ function encodeBoundedRuns(source: LocalRun[]): Uint8Array {
   }
   return bytes.byteLength <= MAX_RUN_STORAGE_BYTES ? bytes : encoder.encode('[]');
 }
+
+function encodedRunBytes(runs: LocalRun[]): number { return new TextEncoder().encode(JSON.stringify(runs)).byteLength; }
 
 function withQueue<T>(queues: Map<string, Promise<void>>, key: string, operation: () => Promise<T>): Promise<T> {
   const previous = queues.get(key) ?? Promise.resolve();

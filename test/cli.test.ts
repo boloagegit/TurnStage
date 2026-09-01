@@ -9,6 +9,10 @@ import { createCliOutputDocument, renderCliOutput } from '../src/cli/output';
 import { executeHeadlessCli, runHeadlessCli } from '../src/cli/runner';
 import { NodeCliRuntime } from '../src/cli/nodeRuntime';
 import { NodeScenarioSession } from '../src/cli/nodeSession';
+import { serializeAdversarialCsv } from '../src/extension/testing/adversarialCsv';
+import { parseAdversarialSource } from '../src/extension/testing/adversarialSource';
+import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../src/extension/config/profileValidator';
+import { builtInEnvironment } from '../src/extension/config/defaultEnvironment';
 import { createProvenanceManifest } from '../src/extension/testing/provenance';
 import type { ScenarioDefinition, TurnStageEnvironment, TurnStageProfile } from '../src/shared/types';
 
@@ -89,6 +93,49 @@ describe('headless CLI contract', () => {
       await writeFile(reportPath, '{"status":"changed"}\n');
       await expect(runtime.verify({ command: 'verify', manifestPath: 'provenance.json' })).resolves.toMatchObject({ verification: { valid: false, manifestValid: true } });
     } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('executes a linked multi-attempt CSV suite without converting the source file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'turnstage-cli-csv-'));
+    const profile: TurnStageProfile = {
+      version: 1,
+      id: 'csv-profile',
+      name: 'CSV profile',
+      conversation: { send: { method: 'POST', url: 'https://example.test/stream', timeoutMs: 1_000, variants: [{ id: 'default', body: { message: { $value: 'input.text' } } }] } },
+      stream: {
+        transport: 'sse', doneValue: '[DONE]',
+        mappings: [{ id: 'text', match: {}, emit: { type: 'content.text.delta', text: { path: '$.text' } } }],
+      },
+      tests: { adversarialSuites: ['security.adversarial.csv'], scenarios: [] },
+    };
+    const scenarios: ScenarioDefinition[] = [{
+      id: 'csv-case', name: 'CSV case', steps: [{ id: 'turn-1', input: 'Probe' }],
+      adversarial: { mode: 'singleTurn', maxTurns: 1, timeoutMs: 1_000, repetitions: 2, forbid: { content: ['blocked-marker'] } },
+    }];
+    const fetchMock = vi.fn(async () => new Response('data: {"text":"Safe response"}\n\ndata: [DONE]\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await writeFile(join(directory, 'profile.turnstage.jsonc'), JSON.stringify(profile));
+      const csv = serializeAdversarialCsv(scenarios);
+      await writeFile(join(directory, 'security.adversarial.csv'), csv);
+      expect(new ProfileValidator().validate(profile, undefined, [builtInEnvironment()])).toEqual([]);
+      const parsed = parseAdversarialSource('security.adversarial.csv', csv);
+      expect(parsed.issues).toEqual([]);
+      expect(validateAdversarialScenariosAgainstProfile(profile, parsed.scenarios, [builtInEnvironment()])).toEqual([]);
+      const result = await new NodeCliRuntime('test', directory).execute({
+        command: 'run', configFiles: ['profile.turnstage.jsonc'],
+        selectors: { profiles: [], suites: [], cases: [], tags: [], changedFiles: [] },
+        policy: { failFast: false, concurrency: 1, maxRequests: 10 },
+        impact: { workspaceRoot: directory, includeUnbound: true },
+      });
+
+      expect(result.records).toEqual([expect.objectContaining({ id: expect.stringMatching(/^csv-profile\/security-/u), outcome: 'resisted' })]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(await import('node:fs/promises').then(({ readFile }) => readFile(join(directory, 'security.adversarial.csv'), 'utf8'))).toBe(csv);
+    } finally {
+      vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
     }
   });

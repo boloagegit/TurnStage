@@ -9,6 +9,10 @@ type SchemaNode = {
   enum?: unknown[];
   minimum?: number;
   maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  maxItems?: number;
+  pattern?: string;
   uniqueItems?: boolean;
   properties?: Record<string, SchemaNode>;
   items?: SchemaNode;
@@ -48,6 +52,7 @@ function matchesSchema(value: unknown, node: SchemaNode): boolean {
   if (!resolved.type) return true;
   if (resolved.type === 'array') {
     return Array.isArray(value)
+      && (resolved.maxItems === undefined || value.length <= resolved.maxItems)
       && (!resolved.uniqueItems || new Set(value.map((item) => JSON.stringify(item))).size === value.length)
       && (!resolved.items || value.every((item) => matchesSchema(item, resolved.items as SchemaNode)));
   }
@@ -63,7 +68,10 @@ function matchesSchema(value: unknown, node: SchemaNode): boolean {
       return true;
     });
   }
-  if (resolved.type === 'string') return typeof value === 'string';
+  if (resolved.type === 'string') return typeof value === 'string'
+    && (resolved.minLength === undefined || value.length >= resolved.minLength)
+    && (resolved.maxLength === undefined || value.length <= resolved.maxLength)
+    && (resolved.pattern === undefined || new RegExp(resolved.pattern, 'u').test(value));
   if (resolved.type === 'number' || resolved.type === 'integer') {
     if (typeof value !== 'number' || !Number.isFinite(value)) return false;
     if (resolved.type === 'integer' && !Number.isInteger(value)) return false;
@@ -85,12 +93,13 @@ const validUi: UiDefinition = {
   },
   messageActions: ['message.copy', 'message.retry'],
   messageActionVisibility: 'always',
+  messageTags: [{ id: 'tool', label: 'Tool call', source: 'normalizedEvent', path: 'type', operator: 'startsWith', value: 'tool.', tone: 'warning' }],
 };
 
 describe('profile UI schema', () => {
   it('declares every UiDefinition field and keeps extension points scoped', () => {
     expect(uiSchema).toMatchObject({ type: 'object', additionalProperties: false });
-    expect(Object.keys(uiSchema.properties ?? {})).toEqual(['layout', 'composer', 'streaming', 'locks', 'components', 'messageActions', 'messageActionVisibility']);
+    expect(Object.keys(uiSchema.properties ?? {})).toEqual(['layout', 'composer', 'streaming', 'locks', 'components', 'messageActions', 'messageActionVisibility', 'messageTags']);
 
     const layout = propertySchema(uiSchema, 'layout');
     expect(layout).toMatchObject({ type: 'object', additionalProperties: false });
@@ -167,6 +176,8 @@ describe('profile UI schema', () => {
     ['an unsupported message action', { ...validUi, messageActions: ['request.send'] }],
     ['duplicate message actions', { ...validUi, messageActions: ['message.copy', 'message.copy'] }],
     ['an unsupported message action visibility', { ...validUi, messageActionVisibility: 'hover' }],
+    ['an unsupported message tag source', { ...validUi, messageTags: [{ id: 'tag', label: 'Tag', source: 'network', path: 'type', operator: 'exists' }] }],
+    ['an unsafe message tag path', { ...validUi, messageTags: [{ id: 'tag', label: 'Tag', source: 'message', path: '__proto__.value', operator: 'exists' }] }],
     ['an Inspector width below the supported range', { ...validUi, layout: { inspectorWidth: 120 } }],
     ['a fractional Inspector width', { ...validUi, layout: { inspectorWidth: 360.5 } }],
   ])('rejects %s', (_description, value) => {

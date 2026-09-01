@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createAdversarialSuite, normalizeAdversarialSuite, parseAdversarialSuite, serializeAdversarialSuite, validateAdversarialSuite } from '../src/extension/testing/adversarialSuite';
+import { createAdversarialSuite, isSafeAdversarialSuitePath, normalizeAdversarialSuite, parseAdversarialSuite, serializeAdversarialSuite, validateAdversarialSuite } from '../src/extension/testing/adversarialSuite';
 import type { AdversarialSuiteDefinition, ScenarioDefinition } from '../src/shared/types';
 
 function suite(): AdversarialSuiteDefinition {
@@ -42,5 +42,12 @@ describe('adversarial suites', () => {
       expect.objectContaining({ path: 'cases[0].arbitrary' }),
       expect.objectContaining({ path: 'cases[0].forbid.content[0].value', message: expect.stringContaining('safe') }),
     ]));
+  });
+
+  it('accepts only safe workspace-relative adversarial JSON or CSV sources', () => {
+    expect(isSafeAdversarialSuitePath('.vscode/turnstage/tests/security.adversarial.jsonc')).toBe(true);
+    expect(isSafeAdversarialSuitePath('.vscode/turnstage/tests/security.adversarial.csv')).toBe(true);
+    expect(isSafeAdversarialSuitePath('../security.adversarial.csv')).toBe(false);
+    expect(isSafeAdversarialSuitePath('tests/security.csv')).toBe(false);
   });
 });

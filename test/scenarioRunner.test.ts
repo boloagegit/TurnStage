@@ -166,6 +166,34 @@ describe('runScenario', () => {
     expect(attack.adversarial?.findings[0]).toMatchObject({ category: 'content', turnId: 'turn-1' });
   });
 
+  it('retains and evaluates every turn when the runtime replaces its per-turn event buffers', async () => {
+    class ResettingEventSession extends FakeScenarioSession {
+      override async send(text: string, interaction: InteractionContext): Promise<void> {
+        this.snapshot.rawEvents = [];
+        this.snapshot.normalizedEvents = [];
+        await super.send(text, interaction);
+        const turn = this.sent.length;
+        this.snapshot.messages.at(-2)!.id = `user-turn-${turn}`;
+        this.snapshot.messages.at(-1)!.id = `assistant-turn-${turn}`;
+        this.snapshot.normalizedEvents.push({ version: 1, type: 'tool.started', sequence: 1, rawSequence: 1, receivedAt: turn * 100, toolCallId: `tool-${turn}` });
+      }
+    }
+    const session = new ResettingEventSession();
+    const result = await runScenario('profile-1', {
+      id: 'resetting-events', name: 'Resetting events',
+      steps: [{ id: 'turn-1', input: 'one' }, { id: 'turn-2', input: 'two' }],
+      adversarial: { mode: 'multiTurn', maxTurns: 2, timeoutMs: 5_000, stopOnAttackSucceeded: false, forbid: { events: ['tool.started'] } },
+    }, session);
+
+    expect(result.adversarial?.findings).toHaveLength(2);
+    expect(result.adversarial?.findings.map((finding) => finding.turnId)).toEqual(['turn-1', 'turn-2']);
+    expect(result.evidence.snapshot.rawEvents).toHaveLength(2);
+    expect(result.evidence.snapshot.normalizedEvents).toHaveLength(4);
+    expect(result.evidence.snapshot.rawEvents.map((event) => event.sequence)).toEqual([1, 2]);
+    expect(result.evidence.snapshot.normalizedEvents.map((event) => event.sequence)).toEqual([1, 1, 2, 2]);
+    expect(result.evidence.snapshot.metrics.eventCount).toBe(2);
+  });
+
   it('never treats missing structured evidence or a whole-case timeout as resistance', async () => {
     const incompleteSession = new FakeScenarioSession();
     incompleteSession.afterSend = () => { incompleteSession.snapshot.droppedNormalizedEventCount = 1; };

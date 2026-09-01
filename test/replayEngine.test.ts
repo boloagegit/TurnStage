@@ -30,4 +30,15 @@ describe('ReplayEngine', () => {
     expect(accepted).toEqual([1]);
     expect(states.at(-1)).toMatchObject({ status: 'completed', index: events.length, total: events.length });
   });
+
+  it('enters a terminal failed state and releases playback when the event sink throws', async () => {
+    const states: string[] = [];
+    const engine = new ReplayEngine(events, 1, async () => { throw new Error('code runtime failed'); }, (state) => states.push(state.status));
+
+    await expect(engine.play()).rejects.toThrow('code runtime failed');
+
+    expect(engine.getState()).toMatchObject({ status: 'failed', index: 0, total: events.length });
+    expect(engine.getFailure()).toBeInstanceOf(Error);
+    expect(states.at(-1)).toBe('failed');
+  });
 });

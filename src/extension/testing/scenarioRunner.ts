@@ -3,6 +3,8 @@ import type {
   AdversarialIssue,
   InteractionContext,
   NetworkExchange,
+  NormalizedEvent,
+  RawStreamEvent,
   ScenarioCheckResult,
   ScenarioDefinition,
   ScenarioRunResult,
@@ -93,9 +95,10 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
   const stepResults: ScenarioRunResult['steps'] = [];
   const findings: AdversarialFinding[] = [];
   const issues: AdversarialIssue[] = [];
+  const evidenceAccumulator = new AdversarialEvidenceAccumulator();
   let attemptedTurns = 0;
   let completedTurns = 0;
-  let activeTurn: { step: ScenarioDefinition['steps'][number]; index: number; startedAt: number } | undefined;
+  let activeTurn: { step: ScenarioDefinition['steps'][number]; index: number; startedAt: number; boundary: ReturnType<typeof captureAdversarialBoundary>; captured: boolean } | undefined;
   try {
     if (!cancellation?.isCancellationRequested) {
       const start = await raceWithTermination(session.startSession(), timeoutSignal, cancellationSignal);
@@ -105,9 +108,9 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
       if (timedOut || cancellation?.isCancellationRequested) break;
       attemptedTurns += 1;
       const stepStartedAt = Date.now();
-      activeTurn = { step, index: turnIndex, startedAt: stepStartedAt };
       const beforeNetwork = session.getNetworkEntries();
       const boundary = captureAdversarialBoundary(session.snapshot, beforeNetwork);
+      activeTurn = { step, index: turnIndex, startedAt: stepStartedAt, boundary, captured: false };
       const send = await raceWithTermination(session.send(step.input, { kind: 'manual' }), timeoutSignal, cancellationSignal);
       if (send === 'timeout') {
         const location = { kind: 'network' as const, networkId: session.getNetworkEntries().at(-1)?.id };
@@ -117,17 +120,19 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
         break;
       }
       if (send === 'cancelled') break;
-      const evaluation = evaluateAdversarialTurn(definition, step, turnIndex, session.snapshot, session.getNetworkEntries(), boundary);
+      const turnSnapshot = evidenceAccumulator.capture(session.snapshot, boundary);
+      activeTurn.captured = true;
+      const evaluation = evaluateAdversarialTurn(definition, step, turnIndex, turnSnapshot, session.getNetworkEntries(), boundary);
       findings.push(...evaluation.findings);
       issues.push(...evaluation.issues);
       if (evaluation.completed) completedTurns += 1;
       const checks = evaluation.findings.length || evaluation.issues.length
         ? [...evaluation.findings.map(findingCheck), ...evaluation.issues.map(issueCheck)]
-        : [resistedTurnCheck(step.id, turnIndex, session.snapshot.messages.filter((message) => message.role === 'assistant').at(-1)?.id)];
+        : [resistedTurnCheck(step.id, turnIndex, turnSnapshot.messages.filter((message) => message.role === 'assistant').at(-1)?.id)];
       stepResults.push({ stepId: step.id, name: step.name?.trim() || step.id, durationMs: Date.now() - stepStartedAt, checks });
+      activeTurn = undefined;
       if (evaluation.findings.length && definition.stopOnAttackSucceeded !== false) break;
       if (evaluation.issues.some((issue) => issue.kind === 'infrastructure')) break;
-      activeTurn = undefined;
     }
   } catch (error) {
     const issue: AdversarialIssue = {
@@ -143,6 +148,10 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
     clearTimeout(timeoutHandle);
     cancellationSubscription?.dispose();
     await abortPromise;
+    if (activeTurn && !activeTurn.captured) {
+      evidenceAccumulator.capture(session.snapshot, activeTurn.boundary);
+      activeTurn.captured = true;
+    }
   }
 
   if (cancellation?.isCancellationRequested && !findings.length && !issues.some((issue) => issue.id.startsWith('indeterminate-cancel'))) {
@@ -158,7 +167,7 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
       : issues.length || attemptedTurns < scenario.steps.length
         ? 'indeterminate'
         : 'resisted';
-  const finalEvidence = { snapshot: structuredClone(session.snapshot), networkEntries: session.getNetworkEntries() };
+  const finalEvidence = { snapshot: evidenceAccumulator.finalize(session.snapshot), networkEntries: session.getNetworkEntries() };
   const checks: ScenarioCheckResult[] = issues.filter((issue) => !stepResults.some((step) => step.checks.some((check) => check.id === issue.id))).map(issueCheck);
   return {
     scenarioId: scenario.id,
@@ -175,6 +184,83 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
       requestPreview: session.requestPreview as ScenarioRunResult['evidence']['requestPreview'],
     },
   };
+}
+
+const MAX_ADVERSARIAL_EVIDENCE_EVENTS = 10_000;
+const metricCounterKeys = ['eventCount', 'byteCount', 'parseErrorCount', 'mappingErrorCount', 'unmatchedEventCount', 'reconnectCount'] as const;
+
+class AdversarialEvidenceAccumulator {
+  private readonly rawEvents: RawStreamEvent[] = [];
+  private readonly normalizedEvents: NormalizedEvent[] = [];
+  private readonly messageRawSequences = new Map<string, number[]>();
+  private readonly metricCounters: Record<typeof metricCounterKeys[number], number> = { eventCount: 0, byteCount: 0, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0, reconnectCount: 0 };
+  private droppedRaw = 0;
+  private droppedNormalized = 0;
+  private nextSequence = 1;
+
+  capture(snapshot: SessionSnapshot, boundary: ReturnType<typeof captureAdversarialBoundary>): SessionSnapshot {
+    const reset = snapshot.rawEvents !== boundary.rawEvents;
+    const rawDelta = reset ? snapshot.rawEvents : snapshot.rawEvents.slice(boundary.rawEventCount);
+    const normalizedReset = snapshot.normalizedEvents !== boundary.normalizedEvents;
+    const normalizedDelta = normalizedReset ? snapshot.normalizedEvents : snapshot.normalizedEvents.slice(boundary.normalizedEventCount);
+    const sequenceMap = new Map<number, number>();
+    const rebasedRaw = rawDelta.map((event) => {
+      const sequence = this.nextSequence++;
+      sequenceMap.set(event.sequence, sequence);
+      return { ...structuredClone(event), sequence };
+    });
+    const rebasedNormalized = normalizedDelta.map((event) => {
+      const sourceSequence = event.rawSequence ?? event.sequence;
+      const sequence = sequenceMap.get(sourceSequence) ?? this.nextSequence++;
+      return { ...structuredClone(event), sequence, ...(event.rawSequence === undefined ? {} : { rawSequence: sequence }) };
+    });
+    this.rawEvents.push(...rebasedRaw);
+    this.normalizedEvents.push(...rebasedNormalized);
+    this.boundEvents(this.rawEvents, 'raw');
+    this.boundEvents(this.normalizedEvents, 'normalized');
+
+    const droppedRaw = reset ? snapshot.droppedEventCount : Math.max(0, snapshot.droppedEventCount - boundary.droppedEventCount);
+    const droppedNormalized = normalizedReset ? snapshot.droppedNormalizedEventCount ?? 0 : Math.max(0, (snapshot.droppedNormalizedEventCount ?? 0) - boundary.droppedNormalizedEventCount);
+    this.droppedRaw += droppedRaw;
+    this.droppedNormalized += droppedNormalized;
+    for (const key of metricCounterKeys) {
+      const value = snapshot.metrics[key] ?? 0;
+      this.metricCounters[key] += reset ? value : Math.max(0, value - boundary.metricCounters[key]);
+    }
+
+    const turnSnapshot = structuredClone(snapshot);
+    turnSnapshot.rawEvents = rebasedRaw;
+    turnSnapshot.normalizedEvents = rebasedNormalized;
+    for (const message of turnSnapshot.messages) {
+      if (boundary.messageIds.has(message.id) || !Array.isArray(message.metadata?.rawSequences)) continue;
+      const rawSequences = message.metadata.rawSequences.flatMap((value) => typeof value === 'number' && sequenceMap.has(value) ? [sequenceMap.get(value)!] : []);
+      message.metadata = { ...message.metadata, rawSequences };
+      this.messageRawSequences.set(message.id, rawSequences);
+    }
+    return turnSnapshot;
+  }
+
+  finalize(snapshot: SessionSnapshot): SessionSnapshot {
+    const result = structuredClone(snapshot);
+    result.rawEvents = structuredClone(this.rawEvents);
+    result.normalizedEvents = structuredClone(this.normalizedEvents);
+    result.droppedEventCount = this.droppedRaw;
+    result.droppedNormalizedEventCount = this.droppedNormalized;
+    result.metrics = { ...result.metrics, ...this.metricCounters };
+    for (const message of result.messages) {
+      const rawSequences = this.messageRawSequences.get(message.id);
+      if (rawSequences) message.metadata = { ...message.metadata, rawSequences: [...rawSequences] };
+    }
+    return result;
+  }
+
+  private boundEvents<T>(events: T[], kind: 'raw' | 'normalized'): void {
+    const overflow = Math.max(0, events.length - MAX_ADVERSARIAL_EVIDENCE_EVENTS);
+    if (!overflow) return;
+    events.splice(0, overflow);
+    if (kind === 'raw') this.droppedRaw += overflow;
+    else this.droppedNormalized += overflow;
+  }
 }
 
 async function raceWithTermination(promise: Promise<void>, deadline: Promise<void>, cancellation: Promise<void>): Promise<'completed' | 'timeout' | 'cancelled'> {

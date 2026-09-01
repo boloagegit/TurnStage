@@ -156,9 +156,10 @@ does not declare a `browser` entry and therefore does not claim support for
    **TurnStage: Export Contract Test Report** to save the latest sanitized
    results manually.
 8. Add known red-team regressions under **Configure Profile → Scenarios →
-   Adversarial tests**. Use JSONC suites for Git-managed bulk cases or CSV for
-   spreadsheet exchange, then triage the four outcomes in Test Explorer or the
-   Profile's latest-results list.
+   Adversarial tests**. Link a workspace-relative JSONC or CSV source for
+   Git-managed bulk cases, or import/export copies for spreadsheet exchange,
+   then triage the four outcomes in Test Explorer or the Profile's
+   latest-results list.
 9. From a latest result, choose **Diagnose with Copilot** to explain timeout,
    TTFT, stream, mapping, assertion, comparison, or repeat-stability evidence.
    Use **Profile Doctor** for configuration-only diagnosis. Response-quality
@@ -366,6 +367,11 @@ recorded conversation through the last user message, then feeds saved raw
 events through the same Mapping Engine and reducer; it never calls the backend.
 Runs recorded without raw events remain inspectable and exportable but are
 clearly marked as unavailable for replay.
+
+The Replay page can delete one local run or clear the current Profile's local
+history after a native confirmation. Deletion never removes exported
+`*.turnstage-run.json` files and is disabled while a request or replay is
+active.
 
 Profiles may also enable reference-only remote session history. It stores only
 the conversation ID and metadata scoped by workspace/profile/actor/environment.

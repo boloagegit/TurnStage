@@ -127,10 +127,11 @@ Indeterminate, or Infrastructure error; incomplete evidence and timeout never
 pass.
 
 Profiles can also list workspace-relative `tests.adversarialSuites` paths.
-Files must end in `.adversarial.jsonc` or `.adversarial.json`, remain inside the
-same workspace folder, and use the versioned `turnstage-adversarial-suite`
-format. Linked discovery adds a Suite level to Test Explorer. JSONC is the
-lossless format; CSV import/export uses one row per turn. See
+Files must end in `.adversarial.jsonc`, `.adversarial.json`, or
+`.adversarial.csv` and remain inside the same workspace folder. JSON/JSONC
+uses the versioned `turnstage-adversarial-suite` format; CSV uses one row per
+ordered turn and is read directly without conversion. Linked discovery adds a
+Suite level to Test Explorer. JSONC is lossless for suite-only metadata. See
 `docs/adversarial-testing.md` for limits, examples, and the bulk workflow.
 
 ### Baseline comparison and performance budgets
@@ -512,6 +513,11 @@ stored in extension global storage. The individual flags control whether raw
 events, normalized events, and the chat snapshot are included; request
 metadata, metrics, and the terminal result remain available. A run without raw
 events cannot reproduce event replay.
+
+Recorded runs are managed from the Replay page. Single-run deletion and
+Profile-scoped clear-history both require native confirmation, are disabled
+while a request/replay is active, and do not remove separately exported run
+files.
 
 `history.remoteSessions.mode: "referenceOnly"` stores conversation ID, title,
 timestamp, actor, and environment in VS Code global state under a workspace-

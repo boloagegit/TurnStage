@@ -54,7 +54,7 @@
   background: var(--mcp-background);
   scrollbar-width: thin;
 }
-
+.mobile-chat-preview__toolbar-overflow-trigger { display: inline-flex; flex: 0 0 auto; }
 .mobile-chat-preview__viewport-icon {
   display: grid;
   place-items: center;
@@ -532,6 +532,10 @@
   font-size: .846em;
   line-height: 1.3;
 }
+
+.mobile-chat-preview__message-tags { display: inline-flex; min-width: 0; flex-wrap: wrap; gap: 4px; }
+.mobile-chat-preview__message-tag { max-width: 16em; overflow: hidden; padding: 1px 6px; border: 1px solid var(--mcp-border); border-radius: 999px; color: var(--mcp-muted); font-size: .692em; font-weight: 600; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-chat-preview__message-tag--info { border-color: var(--vscode-charts-blue, var(--mcp-focus)); color: var(--vscode-charts-blue, var(--mcp-focus)); }.mobile-chat-preview__message-tag--success { border-color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }.mobile-chat-preview__message-tag--warning { border-color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow)); color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow)); }.mobile-chat-preview__message-tag--error { border-color: var(--vscode-errorForeground); color: var(--vscode-errorForeground); }
 
 .mobile-chat-preview__message-body {
   grid-column: 2;

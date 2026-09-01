@@ -63,9 +63,12 @@ export type WebviewMessage = Envelope & (
   | { type: 'run.replay.speed'; speed: 0.25 | 0.5 | 1 | 2 | 4 }
   | { type: 'run.import' }
   | { type: 'run.export'; runId: string }
-  | { type: 'adversarial.file'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate' }
+  | { type: 'run.delete'; runId: string }
+  | { type: 'run.clear' }
+  | { type: 'adversarial.file'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkSuite' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate' }
   | { type: 'test.runAll' }
   | { type: 'test.rerun'; status: 'failed' | 'unstable' | 'incomplete' }
+  | { type: 'test.timeline.open'; evidenceId: string }
   | { type: 'test.evidence.open'; evidenceId: string; location: ScenarioEvidenceLocation }
   | { type: 'campaign.preview'; campaignId: string }
   | { type: 'campaign.run'; campaignId: string }
@@ -97,7 +100,8 @@ export type HostMessage = Envelope & (
   | { type: 'form.accepted'; formId: string; sourceMessageId?: string }
   | { type: 'run.imported'; path: string; runId: string; duplicate: boolean }
   | { type: 'run.exported'; path: string }
-  | { type: 'adversarial.operation'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string }
+  | { type: 'run.history.changed'; deletedCount: number; deletedBytes: number }
+  | { type: 'adversarial.operation'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkSuite' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string }
   | { type: 'test.results'; results: AdversarialResultSummary[] }
   | { type: 'campaign.dashboard'; dashboard: CampaignDashboardV1 }
   | { type: 'campaign.preview'; campaignId: string; selectedCases: number; plannedAttempts: number; plannedRequests: number; maximumDurationMs: number; maxConcurrency: number; warnings: string[] }
@@ -182,9 +186,10 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   if (!isRecord(value) || !hasEnvelope(value, instanceId)) return false;
   const message = value;
   switch (message.type) {
-    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'test.runAll': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
-    case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
+    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'test.runAll': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
+    case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
     case 'test.rerun': return ['failed', 'unstable', 'incomplete'].includes(String(message.status));
+    case 'test.timeline.open': return isBoundedString(message.evidenceId);
     case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
     case 'campaign.preview': case 'campaign.run': case 'campaign.cancel': return isBoundedId(message.campaignId);
     case 'campaign.resume': case 'campaign.acceptBaseline': case 'campaign.exportResults': case 'campaign.copilotSummary': return isBoundedId(message.campaignId) && isBoundedId(message.runId);
@@ -203,6 +208,7 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
     case 'run.replay.play': return isBoundedString(message.runId) && typeof message.speed === 'number' && replaySpeeds.has(message.speed);
     case 'run.replay.speed': return typeof message.speed === 'number' && replaySpeeds.has(message.speed);
     case 'run.export': return isBoundedString(message.runId);
+    case 'run.delete': return isBoundedId(message.runId);
     case 'visual.baseline.save': case 'visual.compare': return isVisualCapture(message);
     default: return false;
   }
@@ -226,7 +232,8 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'form.accepted': return isBoundedString(message.formId) && optionalBoundedString(message.sourceMessageId);
     case 'run.imported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedString(message.runId) && typeof message.duplicate === 'boolean';
     case 'run.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH);
-    case 'adversarial.operation': return ['importCsv', 'importJsonc', 'importJsonl', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path);
+    case 'run.history.changed': return Number.isInteger(message.deletedCount) && Number(message.deletedCount) >= 0 && Number(message.deletedCount) <= 100 && Number.isSafeInteger(message.deletedBytes) && Number(message.deletedBytes) >= 0 && Number(message.deletedBytes) <= 100 * 1024 * 1024;
+    case 'adversarial.operation': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path);
     case 'test.results': return Array.isArray(message.results) && message.results.length <= 10_000 && isStructuredValue(message.results, MAX_HOST_VALUE_NODES);
     case 'campaign.dashboard': return isRecord(message.dashboard) && isStructuredValue(message.dashboard, MAX_HOST_VALUE_NODES);
     case 'campaign.preview': return isBoundedString(message.campaignId) && [message.selectedCases, message.plannedAttempts, message.plannedRequests, message.maximumDurationMs, message.maxConcurrency].every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0) && Array.isArray(message.warnings) && message.warnings.length <= 100 && message.warnings.every((entry) => isBoundedString(entry, 4096));

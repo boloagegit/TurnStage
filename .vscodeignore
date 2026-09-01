@@ -11,6 +11,7 @@ vitest.config.ts
 node_modules/**
 .vscode-test/**
 .github/**
+.impeccable/**
 docs/performance-results.json
 artifacts/**
 *.vsix

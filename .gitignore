@@ -17,6 +17,7 @@ test-results/
 .turnstage/reports/
 
 # Local environment and tool state
+.impeccable/
 .env
 .env.*
 !.env.example

@@ -381,7 +381,10 @@ message/event selection.
 `globalStorageUri/runs/<profileId>.json`, applies retention, and imports or
 exports a versioned run envelope through user-selected file dialogs. Import is
 bounded, accepts legacy raw-run exports, requires the current profile ID, and
-assigns a new ID on collision. A replay restores the recorded snapshot only
+assigns a new ID on collision. Profile-scoped delete and clear operations share
+the same serialized repository queue, require host confirmation, and are
+rejected while a request or replay is active. They do not affect separately
+exported files. A replay restores the recorded snapshot only
 through its last user message, feeds recorded raw events through the same
 mapping/reducer path, and finishes using the stored result. It never calls the
 backend. Runs without raw events cannot be replayed. `ReplayEngine` preserves

@@ -44,6 +44,10 @@
       --vscode-chat-avatarBackground: #3c3c3c;
       --vscode-chat-avatarForeground: #ffffff;
       --vscode-textCodeBlock-background: #181818;
+      --vscode-symbolIcon-propertyForeground: #9cdcfe;
+      --vscode-symbolIcon-stringForeground: #ce9178;
+      --vscode-symbolIcon-numberForeground: #b5cea8;
+      --vscode-symbolIcon-booleanForeground: #569cd6;
       --vscode-badge-background: #4d4d4d;
       --vscode-badge-foreground: #ffffff;
       --vscode-testing-iconPassed: #73c991;
@@ -107,6 +111,7 @@
       },
       metrics: { messageEnabled: ['ttft', 'totalDuration'] },
       tests: {
+        adversarialSuites: ['.vscode/turnstage/tests/security-regression.adversarial.csv'],
         campaigns: [{
           id: 'release-safety',
           name: 'Release safety',
@@ -248,7 +253,7 @@
       target[path.at(-1)] = value;
     };
     window.acquireVsCodeApi = () => ({
-      getState: () => ({ section: query.get('section') ?? 'test', inspectorTab: query.get('tab') ?? 'Raw Events', splitPercent: Number(query.get('split')) || 50, splitCustomized: query.has('split'), draft: query.get('draft') ?? '', chatViewport }),
+      getState: () => ({ section: query.get('section') ?? 'test', configurationSection: query.get('configurationSection') ?? undefined, rightPaneMode: query.get('rightPane') ?? undefined, inspectorTab: query.get('tab') ?? 'Raw Events', splitPercent: Number(query.get('split')) || 50, splitCustomized: query.has('split'), draft: query.get('draft') ?? '', activeEvidenceId: query.get('activeEvidence') ?? undefined, chatViewport }),
       setState: () => {},
       postMessage: (message) => {
         window.__turnstageMessages.push(JSON.parse(JSON.stringify(message)));
@@ -276,6 +281,10 @@
             dispatch({ type: 'inspector.focus', tab, evidenceId: message.evidenceId, networkId: location.networkId, sequence: location.sequence ?? location.rawSequence, messageId: location.messageId });
             dispatch({ type: 'test.timeline', evidenceId: message.evidenceId, timeline: evidenceTimeline });
           }, 0);
+          return;
+        }
+        if (message.type === 'test.timeline.open') {
+          setTimeout(() => dispatch({ type: 'test.timeline', evidenceId: message.evidenceId, timeline: evidenceTimeline }), 0);
           return;
         }
         if (message.type !== 'webview.ready') return;

@@ -25,7 +25,7 @@ export interface TurnStageProfile {
 /** Declarative, profile-owned conversation tests. No field is executable code. */
 export interface ProfileTestsDefinition {
   scenarios: ScenarioDefinition[];
-  /** Workspace-relative, Git-friendly adversarial suite files. */
+  /** Workspace-relative, Git-friendly adversarial JSONC or CSV source files. */
   adversarialSuites?: string[];
   /** Optional explicit, workspace-relative CI report output. */
   reporting?: ScenarioReportingDefinition;
@@ -672,6 +672,19 @@ export interface UiDefinition {
   components?: Record<string, { visible?: boolean; label?: string; collapsible?: boolean; defaultCollapsed?: boolean; [key: string]: unknown }>;
   messageActions?: string[];
   messageActionVisibility?: 'always' | 'interaction';
+  /** Bounded, deterministic labels derived from a message or its correlated events. */
+  messageTags?: MessageTagRule[];
+}
+
+export interface MessageTagRule {
+  id: string;
+  label: string;
+  source: 'message' | 'normalizedEvent' | 'rawEvent';
+  /** Dot path with optional `*` segments, such as `type` or `parts.*.type`. */
+  path: string;
+  operator: 'exists' | 'equals' | 'contains' | 'startsWith';
+  value?: string | number | boolean;
+  tone?: 'neutral' | 'info' | 'success' | 'warning' | 'error';
 }
 
 export interface TurnStageEnvironment {
@@ -878,7 +891,7 @@ export interface SessionSnapshot {
 
 export interface ReplaySnapshot {
   runId: string;
-  status: 'idle' | 'playing' | 'paused' | 'completed' | 'stopped';
+  status: 'idle' | 'playing' | 'paused' | 'completed' | 'stopped' | 'failed';
   speed: 0.25 | 0.5 | 1 | 2 | 4;
   index: number;
   total: number;
@@ -922,5 +935,6 @@ export interface LocalRunSummary {
   normalizedEventCount?: number;
   messageCount?: number;
   errorCount?: number;
+  storageBytes?: number;
   request?: { method?: string; url?: string; variantId?: string };
 }

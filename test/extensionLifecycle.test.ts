@@ -29,6 +29,14 @@ describe('Extension host editor lifecycle', () => {
     expect(editorSource).toContain('const sessionSnapshot = currentSessionSnapshot();');
     expect(editorSource).toContain("message.type === 'webview.ready'");
     expect(editorSource).toContain('await rehydrate();');
+    expect(editorSource).toContain('const pendingSection = this.pendingSections.get(documentKey);');
+    expect(editorSource).not.toContain("this.pendingSections.get(documentKey) ?? 'test'");
+  });
+
+  it('drops late Webview messages after the panel is disposed', () => {
+    expect(editorSource).toContain('if (disposed) return false;');
+    expect(editorSource).toContain('if (disposed || isDisposedWebviewError(error)) return false;');
+    expect(editorSource).toContain("error.message.includes('Webview is disposed')");
   });
 
   it('waits for an editor controller before executing start, replay, import, or export', () => {

@@ -219,7 +219,7 @@ export class ProfileValidator {
     if (adversarialSuites !== undefined) {
       if (!Array.isArray(adversarialSuites) || adversarialSuites.length > 100) out.push(issue(tree, ['tests', 'adversarialSuites'], localize('Adversarial suites must be an array with at most 100 workspace-relative paths.')));
       else {
-        adversarialSuites.forEach((path, index) => { if (!isSafeAdversarialSuitePath(path)) out.push(issue(tree, ['tests', 'adversarialSuites', index], localize('Adversarial suite path must be a safe workspace-relative .adversarial.jsonc or .json path.'))); });
+        adversarialSuites.forEach((path, index) => { if (!isSafeAdversarialSuitePath(path)) out.push(issue(tree, ['tests', 'adversarialSuites', index], localize('Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .json, or .csv path.'))); });
         if (duplicates(adversarialSuites).length) out.push(issue(tree, ['tests', 'adversarialSuites'], localize('Adversarial suite paths must be unique.')));
       }
     }
@@ -437,6 +437,27 @@ export class ProfileValidator {
     if (streamingIntensity !== undefined && (typeof streamingIntensity !== 'number' || !Number.isInteger(streamingIntensity) || streamingIntensity < 10 || streamingIntensity > 100)) out.push(issue(tree, ['ui', 'streaming', 'intensityPercent'], localize('Assistant streaming intensity must be an integer from 10 to 100 percent.')));
     const messageActionVisibility = profile.ui?.messageActionVisibility as unknown;
     if (messageActionVisibility !== undefined && !['always', 'interaction'].includes(String(messageActionVisibility))) out.push(issue(tree, ['ui', 'messageActionVisibility'], localize('Unknown message action visibility: {value}.', { value: String(messageActionVisibility) })));
+    const messageTags = profile.ui?.messageTags as unknown;
+    if (messageTags !== undefined && (!Array.isArray(messageTags) || messageTags.length > 20)) {
+      out.push(issue(tree, ['ui', 'messageTags'], localize('Message tags must be an array with at most 20 rules.')));
+    } else if (Array.isArray(messageTags)) {
+      const ids = new Set<string>();
+      for (const [index, candidate] of messageTags.entries()) {
+        const path = ['ui', 'messageTags', index] as const;
+        if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) { out.push(issue(tree, [...path], localize('Message tag rules must be objects.'))); continue; }
+        const rule = candidate as Record<string, unknown>;
+        const id = rule.id;
+        if (typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(id) || ids.has(id)) out.push(issue(tree, [...path, 'id'], localize('Message tag ids must be unique, bounded identifiers.')));
+        else ids.add(id);
+        if (typeof rule.label !== 'string' || !rule.label.trim() || rule.label.length > 48) out.push(issue(tree, [...path, 'label'], localize('Message tag labels must contain 1 to 48 characters.')));
+        if (!['message', 'normalizedEvent', 'rawEvent'].includes(String(rule.source))) out.push(issue(tree, [...path, 'source'], localize('Unknown message tag source: {value}.', { value: String(rule.source) })));
+        if (typeof rule.path !== 'string' || rule.path.length > 256 || !/^(?!.*(?:^|\.)(?:__proto__|prototype|constructor)(?:\.|$))[A-Za-z0-9_-]+(?:\.(?:[A-Za-z0-9_-]+|\*))*$/u.test(rule.path)) out.push(issue(tree, [...path, 'path'], localize('Message tag paths must be safe bounded dot paths.')));
+        if (!['exists', 'equals', 'contains', 'startsWith'].includes(String(rule.operator))) out.push(issue(tree, [...path, 'operator'], localize('Unknown message tag operator: {value}.', { value: String(rule.operator) })));
+        if (rule.operator !== 'exists' && !['string', 'number', 'boolean'].includes(typeof rule.value)) out.push(issue(tree, [...path, 'value'], localize('This message tag operator requires a primitive value.')));
+        if (typeof rule.value === 'string' && rule.value.length > 512) out.push(issue(tree, [...path, 'value'], localize('Message tag values cannot exceed 512 characters.')));
+        if (rule.tone !== undefined && !['neutral', 'info', 'success', 'warning', 'error'].includes(String(rule.tone))) out.push(issue(tree, [...path, 'tone'], localize('Unknown message tag tone: {value}.', { value: String(rule.tone) })));
+      }
+    }
     profile.stream.mappings.forEach((mapping, index) => {
       if (mapping.emit.type !== 'message.metric.updated') return;
       const metric = mapping.emit.metric;

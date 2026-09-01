@@ -37,6 +37,7 @@ export async function run(): Promise<void> {
   await assertConversationContractReports(workspaceRoot);
   await assertCopilotToolBoundary(workspaceRoot);
   await assertCustomEditorAndTextFallback(profileUri);
+  await assertReplayCloseReopenLifecycle();
   await assertDiagnostics(profileDirectory, profileUri);
   await assertFileDiscoveryAfterCreateAndChange(profileDirectory);
   await assertWorkspaceTrustBehavior(profileDirectory);
@@ -184,15 +185,17 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
   }
   const json = await waitFor(async () => await exists(jsonUri) ? readText(jsonUri) : undefined, 'the trusted JSON contract report', 15_000);
   const junit = await waitFor(async () => await exists(junitUri) ? readText(junitUri) : undefined, 'the trusted JUnit contract report', 15_000);
-  const parsed = JSON.parse(json) as { format?: string; version?: number; summary?: { total?: number; passed?: number; failed?: number; attackSucceeded?: number }; failureClusters?: Array<{ count?: number; fingerprint?: { digest?: string } }>; scenarios?: Array<{ comparison?: { differenceCount?: number }; adversarial?: { outcome?: string; attemptedTurns?: number; completedTurns?: number; plannedTurns?: number; repetitions?: { requestedAttempts?: number; completedAttempts?: number; sampleComplete?: boolean; stability?: string; counts?: Record<string, number> }; reliability?: { completedAttempts?: number; sampleComplete?: boolean; verdict?: string; duration?: { p95Ms?: number } }; timeline?: { entries?: Array<{ phase?: string; location?: { kind?: string } }>; completeness?: string } } }> };
+  const parsed = JSON.parse(json) as { format?: string; version?: number; summary?: { total?: number; passed?: number; failed?: number; resisted?: number; attackSucceeded?: number }; failureClusters?: Array<{ count?: number; fingerprint?: { digest?: string } }>; scenarios?: Array<{ adversarial?: { outcome?: string; attemptedTurns?: number; completedTurns?: number; plannedTurns?: number; repetitions?: { requestedAttempts?: number; completedAttempts?: number; sampleComplete?: boolean; stability?: string; counts?: Record<string, number> }; reliability?: { completedAttempts?: number; sampleComplete?: boolean; verdict?: string; duration?: { p95Ms?: number } }; timeline?: { entries?: Array<{ phase?: string; location?: { kind?: string } }>; completeness?: string } }; comparison?: { differenceCount?: number } }> };
   assert.equal(parsed.format, 'turnstage-contract-report');
   assert.equal(parsed.version, 2);
-  assert.equal(parsed.summary?.total, 2);
-  assert.equal(parsed.summary?.passed, 1, json);
+  assert.equal(parsed.summary?.total, 3);
+  assert.equal(parsed.summary?.passed, 2, json);
   assert.equal(parsed.summary?.failed, 1, json);
+  assert.equal(parsed.summary?.resisted, 1, json);
   assert.equal(parsed.summary?.attackSucceeded, 1, json);
   assert.equal(parsed.scenarios?.find((scenario) => scenario.comparison)?.comparison?.differenceCount, 0);
-  const adversarial = parsed.scenarios?.find((scenario) => scenario.adversarial)?.adversarial;
+  const adversarialScenarios = parsed.scenarios?.filter((scenario) => scenario.adversarial) ?? [];
+  const adversarial = adversarialScenarios.find((scenario) => scenario.adversarial?.outcome === 'attackSucceeded')?.adversarial;
   assert.equal(adversarial?.outcome, 'attackSucceeded');
   assert.equal(adversarial?.attemptedTurns, 2);
   assert.equal(adversarial?.completedTurns, 2);
@@ -209,7 +212,11 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
   assert.ok(adversarial?.timeline?.entries?.some((entry) => entry.phase === 'terminal'), json);
   assert.ok((parsed.failureClusters?.length ?? 0) > 0, json);
   assert.match(parsed.failureClusters?.[0]?.fingerprint?.digest ?? '', /^[a-f0-9]{64}$/);
-  assert.match(junit, /<testsuite[^>]+tests="2"[^>]+failures="1"/);
+  const csvAdversarial = adversarialScenarios.find((scenario) => scenario.adversarial?.outcome === 'resisted')?.adversarial;
+  assert.equal(csvAdversarial?.repetitions?.requestedAttempts, 2, json);
+  assert.equal(csvAdversarial?.repetitions?.completedAttempts, 2, json);
+  assert.equal(csvAdversarial?.repetitions?.counts?.resisted, 2, json);
+  assert.match(junit, /<testsuite[^>]+tests="3"[^>]+failures="1"/);
   assert.match(junit, /Adversarial attack succeeded/);
   for (const forbidden of ['Integration Profile', 'Integration contract', 'Integration adversarial', 'Integration multi-turn attack', 'Integration baseline', 'Integration candidate', 'Hello from Test Explorer', 'Establish context', 'Run the known fixed attack', 'rawEvents', 'requestPreview', 'actual', 'expected']) {
     assert.equal(json.includes(forbidden), false, `JSON contract report must exclude ${forbidden}`);
@@ -344,6 +351,30 @@ async function assertCustomEditorAndTextFallback(profileUri: vscode.Uri): Promis
   // and avoids leaving a dirty editor or a pending Extension Host UI prompt.
   const active = vscode.window.tabGroups.activeTabGroup.activeTab;
   if (active) await vscode.window.tabGroups.close(active, true);
+}
+
+async function assertReplayCloseReopenLifecycle(): Promise<void> {
+  const demoUri = vscode.Uri.parse('turnstage-demo:/basic-sse-chat.turnstage.jsonc');
+  const first = await vscode.commands.executeCommand<string>('turnstage.replayRun', demoUri);
+  assert.equal(first, 'started', 'A built-in fixture replay should start in the Extension Host');
+  const firstTab = await waitFor(() => {
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    return tab?.input instanceof vscode.TabInputCustom && tab.input.uri.toString() === demoUri.toString() ? tab : undefined;
+  }, 'the built-in fixture replay tab');
+
+  // Close while replay is still active. The provider must drain the replay
+  // task and disposal before a reopened controller reads the run list.
+  assert.equal(await vscode.window.tabGroups.close(firstTab, true), true);
+  const second = await vscode.commands.executeCommand<string>('turnstage.replayRun', demoUri);
+  assert.equal(second, 'started', 'Replay should start after closing and reopening its custom editor');
+
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const repeated = await vscode.commands.executeCommand<string>('turnstage.replayRun', demoUri);
+  assert.equal(repeated, 'started', 'A completed replay should be repeatable instead of remaining active');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  const active = vscode.window.tabGroups.activeTabGroup.activeTab;
+  if (active?.input instanceof vscode.TabInputCustom && active.input.uri.toString() === demoUri.toString()) await vscode.window.tabGroups.close(active, true);
 }
 
 async function assertDiagnostics(profileDirectory: vscode.Uri, profileUri: vscode.Uri): Promise<void> {
