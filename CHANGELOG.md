@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.17.0
+
+- Added direct workspace-relative `.adversarial.csv` suite linking across the Profile GUI, Test Explorer, CLI, schema, watcher, and report pipeline. A Profile can mix independent JSONC and CSV suites without conversion; CSV retains ordered multi-turn cases and per-case repetitions, while JSONC remains the lossless format for suite-only defaults and metadata.
+- Hardened replay lifecycle and persistence. Stop now drains active replay work, repeated replay survives editor close/reopen, event capture remains complete, and the Replay page can delete one recorded run or clear the current Profile's local history through native confirmation. Deletion is serialized with concurrent saves, rejected while a request or replay is active, and never removes separately exported files.
+- Refined VS Code Webview navigation and action hierarchy with a dedicated Red Team tab, compact table-based case settings, contextual overflow actions, persistent right-pane state, searchable syntax-highlighted JSON evidence, bounded event virtualization, generic message tags, and causal evidence beside adversarial results rather than above them.
+- Expanded real Extension Host and mock-server coverage for mixed JSONC/CSV suites, repeated probabilistic outcomes, tab rehydration, Stop/replay recovery, debug evidence, Restricted Mode, and packaging boundaries. Existing version-1 Profiles and adversarial suites remain compatible; this release still does not add an LLM judge, external classifier, adaptive attack generator, arbitrary executable scripts, or unbounded execution.
+
 ## 0.16.0
 
 - Added the stable VS Code-native `@turnstage` Chat participant with bounded `/diagnose`, `/run`, `/compare`, `/configure`, and `/evidence` workflows. It orchestrates only TurnStage language-model tools, preserves native confirmations for network runs, Profile edits, and response disclosure, renders evidence actions and deterministic follow-ups, supports English and Traditional Chinese prompts, and retains only sanitized IDs and outcome metadata across turns.
