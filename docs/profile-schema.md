@@ -126,13 +126,19 @@ version. `maxTurns` is a hard bound rather than a truncation request, and
 Indeterminate, or Infrastructure error; incomplete evidence and timeout never
 pass.
 
-Profiles can also list workspace-relative `tests.adversarialSuites` paths.
-Files must end in `.adversarial.jsonc`, `.adversarial.json`, or
-`.adversarial.csv` and remain inside the same workspace folder. JSON/JSONC
-uses the versioned `turnstage-adversarial-suite` format; CSV uses one row per
-ordered turn and is read directly without conversion. Linked discovery adds a
-Suite level to Test Explorer. JSONC is lossless for suite-only metadata. See
-`docs/adversarial-testing.md` for limits, examples, and the bulk workflow.
+Profiles can also list `tests.adversarialSuites` references. A portable
+reference is a safe workspace-relative path ending in `.adversarial.jsonc`,
+`.adversarial.json`, or `.adversarial.csv`. The Profile editor can also link an
+explicitly selected external file; it writes an opaque `external:<grant>:<name>`
+reference whose local authorization is stored in VS Code workspace state and
+bound to the exact Profile URI. External references are intentionally not
+portable: another machine, workspace-state reset, or a copied Profile must link
+the file again. Missing or mismatched authorization fails closed before reading
+the file. JSON/JSONC uses the versioned `turnstage-adversarial-suite` format;
+CSV uses one row per ordered turn and is read directly without conversion.
+Linked discovery adds a Suite level to Test Explorer. JSONC is lossless for
+suite-only metadata. See `docs/adversarial-testing.md` for limits, examples,
+and the bulk workflow.
 
 ### Baseline comparison and performance budgets
 
@@ -494,11 +500,17 @@ equivalent extension resource. Both replay without a network call. See
 ## UI, history, errors, security, metrics
 
 The `ui` object supports typed layout presets (`chat-only`, `split-inspector`,
-`chat-with-metrics`, `compact`), inspector position/width, composer hints,
-Assistant streaming indicators (`none`, `caret`, `dots`, or `shimmer`) with a
-bounded animation speed (`400`–`4000` ms) and intensity (`10`–`100` percent),
-lock hints, component visibility metadata, and message action names. The
-Webview applies layout/composer settings, component visibility, labels, and
+`chat-with-metrics`, `compact`), inspector position/width, composer hints, and
+Assistant streaming presentation. `ui.streaming.reveal` is `instant`, `event`,
+or `adaptive`; adaptive reveal uses `pace` (`calm`, `balanced`, or `fast`) and
+an integer `maxVisualLagMs` from `100` to `2000`. `indicator` is independently
+`none`, `caret`, `dots`, or `shimmer`, with bounded animation `speedMs`
+(`400`–`4000`) and `intensityPercent` (`10`–`100`). The legacy `effect` field is
+still accepted as an alias for `indicator`. Reveal changes presentation only:
+events, metrics, evidence, and terminal outcomes are not delayed, and reduced
+motion or assistive technology bypasses adaptive reveal. The object also
+supports lock hints, component visibility metadata, and message action names.
+The Webview applies layout/composer settings, component visibility, labels, and
 active-turn allow/disable lists. The allow list wins while a turn is active;
 Stop, Inspector, Configuration, history viewing, and Copy keep safe defaults.
 `ui.messageActionVisibility` is `always` by default so Copy, Retry,

@@ -40,7 +40,9 @@ ProfileRepository / TextDocument
   → NormalizedEvent (version 1)
   → reduceEvent
   → SessionSnapshot
-  → debounced session.snapshot message
+  → full session.snapshot checkpoint
+  → debounced session.delta append/upsert updates
+  → full checkpoint fallback if ordering or identity cannot be proven
   → React renderer and inspector
 ```
 
@@ -87,9 +89,13 @@ remote, WSL, or a development container). This repository does not claim
 VS Code Web support.
 
 When a profile is opened, the custom editor posts a profile snapshot,
-validation diagnostics, and then session snapshots. A static opening starts
-immediately after a valid controller is created. A request-backed opening stays
-`notStarted` until **Start Session** is invoked.
+validation diagnostics, and then a full session checkpoint. Normal session
+changes are batched and posted as bounded raw/normalized append deltas plus
+message remove/upsert changes and changed run/request/network projections. A
+session identity change, event-retention discontinuity, or Webview mismatch
+requests another full checkpoint rather than applying an uncertain delta. A
+static opening starts immediately after a valid controller is created. A
+request-backed opening stays `notStarted` until **Start Session** is invoked.
 
 ## Conversation contract tests
 
@@ -111,9 +117,14 @@ An adversarial Scenario switches `runScenario` to a bounded fixed-script
 runner. It captures a per-turn evidence boundary, evaluates only newly observed
 assistant messages, Network exchanges, and normalized events, and assigns one
 of four domain outcomes. Suite discovery resolves validated workspace-relative
-JSONC files and publishes Profile → Suite → Case → Turn. Batch workers are
-limited by `turnstage.adversarialConcurrency` (1–8, default 3); each case still
-owns an isolated `SessionController` and whole-case timeout.
+JSONC/JSON/CSV files or an explicitly authorized external reference and
+publishes Profile → Suite → Case → Turn. External grants live in VS Code
+workspace state, are bound to the exact Profile URI, retain at most 100 entries,
+and fail closed when missing. Batch workers are limited by
+`turnstage.adversarialConcurrency` (1–8, default 3); each case still owns an
+isolated `SessionController` and whole-case timeout. The Red Team Webview catalog
+receives at most 100 structural case summaries and never receives linked prompts
+or rule values.
 
 The last 100 Scenario evidence records are cached only in Extension Host
 memory. A failed `TestMessage` contains a trusted command link whose arguments
@@ -136,7 +147,7 @@ evidence. Configured reports are written below a validated workspace-relative
 directory after trusted Test Explorer runs; manual export uses the native Save
 dialog. Evidence Bundle export writes a new folder with the report projections,
 sanitized adversarial summary, turn, finding, Network, and Event CSVs, and a
-privacy manifest. Version 5 also projects a bounded causal timeline and
+privacy manifest. Version 6 also projects a bounded causal timeline and
 deterministic failure clusters from structural metadata; it does not add raw
 content to reports. Visible visual artifacts are copied only after a second
 explicit choice. Debug evidence remains a separate in-memory path and never
@@ -352,13 +363,18 @@ Every message has:
 Webview-to-host message types include `webview.ready`, profile validation/text
 operations, control changes, session/request/conversation operations,
 `citation.open`, `action.invoke`, form operations, and run replay/import/export.
-Host-to-Webview types include `host.ready`, `workspace.section`, `profile.snapshot`,
-`profile.validation`, `session.snapshot`, `request.error`, `run.imported`,
-`run.exported`, and `workspaceTrust.changed`.
+Host-to-Webview types include `host.ready`, `workspace.section`,
+`profile.snapshot`, `profile.validation`, `session.snapshot`, `session.delta`,
+`request.error`, `run.imported`, `run.exported`, and
+`workspaceTrust.changed`.
 
-`session.snapshot` carries only bounded local-run summaries for the Runs list;
-raw events, normalized events, requests, and recorded chat snapshots remain in
-the Extension Host and are resolved by run ID for replay or export.
+The initial `session.snapshot` is a bounded current-session checkpoint plus
+local-run summaries. After that checkpoint, `session.delta` carries only the
+new raw/normalized event suffix, changed message tails, removals, and changed
+run/request/network projections. The Webview requests a fresh checkpoint if a
+delta cannot be applied to the exact base session. Full recorded-run raw events,
+normalized events, requests, and chat snapshots remain in the Extension Host
+and are resolved by run ID for replay or export.
 
 The host validates the envelope and instance ID with `isWebviewMessage`; this
 is a shallow discriminant check, not a full runtime schema validation of every
@@ -447,14 +463,17 @@ These are current implementation facts, not benchmark conclusions:
 - Profile-configured component visibility and active-turn allow/disable lists
   are applied by the Webview. Required stop context is checked before the
   remote stop request; a missing value produces a non-blocking warning.
-- The editor batches snapshots through `EventBatcher` at the configured
-  interval with a maximum of 50 changes. Terminal updates bypass the timer for
-  an immediate flush.
+- The editor batches session changes through `EventBatcher` at the configured
+  interval. After a full checkpoint the normal path sends bounded deltas;
+  discontinuous event retention or identity forces a full-checkpoint fallback.
+  Terminal updates bypass the timer for an immediate flush.
 - Raw and normalized events are bounded by event limits, raw events also have
   a byte limit, and messages have a conversation limit. Run JSON does not have
-  an equivalent global byte limit. Messages use browser
-  content visibility rather than a fully windowed list. Stable per-message
-  citation numbering and late citation metadata upsert are implemented. The
+  an equivalent global byte limit. Chat initially mounts the newest 200
+  messages and reveals earlier history in 200-message steps, capped at 1,000
+  mounted messages; this is progressive bounded mounting rather than a fully
+  virtualized variable-height list. Stable per-message citation numbering and
+  late citation metadata upsert are implemented. The
   inspector supports persistent text, event-type, mapping-status, event-health,
   and terminal-event filtering. Unknown vendor events remain available in Raw
   Events and do not imply a generic renderer.

@@ -13,7 +13,7 @@ The contributed VS Code settings are:
 | `turnstage.maxBufferedEvents` | `5000` | Minimum 100; caps raw and normalized events retained in a live session |
 | `turnstage.maxConversationMessages` | `500` | 50–5000; caps conversation messages retained in memory |
 | `turnstage.maxBufferedBytes` | `10485760` | Minimum 1048576; caps JSON byte size of the raw-event buffer (10 MiB default) |
-| `turnstage.streamBatchIntervalMs` | `32` | 16–100 ms; batching interval for host-to-Webview `session.snapshot` messages |
+| `turnstage.streamBatchIntervalMs` | `32` | 16–100 ms; batching interval for Host-to-Webview session updates after the initial checkpoint |
 | `turnstage.runRetention` | `20` | 1–100; fallback local-run retention |
 | `turnstage.profileGlob` | `.vscode/turnstage/profiles/*.turnstage.jsonc` | Discovery scope, not a throughput limit |
 | `turnstage.logLevel` | `info` | Filters Output Channel entries; `debug` adds per-attempt, chunk, event, retry, timeout, and mapping metadata without payloads |
@@ -43,16 +43,18 @@ ignores non-finite durations.
 
 ## Host-to-Webview update path
 
-The custom editor's `sendSession` function queues changes through
-`EventBatcher` using `streamBatchIntervalMs` and a maximum batch of 50 changes.
-A burst therefore produces fewer `session.snapshot` messages than one message
-per event, while the maximum batch forces progress under continuous input. The
-snapshot contains the current session, raw/normalized arrays, errors, metrics,
-and local runs.
+The custom editor first sends a full `session.snapshot` checkpoint. Its
+`sendSession` function then queues changes through `EventBatcher` using
+`streamBatchIntervalMs`; the normal flush asks `SessionDeltaTracker` for a
+bounded `session.delta`. Event arrays carry a retained-sequence boundary and an
+append-only suffix, messages carry remove IDs and changed tail upserts, and run,
+request-preview, or Network projections are included only when changed.
 
-Terminal changes bypass the timer and flush immediately. There is no
-sequence-range field in the host protocol because the Webview still receives a
-bounded current-state snapshot rather than event deltas.
+The tracker deliberately returns no delta when the session identity changed or
+retained event ordering can no longer be proven. The host then sends and records
+a fresh full checkpoint. The Webview performs the same base-session check and
+requests a resync instead of applying a mismatched delta. Terminal changes
+bypass the timer and flush immediately.
 
 The Webview keeps the current Tree-selected section, draft, inspector tab,
 split size, and linked message/event selection through VS Code's
@@ -71,20 +73,28 @@ The current UI includes these performance-conscious choices:
   collapsible element;
 - message text/markdown deltas are merged into one part per type by the
   reducer;
+- Chat initially mounts the latest 200 messages and lets the user reveal earlier
+  history in 200-message steps up to 1,000 mounted messages;
+- Markdown input is bounded and its parsed block tree is memoized by message
+  text;
 - chat auto-scrolls only while the user remains near the bottom, with a Jump
   to latest control otherwise;
-- stream updates are delivered as snapshots at the configured debounce rate;
+- stream updates use bounded deltas after a full checkpoint, at the configured
+  batching interval;
+- adaptive Assistant reveal segments even a large single-event response into a
+  bounded visual schedule and catches up within `maxVisualLagMs`; it never delays
+  canonical events, TTFT, evidence, or terminal state;
 - CSS uses VS Code theme variables and reduced-motion rules rather than a
   separate visual runtime.
 - Chat screenshot rendering is user-triggered, capped at 8 million output
   pixels, and bounded again by a 24 MiB clipboard-side PNG limit.
 
-The current UI does not virtualize the conversation message list, does not use
-`React.memo`, and does not defer syntax highlighting (code is rendered as text
-inside a simple code block). Fixed-height event rows do not expand; selection
-updates a separate detail region. Inspector text search and event-type
-filtering are implemented; sequence-range batches and incremental citation
-indexing are not.
+The conversation list is not a fully virtualized variable-height list; the
+1,000 mounted-message cap is a deliberate UI bound below the configurable
+5,000-message canonical session ceiling. Fixed-height event rows do not expand;
+selection updates a separate detail region. Inspector text search and
+event-type filtering are implemented. Delta messages use sequence boundaries,
+but incremental citation indexing is not implemented.
 
 ## Activation and bundle behavior
 
@@ -179,19 +189,24 @@ For each run capture:
 
 ## Observed results
 
-Measured 2026-08-28 with Node 26.3.1 on macOS 26.5.2 arm64. These are
+Measured 2026-09-01 with Node 26.3.1 on macOS 26.5.2 arm64. These are
 microbenchmarks and do not substitute for a VS Code UI trace.
 
 | Scenario | Result | Environment/date | Notes |
 | --- | --- | --- | --- |
-| SSE representative chunks | 0.0022 ms mean; 445,632.68 runs/s | Node 26.3.1, 2026-08-28 | Chunk-safe parser microbenchmark |
-| NDJSON representative chunks | 0.0011 ms mean; 891,845.46 runs/s | Node 26.3.1, 2026-08-28 | Chunk-safe parser microbenchmark |
-| One event through all matching rules | 0.0012 ms mean; 851,220.47 runs/s | Node 26.3.1, 2026-08-28 | Generic mapping overhead |
-| 20,000 text deltas | 22.1482 ms mean; 45.1504 runs/s | Node 26.3.1, 2026-08-28 | Two all-match mapping rules |
-| 5,000 raw events | 1.0522 ms mean; 950.35 runs/s | Node 26.3.1, 2026-08-28 | No drop for the benchmark payload |
-| 100 tool/citation/follow-up groups | 0.2332 ms mean; 4,287.55 runs/s | Node 26.3.1, 2026-08-28 | 300 reducer events |
-| Abort, timeout, disconnect cleanup | Unit paths passed; UI trace not measured | Vitest, 2026-08-28 | Do not infer browser responsiveness |
-| Production bundle sizes | 150,042 B host; 385,256 B Webview JS; 97,919 B CSS | esbuild, 2026-08-28 | Minified, `vscode` external; integration bundle excluded from VSIX |
+| SSE representative chunks | 0.0026 ms mean; 387,350.29 runs/s | Node 26.3.1, 2026-09-01 | Chunk-safe parser microbenchmark |
+| NDJSON representative chunks | 0.0017 ms mean; 583,894.89 runs/s | Node 26.3.1, 2026-09-01 | Chunk-safe parser microbenchmark |
+| One event through all matching rules | 0.0023 ms mean; 441,687.91 runs/s | Node 26.3.1, 2026-09-01 | Generic mapping overhead |
+| 20,000 text deltas | 38.2364 ms mean; 26.1531 runs/s | Node 26.3.1, 2026-09-01 | Two all-match mapping rules |
+| 5,000 raw events | 1.5875 ms mean; 629.92 runs/s | Node 26.3.1, 2026-09-01 | No drop for the benchmark payload |
+| 100 tool/citation/follow-up groups | 0.1315 ms mean; 7,605.03 runs/s | Node 26.3.1, 2026-09-01 | 300 reducer events |
+| 5,000 correlated text deltas | 1.2996 ms mean; 769.44 runs/s | Node 26.3.1, 2026-09-01 | Reducer aggregation path |
+| Apply one delta to 5,000 events and 500 messages | 0.0375 ms mean; 26,667.71 runs/s | Node 26.3.1, 2026-09-01 | Existing checkpoint plus one append/upsert delta |
+| Serialize bounded delta | 0.0011 ms mean; 925,761.69 runs/s | Node 26.3.1, 2026-09-01 | Same update as the full-snapshot comparison |
+| Serialize equivalent full snapshot | 1.6936 ms mean; 590.45 runs/s | Node 26.3.1, 2026-09-01 | 5,001 events and 500 messages |
+| Plan one-million-character adaptive reveal | 66.8725 ms mean; 14.9538 runs/s | Node 26.3.1, 2026-09-01 | Segmentation/planning microbenchmark, not elapsed visual reveal time |
+| Abort, timeout, disconnect cleanup | Unit paths passed; UI trace not measured | Vitest, 2026-09-01 | Do not infer browser responsiveness |
+| Production bundle sizes | 623,753 B host; 586,008 B Webview JS; 159,474 B CSS; 179,614 B CLI | esbuild, 2026-09-01 | Minified, `vscode` external; 32,666 B integration bundle excluded from VSIX |
 
 ## Current performance limitations
 
@@ -200,10 +215,11 @@ microbenchmarks and do not substitute for a VS Code UI trace.
   be substantially larger than their list summaries.
 - Recorded-run lists send bounded summaries to the Webview; full raw events,
   normalized events, requests, and snapshots remain host-side.
-- Host snapshot updates are batched by `streamBatchIntervalMs` with a maximum
-  batch of 50 changes; terminal updates are flushed immediately.
-- Conversation messages use browser content visibility rather than a fully
-  windowed list. Raw-event details render separately from fixed-height rows.
+- Host updates are batched by `streamBatchIntervalMs`; normal updates use deltas
+  after a full checkpoint, and terminal updates are flushed immediately.
+- Conversation history uses progressive bounded mounting rather than a fully
+  virtualized variable-height list. Raw-event details render separately from
+  fixed-height rows.
 - Replay event pacing is scheduler-based and is not validated by a full UI
   trace under Extension Host load; displayed message timings remain the
   original recorded measurements.

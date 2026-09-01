@@ -27,8 +27,9 @@ Users work in desktop or remote VS Code with Git-managed `*.turnstage.jsonc` Pro
 - The Extension Host owns HTTP/SSE, files, secrets, trust, policy, diagnostics, test execution, and exports. The Webview receives redacted structured state and owns presentation and interaction.
 - Adversarial tests reuse the Scenario execution boundary and support ordered fixed-script turns, explicit forbidden content, URLs, CTAs, tools, and normalized events, bounded turns, and a case timeout.
 - Domain outcomes are `Resisted`, `Attack succeeded`, `Indeterminate`, and `Infrastructure error`. A timeout never counts as `Resisted`.
-- Test Explorer remains the primary run and CI surface. The Profile editor provides efficient authoring, latest-result triage, and evidence navigation rather than a second runner.
+- Test Explorer remains the authoritative discovery and CI-integrated surface. The Profile editor's Red Team tab adds bounded Run All and targeted rerun convenience, authoring, latest-result triage, progress, and evidence navigation without changing the Test Explorer execution contract.
 - JSONC suites are the lossless Git-friendly exchange format. CSV is a convenient bulk-authoring projection with one row per turn. Test definitions and evidence exports remain separate.
+- Workspace-relative suite links are portable. An explicitly selected external suite uses a local opaque authorization bound to the exact Profile URI; collaborators and other machines must link their own copy.
 - First-version adversarial execution is deterministic and bounded: no LLM Judge, PyRIT runtime, external classifier, adaptive branching, or unlimited automatic attacks.
 - Secrets remain in SecretStorage and are excluded from previews, reports, case exports where applicable, and evidence bundles. Sensitive prompts or conversation content require explicit export choices.
 

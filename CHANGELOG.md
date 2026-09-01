@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.22.1
+
+- Corrected the README and product, architecture, performance, Profile schema,
+  adversarial-testing, and security documentation to match the 0.22 runtime.
+- Documented incremental session checkpoints/deltas, progressive Chat mounting,
+  adaptive Assistant reveal, the three-pane Debug/Red Team/Configure workspace,
+  bounded Red Team catalogs, and Profile-bound external suite authorizations.
+- Refreshed the repeatable benchmark record and clarified which measurements are
+  microbenchmarks rather than Extension Host or end-to-end UI evidence.
+
 ## 0.22.0
 
 - Reworked the Red Team workspace for large suites with bounded catalog loading, compact filtering and pagination, clearer result actions, causal evidence navigation, and explicit campaign or run progress without rendering every case at once.

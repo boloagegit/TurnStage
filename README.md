@@ -35,6 +35,15 @@ renderer and inspector.
   as a PNG, ready to paste into an issue, document, or chat.
   Messages and their raw/normalized events can be selected in either direction;
   event evidence is grouped by conversation turn in a collapsible virtual tree.
+- Incremental Host-to-Webview session deltas after a full checkpoint, with a
+  fail-safe full-snapshot resync when ordering or identity cannot be proven.
+  Chat initially mounts the latest 200 messages and can progressively reveal
+  earlier history up to 1,000 rendered messages, while the canonical bounded
+  session remains owned by the Extension Host.
+- Adaptive Assistant response reveal for providers that emit a large response
+  in one event. Reveal pace and maximum visual lag are presentation-only;
+  normalized events, TTFT, evidence, terminal state, and test outcomes update
+  immediately. Reduced-motion and assistive-technology modes bypass the effect.
 - Native Profile Tree resource rows with compact **Run**, **Open**, and
   **Configure Profile** actions. Profile Configuration provides eight
   profile-specific sections in the Custom Editor; Test remains the live chat
@@ -156,11 +165,12 @@ does not declare a `browser` entry and therefore does not claim support for
    **Configure Profile → Scenarios**, or edit the same fields in JSONC. Run
    **TurnStage: Export Contract Test Report** to save the latest sanitized
    results manually.
-8. Add known red-team regressions under **Configure Profile → Scenarios →
-   Adversarial tests**. Link a workspace-relative JSONC or CSV source for
-   Git-managed bulk cases, or import/export copies for spreadsheet exchange,
-   then triage the four outcomes in Test Explorer or the Profile's
-   latest-results list.
+8. Add known red-team regressions in the Profile's **Red Team** tab. Link a
+   workspace-relative JSONC or CSV source for portable Git-managed cases, or
+   explicitly select an external file when the suite must remain elsewhere.
+   External links are local, Profile-bound authorizations and are not portable
+   to another machine. Import/export copies remain available for spreadsheet
+   exchange; triage the four outcomes in Test Explorer or Red Team results.
 9. From a latest result, choose **Diagnose with Copilot** to explain timeout,
    TTFT, stream, mapping, assertion, comparison, or repeat-stability evidence.
    Use **Profile Doctor** for configuration-only diagnosis. Response-quality
@@ -398,10 +408,11 @@ out of the chat surface by default and remain available in Debug data. A
 backend `usage.updated` message part is likewise hidden in Chat unless
 `ui.components.usage.visible` is explicitly enabled.
 
-The test workspace keeps Chat on the left and provides Debug and Configure as
-two modes of the right pane. Configure exposes the same seven profile sections
-as the command-driven configuration flow, including request, stream mapping,
-Chat UI, history, metrics, and security. Every GUI edit is applied as a
+The test workspace keeps Chat on the left and provides **Debug**, **Red Team**,
+and **Configure** as three modes of the right pane. Configure exposes the same
+eight profile sections as the command-driven configuration flow: General,
+Opening & Flow, Request, Stream & Mapping, Chat UI, Scenarios, History & Errors,
+and Security. Every GUI edit is applied as a
 structured `WorkspaceEdit` to the open `.turnstage.jsonc` document, so the
 profile file remains the source of truth and VS Code Undo/Redo continues to
 work. Open JSONC remains available from the configuration toolbar.
@@ -454,7 +465,7 @@ The contributed settings are:
 | `turnstage.maxBufferedEvents` | `5000` | Maximum raw and normalized events kept in the live session |
 | `turnstage.maxConversationMessages` | `500` | Maximum conversation messages kept in memory (50–5000) |
 | `turnstage.maxBufferedBytes` | `10485760` | Maximum raw-buffer JSON bytes (10 MiB) |
-| `turnstage.streamBatchIntervalMs` | `32` | Batching interval for host-to-Webview snapshots (16–100 ms) |
+| `turnstage.streamBatchIntervalMs` | `32` | Batching interval for Host-to-Webview session updates (16–100 ms); normal updates are deltas after a full checkpoint |
 | `turnstage.runRetention` | `20` | Fallback local-run retention (1–100) |
 | `turnstage.logLevel` | `info` | Minimum output-channel level: error, warn, info, or debug |
 | `turnstage.notifications.enabled` | `true` | Show non-modal TurnStage notifications; selecting **Do not show again** sets it false at user scope |
@@ -567,13 +578,17 @@ scenarios. Observed results and their environment are recorded in
 - Raw-event mapping and normalized events: `docs/event-mapping.md`
 - Security, trust, secrets, and redaction: `docs/security.md`
 - Performance budgets and measurement plan: `docs/performance.md`
+- Adversarial suites, repetitions, campaigns, and evidence: `docs/adversarial-testing.md`
 - Required VS Code UI review standard: `docs/vscode-extension-ui-guidelines.md`
 - Current VS Code UI audit: `docs/vscode-ui-audit-2026-08-27.md`
 
 ## Scope boundaries
 
-The first implementation does not provide a low-code drag-and-drop builder,
-arbitrary user scripts/components/styles, provider SDKs, Copilot/MCP
-integration, cloud sync, accounts, collaborative storage, automatic telemetry,
-or automatic backend actions. Configured actions require a user interaction and
-VS Code command actions require an allowlist.
+The current implementation does not provide a low-code drag-and-drop builder,
+arbitrary user scripts/components/styles, provider SDKs, a general MCP server,
+cloud sync, accounts, collaborative storage, automatic telemetry, or autonomous
+backend actions. Its Copilot integration is limited to the contributed bounded
+language-model tools and `@turnstage` participant; it does not grant Copilot
+arbitrary Profile edits, shell access, or unconfirmed network execution.
+Configured actions require a user interaction and VS Code command actions
+require an allowlist.

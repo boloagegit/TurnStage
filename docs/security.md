@@ -299,8 +299,15 @@ case/turn/rule counts, regular expressions, file size, concurrency, maximum
 turns, and whole-case timeout are bounded. A missing mapping, dropped evidence,
 unexpected stream end, cancellation, or timeout fails closed as Indeterminate
 or Infrastructure error. CSV import validates the full file before applying a
-Profile edit; direct CSV links are bounded, workspace-relative, validated
-before execution, and never rewritten. Spreadsheet-leading formula characters
+Profile edit. Portable links are bounded workspace-relative paths. An external
+link is created only after explicit file selection and is represented in the
+Profile by an opaque reference; its exact URI is stored in VS Code workspace
+state, bound to the exact Profile URI, and limited to the newest 100 grants.
+Resolution rechecks the reference and Profile binding and fails closed when the
+local grant is absent. External absolute paths are not sent to the Webview or
+written into the Profile. Linked sources are validated before execution and
+never rewritten. The Red Team catalog sends at most 100 structural summaries
+and excludes prompts and rule values. Spreadsheet-leading formula characters
 are escaped on export.
 Evidence Bundle CSVs contain structural metadata only; they exclude prompts,
 assistant content, request/response payloads, URLs, headers, raw events, and
