@@ -132,6 +132,7 @@ export interface CampaignProgressEvent {
 export interface ScenarioRunSnapshot {
   summaries: readonly ScenarioControllerRunSummary[];
   results: readonly AdversarialResultSummary[];
+  cancelled?: boolean;
 }
 
 export interface ScenarioControllerRunSummary {
@@ -200,6 +201,7 @@ export class ScenarioTestController implements vscode.Disposable {
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
   private latestRunSummaries: ScenarioControllerRunSummary[] = [];
   private refreshing?: Promise<void>;
+  private activeManualRun?: vscode.CancellationTokenSource;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -224,7 +226,7 @@ export class ScenarioTestController implements vscode.Disposable {
     context.subscriptions.push(watcher, vscode.workspace.onDidSaveTextDocument((document) => { if (/\.(?:turnstage\.(?:json|jsonc)|adversarial\.(?:json|jsonc|csv))$/iu.test(document.uri.path)) refresh(); }));
   }
 
-  dispose(): void { this.resultsEmitter.dispose(); this.campaignEmitter.dispose(); this.campaignProgressEmitter.dispose(); this.controller.dispose(); }
+  dispose(): void { this.activeManualRun?.cancel(); this.resultsEmitter.dispose(); this.campaignEmitter.dispose(); this.campaignProgressEmitter.dispose(); this.controller.dispose(); }
 
   async refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
@@ -378,13 +380,21 @@ export class ScenarioTestController implements vscode.Disposable {
     return this.campaigns.getRun(entry.profile.id, runId);
   }
   getLatestRunSummaries(): readonly ScenarioControllerRunSummary[] { return this.latestRunSummaries.map((summary) => ({ ...summary, counts: summary.counts ? { ...summary.counts } : undefined })); }
-  async runAll(): Promise<void> {
+  async runAll(): Promise<'completed' | 'cancelled'> {
+    if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
     const cancellation = new vscode.CancellationTokenSource();
-    try { await this.run(new vscode.TestRunRequest(), cancellation.token); }
-    finally { cancellation.dispose(); }
+    this.activeManualRun = cancellation;
+    try {
+      const snapshot = await this.run(new vscode.TestRunRequest(), cancellation.token);
+      return snapshot.cancelled ? 'cancelled' : 'completed';
+    } finally {
+      if (this.activeManualRun === cancellation) this.activeManualRun = undefined;
+      cancellation.dispose();
+    }
   }
 
-  async rerunLatest(uri: vscode.Uri, status: 'failed' | 'unstable' | 'incomplete'): Promise<void> {
+  async rerunLatest(uri: vscode.Uri, status: 'failed' | 'unstable' | 'incomplete'): Promise<'completed' | 'cancelled'> {
+    if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
     const latest = this.getLatestResults(uri).filter((result) => status === 'failed'
       ? result.outcome !== 'resisted'
       : status === 'unstable'
@@ -401,8 +411,20 @@ export class ScenarioTestController implements vscode.Disposable {
     this.controller.items.forEach(visit);
     if (!itemIds.length) throw new Error('The matching Test Explorer items are no longer available. Refresh the tests and try again.');
     const cancellation = new vscode.CancellationTokenSource();
-    try { await this.runSelection({ itemIds }, cancellation.token); }
-    finally { cancellation.dispose(); }
+    this.activeManualRun = cancellation;
+    try {
+      const snapshot = await this.runSelection({ itemIds }, cancellation.token);
+      return snapshot.cancelled ? 'cancelled' : 'completed';
+    } finally {
+      if (this.activeManualRun === cancellation) this.activeManualRun = undefined;
+      cancellation.dispose();
+    }
+  }
+
+  cancelActiveManualRun(): boolean {
+    if (!this.activeManualRun || this.activeManualRun.token.isCancellationRequested) return false;
+    this.activeManualRun.cancel();
+    return true;
   }
 
   async runSelection(selection: ScenarioRunSelection, token: vscode.CancellationToken, scope: ScenarioRunScope = {}): Promise<ScenarioRunSnapshot> {
@@ -675,7 +697,7 @@ export class ScenarioTestController implements vscode.Disposable {
           run.appendOutput(`${localize('Batch run cancelled before any requests were sent.')}\r\n`);
           operation.cancel({ reason: 'user-declined', completedCases: 0 });
           this.latestRunSummaries = [];
-          return { summaries: [], results: [] };
+          return { summaries: [], results: [], cancelled: true };
         }
       }
       for (const uriKey of new Set(jobs.map((job) => job.uri.toString()))) {
@@ -821,6 +843,7 @@ export class ScenarioTestController implements vscode.Disposable {
       return {
         summaries: snapshotSummaries.map((summary) => ({ ...summary, counts: summary.counts ? { ...summary.counts } : undefined })),
         results: snapshotResults,
+        ...(effectiveToken.isCancellationRequested ? { cancelled: true } : {}),
       };
     } catch (error) {
       operation.fail({ reason: error instanceof Error ? error.name : 'Error', completedCases: completed.length });

@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AdversarialResultSummary, ChatMessage, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 import { MobileChatPreview, resizeComposerTextarea } from '../src/webview/MobileChatPreview';
-import { ACCESSIBLE_EVENT_WINDOW_SIZE, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
+import { ACCESSIBLE_EVENT_WINDOW_SIZE, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, eventTimeDeltas, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
 import { AdversarialWorkspace, SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
 
@@ -520,6 +520,21 @@ describe('Webview DOM behavior', () => {
     expect(accessibilityResult.violations).toEqual([]);
   });
 
+  it('shows raw-event gaps from the complete stream even when the visible list is filtered', async () => {
+    const all = [
+      { sequence: 1, receivedAt: 1000, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {} },
+      { sequence: 2, receivedAt: 1040, elapsedMs: 40, protocol: 'sse', raw: '{}', data: {} },
+      { sequence: 3, receivedAt: 1125, elapsedMs: 125, protocol: 'sse', raw: '{}', data: {} },
+    ];
+    render(<VirtualEvents items={[all[0]!, all[2]!]} kind="raw" eventDeltas={eventTimeDeltas(all)} label="Raw Events" />);
+
+    const rows = screen.getAllByRole('option');
+    expect(rows[0].textContent).toContain('Δ—');
+    expect(rows[1].textContent).toContain('Δ85 ms');
+    await userEvent.setup().click(rows[1]);
+    expect(screen.getByText(/Gap 85 ms/)).toBeTruthy();
+  });
+
   it('keeps a small event list stable when selecting later events', async () => {
     const user = userEvent.setup();
     const items = Array.from({ length: 10 }, (_, index) => ({ sequence: index + 1, receivedAt: index + 1, elapsedMs: index, protocol: 'sse', raw: '{}', data: { index } }));
@@ -727,6 +742,21 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } });
     await user.click(screen.getByRole('button', { name: 'Diagnose profile with Copilot' }));
     expect(post).toHaveBeenCalledWith({ type: 'copilot.profileDoctor' });
+  });
+
+  it('opens a linked suite with a distinct action and exposes persistent test-run feedback', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const linked: TurnStageProfile = { ...profile, tests: { scenarios: [], adversarialSuites: ['tests/safety.adversarial.csv'] } };
+    render(<AdversarialWorkspace profile={linked} post={post} testOperation={{ action: 'runAll', state: 'running' }} />);
+
+    await user.click(screen.getByRole('button', { name: 'Open linked suite tests/safety.adversarial.csv' }));
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.openLinkedSuite', path: 'tests/safety.adversarial.csv' });
+    expect(screen.getByRole('button', { name: 'Unlink suite tests/safety.adversarial.csv' })).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('Running all TurnStage tests');
+    expect((screen.getByRole('button', { name: 'Running all…' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Stop test run' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.cancel' });
   });
 
   it('restores Red Team expansion and scroll checkpoints', () => {

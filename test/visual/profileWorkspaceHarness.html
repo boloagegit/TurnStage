@@ -79,6 +79,7 @@
     const messageActions = query.has('actions') ? query.get('actions').split(',').filter(Boolean) : undefined;
     const messageActionVisibility = query.get('actionVisibility') ?? 'always';
     const active = query.get('active') === 'true';
+    const replayStatus = query.get('replay');
     const viewportPresets = {
       'mobile-s': { width: 320, height: 568 },
       'mobile-m': { width: 375, height: 667 },
@@ -186,7 +187,8 @@
         { id: 'user-1', role: 'user', status: 'completed', createdAt: 1000, parts: [{ type: 'text', text: 'Verify themed streaming layout' }], citations: [], actions: [], followups: [], metadata: { rawSequences: [] } },
         { id: 'assistant-1', role: 'assistant', status: active ? 'streaming' : 'completed', createdAt: 1600, completedAt: active ? undefined : 4600, parts: [{ type: 'progress', text: 'Preparing the streamed response', status: active ? 'running' : 'completed' }, { type: 'text', text: 'Here is the sample result.' }], citations: [], actions: [], followups: [], timing: { ttft: 1808, totalDuration: active ? undefined : 3612 }, metrics: [{ id: 'e2e', label: 'E2E', value: 180, unit: 'ms', format: 'duration', aggregation: 'last', sampleCount: 1 }, { id: 'tokens', label: 'Tokens', value: 42, format: 'number', aggregation: 'sum', sampleCount: 2 }], metadata: { rawSequences: [1, 2, 3, 4, 5, 6] } }
       ],
-      metrics: { eventCount: 6, byteCount: 420, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0, totalDuration: 3612 }
+      metrics: { eventCount: 6, byteCount: 420, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0, totalDuration: 3612 },
+      ...(replayStatus === 'playing' || replayStatus === 'paused' ? { replay: { runId: 'replayable-run', status: replayStatus, speed: 1, index: 3, total: 6 } } : {})
     };
     const runs = [
       { id: 'replayable-run', profileId: profile.id, createdAt: 4600, replayable: true, hasSnapshot: true, metrics: snapshot.metrics, result: { type: 'completed' } },

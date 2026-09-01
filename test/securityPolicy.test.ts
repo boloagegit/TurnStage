@@ -82,7 +82,7 @@ const mock = vi.hoisted(() => {
 vi.mock('vscode', () => mock);
 
 import { SecretService, UriPolicy, redactDeep, redactHeaders } from '../src/extension/security/security';
-import { TurnStageEditorProvider, isAllowedPatchPath } from '../src/extension/editors/turnstageEditorProvider';
+import { TurnStageEditorProvider, canOpenLinkedAdversarialSuite, isAllowedPatchPath } from '../src/extension/editors/turnstageEditorProvider';
 
 const profileUri = new mock.Uri('file', '/workspace/.vscode/turnstage/profiles/demo.turnstage.jsonc');
 
@@ -382,6 +382,14 @@ describe('profile patch allowlist', () => {
     ] as const;
 
     for (const path of rejected) expect(isAllowedPatchPath(path), path.join('.')).toBe(false);
+  });
+
+  it('opens only an exact safe adversarial suite linked by the current profile', () => {
+    const configured = { ...profile(), tests: { scenarios: [], adversarialSuites: ['tests/safety.adversarial.csv'] } };
+    expect(canOpenLinkedAdversarialSuite(configured, 'tests/safety.adversarial.csv')).toBe(true);
+    expect(canOpenLinkedAdversarialSuite(configured, 'tests/other.adversarial.csv')).toBe(false);
+    expect(canOpenLinkedAdversarialSuite(configured, '../secrets.adversarial.csv')).toBe(false);
+    expect(canOpenLinkedAdversarialSuite(configured, 'tests/safety.csv')).toBe(false);
   });
 
   it('reports a rejected patch instead of silently ignoring it', async () => {

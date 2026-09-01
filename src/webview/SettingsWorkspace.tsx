@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import type { MappingTestResult, WebviewPayload } from '../shared/protocol';
+import type { MappingTestResult, TestOperationSnapshot, WebviewPayload } from '../shared/protocol';
 import type { AdversarialForbidDefinition, AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TestCampaignDefinition, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
@@ -36,6 +36,7 @@ export interface SettingsWorkspaceProps {
   remoteName?: string;
   testResults?: AdversarialResultSummary[];
   campaignDashboard?: CampaignDashboardV1;
+  testOperation?: TestOperationSnapshot;
   /** The section selected by the host tree/editor. */
   section: SettingsSectionId;
   onSectionChange: (section: SettingsSectionId) => void;
@@ -70,6 +71,7 @@ export function SettingsWorkspace({
   remoteName,
   testResults = [],
   campaignDashboard,
+  testOperation,
   section,
   onSectionChange,
   embedded = false,
@@ -129,7 +131,7 @@ export function SettingsWorkspace({
           {active.id === 'request' && <RequestSection profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} connectionResult={connectionResult} post={post} patch={patch} />}
           {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
           {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
-          {active.id === 'scenario-tests' && <ScenarioTestsSection view="contracts" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} />}
+          {active.id === 'scenario-tests' && <ScenarioTestsSection view="contracts" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} />}
           {active.id === 'history-errors' && <HistoryErrorsSection profile={profile} snapshot={snapshot} patch={patch} />}
           {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} />}
         </section>
@@ -138,11 +140,12 @@ export function SettingsWorkspace({
   </div>;
 }
 
-export function AdversarialWorkspace({ profile, post, testResults = [], campaignDashboard, activeEvidenceId, timeline, scrollTop, onScrollTopChange, expandedCaseId, onExpandedCaseIdChange }: {
+export function AdversarialWorkspace({ profile, post, testResults = [], campaignDashboard, testOperation, activeEvidenceId, timeline, scrollTop, onScrollTopChange, expandedCaseId, onExpandedCaseIdChange }: {
   profile: TurnStageProfile;
   post: SettingsWorkspacePost;
   testResults?: AdversarialResultSummary[];
   campaignDashboard?: CampaignDashboardV1;
+  testOperation?: TestOperationSnapshot;
   activeEvidenceId?: string;
   timeline?: React.ReactNode;
   scrollTop?: number;
@@ -167,7 +170,7 @@ export function AdversarialWorkspace({ profile, post, testResults = [], campaign
           <div className="settings-panel-title"><h1 id="red-team-panel-title">{t('Adversarial testing')}</h1><p className="settings-section-description">{t('Author known attacks, run bounded samples, and inspect causal evidence without changing formal outcomes.')}</p></div>
           <span className="settings-section-count">{t('{count} inline cases', { count: formatNumber(profile.tests?.scenarios?.filter((scenario) => scenario.adversarial).length ?? 0) })}</span>
         </div>
-        <ScenarioTestsSection view="adversarial" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} timeline={timeline} expandedCaseId={expandedCaseId} onExpandedCaseIdChange={onExpandedCaseIdChange} />
+        <ScenarioTestsSection view="adversarial" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={timeline} expandedCaseId={expandedCaseId} onExpandedCaseIdChange={onExpandedCaseIdChange} />
       </section>
     </div>
   </div>;
@@ -414,7 +417,7 @@ const performanceMetricOptions: Array<{ id: ScenarioPerformanceMetric; label: st
   { id: 'metrics.maxEventGap', label: 'Maximum event gap' },
 ];
 
-function ScenarioTestsSection({ view, profile, patch, post, testResults, campaignDashboard, activeEvidenceId, timeline, expandedCaseId: controlledExpandedCaseId, onExpandedCaseIdChange }: { view: 'contracts' | 'adversarial'; profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; campaignDashboard?: CampaignDashboardV1; activeEvidenceId?: string; timeline?: React.ReactNode; expandedCaseId?: string; onExpandedCaseIdChange?: (id: string | undefined) => void }): React.JSX.Element {
+function ScenarioTestsSection({ view, profile, patch, post, testResults, campaignDashboard, testOperation, activeEvidenceId, timeline, expandedCaseId: controlledExpandedCaseId, onExpandedCaseIdChange }: { view: 'contracts' | 'adversarial'; profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; campaignDashboard?: CampaignDashboardV1; testOperation?: TestOperationSnapshot; activeEvidenceId?: string; timeline?: React.ReactNode; expandedCaseId?: string; onExpandedCaseIdChange?: (id: string | undefined) => void }): React.JSX.Element {
   const scenarios = profile.tests?.scenarios ?? [];
   const qualityRubrics = profile.tests?.qualityRubrics ?? [];
   const [undo, setUndo] = useState<{ label: string; scenarios: ScenarioDefinition[] }>();
@@ -460,6 +463,7 @@ function ScenarioTestsSection({ view, profile, patch, post, testResults, campaig
     saveQualityRubrics([...qualityRubrics, { id, name: t('Quality rubric {number}', { number: formatNumber(ordinal) }), criteria: [{ id: 'criterion-1', label: t('Criterion 1'), description: t('Describe the observable quality expected from the disclosed response.') }] }]);
   };
   const campaigns = profile.tests?.campaigns ?? [];
+  const testRunActive = testOperation?.state === 'running' || testOperation?.state === 'cancelling';
   const saveCampaigns = (value: TestCampaignDefinition[] | undefined) => profile.tests ? patch(['tests', 'campaigns'], value) : patch(['tests'], { scenarios: [], ...(value ? { campaigns: value } : {}) });
   const addCampaign = () => {
     const ordinal = campaigns.length + 1;
@@ -517,12 +521,13 @@ function ScenarioTestsSection({ view, profile, patch, post, testResults, campaig
         </div></details>
       </div>
       {undo && <div className="settings-undo" role="status"><span>{undo.label}</span><button type="button" onClick={() => { save(undo.scenarios); setUndo(undefined); }}>{t('Undo')}</button><IconButton type="button" icon="clear-all" label={t('Dismiss undo')} onClick={() => setUndo(undefined)} /></div>}
-      {(profile.tests?.adversarialSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.adversarialSuites!.map((path, index) => <li key={`${path}-${index}`}><code>{path}</code><IconButton type="button" icon="trash" label={t('Unlink suite {path}', { path })} onClick={() => patch(['tests', 'adversarialSuites'], profile.tests!.adversarialSuites!.filter((_, itemIndex) => itemIndex !== index))} /></li>)}</ul></div>}
+      {(profile.tests?.adversarialSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.adversarialSuites!.map((path, index) => <li key={`${path}-${index}`}><code title={path}>{path}</code><div className="adversarial-linked-suite-actions"><IconButton type="button" icon="go-to-file" label={t('Open linked suite {path}', { path })} onClick={() => post({ type: 'adversarial.openLinkedSuite', path })} /><IconButton type="button" icon="trash" label={t('Unlink suite {path}', { path })} onClick={() => patch(['tests', 'adversarialSuites'], profile.tests!.adversarialSuites!.filter((_, itemIndex) => itemIndex !== index))} /></div></li>)}</ul></div>}
       {!adversarialEntries.length ? <div className="settings-empty settings-empty--action"><span>{t('No inline adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <AdversarialCaseTable entries={adversarialEntries} expandedCaseId={expandedCaseId} onToggle={(id) => setExpandedCaseId(expandedCaseId === id ? undefined : id)} onChange={(index, value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(index, value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={(index, scenario) => { if (expandedCaseId === scenario.id) setExpandedCaseId(undefined); saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); }} />}
       <p className="settings-footnote">{t('Linked CSV stays the source of truth and uses one row per turn. JSONC remains the lossless format for suite-level defaults and metadata.')}</p>
     </section>
     <section className="settings-card" aria-labelledby="adversarial-results-heading">
-      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-results-heading">{t('Latest adversarial results')}</h2><p className="settings-card-description">{t('Run from Test Explorer, then open the exact Chat, Network, or Events evidence for a result.')}</p></div><div className="adversarial-rerun-actions" role="group" aria-label={t('Run adversarial tests')}><button type="button" onClick={() => post({ type: 'test.runAll' })}>{t('Run all')}</button><button type="button" disabled={!testResults.some((result) => result.outcome !== 'resisted')} onClick={() => post({ type: 'test.rerun', status: 'failed' })}>{t('Rerun failures')}</button><details><summary>{t('More reruns')}</summary><div><button type="button" disabled={!testResults.some((result) => result.repetitions?.stability === 'unstable')} onClick={() => post({ type: 'test.rerun', status: 'unstable' })}>{t('Unstable')}</button><button type="button" disabled={!testResults.some((result) => result.repetitions?.sampleComplete === false)} onClick={() => post({ type: 'test.rerun', status: 'incomplete' })}>{t('Incomplete')}</button></div></details></div></div>
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-results-heading">{t('Latest adversarial results')}</h2><p className="settings-card-description">{t('Run from Test Explorer, then open the exact Chat, Network, or Events evidence for a result.')}</p></div><div className="adversarial-rerun-actions" role="group" aria-label={t('Run adversarial tests')}><button type="button" className="primary" disabled={testRunActive} aria-busy={testOperation?.action === 'runAll' && testRunActive} onClick={() => post({ type: 'test.runAll' })}>{t(testOperation?.action === 'runAll' && testRunActive ? 'Running all…' : 'Run all')}</button><button type="button" disabled={testRunActive || !testResults.some((result) => result.outcome !== 'resisted')} onClick={() => post({ type: 'test.rerun', status: 'failed' })}>{t(testOperation?.action === 'rerunFailed' && testRunActive ? 'Rerunning failures…' : 'Rerun failures')}</button><details><summary>{t('More reruns')}</summary><div><button type="button" disabled={testRunActive || !testResults.some((result) => result.repetitions?.stability === 'unstable')} onClick={() => post({ type: 'test.rerun', status: 'unstable' })}>{t('Unstable')}</button><button type="button" disabled={testRunActive || !testResults.some((result) => result.repetitions?.sampleComplete === false)} onClick={() => post({ type: 'test.rerun', status: 'incomplete' })}>{t('Incomplete')}</button></div></details>{testRunActive && <IconButton type="button" className="danger-subtle" icon="stop" label={t(testOperation?.state === 'cancelling' ? 'Stopping test run…' : 'Stop test run')} disabled={testOperation?.state === 'cancelling'} onClick={() => post({ type: 'test.cancel' })} />}</div></div>
+      <TestOperationStatus operation={testOperation} />
       {!testResults.length ? <p className="settings-empty">{t('No adversarial results in this Extension Host session.')}</p> : <ul className="adversarial-result-list">{testResults.map((result) => <li key={`${result.scenarioId}-${result.evidenceId}`}>
         <div className="adversarial-result-identity"><strong>{result.scenarioName}</strong><code>{result.scenarioId}</code></div>
         <span className={`adversarial-outcome adversarial-outcome--${result.outcome}`}><ProductIcon name={result.outcome === 'resisted' ? 'check' : result.outcome === 'attackSucceeded' ? 'target' : 'warning'} />{t(adversarialOutcomeText(result.outcome))}</span>
@@ -579,6 +584,27 @@ function ScenarioTestsSection({ view, profile, patch, post, testResults, campaig
     </section>
     <p className="settings-footnote">{t('Run these scenarios from VS Code Test Explorer. Every completed step also receives TurnStage state-invariant checks.')}</p>
     </>}
+  </div>;
+}
+
+function TestOperationStatus({ operation }: { operation?: TestOperationSnapshot }): React.JSX.Element | null {
+  if (!operation) return null;
+  const active = operation.state === 'running' || operation.state === 'cancelling';
+  const icon = operation.state === 'completed' ? 'check' : operation.state === 'failed' ? 'error' : operation.state === 'cancelled' ? 'stop' : 'refresh';
+  const title = operation.state === 'running'
+    ? operation.action === 'runAll' ? 'Running all TurnStage tests…' : operation.action === 'rerunFailed' ? 'Rerunning failed tests…' : operation.action === 'rerunUnstable' ? 'Rerunning unstable tests…' : 'Rerunning incomplete tests…'
+    : operation.state === 'cancelling' ? 'Stopping test run…'
+      : operation.state === 'completed' ? 'Test run completed'
+        : operation.state === 'cancelled' ? 'Test run cancelled'
+          : 'Test run failed';
+  const detail = active ? 'Results update here as each Profile finishes. You can keep using the editor.'
+    : operation.state === 'completed' ? 'The latest results and evidence links are ready.'
+      : operation.state === 'cancelled' ? 'Completed attempts remain available; unfinished work is not treated as passed.'
+        : 'Open TurnStage Output for diagnostic details.';
+  return <div className={`test-operation-status test-operation-status--${operation.state}`} role="status" aria-live="polite" aria-atomic="true">
+    <ProductIcon name={icon} className={active ? 'test-operation-status__active-icon' : ''} />
+    <div><strong>{t(title)}</strong><span>{t(detail)}</span>{operation.detail && <small>{operation.detail}</small>}</div>
+    {active && <progress aria-label={t('Test run progress')} />}
   </div>;
 }
 

@@ -103,7 +103,7 @@ describe('Extension host editor lifecycle', () => {
 
   it('keeps CI report projection separate from runtime evidence', () => {
     expect(activateSource).toContain("command('runContractTests', () => scenarioTests.runAll())");
-    expect(scenarioTestSource).toContain('async runAll(): Promise<void>');
+    expect(scenarioTestSource).toContain("async runAll(): Promise<'completed' | 'cancelled'>");
     expect(activateSource).toContain("command('exportTestReport'");
     expect(scenarioTestSource).toContain('ScenarioReportService');
     expect(scenarioReportSource).toContain("format: SCENARIO_REPORT_FORMAT");

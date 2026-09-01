@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { modify } from 'jsonc-parser';
-import type { HostPayload, InspectorTargetTab, WebviewMessage, WorkspaceSection } from '../../shared/protocol';
+import type { HostPayload, InspectorTargetTab, TestOperationAction, TestOperationSnapshot, WebviewMessage, WorkspaceSection } from '../../shared/protocol';
 import { isWebviewMessage, PROTOCOL_VERSION } from '../../shared/protocol';
 import type { AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, ScenarioRunEvidence, ScenarioRunResult, SessionSnapshot, TurnStageProfile } from '../../shared/types';
 import { EnvironmentRepository, MAX_PROFILE_BYTES } from '../config/profileRepository';
@@ -47,6 +47,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private readonly activeCampaignRuns = new Map<string, { campaignId: string; cancellation: vscode.CancellationTokenSource }>();
   private readonly pendingCampaignRuns = new Set<Promise<unknown>>();
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
+  private readonly latestTestOperations = new Map<string, TestOperationSnapshot>();
   constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel, private readonly environments = new EnvironmentRepository(context.globalStorageUri), visualRegression?: VisualRegressionService, private readonly scenarioTests?: ScenarioTestController) { this.runs = new LocalRunRepository(context, output); this.secrets = new SecretService(context); this.visualRegression = visualRegression ?? new VisualRegressionService(context); }
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
@@ -83,6 +84,10 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const campaignPosters = this.campaignPosters.get(documentKey) ?? new Set<typeof postCampaigns>();
     campaignPosters.add(postCampaigns);
     this.campaignPosters.set(documentKey, campaignPosters);
+    const postTestOperation = async (operation: TestOperationSnapshot, requestId?: string) => {
+      this.latestTestOperations.set(documentKey, operation);
+      await post({ type: 'test.operation', operation }, requestId);
+    };
     const postEvidence = async (evidence: ScenarioRunEvidence, result: ScenarioRunResult | undefined, target: { tab: InspectorTargetTab; evidenceId: string; networkId?: string; sequence?: number; messageId?: string }): Promise<boolean> => {
       if (!controller?.applyScenarioEvidence(evidence)) return false;
       const snapshot = currentSessionSnapshot();
@@ -187,6 +192,8 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           }
           await rehydrate();
           await postResults(this.latestResults.get(documentKey) ?? []);
+          const latestTestOperation = this.latestTestOperations.get(documentKey);
+          if (latestTestOperation) await post({ type: 'test.operation', operation: latestTestOperation });
           if (this.scenarioTests) await post({ type: 'campaign.dashboard', dashboard: await this.scenarioTests.getCampaignDashboard(document.uri) });
           return;
         }
@@ -204,8 +211,38 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           await post({ type: 'adversarial.operation', action: message.action, ...operation }, message.requestId);
           return;
         }
-        if (message.type === 'test.runAll') { await vscode.commands.executeCommand('turnstage.runContractTests'); return; }
-        if (message.type === 'test.rerun') { await vscode.commands.executeCommand('turnstage.rerunLatestTests', document.uri, message.status); return; }
+        if (message.type === 'adversarial.openLinkedSuite') {
+          const profile = this.codec.parse(document.getText()).profile;
+          if (!profile) throw new Error(localize('Profile could not be parsed.'));
+          if (!canOpenLinkedAdversarialSuite(profile, message.path)) throw new Error(localize('Only a safe suite linked by this Profile can be opened.'));
+          const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+          if (!folder) throw new Error(localize('The linked suite cannot be resolved because this Profile is not inside a workspace folder.'));
+          const uri = vscode.Uri.joinPath(folder.uri, ...message.path.split('/'));
+          await vscode.workspace.fs.stat(uri);
+          await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
+          return;
+        }
+        if (message.type === 'test.runAll' || message.type === 'test.rerun') {
+          if (!this.scenarioTests) throw new Error(localize('Test runtime is unavailable.'));
+          const current = this.latestTestOperations.get(documentKey);
+          if (current?.state === 'running' || current?.state === 'cancelling') throw new Error(localize('A TurnStage test run is already active.'));
+          const action: TestOperationAction = message.type === 'test.runAll' ? 'runAll' : message.status === 'failed' ? 'rerunFailed' : message.status === 'unstable' ? 'rerunUnstable' : 'rerunIncomplete';
+          await postTestOperation({ action, state: 'running' }, message.requestId);
+          try {
+            const state = message.type === 'test.runAll' ? await this.scenarioTests.runAll() : await this.scenarioTests.rerunLatest(document.uri, message.status);
+            await postTestOperation({ action, state }, message.requestId);
+          } catch (error) {
+            await postTestOperation({ action, state: 'failed' }, message.requestId);
+            throw error;
+          }
+          return;
+        }
+        if (message.type === 'test.cancel') {
+          const active = this.latestTestOperations.get(documentKey);
+          if (!active || active.state !== 'running' || !this.scenarioTests?.cancelActiveManualRun()) throw new Error(localize('No active TurnStage test run is available to stop.'));
+          await postTestOperation({ action: active.action, state: 'cancelling' }, message.requestId);
+          return;
+        }
         if (message.type === 'test.timeline.open') {
           const reference = this.scenarioTests?.getEvidence(message.evidenceId);
           if (!reference?.result) throw new Error(localize('This test evidence is no longer available. Run the scenario again.'));
@@ -734,6 +771,11 @@ export function isAllowedPatchPath(path: unknown): path is Array<string | number
   if (/^ui\.streaming\.(effect|speedMs|intensityPercent)$/.test(key)) return true;
   if (/^ui\.components\.[a-zA-Z0-9_-]+\.(visible|label|collapsible|defaultCollapsed)$/.test(key)) return true;
   return /^ui\.locks\.whileTurnActive\.(disable|allow)$/.test(key);
+}
+
+/** Fail closed before resolving a Webview-supplied path in the Extension Host. */
+export function canOpenLinkedAdversarialSuite(profile: TurnStageProfile, path: unknown): path is string {
+  return isSafeAdversarialSuitePath(path) && Boolean(profile.tests?.adversarialSuites?.includes(path));
 }
 
 function completedOperation(detail: string, uri: vscode.Uri): { status: 'completed'; detail: string; path: string } {

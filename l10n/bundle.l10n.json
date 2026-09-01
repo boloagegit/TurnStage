@@ -568,5 +568,10 @@
   "Unknown message tag operator: {value}.": "Unknown message tag operator: {value}.",
   "This message tag operator requires a primitive value.": "This message tag operator requires a primitive value.",
   "Message tag values cannot exceed 512 characters.": "Message tag values cannot exceed 512 characters.",
-  "Unknown message tag tone: {value}.": "Unknown message tag tone: {value}."
+  "Unknown message tag tone: {value}.": "Unknown message tag tone: {value}.",
+  "A TurnStage test run is already active.": "A TurnStage test run is already active.",
+  "No active TurnStage test run is available to stop.": "No active TurnStage test run is available to stop.",
+  "Only a safe suite linked by this Profile can be opened.": "Only a safe suite linked by this Profile can be opened.",
+  "Test runtime is unavailable.": "Test runtime is unavailable.",
+  "The linked suite cannot be resolved because this Profile is not inside a workspace folder.": "The linked suite cannot be resolved because this Profile is not inside a workspace folder."
 }

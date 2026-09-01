@@ -70,10 +70,10 @@ try {
   assert.ok((await sessionTools.innerText()).includes('Ready'), 'Idle session diagnostics must report Ready instead of the previous turn result');
   assert.equal(await page.locator('.mobile-chat-preview__app-header').getByRole('button').count(), 0, 'Harness actions must stay outside the simulated Chat header');
   assert.equal(await sessionTools.getByRole('button', { name: 'Restart session' }).locator('.codicon-debug-restart').count(), 1, 'Restart session must use the specific VS Code restart Codicon');
-  assert.equal(await page.getByRole('tab', { name: 'Evidence' }).getAttribute('aria-selected'), 'true', 'Evidence is the default right-panel mode');
-  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'false', 'Red Team remains directly available beside Evidence');
-  assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'false', 'Configure remains directly available beside Evidence');
-  await page.getByRole('tab', { name: 'Evidence' }).focus();
+  assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Debug is the default right-panel mode');
+  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'false', 'Red Team remains directly available beside Debug');
+  assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'false', 'Configure remains directly available beside Debug');
+  await page.getByRole('tab', { name: 'Debug' }).focus();
   await page.keyboard.press('ArrowRight');
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'Right Arrow switches to Red Team');
   await page.keyboard.press('ArrowRight');
@@ -81,7 +81,7 @@ try {
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Red Team');
   await page.keyboard.press('ArrowLeft');
-  assert.equal(await page.getByRole('tab', { name: 'Evidence' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Evidence');
+  assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Debug');
   await page.screenshot({ path: resolve(artifactDirectory, 'wide-dark.png'), fullPage: true });
   await page.getByRole('tab', { name: 'Network' }).click();
   const networkList = page.getByRole('listbox', { name: 'Network requests' });
@@ -187,7 +187,7 @@ try {
   await page.getByRole('tab', { name: 'Configure' }).click();
   const inspectMessage = assistantMessage.getByRole('button', { name: 'Inspect message' });
   await inspectMessage.click();
-  assert.equal(await page.getByRole('tab', { name: 'Evidence' }).getAttribute('aria-selected'), 'true', 'Inspect message must switch the right pane from Configure to Evidence');
+  assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Inspect message must switch the right pane from Configure to Debug');
   assert.equal(await page.getByRole('tab', { name: 'Raw Events' }).getAttribute('aria-selected'), 'true', 'Inspect message must open Raw Events');
   await page.locator('#inspector-event-6').waitFor();
   assert.equal(await page.locator('#inspector-event-6').getAttribute('aria-selected'), 'true', 'Inspect message must select the last linked raw event');
@@ -197,6 +197,9 @@ try {
   await page.screenshot({ path: resolve(artifactDirectory, 'inspect-message-debug-dark.png'), fullPage: true });
   await page.getByRole('tab', { name: 'Raw Events' }).click();
   const firstEventRow = page.getByRole('listbox', { name: 'Raw Events' }).getByRole('option').first();
+  const secondEventRow = page.getByRole('listbox', { name: 'Raw Events' }).getByRole('option').nth(1);
+  assert.ok((await firstEventRow.innerText()).includes('Δ—'), 'The first raw event must show that no previous-event gap exists');
+  assert.ok((await secondEventRow.innerText()).includes('Δ601 ms'), 'Raw event rows must show the interval from the complete source stream');
   assert.equal(await firstEventRow.getAttribute('data-disclosure-state'), 'collapsed', 'Event rows must expose their collapsed state');
   await firstEventRow.click();
   await page.getByRole('region', { name: 'Event payload' }).waitFor();
@@ -250,9 +253,21 @@ try {
   assert.equal(await campaignCard.getByRole('button', { name: 'Summarize with Copilot' }).count(), 1, 'Copilot analysis must stay a distinct advisory action');
   assert.equal(await campaignCard.evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Campaign controls must not overflow the settings pane');
   await campaignCard.screenshot({ path: resolve(artifactDirectory, 'campaign-regression-dark.png') });
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run', type: 'test.operation', operation: { action: 'runAll', state: 'running' } } })));
+  const activeTestRun = page.locator('.test-operation-status--running');
+  await activeTestRun.waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Running all…' }).isDisabled(), true, 'An active Red Team run must disable duplicate starts');
+  assert.equal(await page.getByRole('button', { name: 'Stop test run' }).locator('.codicon-debug-stop').count(), 1, 'An active Red Team run must expose a distinct stop action');
+  await activeTestRun.screenshot({ path: resolve(artifactDirectory, 'adversarial-run-active-dark.png') });
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run-complete', type: 'test.operation', operation: { action: 'runAll', state: 'completed' } } })));
   const linkedCsv = page.getByText('.vscode/turnstage/tests/security-regression.adversarial.csv', { exact: true });
   await linkedCsv.scrollIntoViewIfNeeded();
   assert.equal(await linkedCsv.count(), 1, 'Red Team must show a directly linked CSV source without copying it into Profile JSONC');
+  const openLinkedCsv = page.getByRole('button', { name: 'Open linked suite .vscode/turnstage/tests/security-regression.adversarial.csv' });
+  assert.equal(await openLinkedCsv.locator('.codicon-go-to-file').count(), 1, 'Linked suites must expose a distinct open-file Codicon');
+  await openLinkedCsv.click();
+  assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'adversarial.openLinkedSuite'))).path, '.vscode/turnstage/tests/security-regression.adversarial.csv', 'Open linked suite must send the exact linked path');
+  assert.equal(await page.getByRole('button', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' }).locator('.codicon-trash').count(), 1, 'Open and unlink must use distinguishable icons');
   assert.equal(await page.locator('button:visible', { hasText: 'Link suite' }).count(), 1, 'Bulk source linking must use one visible format-neutral action');
   await page.locator('.adversarial-linked-suites').screenshot({ path: resolve(artifactDirectory, 'linked-adversarial-csv-dark.png') });
   const runningPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -298,7 +313,7 @@ try {
   assert.equal(await findingTimelineAction.count(), 1, 'Red Team timeline must make the failure point directly navigable');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-timeline-dark.png') });
   await adversarialResults.getByRole('button', { name: 'Open evidence' }).click();
-  await page.getByRole('tab', { name: 'Evidence' }).waitFor();
+  await page.getByRole('tab', { name: 'Debug' }).waitFor();
   await page.waitForFunction(() => document.querySelector('#right-pane-debug-tab')?.getAttribute('aria-selected') === 'true');
   await page.getByRole('heading', { name: 'Attack succeeded: Known two-turn probe' }).waitFor();
   assert.equal(await page.getByText('3/5 resisted · 5 attempts · Unstable result', { exact: true }).count(), 1, 'Evidence summary must preserve the repeated-run stability context');
@@ -327,7 +342,7 @@ try {
   await page.getByRole('button', { name: 'Validate' }).click();
   assert.deepEqual(await page.evaluate(() => globalThis.__turnstageMessages.slice(-2).map((message) => message.type)), ['profile.openAsText', 'profile.validate'], 'Configuration toolbar actions must reach the host protocol');
   await page.locator('.operation-status').filter({ hasText: 'Profile is valid.' }).waitFor();
-  await page.getByRole('tab', { name: 'Evidence' }).click();
+  await page.getByRole('tab', { name: 'Debug' }).click();
   await page.getByRole('tab', { name: 'Raw Events' }).waitFor();
   assert.equal(await page.locator('[data-message-id="assistant-1"][data-selected="true"]').count(), 1, 'Returning to Debug restores the linked message selection');
 
@@ -416,6 +431,14 @@ try {
   await page.getByRole('heading', { name: 'Recorded runs' }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Import run' }).count(), 1, 'Recorded Runs must expose Import run');
   await page.screenshot({ path: resolve(artifactDirectory, 'recorded-runs-dark.png'), fullPage: true });
+
+  await page.goto(`${url}?tab=Runs&replay=playing&active=true`);
+  await waitForProfile();
+  const replayOperation = page.locator('.runtime-operation--playing');
+  await replayOperation.waitFor();
+  assert.ok((await replayOperation.innerText()).includes('3 / 6 events'), 'Active replay progress must remain visible above every right-panel view');
+  assert.equal(await replayOperation.getByRole('button', { name: 'Stop replay' }).count(), 1, 'Active replay feedback must expose an immediate stop action');
+  await page.screenshot({ path: resolve(artifactDirectory, 'replay-active-dark.png'), fullPage: true });
 
   await page.reload();
   await waitForProfile();

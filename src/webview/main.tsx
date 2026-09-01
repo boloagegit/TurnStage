@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { HostMessage, MappingTestResult, WebviewPayload, WorkspaceSection } from '../shared/protocol';
+import type { HostMessage, MappingTestResult, TestOperationSnapshot, WebviewPayload, WorkspaceSection } from '../shared/protocol';
 import { isHostMessage, isWorkspaceSection, PROTOCOL_VERSION } from '../shared/protocol';
 import type { AdversarialResultSummary, CampaignDashboardV1, ChatMessage, ConnectionDoctorSummary, EvidenceTimelineEntry, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { mappingDraftFromRawEvent } from './configEditors';
@@ -203,6 +203,14 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
   networkInspector: NetworkInspectorState;
   setNetworkInspector: (state: NetworkInspectorState) => void;
 }): React.JSX.Element {
+  const [testOperation, setTestOperation] = useState<TestOperationSnapshot>();
+  useEffect(() => {
+    const listener = (event: MessageEvent<HostMessage>) => {
+      if (isHostMessage(event.data, instanceId) && event.data.type === 'test.operation') setTestOperation(event.data.operation);
+    };
+    window.addEventListener('message', listener);
+    return () => window.removeEventListener('message', listener);
+  }, []);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLElement>(null);
   const layout = resolveUiLayout(profile.ui);
@@ -265,8 +273,9 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
     if (focus) focusAfterRender(() => document.getElementById(`right-pane-${mode}-tab`)?.focus());
   };
   const activeEvidence = testResults.find((result) => result.evidenceId === activeEvidenceId);
+  const replayActive = snapshot?.replay && (snapshot.replay.status === 'playing' || snapshot.replay.status === 'paused') ? snapshot.replay : undefined;
   return <div className="test-surface">
-    <div className="test-surface__header">{activeEvidence && <EvidenceSummary result={activeEvidence} />}</div>
+    <div className="test-surface__header">{replayActive && <ReplayOperationStatus replay={replayActive} onOpenControls={() => { setRightPaneMode('debug'); setInspectorTab('Runs'); }} />}{activeEvidence && <EvidenceSummary result={activeEvidence} />}</div>
     <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
     <section ref={previewRef} className="preview-pane">
       <MobileChatPreview profile={profile} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} viewport={chatViewport} onViewportChange={setChatViewport} onConfigure={() => setRightPaneMode('configure')} selectedMessageId={rightPaneMode === 'debug' ? selectedMessageId : undefined} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={onMessageActionFeedback} initialMessageScrollTop={scrollPositions.chat} onMessageScrollTopChange={(value) => onScrollPositionChange('chat', value)} />
@@ -286,7 +295,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
             const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? rightPaneModes.length - 1 : (currentIndex + (event.key === 'ArrowLeft' ? -1 : 1) + rightPaneModes.length) % rightPaneModes.length;
             selectRightPaneMode(rightPaneModes[nextIndex]!, true);
           }}>
-            <button id="right-pane-debug-tab" type="button" role="tab" tabIndex={rightPaneMode === 'debug' ? 0 : -1} aria-selected={rightPaneMode === 'debug'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('debug')}>{t('Evidence')}</button>
+            <button id="right-pane-debug-tab" type="button" role="tab" tabIndex={rightPaneMode === 'debug' ? 0 : -1} aria-selected={rightPaneMode === 'debug'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('debug')}>{t('Debug')}</button>
             <button id="right-pane-adversarial-tab" type="button" role="tab" tabIndex={rightPaneMode === 'adversarial' ? 0 : -1} aria-selected={rightPaneMode === 'adversarial'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('adversarial')}>{t('Red Team')}</button>
             <button id="right-pane-configure-tab" type="button" role="tab" tabIndex={rightPaneMode === 'configure' ? 0 : -1} aria-selected={rightPaneMode === 'configure'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('configure')}>{t('Configure')}</button>
           </div>
@@ -296,8 +305,8 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
           {rightPaneMode === 'debug'
             ? <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} onCreateMapping={onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} scrollPositions={scrollPositions} onScrollPositionChange={onScrollPositionChange} networkInspector={networkInspector} onNetworkInspectorChange={setNetworkInspector} />
             : rightPaneMode === 'adversarial'
-              ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} post={post} scrollTop={scrollPositions.adversarial} onScrollTopChange={(value) => onScrollPositionChange('adversarial', value)} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} />
-              : <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} post={post} scrollStateKey={configurationSection} scrollTop={scrollPositions[`configure.${configurationSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`configure.${configurationSection}`, value)} />}
+              ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} post={post} scrollTop={scrollPositions.adversarial} onScrollTopChange={(value) => onScrollPositionChange('adversarial', value)} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} />
+              : <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} post={post} scrollStateKey={configurationSection} scrollTop={scrollPositions[`configure.${configurationSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`configure.${configurationSection}`, value)} />}
         </div>
       </aside>
     </>}
@@ -454,6 +463,7 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
   const data = effectiveTab === 'Raw Events' ? snapshot?.rawEvents ?? [] : effectiveTab === 'Normalized' ? snapshot?.normalizedEvents ?? [] : [];
   const eventKind = effectiveTab === 'Normalized' ? 'normalized' : 'raw';
   const filters = eventFilters[eventKind];
+  const eventDeltas = useMemo(() => eventKind === 'raw' ? eventTimeDeltas(data) : undefined, [data, eventKind]);
   const terminalRawSequences = useMemo(() => terminalSequences(snapshot?.normalizedEvents ?? []), [snapshot?.normalizedEvents]);
   const types = useMemo(() => [...new Set(data.map((item) => eventLabel(item)))].sort(), [data]);
   const filtered = useMemo(() => data.filter((item) => eventMatchesFilters(item, filters, eventKind, terminalRawSequences)), [data, eventKind, filters, terminalRawSequences]);
@@ -477,7 +487,7 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
           </details>
           <span role="status">{t('{filtered} of {total}', { filtered: formatNumber(filtered.length), total: formatNumber(data.length) })}</span>
         </div>
-        <VirtualEvents items={filtered} kind={eventKind} terminalRawSequences={terminalRawSequences} label={t(effectiveTab)} onCreateMapping={effectiveTab === 'Raw Events' && interactive ? onCreateMapping : undefined} selectedSequence={selectedSequence} onSelectEvent={onSelectEvent} initialScrollTop={scrollPositions[`events.${eventKind}`]} onScrollTopChange={(value) => onScrollPositionChange(`events.${eventKind}`, value)} />
+        <VirtualEvents items={filtered} kind={eventKind} eventDeltas={eventDeltas} terminalRawSequences={terminalRawSequences} label={t(effectiveTab)} onCreateMapping={effectiveTab === 'Raw Events' && interactive ? onCreateMapping : undefined} selectedSequence={selectedSequence} onSelectEvent={onSelectEvent} initialScrollTop={scrollPositions[`events.${eventKind}`]} onScrollTopChange={(value) => onScrollPositionChange(`events.${eventKind}`, value)} />
       </div>
       : effectiveTab === 'Metrics'
         ? <MetricGrid metrics={snapshot?.metrics} enabled={profile?.metrics?.enabled} />
@@ -592,7 +602,26 @@ function networkDetailPanelId(tab: NetworkDetailTab): string { return `network-d
 function optionalDuration(value: number | undefined): string { return value === undefined ? '—' : formatDuration(value); }
 function formatBytes(value: number): string { if (value < 1024) return `${formatNumber(value)} B`; if (value < 1024 * 1024) return `${formatNumber(Math.round(value / 1024))} KB`; return `${formatNumber(Math.round(value / (1024 * 1024)))} MB`; }
 
-export function VirtualEvents({ items, kind = 'raw', terminalRawSequences = new Set<number>(), label, onCreateMapping, selectedSequence, onSelectEvent, initialScrollTop, onScrollTopChange }: { items: Array<Record<string, any>>; kind?: 'raw' | 'normalized'; terminalRawSequences?: ReadonlySet<number>; label: string; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; onSelectEvent?: (event: Record<string, unknown>) => void; initialScrollTop?: number; onScrollTopChange?: (value: number) => void }): React.JSX.Element {
+/** Calculate gaps from the complete event stream so filtering never changes timing semantics. */
+export function eventTimeDeltas(items: Array<Record<string, any>>): ReadonlyMap<number, number | undefined> {
+  const deltas = new Map<number, number | undefined>();
+  let previousElapsed: number | undefined;
+  let previousReceived: number | undefined;
+  for (const item of items) {
+    const sequence = eventSequence(item);
+    const elapsed = typeof item.elapsedMs === 'number' && Number.isFinite(item.elapsedMs) ? item.elapsedMs : undefined;
+    const received = typeof item.receivedAt === 'number' && Number.isFinite(item.receivedAt) ? item.receivedAt : undefined;
+    const delta = elapsed !== undefined && previousElapsed !== undefined && elapsed >= previousElapsed
+      ? elapsed - previousElapsed
+      : received !== undefined && previousReceived !== undefined && received >= previousReceived ? received - previousReceived : undefined;
+    if (sequence !== undefined) deltas.set(sequence, delta);
+    previousElapsed = elapsed;
+    previousReceived = received;
+  }
+  return deltas;
+}
+
+export function VirtualEvents({ items, kind = 'raw', eventDeltas, terminalRawSequences = new Set<number>(), label, onCreateMapping, selectedSequence, onSelectEvent, initialScrollTop, onScrollTopChange }: { items: Array<Record<string, any>>; kind?: 'raw' | 'normalized'; eventDeltas?: ReadonlyMap<number, number | undefined>; terminalRawSequences?: ReadonlySet<number>; label: string; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; onSelectEvent?: (event: Record<string, unknown>) => void; initialScrollTop?: number; onScrollTopChange?: (value: number) => void }): React.JSX.Element {
   const rowHeight = 30;
   const listRef = useRef<HTMLDivElement>(null);
   const restoredScroll = useRef(false);
@@ -681,6 +710,7 @@ export function VirtualEvents({ items, kind = 'raw', terminalRawSequences = new 
   const accessibleEnd = Math.min(items.length, visibleStart + ACCESSIBLE_EVENT_WINDOW_SIZE);
   const accessibleWindow = screenReader && items.length > ACCESSIBLE_EVENT_WINDOW_SIZE;
   const selectedDetailId = selectedItem ? eventDetailId(kind, selectedItem, selectedIndex) : undefined;
+  const selectedDelta = selectedItem ? eventDeltas?.get(eventSequence(selectedItem) ?? -1) : undefined;
   return <div className={`event-browser ${selectedItem ? 'event-browser--detail' : ''} ${accessibleWindow ? 'event-browser--accessible-window' : ''}`.trim()}>
     {screenReader && items.length > ACCESSIBLE_EVENT_WINDOW_SIZE && <p className="event-accessibility-notice" role="status" aria-live="polite">{t('Showing events {start}–{end} of {total} for screen reader performance.', { start: formatNumber(visibleStart + 1), end: formatNumber(accessibleEnd), total: formatNumber(items.length) })}</p>}
     <span className="sr-only" aria-live="polite" aria-atomic="true">{selectedItem ? t('Event payload opened for {event} #{sequence}.', { event: eventLabel(selectedItem), sequence: formatNumber(selectedItem.sequence) }) : ''}</span>
@@ -690,18 +720,29 @@ export function VirtualEvents({ items, kind = 'raw', terminalRawSequences = new 
         const selected = itemSequence === effectiveSelectedSequence;
         const itemIndex = visibleStart + index;
         const status = eventRowStatus(item, kind, terminalRawSequences);
-        return <button type="button" role="option" id={eventRowId(item, itemIndex)} aria-selected={selected} aria-controls={eventDetailId(kind, item, itemIndex)} aria-setsize={items.length} aria-posinset={itemIndex + 1} data-disclosure-state={selected ? 'expanded' : 'collapsed'} tabIndex={itemIndex === rovingIndex ? 0 : -1} title={t('View event payload')} className={`event-row ${selected ? 'selected' : ''}`} key={`${item.sequence}-${eventLabel(item)}-${index}`} onClick={() => selectEventAt(itemIndex)} onKeyDown={(event) => handleEventKeyDown(event, itemIndex)}>
-          <span className="event-disclosure"><ProductIcon name={selected ? 'chevron-down' : 'chevron-right'} /></span><span>#{formatNumber(item.sequence)}</span><strong>{eventLabel(item)}</strong><span className={`event-status event-status--${status.kind}`} title={t(status.label)} aria-label={t(status.label)}><ProductIcon name={status.icon} /></span><span>+{formatDuration(item.elapsedMs ?? 0)}</span>
+        const eventDelta = itemSequence === undefined ? undefined : eventDeltas?.get(itemSequence);
+        return <button type="button" role="option" id={eventRowId(item, itemIndex)} aria-selected={selected} aria-controls={eventDetailId(kind, item, itemIndex)} aria-setsize={items.length} aria-posinset={itemIndex + 1} data-disclosure-state={selected ? 'expanded' : 'collapsed'} tabIndex={itemIndex === rovingIndex ? 0 : -1} title={t('View event payload')} className={`event-row ${eventDeltas ? 'event-row--with-delta' : ''} ${selected ? 'selected' : ''}`.trim()} key={`${item.sequence}-${eventLabel(item)}-${index}`} onClick={() => selectEventAt(itemIndex)} onKeyDown={(event) => handleEventKeyDown(event, itemIndex)}>
+          <span className="event-disclosure"><ProductIcon name={selected ? 'chevron-down' : 'chevron-right'} /></span><span>#{formatNumber(item.sequence)}</span><strong>{eventLabel(item)}</strong><span className={`event-status event-status--${status.kind}`} title={t(status.label)} aria-label={t(status.label)}><ProductIcon name={status.icon} /></span><span className="event-time-total"><span className="sr-only">{t('Total elapsed')}</span>+{formatDuration(item.elapsedMs ?? 0)}</span>{eventDeltas && <span className="event-time-gap"><span className="sr-only">{t('Since previous event')}</span>Δ{eventDelta === undefined ? '—' : formatDuration(eventDelta)}</span>}
         </button>;
       })}</div></div>}
     </div>
     {selectedItem && <section id={selectedDetailId} className="event-detail" aria-labelledby={`${selectedDetailId}-heading`}>
-      <header><div><strong id={`${selectedDetailId}-heading`}>{t('Event payload')}</strong><span>{eventLabel(selectedItem)} · #{formatNumber(selectedItem.sequence)} · +{formatDuration(selectedItem.elapsedMs ?? 0)}</span></div>{onCreateMapping && <button onClick={() => onCreateMapping(selectedItem as RawStreamEvent)}>{t('Create mapping draft')}</button>}</header>
+      <header><div><strong id={`${selectedDetailId}-heading`}>{t('Event payload')}</strong><span>{eventLabel(selectedItem)} · #{formatNumber(selectedItem.sequence)} · {t('Total {duration}', { duration: formatDuration(selectedItem.elapsedMs ?? 0) })}{eventDeltas ? ` · ${t('Gap {duration}', { duration: selectedDelta === undefined ? '—' : formatDuration(selectedDelta) })}` : ''}</span></div>{onCreateMapping && <button onClick={() => onCreateMapping(selectedItem as RawStreamEvent)}>{t('Create mapping draft')}</button>}</header>
       <JsonBlock value={selectedItem} />
     </section>}
   </div>;
 }
 function MetricGrid({ metrics, enabled }: { metrics?: SessionSnapshot['metrics']; enabled?: string[] }): React.JSX.Element { if (!metrics) return <p className="muted">{t('No metrics yet.')}</p>; const allow = enabled?.length ? new Set(enabled) : undefined; const entries = Object.entries(metrics).filter(([key, value]) => value !== undefined && (!allow || allow.has(key))); if (!entries.length) return <p className="muted">{t('No enabled metrics have values yet.')}</p>; return <dl className="metrics">{entries.map(([key, value]) => <div key={key}><dt>{localizeHumanized(key)}</dt><dd>{typeof value === 'number' ? (/latency|duration|gap/i.test(key) ? formatDuration(value) : formatNumber(value)) : String(value)}</dd></div>)}</dl>; }
+
+function ReplayOperationStatus({ replay, onOpenControls }: { replay: ReplaySnapshot; onOpenControls: () => void }): React.JSX.Element {
+  const progress = replay.total ? Math.round((replay.index / replay.total) * 100) : 0;
+  return <div className={`runtime-operation runtime-operation--${replay.status}`} role="status" aria-live="polite" aria-atomic="true">
+    <ProductIcon name={replay.status === 'paused' ? 'warning' : 'circle-filled'} />
+    <div><strong>{t(replay.status === 'paused' ? 'Replay paused' : 'Replaying recorded run…')}</strong><span>{t('{current} / {total} events', { current: formatNumber(replay.index), total: formatNumber(replay.total) })}</span></div>
+    <div className="runtime-operation__actions"><IconButton type="button" icon="list-tree" label={t('Open replay controls')} onClick={onOpenControls} /><IconButton type="button" icon="stop" label={t('Stop replay')} onClick={() => post({ type: 'run.replay.stop' })} /></div>
+    <progress value={progress} max={100} aria-label={t('Replay progress')}>{progress}%</progress>
+  </div>;
+}
 
 export function Replay({ runs, replay, remoteSessions, active, trusted }: { runs: LocalRunSummary[]; replay?: ReplaySnapshot; remoteSessions?: RemoteSessionReference[]; active: boolean; trusted: boolean }): React.JSX.Element {
   const [speed, setSpeed] = useState<ReplaySnapshot['speed']>(replay?.speed ?? 1); useEffect(() => { if (replay) setSpeed(replay.speed); }, [replay?.speed]);

@@ -568,5 +568,10 @@
   "Unknown message tag operator: {value}.": "不支援的訊息標籤運算子：{value}。",
   "This message tag operator requires a primitive value.": "這個訊息標籤運算子需要原始型別的值。",
   "Message tag values cannot exceed 512 characters.": "訊息標籤值不得超過 512 字元。",
-  "Unknown message tag tone: {value}.": "不支援的訊息標籤語氣：{value}。"
+  "Unknown message tag tone: {value}.": "不支援的訊息標籤語氣：{value}。",
+  "A TurnStage test run is already active.": "已有 TurnStage 測試正在執行。",
+  "No active TurnStage test run is available to stop.": "目前沒有可停止的 TurnStage 測試。",
+  "Only a safe suite linked by this Profile can be opened.": "只能開啟此 Profile 已連結且路徑安全的測試套件。",
+  "Test runtime is unavailable.": "測試執行階段目前無法使用。",
+  "The linked suite cannot be resolved because this Profile is not inside a workspace folder.": "此 Profile 不在工作區資料夾內，因此無法解析已連結的測試套件。"
 }
