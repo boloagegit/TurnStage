@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { MappingTestResult, WebviewPayload } from '../shared/protocol';
 import type { AdversarialForbidDefinition, AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TestCampaignDefinition, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
@@ -41,9 +41,23 @@ export interface SettingsWorkspaceProps {
   onSectionChange: (section: SettingsSectionId) => void;
   /** Use the compact, single-pane layout beside the Chat preview. */
   embedded?: boolean;
+  /** Section-scoped scroll checkpoint restored when VS Code recreates the Webview. */
+  scrollStateKey?: string;
+  scrollTop?: number;
+  onScrollTopChange?: (value: number) => void;
 }
 
 type PatchPath = Array<string | number>;
+
+function useRestoredScrollPosition(ref: React.RefObject<HTMLDivElement | null>, key: string, scrollTop: number | undefined): void {
+  const restoredKey = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || restoredKey.current === key) return;
+    restoredKey.current = key;
+    element.scrollTop = typeof scrollTop === 'number' && Number.isFinite(scrollTop) ? Math.max(0, scrollTop) : 0;
+  }, [key, ref, scrollTop]);
+}
 
 /** A profile-scoped, single-section settings editor. */
 export function SettingsWorkspace({
@@ -58,8 +72,13 @@ export function SettingsWorkspace({
   campaignDashboard,
   section,
   onSectionChange,
-  embedded = false
+  embedded = false,
+  scrollStateKey = section,
+  scrollTop,
+  onScrollTopChange
 }: SettingsWorkspaceProps): React.JSX.Element {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useRestoredScrollPosition(scrollRef, scrollStateKey, scrollTop);
   const patch = (path: PatchPath, value: unknown) => post({ type: 'profile.patch', path, value });
 
   const active = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0];
@@ -84,7 +103,7 @@ export function SettingsWorkspace({
       </div>
     </header>
 
-    <div className="settings-main" id="settings-content">
+    <div ref={scrollRef} className="settings-main" id="settings-content" onScroll={(event) => onScrollTopChange?.(event.currentTarget.scrollTop)}>
       <div className="settings-content-layout">
         {!embedded && <nav className="settings-section-nav" aria-label={t('Profile configuration sections')}>
           <div className="settings-section-nav-list">
@@ -119,15 +138,21 @@ export function SettingsWorkspace({
   </div>;
 }
 
-export function AdversarialWorkspace({ profile, post, testResults = [], campaignDashboard, activeEvidenceId, timeline }: {
+export function AdversarialWorkspace({ profile, post, testResults = [], campaignDashboard, activeEvidenceId, timeline, scrollTop, onScrollTopChange, expandedCaseId, onExpandedCaseIdChange }: {
   profile: TurnStageProfile;
   post: SettingsWorkspacePost;
   testResults?: AdversarialResultSummary[];
   campaignDashboard?: CampaignDashboardV1;
   activeEvidenceId?: string;
   timeline?: React.ReactNode;
+  scrollTop?: number;
+  onScrollTopChange?: (value: number) => void;
+  expandedCaseId?: string;
+  onExpandedCaseIdChange?: (id: string | undefined) => void;
 }): React.JSX.Element {
   const patch = (path: PatchPath, value: unknown) => post({ type: 'profile.patch', path, value });
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useRestoredScrollPosition(scrollRef, 'adversarial', scrollTop);
   return <div className="settings-workspace settings-workspace--embedded red-team-workspace">
     <header className="settings-header settings-header--embedded" aria-label={t('Red Team toolbar')}>
       <div className="red-team-title"><strong>{t('Red Team')}</strong><span>{t('Bounded adversarial cases, results, and causal evidence.')}</span></div>
@@ -136,13 +161,13 @@ export function AdversarialWorkspace({ profile, post, testResults = [], campaign
         <IconButton icon="check" label={t('Validate')} type="button" className="settings-primary-action" onClick={() => post({ type: 'profile.validate' })} />
       </div>
     </header>
-    <div className="settings-main">
+    <div ref={scrollRef} className="settings-main" onScroll={(event) => onScrollTopChange?.(event.currentTarget.scrollTop)}>
       <section className="settings-panel red-team-panel" aria-labelledby="red-team-panel-title" tabIndex={-1}>
         <div className="settings-panel-heading">
           <div className="settings-panel-title"><h1 id="red-team-panel-title">{t('Adversarial testing')}</h1><p className="settings-section-description">{t('Author known attacks, run bounded samples, and inspect causal evidence without changing formal outcomes.')}</p></div>
           <span className="settings-section-count">{t('{count} inline cases', { count: formatNumber(profile.tests?.scenarios?.filter((scenario) => scenario.adversarial).length ?? 0) })}</span>
         </div>
-        <ScenarioTestsSection view="adversarial" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} timeline={timeline} />
+        <ScenarioTestsSection view="adversarial" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} timeline={timeline} expandedCaseId={expandedCaseId} onExpandedCaseIdChange={onExpandedCaseIdChange} />
       </section>
     </div>
   </div>;
@@ -389,13 +414,18 @@ const performanceMetricOptions: Array<{ id: ScenarioPerformanceMetric; label: st
   { id: 'metrics.maxEventGap', label: 'Maximum event gap' },
 ];
 
-function ScenarioTestsSection({ view, profile, patch, post, testResults, campaignDashboard, activeEvidenceId, timeline }: { view: 'contracts' | 'adversarial'; profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; campaignDashboard?: CampaignDashboardV1; activeEvidenceId?: string; timeline?: React.ReactNode }): React.JSX.Element {
+function ScenarioTestsSection({ view, profile, patch, post, testResults, campaignDashboard, activeEvidenceId, timeline, expandedCaseId: controlledExpandedCaseId, onExpandedCaseIdChange }: { view: 'contracts' | 'adversarial'; profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; campaignDashboard?: CampaignDashboardV1; activeEvidenceId?: string; timeline?: React.ReactNode; expandedCaseId?: string; onExpandedCaseIdChange?: (id: string | undefined) => void }): React.JSX.Element {
   const scenarios = profile.tests?.scenarios ?? [];
   const qualityRubrics = profile.tests?.qualityRubrics ?? [];
   const [undo, setUndo] = useState<{ label: string; scenarios: ScenarioDefinition[] }>();
-  const [expandedCaseId, setExpandedCaseId] = useState<string>();
+  const [uncontrolledExpandedCaseId, setUncontrolledExpandedCaseId] = useState<string>();
+  const expandedCaseId = onExpandedCaseIdChange ? controlledExpandedCaseId : uncontrolledExpandedCaseId;
+  const setExpandedCaseId = (id: string | undefined) => { setUncontrolledExpandedCaseId(id); onExpandedCaseIdChange?.(id); };
   const adversarialEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => scenario.adversarial);
   const contractEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => !scenario.adversarial);
+  useEffect(() => {
+    if (expandedCaseId && !adversarialEntries.some(({ scenario }) => scenario.id === expandedCaseId)) setExpandedCaseId(undefined);
+  }, [adversarialEntries, expandedCaseId]);
   const save = (next: ScenarioDefinition[]) => patch(['tests', 'scenarios'], next);
   const saveDestructive = (label: string, next: ScenarioDefinition[]) => {
     setUndo({ label, scenarios: structuredClone(scenarios) });
@@ -488,7 +518,7 @@ function ScenarioTestsSection({ view, profile, patch, post, testResults, campaig
       </div>
       {undo && <div className="settings-undo" role="status"><span>{undo.label}</span><button type="button" onClick={() => { save(undo.scenarios); setUndo(undefined); }}>{t('Undo')}</button><IconButton type="button" icon="clear-all" label={t('Dismiss undo')} onClick={() => setUndo(undefined)} /></div>}
       {(profile.tests?.adversarialSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.adversarialSuites!.map((path, index) => <li key={`${path}-${index}`}><code>{path}</code><IconButton type="button" icon="trash" label={t('Unlink suite {path}', { path })} onClick={() => patch(['tests', 'adversarialSuites'], profile.tests!.adversarialSuites!.filter((_, itemIndex) => itemIndex !== index))} /></li>)}</ul></div>}
-      {!adversarialEntries.length ? <div className="settings-empty settings-empty--action"><span>{t('No inline adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <AdversarialCaseTable entries={adversarialEntries} expandedCaseId={expandedCaseId} onToggle={(id) => setExpandedCaseId((current) => current === id ? undefined : id)} onChange={(index, value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(index, value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={(index, scenario) => { if (expandedCaseId === scenario.id) setExpandedCaseId(undefined); saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); }} />}
+      {!adversarialEntries.length ? <div className="settings-empty settings-empty--action"><span>{t('No inline adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <AdversarialCaseTable entries={adversarialEntries} expandedCaseId={expandedCaseId} onToggle={(id) => setExpandedCaseId(expandedCaseId === id ? undefined : id)} onChange={(index, value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(index, value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={(index, scenario) => { if (expandedCaseId === scenario.id) setExpandedCaseId(undefined); saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); }} />}
       <p className="settings-footnote">{t('Linked CSV stays the source of truth and uses one row per turn. JSONC remains the lossless format for suite-level defaults and metadata.')}</p>
     </section>
     <section className="settings-card" aria-labelledby="adversarial-results-heading">

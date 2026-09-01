@@ -369,6 +369,17 @@ describe('Webview DOM behavior', () => {
     expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull();
   });
 
+  it('restores and checkpoints the conversation scroll position after Webview recreation', () => {
+    const onMessageScrollTopChange = vi.fn();
+    render(<MobileChatPreview {...mobileProps({ initialMessageScrollTop: 240, onMessageScrollTopChange })} />);
+    const messages = screen.getByRole('log') as HTMLDivElement;
+
+    expect(messages.scrollTop).toBe(240);
+    messages.scrollTop = 315;
+    fireEvent.scroll(messages);
+    expect(onMessageScrollTopChange).toHaveBeenLastCalledWith(315);
+  });
+
   it('keeps RTL direction and long CJK or emoji content in the rendered conversation', () => {
     const longText = '這是一段很長的繁體中文內容，包含 emoji 🧪🚀🙂，用來確認對話不會假設拉丁字元寬度。'.repeat(8);
     setLocale('ar', 'rtl');
@@ -464,6 +475,19 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByRole('status').textContent).toContain('Showing events');
     expect(screen.getByRole('status').textContent).toContain('1–200');
     expect(screen.getByRole('status').textContent).toContain('1,000');
+  });
+
+  it('restores and checkpoints virtual event-list scrolling without rendering every event', () => {
+    const items = Array.from({ length: 500 }, (_, index) => ({ sequence: index + 1, rawSequence: index + 1, type: 'message', elapsedMs: index }));
+    const onScrollTopChange = vi.fn();
+    const { container } = render(<VirtualEvents items={items} label="Raw Events" initialScrollTop={360} onScrollTopChange={onScrollTopChange} />);
+    const list = container.querySelector('.virtual-list') as HTMLDivElement;
+
+    expect(list.scrollTop).toBe(360);
+    expect(screen.getAllByRole('option').length).toBeLessThan(items.length);
+    list.scrollTop = 510;
+    fireEvent.scroll(list);
+    expect(onScrollTopChange).toHaveBeenLastCalledWith(510);
   });
 
   it('makes event payload disclosure visible and operable by pointer and keyboard', async () => {
@@ -703,6 +727,19 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } });
     await user.click(screen.getByRole('button', { name: 'Diagnose profile with Copilot' }));
     expect(post).toHaveBeenCalledWith({ type: 'copilot.profileDoctor' });
+  });
+
+  it('restores Red Team expansion and scroll checkpoints', () => {
+    const configured = { ...profile, tests: { scenarios: [{ id: 'case-1', name: 'Restored case', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } }] } } as TurnStageProfile;
+    const onScrollTopChange = vi.fn();
+    const { container } = render(<AdversarialWorkspace profile={configured} post={vi.fn()} expandedCaseId="case-1" onExpandedCaseIdChange={vi.fn()} scrollTop={480} onScrollTopChange={onScrollTopChange} />);
+    const scrollContainer = container.querySelector('.settings-main') as HTMLDivElement;
+
+    expect(screen.getByRole('button', { name: 'Close editor' }).getAttribute('aria-expanded')).toBe('true');
+    expect(scrollContainer.scrollTop).toBe(480);
+    scrollContainer.scrollTop = 640;
+    fireEvent.scroll(scrollContainer);
+    expect(onScrollTopChange).toHaveBeenLastCalledWith(640);
   });
 
   it('authors and operates a bounded campaign with baseline, diff, resume, and JSONL actions', async () => {

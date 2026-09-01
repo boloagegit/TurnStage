@@ -82,6 +82,9 @@ export interface MobileChatPreviewProps {
   messageActionFeedback?: MessageActionFeedback;
   visualFeedback?: VisualFeedback;
   onMessageActionFeedback?: (feedback: MessageActionFeedback | undefined) => void;
+  /** Scroll checkpoint restored after VS Code recreates a hidden Webview DOM. */
+  initialMessageScrollTop?: number;
+  onMessageScrollTopChange?: (value: number) => void;
   className?: string;
 }
 
@@ -109,6 +112,8 @@ export function MobileChatPreview({
   messageActionFeedback,
   visualFeedback,
   onMessageActionFeedback,
+  initialMessageScrollTop,
+  onMessageScrollTopChange,
   className
 }: MobileChatPreviewProps): React.JSX.Element {
   const [uncontrolledViewport, setUncontrolledViewport] = useState<ChatViewportState>(controlledViewport ?? DEFAULT_CHAT_VIEWPORT);
@@ -117,6 +122,8 @@ export function MobileChatPreview({
   const deviceRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const messageScrollRef = useRef<MessageScrollSnapshot | undefined>(undefined);
+  const restoredMessageScroll = useRef(false);
+  const onMessageScrollTopChangeRef = useRef(onMessageScrollTopChange);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [responsiveSize, setResponsiveSize] = useState({ width: viewport.width, height: viewport.height });
   const [fitScale, setFitScale] = useState(1);
@@ -150,6 +157,8 @@ export function MobileChatPreview({
     onViewportChange?.(next);
   };
 
+  useEffect(() => { onMessageScrollTopChangeRef.current = onMessageScrollTopChange; }, [onMessageScrollTopChange]);
+
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage || typeof ResizeObserver === 'undefined') return;
@@ -171,22 +180,28 @@ export function MobileChatPreview({
   useEffect(() => {
     const messages = messagesRef.current;
     if (!messages) return;
-    const handleScroll = () => {
+    const handleScroll = (persist = true) => {
       const nearBottom = isNearBottom(messages);
       const current = messageScrollRef.current;
       if (current) {
         messageScrollRef.current = { ...current, nearBottom, scrollHeight: messages.scrollHeight, scrollTop: messages.scrollTop };
       }
+      if (persist) onMessageScrollTopChangeRef.current?.(messages.scrollTop);
       if (nearBottom) setShowJumpToLatest(false);
     };
-    handleScroll();
-    messages.addEventListener('scroll', handleScroll, { passive: true });
-    return () => messages.removeEventListener('scroll', handleScroll);
+    handleScroll(false);
+    const listener = () => handleScroll(true);
+    messages.addEventListener('scroll', listener, { passive: true });
+    return () => messages.removeEventListener('scroll', listener);
   }, []);
 
   useLayoutEffect(() => {
     const messages = messagesRef.current;
     if (!messages) return;
+    if (!restoredMessageScroll.current && snapshotMessages.length > 0 && typeof initialMessageScrollTop === 'number' && Number.isFinite(initialMessageScrollTop)) {
+      restoredMessageScroll.current = true;
+      messages.scrollTop = Math.max(0, initialMessageScrollTop);
+    }
     const previous = messageScrollRef.current;
     const firstMessageId = snapshotMessages[0]?.id;
     const changed = previous !== undefined && previous.contentKey !== messageContentKey;
@@ -210,7 +225,7 @@ export function MobileChatPreview({
       scrollHeight: messages.scrollHeight,
       scrollTop: messages.scrollTop
     };
-  }, [messageContentKey, snapshotMessages]);
+  }, [initialMessageScrollTop, messageContentKey, snapshotMessages]);
 
   const selectPreset = (preset: ChatViewportPreset) => {
     if (preset === 'responsive') { updateViewport({ ...viewport, preset }); return; }

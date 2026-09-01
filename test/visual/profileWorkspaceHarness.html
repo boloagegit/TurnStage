@@ -252,9 +252,12 @@
       }
       target[path.at(-1)] = value;
     };
+    const initialWebviewState = { section: query.get('section') ?? 'test', configurationSection: query.get('configurationSection') ?? undefined, rightPaneMode: query.get('rightPane') ?? undefined, inspectorTab: query.get('tab') ?? 'Raw Events', splitPercent: Number(query.get('split')) || 50, splitCustomized: query.has('split'), draft: query.get('draft') ?? '', activeEvidenceId: query.get('activeEvidence') ?? undefined, chatViewport };
+    const persistWebviewState = query.get('persistState') === '1';
+    const persistedStateKey = 'turnstage.visual.webviewState';
     window.acquireVsCodeApi = () => ({
-      getState: () => ({ section: query.get('section') ?? 'test', configurationSection: query.get('configurationSection') ?? undefined, rightPaneMode: query.get('rightPane') ?? undefined, inspectorTab: query.get('tab') ?? 'Raw Events', splitPercent: Number(query.get('split')) || 50, splitCustomized: query.has('split'), draft: query.get('draft') ?? '', activeEvidenceId: query.get('activeEvidence') ?? undefined, chatViewport }),
-      setState: () => {},
+      getState: () => persistWebviewState ? JSON.parse(sessionStorage.getItem(persistedStateKey) ?? JSON.stringify(initialWebviewState)) : initialWebviewState,
+      setState: (state) => { if (persistWebviewState) sessionStorage.setItem(persistedStateKey, JSON.stringify(state)); },
       postMessage: (message) => {
         window.__turnstageMessages.push(JSON.parse(JSON.stringify(message)));
         if (message.type === 'profile.patch') {

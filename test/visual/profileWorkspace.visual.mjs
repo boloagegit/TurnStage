@@ -35,6 +35,8 @@ const browser = await chromium.launch(executablePath ? { headless: true, executa
 
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const pageErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(error.stack ?? error.message));
   await page.addInitScript(() => {
     Object.defineProperty(globalThis.navigator, 'clipboard', {
       configurable: true,
@@ -48,7 +50,8 @@ try {
   });
   const url = `http://127.0.0.1:${address.port}/test/visual/profileWorkspaceHarness.html`;
   const waitForProfile = async () => {
-    await page.locator('.mobile-chat-preview__app-header strong').waitFor();
+    try { await page.locator('.mobile-chat-preview__app-header strong').waitFor(); }
+    catch (error) { throw new Error(`Profile Webview did not hydrate. Page errors: ${pageErrors.join(' | ') || 'none'}`, { cause: error }); }
     assert.equal(await page.getByText('Loading profile…').count(), 0, 'The recreated Webview must not remain on Loading profile…');
     assert.equal(await page.locator('.mobile-chat-preview__app-header strong').innerText(), 'Slow SSE Visual Proof');
     assert.equal(await page.locator('.profile-identity').count(), 0, 'The duplicated full-width Profile identity row must stay removed');
@@ -423,6 +426,33 @@ try {
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'Saved Webview state must restore the last right-panel tab');
   assert.equal(await page.getByRole('heading', { name: 'Latest adversarial results' }).count(), 1, 'Restored Red Team state must render its result workspace without a host section override');
   await page.screenshot({ path: resolve(artifactDirectory, 'rehydrated-red-team-tab.png'), fullPage: true });
+
+  await page.goto(`${url}?persistState=1&preset=chat-with-metrics`);
+  await waitForProfile();
+  await page.evaluate(() => globalThis.sessionStorage.removeItem('turnstage.visual.webviewState'));
+  await page.reload();
+  await waitForProfile();
+  await page.getByRole('tab', { name: 'Runs' }).click();
+  await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').inspectorTab === 'Runs');
+  await page.reload();
+  await waitForProfile();
+  assert.equal(await page.getByRole('tab', { name: 'Runs' }).getAttribute('aria-selected'), 'true', 'A saved inspector tab must win over the Profile initial Metrics tab after Webview recreation');
+  await page.setViewportSize({ width: 1000, height: 600 });
+  await page.getByRole('tab', { name: 'Red Team' }).click();
+  const adversarialTable = page.locator('.adversarial-case-table');
+  await adversarialTable.getByRole('button', { name: 'Edit', exact: true }).click();
+  await adversarialTable.getByRole('button', { name: 'Close editor', exact: true }).waitFor();
+  const appliedRedTeamScroll = await page.locator('.red-team-workspace .settings-main').evaluate((element) => { element.scrollTop = Math.min(560, element.scrollHeight - element.clientHeight); element.dispatchEvent(new globalThis.Event('scroll', { bubbles: true })); return element.scrollTop; });
+  assert.ok(appliedRedTeamScroll > 0, 'The representative Red Team viewport must have a real reading position to restore');
+  await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').rightPaneMode === 'adversarial');
+  await page.waitForFunction(() => Boolean(JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').expandedAdversarialCaseId));
+  await page.waitForFunction(() => (JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').scrollPositions?.adversarial ?? 0) > 0);
+  const savedRedTeamScroll = await page.evaluate(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').scrollPositions.adversarial);
+  await page.reload();
+  await waitForProfile();
+  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'The saved right-panel mode must survive recreation');
+  assert.equal(await page.locator('.adversarial-case-table').getByRole('button', { name: 'Close editor', exact: true }).count(), 1, 'The expanded adversarial case must survive recreation');
+  assert.equal(await page.locator('.red-team-workspace .settings-main').evaluate((element) => element.scrollTop), savedRedTeamScroll, 'The Red Team reading position must survive recreation');
 
   await page.goto(url);
   await waitForProfile();

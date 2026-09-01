@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { HostMessage, MappingTestResult, WebviewPayload, WorkspaceSection } from '../shared/protocol';
 import { isHostMessage, isWorkspaceSection, PROTOCOL_VERSION } from '../shared/protocol';
@@ -18,22 +18,31 @@ export type EventIssueFilter = 'all' | 'valid' | 'parse-error' | 'mapping-error'
 export type EventTerminalFilter = 'all' | 'terminal' | 'non-terminal';
 export interface EventFilterState { query: string; eventType: string; mapping: EventMappingFilter; issue: EventIssueFilter; terminal: EventTerminalFilter }
 export interface InspectorEventFilters { raw: EventFilterState; normalized: EventFilterState }
+const MAPPING_FILTERS = new Set<EventMappingFilter>(['all', 'matched', 'unmatched']);
+const ISSUE_FILTERS = new Set<EventIssueFilter>(['all', 'valid', 'parse-error', 'mapping-error']);
+const TERMINAL_FILTERS = new Set<EventTerminalFilter>(['all', 'terminal', 'non-terminal']);
 const rightPaneModes = ['debug', 'adversarial', 'configure'] as const;
 type RightPaneMode = typeof rightPaneModes[number];
-interface WebviewState { section?: WorkspaceSection; configurationSection?: SettingsSectionId; rightPaneMode?: RightPaneMode; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number; selectedNetworkId?: string; activeEvidenceId?: string; chatViewport?: ChatViewportState; eventFilters?: Partial<InspectorEventFilters> }
+const WEBVIEW_STATE_VERSION = 2;
+const scrollPositionKeys = ['chat', 'adversarial', 'events.raw', 'events.normalized', ...SETTINGS_SECTIONS.map((section) => `configure.${section.id}`)] as const;
+type ScrollPositionKey = typeof scrollPositionKeys[number];
+const networkDetailTabs = ['Headers', 'Payload', 'Response', 'Timing'] as const;
+type NetworkDetailTab = typeof networkDetailTabs[number];
+const inspectorTabs = ['Network', 'Raw Events', 'Normalized', 'Metrics', 'Errors', 'Runs'] as const; type InspectorTab = typeof inspectorTabs[number];
+export const DEFAULT_SPLIT_PERCENT = 64;
+export const ACCESSIBLE_EVENT_WINDOW_SIZE = 200;
+export const DEFAULT_EVENT_FILTERS: EventFilterState = { query: '', eventType: 'all', mapping: 'all', issue: 'all', terminal: 'all' };
+export interface NetworkInspectorState { query: string; selectedId?: string; detailTab: NetworkDetailTab }
+export interface WebviewState { version?: number; sessionId?: string; section?: WorkspaceSection; configurationSection?: SettingsSectionId; rightPaneMode?: RightPaneMode; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number; selectedNetworkId?: string; activeEvidenceId?: string; chatViewport?: ChatViewportState; eventFilters?: Partial<InspectorEventFilters>; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; expandedAdversarialCaseId?: string; networkInspector?: Partial<NetworkInspectorState>; acceptedForms?: string[] }
 type VsCodeApi = { postMessage(message: unknown): void; getState(): WebviewState | undefined; setState(state: WebviewState): void };
 const rootElement = typeof document === 'undefined' ? undefined : document.getElementById('root');
 const instanceId = rootElement?.dataset.instanceId ?? 'test-instance';
 const vscode: VsCodeApi = typeof acquireVsCodeApi === 'function'
   ? acquireVsCodeApi<WebviewState>()
   : { postMessage: () => undefined, getState: () => undefined, setState: () => undefined };
-const savedState = vscode.getState();
+const savedState = normalizeWebviewState(vscode.getState());
 const savedSplitCustomized = savedState?.splitCustomized === true;
-const inspectorTabs = ['Network', 'Raw Events', 'Normalized', 'Metrics', 'Errors', 'Runs'] as const; type InspectorTab = typeof inspectorTabs[number];
 const savedInspectorTab = (savedState as { inspectorTab?: unknown } | undefined)?.inspectorTab;
-export const DEFAULT_SPLIT_PERCENT = 64;
-export const ACCESSIBLE_EVENT_WINDOW_SIZE = 200;
-export const DEFAULT_EVENT_FILTERS: EventFilterState = { query: '', eventType: 'all', mapping: 'all', issue: 'all', terminal: 'all' };
 
 function post(message: WebviewPayload): void { vscode.postMessage({ ...message, protocolVersion: PROTOCOL_VERSION, editorInstanceId: instanceId, requestId: crypto.randomUUID() }); }
 
@@ -45,7 +54,13 @@ function App(): React.JSX.Element {
   const [activeEvidenceId, setActiveEvidenceId] = useState(savedState?.activeEvidenceId);
   const [chatViewport, setChatViewport] = useState<ChatViewportState>(isChatViewportState(savedState?.chatViewport) ? savedState.chatViewport : { ...DEFAULT_CHAT_VIEWPORT });
   const [eventFilters, setEventFilters] = useState<InspectorEventFilters>(() => normalizeInspectorEventFilters(savedState?.eventFilters));
-  const [acceptedForms, setAcceptedForms] = useState<ReadonlySet<string>>(() => new Set());
+  const [expandedAdversarialCaseId, setExpandedAdversarialCaseId] = useState(savedState?.expandedAdversarialCaseId);
+  const [networkInspector, setNetworkInspector] = useState<NetworkInspectorState>(() => normalizeNetworkInspectorState(savedState?.networkInspector));
+  const scrollPositionsRef = useRef<Partial<Record<ScrollPositionKey, number>>>({ ...savedState?.scrollPositions });
+  const stateRef = useRef<WebviewState | undefined>(undefined);
+  const persistTimerRef = useRef<number | undefined>(undefined);
+  const profileInspectorDefaultApplied = useRef(!shouldApplyProfileInspectorDefault(savedState));
+  const [acceptedForms, setAcceptedForms] = useState<ReadonlySet<string>>(() => new Set(savedState?.acceptedForms));
   const [messageActionFeedback, setMessageActionFeedback] = useState<MessageActionFeedback>();
   const [visualFeedback, setVisualFeedback] = useState<VisualFeedback>();
   const [testResults, setTestResults] = useState<AdversarialResultSummary[]>([]);
@@ -53,16 +68,53 @@ function App(): React.JSX.Element {
   const [activeTimeline, setActiveTimeline] = useState<{ evidenceId: string; timeline: EvidenceTimelineSummary }>();
   const [connectionResult, setConnectionResult] = useState<ConnectionDoctorSummary>();
   const [profile, setProfile] = useState<TurnStageProfile>(); const [snapshot, setSnapshot] = useState<SessionSnapshot>(); const [runs, setRuns] = useState<LocalRunSummary[]>([]); const [requestPreview, setRequestPreview] = useState<unknown>(); const [networkEntries, setNetworkEntries] = useState<NetworkExchange[]>([]); const [diagnostics, setDiagnostics] = useState<Array<{ severity: string; message: string }>>([]); const [notice, setNotice] = useState(''); const [mappingTestResult, setMappingTestResult] = useState<MappingTestResult>(); const [remoteName, setRemoteName] = useState<string>(); const [, setLocaleVersion] = useState(0);
-  useEffect(() => { const listener = (event: MessageEvent<HostMessage>) => { if (!isHostMessage(event.data, instanceId)) return; const message = event.data; if (message.type === 'host.ready') { setLocale(message.locale, message.direction); setLocaleVersion((current) => current + 1); setRemoteName(message.remoteName); } else if (message.type === 'workspace.section') { if (message.section === 'test') setRightPaneMode('debug'); else { setConfigurationSection(message.section); setRightPaneMode('configure'); } requestAnimationFrame(() => document.getElementById('right-pane-panel')?.focus()); } else if (message.type === 'inspector.focus') { setRightPaneMode('debug'); setActiveEvidenceId(message.evidenceId); setInspectorTab(message.tab); setSelectedNetworkId(message.networkId); setSelectedRawSequence(message.sequence); setSelectedMessageId(message.messageId); if (message.tab === 'Raw Events') setEventFilters((current) => ({ ...current, raw: { ...DEFAULT_EVENT_FILTERS } })); if (message.tab === 'Normalized') setEventFilters((current) => ({ ...current, normalized: { ...DEFAULT_EVENT_FILTERS } })); setNotice(t('Opened test failure evidence.')); focusAfterRender(() => { const target = message.networkId ? document.getElementById(networkRowId(message.networkId)) : message.sequence === undefined ? document.getElementById('right-pane-panel') : document.getElementById(`inspector-event-${String(message.sequence)}`); target?.focus(); }); } else if (message.type === 'profile.snapshot') { setProfile(message.profile); setConnectionResult(undefined); } else if (message.type === 'profile.validation') setDiagnostics(message.diagnostics); else if (message.type === 'profile.validated') { if (message.valid) setNotice(t('Profile is valid.')); } else if (message.type === 'session.snapshot') { setSnapshot(message.snapshot); setRuns(message.runs); setRequestPreview(message.requestPreview); setNetworkEntries(message.networkEntries ?? []); setConnectionResult(undefined); } else if (message.type === 'mapping.test.result') setMappingTestResult(message.result); else if (message.type === 'request.error') setNotice(message.error.message); else if (message.type === 'action.feedback') setMessageActionFeedback({ actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: message.status, message: message.message }); else if (message.type === 'form.accepted') { setAcceptedForms((current) => new Set(current).add(`${message.sourceMessageId ?? ''}:${message.formId}`)); setNotice(t('Form submitted.')); } else if (message.type === 'run.imported') setNotice(t(message.duplicate ? 'Run imported as a copy from {path}' : 'Run imported from {path}', { path: message.path })); else if (message.type === 'run.exported') setNotice(t('Run exported to {path}', { path: message.path })); else if (message.type === 'run.history.changed') setNotice(t(message.deletedCount === 1 ? 'Deleted {count} recorded run.' : 'Deleted {count} recorded runs.', { count: formatNumber(message.deletedCount) })); else if (message.type === 'adversarial.operation' || message.type === 'adversarial.captured') setNotice(message.detail); else if (message.type === 'test.results') setTestResults(message.results); else if (message.type === 'campaign.dashboard') setCampaignDashboard(message.dashboard); else if (message.type === 'campaign.preview') { const summary = t('{cases} cases · {attempts} attempts · up to {requests} requests', { cases: formatNumber(message.selectedCases), attempts: formatNumber(message.plannedAttempts), requests: formatNumber(message.plannedRequests) }); setNotice(message.warnings.length ? `${summary} · ${message.warnings.join(' ')}` : summary); } else if (message.type === 'test.timeline') { setActiveEvidenceId(message.evidenceId); setActiveTimeline({ evidenceId: message.evidenceId, timeline: message.timeline }); } else if (message.type === 'connection.result') setConnectionResult(message.result); else if (message.type === 'visual.result') setVisualFeedback(message); else if (message.type === 'workspaceTrust.changed') setSnapshot((current) => current ? { ...current, trusted: message.trusted } : current); }; window.addEventListener('message', listener); post({ type: 'webview.ready' }); return () => window.removeEventListener('message', listener); }, []);
+  useEffect(() => { const listener = (event: MessageEvent<HostMessage>) => { if (!isHostMessage(event.data, instanceId)) return; const message = event.data; if (message.type === 'host.ready') { setLocale(message.locale, message.direction); setLocaleVersion((current) => current + 1); setRemoteName(message.remoteName); } else if (message.type === 'workspace.section') { if (message.section === 'test') setRightPaneMode('debug'); else { setConfigurationSection(message.section); setRightPaneMode('configure'); } requestAnimationFrame(() => document.getElementById('right-pane-panel')?.focus()); } else if (message.type === 'inspector.focus') { profileInspectorDefaultApplied.current = true; setRightPaneMode('debug'); setActiveEvidenceId(message.evidenceId); setInspectorTab(message.tab); setSelectedNetworkId(message.networkId); setSelectedRawSequence(message.sequence); setSelectedMessageId(message.messageId); if (message.tab === 'Raw Events') setEventFilters((current) => ({ ...current, raw: { ...DEFAULT_EVENT_FILTERS } })); if (message.tab === 'Normalized') setEventFilters((current) => ({ ...current, normalized: { ...DEFAULT_EVENT_FILTERS } })); setNotice(t('Opened test failure evidence.')); focusAfterRender(() => { const target = message.networkId ? document.getElementById(networkRowId(message.networkId)) : message.sequence === undefined ? document.getElementById('right-pane-panel') : document.getElementById(`inspector-event-${String(message.sequence)}`); target?.focus(); }); } else if (message.type === 'profile.snapshot') { setProfile(message.profile); setConnectionResult(undefined); } else if (message.type === 'profile.validation') setDiagnostics(message.diagnostics); else if (message.type === 'profile.validated') { if (message.valid) setNotice(t('Profile is valid.')); } else if (message.type === 'session.snapshot') { setSnapshot(message.snapshot); setRuns(message.runs); setRequestPreview(message.requestPreview); setNetworkEntries(message.networkEntries ?? []); setConnectionResult(undefined); } else if (message.type === 'mapping.test.result') setMappingTestResult(message.result); else if (message.type === 'request.error') setNotice(message.error.message); else if (message.type === 'action.feedback') setMessageActionFeedback({ actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: message.status, message: message.message }); else if (message.type === 'form.accepted') { setAcceptedForms((current) => new Set(current).add(`${message.sourceMessageId ?? ''}:${message.formId}`)); setNotice(t('Form submitted.')); } else if (message.type === 'run.imported') setNotice(t(message.duplicate ? 'Run imported as a copy from {path}' : 'Run imported from {path}', { path: message.path })); else if (message.type === 'run.exported') setNotice(t('Run exported to {path}', { path: message.path })); else if (message.type === 'run.history.changed') setNotice(t(message.deletedCount === 1 ? 'Deleted {count} recorded run.' : 'Deleted {count} recorded runs.', { count: formatNumber(message.deletedCount) })); else if (message.type === 'adversarial.operation' || message.type === 'adversarial.captured') setNotice(message.detail); else if (message.type === 'test.results') setTestResults(message.results); else if (message.type === 'campaign.dashboard') setCampaignDashboard(message.dashboard); else if (message.type === 'campaign.preview') { const summary = t('{cases} cases · {attempts} attempts · up to {requests} requests', { cases: formatNumber(message.selectedCases), attempts: formatNumber(message.plannedAttempts), requests: formatNumber(message.plannedRequests) }); setNotice(message.warnings.length ? `${summary} · ${message.warnings.join(' ')}` : summary); } else if (message.type === 'test.timeline') { setActiveEvidenceId(message.evidenceId); setActiveTimeline({ evidenceId: message.evidenceId, timeline: message.timeline }); } else if (message.type === 'connection.result') setConnectionResult(message.result); else if (message.type === 'visual.result') setVisualFeedback(message); else if (message.type === 'workspaceTrust.changed') setSnapshot((current) => current ? { ...current, trusted: message.trusted } : current); }; window.addEventListener('message', listener); post({ type: 'webview.ready' }); return () => window.removeEventListener('message', listener); }, []);
   useEffect(() => { if (!messageActionFeedback || messageActionFeedback.status === 'pending') return; const timeout = window.setTimeout(() => setMessageActionFeedback(undefined), 2400); return () => window.clearTimeout(timeout); }, [messageActionFeedback]);
   useEffect(() => { if (!notice) return; const timeout = window.setTimeout(() => setNotice(''), 3200); return () => window.clearTimeout(timeout); }, [notice]);
-  useEffect(() => { setAcceptedForms(new Set()); setSelectedMessageId(undefined); setSelectedRawSequence(undefined); setMessageActionFeedback(undefined); }, [snapshot?.sessionId]);
-  useEffect(() => { vscode.setState({ section: rightPaneMode === 'configure' ? configurationSection : 'test', configurationSection, rightPaneMode, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, chatViewport, eventFilters }); }, [configurationSection, rightPaneMode, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, chatViewport, eventFilters]);
+  const checkpointSessionId = useRef(savedState?.sessionId);
   useEffect(() => {
-    if (!profile) return;
+    const nextSessionId = snapshot?.sessionId;
+    if (!nextSessionId) return;
+    const previousSessionId = checkpointSessionId.current;
+    checkpointSessionId.current = nextSessionId;
+    if (previousSessionId === nextSessionId) return;
+    setAcceptedForms(new Set());
+    setMessageActionFeedback(undefined);
+    if (previousSessionId !== undefined || (selectedMessageId && !snapshot.messages.some((message) => message.id === selectedMessageId))) setSelectedMessageId(undefined);
+    if (previousSessionId !== undefined || (selectedRawSequence !== undefined && !snapshot.rawEvents.some((event) => event.sequence === selectedRawSequence))) setSelectedRawSequence(undefined);
+  }, [snapshot?.sessionId]);
+  const persistState = useCallback(() => {
+    if (persistTimerRef.current !== undefined) window.clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = undefined;
+    if (stateRef.current) vscode.setState({ ...stateRef.current, scrollPositions: { ...scrollPositionsRef.current } });
+  }, []);
+  const scheduleStatePersist = useCallback(() => {
+    if (persistTimerRef.current !== undefined) return;
+    persistTimerRef.current = window.setTimeout(persistState, 80);
+  }, [persistState]);
+  const updateScrollPosition = useCallback((key: ScrollPositionKey, value: number) => {
+    const normalized = normalizeScrollPosition(value);
+    if (scrollPositionsRef.current[key] === normalized) return;
+    scrollPositionsRef.current = { ...scrollPositionsRef.current, [key]: normalized };
+    scheduleStatePersist();
+  }, [scheduleStatePersist]);
+  useEffect(() => {
+    stateRef.current = { version: WEBVIEW_STATE_VERSION, sessionId: snapshot?.sessionId, section: rightPaneMode === 'configure' ? configurationSection : 'test', configurationSection, rightPaneMode, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, chatViewport, eventFilters, expandedAdversarialCaseId, networkInspector, acceptedForms: [...acceptedForms] };
+    persistState();
+  }, [snapshot?.sessionId, configurationSection, rightPaneMode, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, chatViewport, eventFilters, expandedAdversarialCaseId, networkInspector, acceptedForms, persistState]);
+  useEffect(() => {
+    const flushIfHidden = () => { if (document.visibilityState === 'hidden') persistState(); };
+    window.addEventListener('pagehide', persistState);
+    document.addEventListener('visibilitychange', flushIfHidden);
+    return () => { window.removeEventListener('pagehide', persistState); document.removeEventListener('visibilitychange', flushIfHidden); persistState(); };
+  }, [persistState]);
+  useEffect(() => {
+    if (!profile || profileInspectorDefaultApplied.current) return;
+    profileInspectorDefaultApplied.current = true;
     const preferredTab = resolveUiLayout(profile.ui).initialInspectorTab;
     if (preferredTab && componentVisible(profile, 'metrics')) setInspectorTab(preferredTab);
   }, [profile?.ui?.layout?.preset, profile?.ui?.components?.metrics?.visible]);
+  useEffect(() => { if (profile && inspectorTab === 'Metrics' && !componentVisible(profile, 'metrics')) setInspectorTab('Raw Events'); }, [inspectorTab, profile?.ui?.components?.metrics?.visible]);
   const active = snapshot ? ['submitting', 'waitingStart', 'streaming', 'stopping'].includes(snapshot.turnState) : false;
   const continuationBlocked = snapshot?.turnState === 'failed' && profile?.errorPolicy?.allowContinuation === false;
   const send = (text = draft, interaction: any = { kind: 'manual' }) => { if (!text.trim() || active || snapshot?.trusted !== true) return; post({ type: 'request.send', text, interaction }); setDraft(''); };
@@ -96,13 +148,13 @@ function App(): React.JSX.Element {
     {diagnostics.length > 0 && <div className="validation-banner" role="alert"><strong>{t(diagnostics.length === 1 ? '{count} configuration issue.' : '{count} configuration issues.', { count: formatNumber(diagnostics.length) })}</strong> {t('Requests are blocked until errors are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></div>}
     {notice && <div className="operation-status" role="status" aria-live="polite" aria-atomic="true"><ProductIcon name="info" /><span>{notice}</span><IconButton icon="clear-all" label={t('Dismiss notification')} type="button" onClick={() => setNotice('')} /></div>}
     <section id="main-panel" tabIndex={-1} className="panel" aria-label={t('Test')}>
-      <TestWorkspace profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} testResults={testResults} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} activeTimeline={activeTimeline && activeTimeline.evidenceId === activeEvidenceId ? activeTimeline.timeline : undefined} connectionResult={connectionResult} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} inspectorTab={inspectorTab} setInspectorTab={setInspectorTab} requestPreview={requestPreview} splitPercent={splitPercent} setSplitPercent={setSplitPercent} splitCustomized={splitCustomized} setSplitCustomized={setSplitCustomized} chatViewport={chatViewport} setChatViewport={setChatViewport} eventFilters={eventFilters} setEventFilters={setEventFilters} selectedMessageId={selectedMessageId} selectedRawSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={setMessageActionFeedback} onSelectMessage={selectMessage} onSelectEvent={selectEvent} onCreateMapping={(event) => { post({ type: 'profile.patch', path: ['stream', 'mappings'], value: [...profile.stream.mappings, mappingDraftFromRawEvent(event, profile)] }); setNotice(t('Created mapping draft from raw event #{sequence}.', { sequence: formatNumber(event.sequence) })); }} rightPaneMode={rightPaneMode} setRightPaneMode={setRightPaneMode} configurationSection={configurationSection} setConfigurationSection={setConfigurationSection} mappingTestResult={mappingTestResult} remoteName={remoteName} />
+      <TestWorkspace profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} testResults={testResults} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} activeTimeline={activeTimeline && activeTimeline.evidenceId === activeEvidenceId ? activeTimeline.timeline : undefined} connectionResult={connectionResult} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} inspectorTab={inspectorTab} setInspectorTab={setInspectorTab} requestPreview={requestPreview} splitPercent={splitPercent} setSplitPercent={setSplitPercent} splitCustomized={splitCustomized} setSplitCustomized={setSplitCustomized} chatViewport={chatViewport} setChatViewport={setChatViewport} eventFilters={eventFilters} setEventFilters={setEventFilters} selectedMessageId={selectedMessageId} selectedRawSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={setMessageActionFeedback} onSelectMessage={selectMessage} onSelectEvent={selectEvent} onCreateMapping={(event) => { post({ type: 'profile.patch', path: ['stream', 'mappings'], value: [...profile.stream.mappings, mappingDraftFromRawEvent(event, profile)] }); setNotice(t('Created mapping draft from raw event #{sequence}.', { sequence: formatNumber(event.sequence) })); }} rightPaneMode={rightPaneMode} setRightPaneMode={setRightPaneMode} configurationSection={configurationSection} setConfigurationSection={setConfigurationSection} mappingTestResult={mappingTestResult} remoteName={remoteName} scrollPositions={scrollPositionsRef.current} onScrollPositionChange={updateScrollPosition} expandedAdversarialCaseId={expandedAdversarialCaseId} setExpandedAdversarialCaseId={setExpandedAdversarialCaseId} networkInspector={networkInspector} setNetworkInspector={setNetworkInspector} />
     </section>
     <div className="sr-status" role="status" aria-live="polite">{terminalAnnouncement(snapshot?.turnState)}</div>
   </main>;
 }
 
-function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, campaignDashboard, activeEvidenceId, activeTimeline, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, configurationSection, setConfigurationSection, mappingTestResult, remoteName }: {
+function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, campaignDashboard, activeEvidenceId, activeTimeline, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, configurationSection, setConfigurationSection, mappingTestResult, remoteName, scrollPositions, onScrollPositionChange, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector }: {
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
   runs: LocalRunSummary[];
@@ -144,6 +196,12 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
   setConfigurationSection: (section: SettingsSectionId) => void;
   mappingTestResult?: MappingTestResult;
   remoteName?: string;
+  scrollPositions: Partial<Record<ScrollPositionKey, number>>;
+  onScrollPositionChange: (key: ScrollPositionKey, value: number) => void;
+  expandedAdversarialCaseId?: string;
+  setExpandedAdversarialCaseId: (id: string | undefined) => void;
+  networkInspector: NetworkInspectorState;
+  setNetworkInspector: (state: NetworkInspectorState) => void;
 }): React.JSX.Element {
   const workspaceRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLElement>(null);
@@ -211,7 +269,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
     <div className="test-surface__header">{activeEvidence && <EvidenceSummary result={activeEvidence} />}</div>
     <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
     <section ref={previewRef} className="preview-pane">
-      <MobileChatPreview profile={profile} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} viewport={chatViewport} onViewportChange={setChatViewport} onConfigure={() => setRightPaneMode('configure')} selectedMessageId={rightPaneMode === 'debug' ? selectedMessageId : undefined} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={onMessageActionFeedback} />
+      <MobileChatPreview profile={profile} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} viewport={chatViewport} onViewportChange={setChatViewport} onConfigure={() => setRightPaneMode('configure')} selectedMessageId={rightPaneMode === 'debug' ? selectedMessageId : undefined} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={onMessageActionFeedback} initialMessageScrollTop={scrollPositions.chat} onMessageScrollTopChange={(value) => onScrollPositionChange('chat', value)} />
     </section>
     {showRightPane && <>
       <div className={`splitter splitter--${rightPanePosition}`} role="separator" aria-label={t('Resize chat preview and right panel')} aria-orientation={rightPanePosition === 'right' ? 'vertical' : 'horizontal'} aria-valuemin={10} aria-valuemax={90} aria-valuenow={Math.round(splitPercent)} tabIndex={0} onPointerDown={beginResize} onKeyDown={(event) => {
@@ -236,10 +294,10 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, c
         </header>
         <div id="right-pane-panel" className="right-pane-panel" role="tabpanel" aria-labelledby={`right-pane-${rightPaneMode}-tab`} tabIndex={-1}>
           {rightPaneMode === 'debug'
-            ? <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} onCreateMapping={onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} />
+            ? <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} onCreateMapping={onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} scrollPositions={scrollPositions} onScrollPositionChange={onScrollPositionChange} networkInspector={networkInspector} onNetworkInspectorChange={setNetworkInspector} />
             : rightPaneMode === 'adversarial'
-              ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} post={post} />
-              : <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} post={post} />}
+              ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} post={post} scrollTop={scrollPositions.adversarial} onScrollTopChange={(value) => onScrollPositionChange('adversarial', value)} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} />
+              : <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} post={post} scrollStateKey={configurationSection} scrollTop={scrollPositions[`configure.${configurationSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`configure.${configurationSection}`, value)} />}
         </div>
       </aside>
     </>}
@@ -390,7 +448,7 @@ function safeJson(value: unknown): string {
   }
 }
 
-export function Inspector({ profile, snapshot, runs = [], networkEntries = [], active = false, tab, setTab, requestPreview, full = false, interactive = true, eventFilters = normalizeInspectorEventFilters(), onEventFiltersChange = () => undefined, onCreateMapping, selectedSequence, selectedNetworkId, onSelectEvent }: { profile?: TurnStageProfile; snapshot?: SessionSnapshot; runs?: LocalRunSummary[]; networkEntries?: NetworkExchange[]; active?: boolean; tab: InspectorTab; setTab: (tab: InspectorTab) => void; requestPreview: unknown; full?: boolean; interactive?: boolean; eventFilters?: InspectorEventFilters; onEventFiltersChange?: (filters: InspectorEventFilters) => void; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; selectedNetworkId?: string; onSelectEvent?: (event: Record<string, unknown>) => void }): React.JSX.Element {
+export function Inspector({ profile, snapshot, runs = [], networkEntries = [], active = false, tab, setTab, requestPreview, full = false, interactive = true, eventFilters = normalizeInspectorEventFilters(), onEventFiltersChange = () => undefined, onCreateMapping, selectedSequence, selectedNetworkId, onSelectEvent, scrollPositions = {}, onScrollPositionChange = () => undefined, networkInspector, onNetworkInspectorChange }: { profile?: TurnStageProfile; snapshot?: SessionSnapshot; runs?: LocalRunSummary[]; networkEntries?: NetworkExchange[]; active?: boolean; tab: InspectorTab; setTab: (tab: InspectorTab) => void; requestPreview: unknown; full?: boolean; interactive?: boolean; eventFilters?: InspectorEventFilters; onEventFiltersChange?: (filters: InspectorEventFilters) => void; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; selectedNetworkId?: string; onSelectEvent?: (event: Record<string, unknown>) => void; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; onScrollPositionChange?: (key: ScrollPositionKey, value: number) => void; networkInspector?: NetworkInspectorState; onNetworkInspectorChange?: (state: NetworkInspectorState) => void }): React.JSX.Element {
   const availableTabs: InspectorTab[] = profile && !componentVisible(profile, 'metrics') ? inspectorTabs.filter((item): item is InspectorTab => item !== 'Metrics') : [...inspectorTabs];
   const effectiveTab = availableTabs.includes(tab) ? tab : availableTabs[0]!;
   const data = effectiveTab === 'Raw Events' ? snapshot?.rawEvents ?? [] : effectiveTab === 'Normalized' ? snapshot?.normalizedEvents ?? [] : [];
@@ -402,7 +460,7 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
   const updateFilters = (patch: Partial<EventFilterState>) => onEventFiltersChange({ ...eventFilters, [eventKind]: { ...filters, ...patch } });
   const filtersActive = filters.query !== '' || filters.eventType !== 'all' || filters.mapping !== 'all' || filters.issue !== 'all' || filters.terminal !== 'all';
   const panelContent = effectiveTab === 'Network'
-    ? <NetworkInspector entries={networkEntries} legacyRequestPreview={requestPreview} selectedEntryId={selectedNetworkId} />
+    ? <NetworkInspector entries={networkEntries} legacyRequestPreview={requestPreview} selectedEntryId={selectedNetworkId} state={networkInspector} onStateChange={onNetworkInspectorChange} />
     : effectiveTab === 'Raw Events' || effectiveTab === 'Normalized'
       ? <div className="event-inspector">
         <div className="event-filters">
@@ -419,7 +477,7 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
           </details>
           <span role="status">{t('{filtered} of {total}', { filtered: formatNumber(filtered.length), total: formatNumber(data.length) })}</span>
         </div>
-        <VirtualEvents items={filtered} kind={eventKind} terminalRawSequences={terminalRawSequences} label={t(effectiveTab)} onCreateMapping={effectiveTab === 'Raw Events' && interactive ? onCreateMapping : undefined} selectedSequence={selectedSequence} onSelectEvent={onSelectEvent} />
+        <VirtualEvents items={filtered} kind={eventKind} terminalRawSequences={terminalRawSequences} label={t(effectiveTab)} onCreateMapping={effectiveTab === 'Raw Events' && interactive ? onCreateMapping : undefined} selectedSequence={selectedSequence} onSelectEvent={onSelectEvent} initialScrollTop={scrollPositions[`events.${eventKind}`]} onScrollTopChange={(value) => onScrollPositionChange(`events.${eventKind}`, value)} />
       </div>
       : effectiveTab === 'Metrics'
         ? <MetricGrid metrics={snapshot?.metrics} enabled={profile?.metrics?.enabled} />
@@ -445,20 +503,22 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
   </div>;
 }
 
-const networkDetailTabs = ['Headers', 'Payload', 'Response', 'Timing'] as const;
-type NetworkDetailTab = typeof networkDetailTabs[number];
-
-export function NetworkInspector({ entries, legacyRequestPreview, selectedEntryId }: { entries: NetworkExchange[]; legacyRequestPreview?: unknown; selectedEntryId?: string }): React.JSX.Element {
-  const [query, setQuery] = useState('');
-  const [selectedId, setSelectedId] = useState<string>();
-  const [detailTab, setDetailTab] = useState<NetworkDetailTab>('Headers');
-  useEffect(() => { if (selectedEntryId && entries.some((entry) => entry.id === selectedEntryId)) setSelectedId(selectedEntryId); }, [entries, selectedEntryId]);
+export function NetworkInspector({ entries, legacyRequestPreview, selectedEntryId, state, onStateChange }: { entries: NetworkExchange[]; legacyRequestPreview?: unknown; selectedEntryId?: string; state?: NetworkInspectorState; onStateChange?: (state: NetworkInspectorState) => void }): React.JSX.Element {
+  const [uncontrolledState, setUncontrolledState] = useState<NetworkInspectorState>(() => normalizeNetworkInspectorState(state));
+  const currentState = state ?? uncontrolledState;
+  const { query, selectedId, detailTab } = currentState;
+  const updateState = (patch: Partial<NetworkInspectorState>) => {
+    const next = normalizeNetworkInspectorState({ ...currentState, ...patch });
+    if (!state) setUncontrolledState(next);
+    onStateChange?.(next);
+  };
+  useEffect(() => { if (selectedEntryId && entries.some((entry) => entry.id === selectedEntryId)) updateState({ selectedId: selectedEntryId }); }, [entries, selectedEntryId]);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filtered = useMemo(() => entries.filter((entry) => !normalizedQuery || `${entry.kind} ${entry.method} ${entry.url} ${entry.status ?? ''} ${entry.state} ${entry.variantId ?? ''} ${entry.correlation?.traceId ?? ''} ${entry.correlation?.spanId ?? ''} ${entry.correlation?.requestId ?? ''}`.toLocaleLowerCase().includes(normalizedQuery)), [entries, normalizedQuery]);
   const selected = filtered.find((entry) => entry.id === selectedId) ?? filtered.at(-1);
   const selectedIndex = selected ? filtered.findIndex((entry) => entry.id === selected.id) : -1;
   const select = (entry: NetworkExchange, focus = false) => {
-    setSelectedId(entry.id);
+    updateState({ selectedId: entry.id });
     if (focus) requestAnimationFrame(() => document.getElementById(networkRowId(entry.id))?.focus());
   };
   const handleRowKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -474,13 +534,13 @@ export function NetworkInspector({ entries, legacyRequestPreview, selectedEntryI
     event.preventDefault();
     const tab = networkDetailTabs[next];
     if (!tab) return;
-    setDetailTab(tab);
+    updateState({ detailTab: tab });
     requestAnimationFrame(() => document.getElementById(networkDetailTabId(tab))?.focus());
   };
   if (!entries.length) return <div className="network-empty"><div className="empty-state compact"><strong>{t('No network requests')}</strong><p>{t('Start a session or send a message to capture requests.')}</p></div>{legacyRequestPreview !== undefined && <details><summary>{t('Last redacted request preview')}</summary><JsonBlock value={legacyRequestPreview} /></details>}</div>;
   return <div className={`network-inspector ${selected ? 'network-inspector--detail' : ''}`}>
     <div className="network-toolbar">
-      <label><span className="sr-only">{t('Filter network requests')}</span><input type="search" value={query} placeholder={t('Filter')} aria-label={t('Filter network requests')} onChange={(event) => setQuery(event.target.value)} /></label>
+      <label><span className="sr-only">{t('Filter network requests')}</span><input type="search" value={query} placeholder={t('Filter')} aria-label={t('Filter network requests')} onChange={(event) => updateState({ query: event.target.value })} /></label>
       <span role="status">{t('{filtered} of {total}', { filtered: formatNumber(filtered.length), total: formatNumber(entries.length) })}</span>
     </div>
     <div className="network-table">
@@ -498,7 +558,7 @@ export function NetworkInspector({ entries, legacyRequestPreview, selectedEntryI
     </div>
     {selected && <section className="network-detail" aria-label={t('Request details')}>
       <header><div><strong title={selected.url}>{networkRequestName(selected)}</strong><span>{selected.method} · {selected.status ?? localizeHumanized(selected.state)} · {formatDuration(selected.timing.total ?? 0)}</span></div></header>
-      <div className="network-detail-tabs" role="tablist" aria-label={t('Request detail views')}>{networkDetailTabs.map((tab) => <button key={tab} id={networkDetailTabId(tab)} role="tab" aria-selected={detailTab === tab} aria-controls={networkDetailPanelId(tab)} tabIndex={detailTab === tab ? 0 : -1} onClick={() => setDetailTab(tab)} onKeyDown={(event) => handleDetailTabKeyDown(event, tab)}>{t(tab)}</button>)}</div>
+      <div className="network-detail-tabs" role="tablist" aria-label={t('Request detail views')}>{networkDetailTabs.map((tab) => <button key={tab} id={networkDetailTabId(tab)} role="tab" aria-selected={detailTab === tab} aria-controls={networkDetailPanelId(tab)} tabIndex={detailTab === tab ? 0 : -1} onClick={() => updateState({ detailTab: tab })} onKeyDown={(event) => handleDetailTabKeyDown(event, tab)}>{t(tab)}</button>)}</div>
       {networkDetailTabs.map((tab) => <div key={tab} id={networkDetailPanelId(tab)} role="tabpanel" aria-labelledby={networkDetailTabId(tab)} hidden={detailTab !== tab} className="network-detail-panel">{detailTab === tab ? <NetworkDetailContent entry={selected} tab={tab} /> : null}</div>)}
     </section>}
   </div>;
@@ -532,10 +592,11 @@ function networkDetailPanelId(tab: NetworkDetailTab): string { return `network-d
 function optionalDuration(value: number | undefined): string { return value === undefined ? '—' : formatDuration(value); }
 function formatBytes(value: number): string { if (value < 1024) return `${formatNumber(value)} B`; if (value < 1024 * 1024) return `${formatNumber(Math.round(value / 1024))} KB`; return `${formatNumber(Math.round(value / (1024 * 1024)))} MB`; }
 
-export function VirtualEvents({ items, kind = 'raw', terminalRawSequences = new Set<number>(), label, onCreateMapping, selectedSequence, onSelectEvent }: { items: Array<Record<string, any>>; kind?: 'raw' | 'normalized'; terminalRawSequences?: ReadonlySet<number>; label: string; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; onSelectEvent?: (event: Record<string, unknown>) => void }): React.JSX.Element {
+export function VirtualEvents({ items, kind = 'raw', terminalRawSequences = new Set<number>(), label, onCreateMapping, selectedSequence, onSelectEvent, initialScrollTop, onScrollTopChange }: { items: Array<Record<string, any>>; kind?: 'raw' | 'normalized'; terminalRawSequences?: ReadonlySet<number>; label: string; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; onSelectEvent?: (event: Record<string, unknown>) => void; initialScrollTop?: number; onScrollTopChange?: (value: number) => void }): React.JSX.Element {
   const rowHeight = 30;
   const listRef = useRef<HTMLDivElement>(null);
-  const [top, setTop] = useState(0);
+  const restoredScroll = useRef(false);
+  const [top, setTop] = useState(() => normalizeScrollPosition(initialScrollTop));
   const [height, setHeight] = useState(480);
   const [activeIndex, setActiveIndex] = useState(0);
   const [uncontrolledSelectedSequence, setUncontrolledSelectedSequence] = useState<number>();
@@ -563,6 +624,15 @@ export function VirtualEvents({ items, kind = 'raw', terminalRawSequences = new 
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || restoredScroll.current) return;
+    restoredScroll.current = true;
+    const restored = normalizeScrollPosition(initialScrollTop);
+    list.scrollTop = restored;
+    setTop(list.scrollTop);
+  }, [initialScrollTop]);
 
   useEffect(() => {
     if (selectedSequence === undefined || selectedIndex < 0) return;
@@ -614,7 +684,7 @@ export function VirtualEvents({ items, kind = 'raw', terminalRawSequences = new 
   return <div className={`event-browser ${selectedItem ? 'event-browser--detail' : ''} ${accessibleWindow ? 'event-browser--accessible-window' : ''}`.trim()}>
     {screenReader && items.length > ACCESSIBLE_EVENT_WINDOW_SIZE && <p className="event-accessibility-notice" role="status" aria-live="polite">{t('Showing events {start}–{end} of {total} for screen reader performance.', { start: formatNumber(visibleStart + 1), end: formatNumber(accessibleEnd), total: formatNumber(items.length) })}</p>}
     <span className="sr-only" aria-live="polite" aria-atomic="true">{selectedItem ? t('Event payload opened for {event} #{sequence}.', { event: eventLabel(selectedItem), sequence: formatNumber(selectedItem.sequence) }) : ''}</span>
-    <div ref={listRef} className="virtual-list" role="listbox" aria-label={label} onScroll={(event) => setTop(event.currentTarget.scrollTop)}>
+    <div ref={listRef} className="virtual-list" role="listbox" aria-label={label} onScroll={(event) => { const next = event.currentTarget.scrollTop; setTop(next); onScrollTopChange?.(next); }}>
       {!items.length ? <div className="empty-state compact"><strong>{t('No matching events')}</strong></div> : <div className="virtual-space" style={{ height: items.length * rowHeight }}><div style={{ transform: `translateY(${visibleStart * rowHeight}px)` }}>{visible.map((item, index) => {
         const itemSequence = eventSequence(item);
         const selected = itemSequence === effectiveSelectedSequence;
@@ -704,10 +774,6 @@ function eventLabel(item: Record<string, any>): string { return String(item.type
 function eventSequence(item: Record<string, any>): number | undefined { return typeof item.rawSequence === 'number' ? item.rawSequence : typeof item.sequence === 'number' ? item.sequence : undefined; }
 
 const TERMINAL_EVENT_TYPES = new Set(['stream.completed', 'stream.failed', 'stream.aborted']);
-const MAPPING_FILTERS = new Set<EventMappingFilter>(['all', 'matched', 'unmatched']);
-const ISSUE_FILTERS = new Set<EventIssueFilter>(['all', 'valid', 'parse-error', 'mapping-error']);
-const TERMINAL_FILTERS = new Set<EventTerminalFilter>(['all', 'terminal', 'non-terminal']);
-
 export function normalizeEventFilterState(value: unknown): EventFilterState {
   const candidate = value && typeof value === 'object' ? value as Partial<EventFilterState> : {};
   return {
@@ -721,6 +787,57 @@ export function normalizeEventFilterState(value: unknown): EventFilterState {
 
 export function normalizeInspectorEventFilters(value?: Partial<InspectorEventFilters>): InspectorEventFilters {
   return { raw: normalizeEventFilterState(value?.raw), normalized: normalizeEventFilterState(value?.normalized) };
+}
+
+export function normalizeScrollPosition(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(10_000_000, Math.max(0, Math.round(value))) : 0;
+}
+
+export function normalizeNetworkInspectorState(value: unknown): NetworkInspectorState {
+  const candidate = value && typeof value === 'object' ? value as Partial<NetworkInspectorState> : {};
+  return {
+    query: typeof candidate.query === 'string' ? candidate.query.slice(0, 512) : '',
+    ...(typeof candidate.selectedId === 'string' && candidate.selectedId.length <= 512 ? { selectedId: candidate.selectedId } : {}),
+    detailTab: networkDetailTabs.includes(candidate.detailTab as NetworkDetailTab) ? candidate.detailTab as NetworkDetailTab : 'Headers'
+  };
+}
+
+export function normalizeWebviewState(value: unknown): WebviewState | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = value as WebviewState;
+  const scrollPositions: Partial<Record<ScrollPositionKey, number>> = {};
+  if (candidate.scrollPositions && typeof candidate.scrollPositions === 'object') {
+    for (const key of scrollPositionKeys) {
+      const position = candidate.scrollPositions[key];
+      if (typeof position === 'number' && Number.isFinite(position)) scrollPositions[key] = normalizeScrollPosition(position);
+    }
+  }
+  const candidateInspectorTab = (candidate as { inspectorTab?: unknown }).inspectorTab;
+  return {
+    version: WEBVIEW_STATE_VERSION,
+    ...boundedOptionalString('sessionId', candidate.sessionId),
+    ...(isWorkspaceSection(candidate.section) ? { section: candidate.section } : {}),
+    ...(isSettingsSectionId(candidate.configurationSection) ? { configurationSection: candidate.configurationSection } : {}),
+    ...(isRightPaneMode(candidate.rightPaneMode) ? { rightPaneMode: candidate.rightPaneMode } : {}),
+    ...(typeof candidate.draft === 'string' ? { draft: candidate.draft.slice(0, 100_000) } : {}),
+    ...(candidateInspectorTab === 'Request' ? { inspectorTab: 'Network' } : isInspectorTab(candidateInspectorTab) ? { inspectorTab: candidateInspectorTab } : {}),
+    ...(typeof candidate.splitPercent === 'number' && Number.isFinite(candidate.splitPercent) ? { splitPercent: clampSplit(candidate.splitPercent) } : {}),
+    ...(typeof candidate.splitCustomized === 'boolean' ? { splitCustomized: candidate.splitCustomized } : {}),
+    ...boundedOptionalString('selectedMessageId', candidate.selectedMessageId),
+    ...(typeof candidate.selectedRawSequence === 'number' && Number.isSafeInteger(candidate.selectedRawSequence) && candidate.selectedRawSequence >= 0 ? { selectedRawSequence: candidate.selectedRawSequence } : {}),
+    ...boundedOptionalString('selectedNetworkId', candidate.selectedNetworkId),
+    ...boundedOptionalString('activeEvidenceId', candidate.activeEvidenceId),
+    ...(isChatViewportState(candidate.chatViewport) ? { chatViewport: candidate.chatViewport } : {}),
+    ...(candidate.eventFilters && typeof candidate.eventFilters === 'object' ? { eventFilters: normalizeInspectorEventFilters(candidate.eventFilters) } : {}),
+    ...(Object.keys(scrollPositions).length ? { scrollPositions } : {}),
+    ...boundedOptionalString('expandedAdversarialCaseId', candidate.expandedAdversarialCaseId),
+    ...(candidate.networkInspector && typeof candidate.networkInspector === 'object' ? { networkInspector: normalizeNetworkInspectorState(candidate.networkInspector) } : {}),
+    ...(Array.isArray(candidate.acceptedForms) ? { acceptedForms: [...new Set(candidate.acceptedForms.filter((item): item is string => typeof item === 'string' && item.length <= 512))].slice(0, 500) } : {})
+  };
+}
+
+function boundedOptionalString<K extends 'sessionId' | 'selectedMessageId' | 'selectedNetworkId' | 'activeEvidenceId' | 'expandedAdversarialCaseId'>(key: K, value: unknown): Partial<Record<K, string>> {
+  return typeof value === 'string' && value.length <= 512 ? { [key]: value } as Partial<Record<K, string>> : {};
 }
 
 export function terminalSequences(normalizedEvents: Array<Record<string, unknown>>): ReadonlySet<number> {
@@ -776,6 +893,10 @@ function isSettingsSectionId(value: unknown): value is SettingsSectionId {
 
 function isInspectorTab(value: unknown): value is InspectorTab {
   return inspectorTabs.includes(value as InspectorTab);
+}
+
+export function shouldApplyProfileInspectorDefault(state: WebviewState | undefined): boolean {
+  return !isInspectorTab(state?.inspectorTab);
 }
 
 function inspectorTabLabel(tab: InspectorTab): string {
