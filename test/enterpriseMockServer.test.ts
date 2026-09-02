@@ -40,6 +40,7 @@ describe('generic POST plus SSE chat mock contract', () => {
       openingMessage: expect.any(String),
       optionsInfo: expect.arrayContaining([expect.objectContaining({ behavior: 'send', prompt: expect.any(String) })]),
     });
+    expect((configured.data as { optionsInfo: unknown[] }).optionsInfo[0]).toBe('Show a sample overview');
   });
 
   it('distinguishes first-turn and continuation bodies and emits the expected SSE order', async () => {

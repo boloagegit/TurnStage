@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.22.2
+
+- Added a one-click duplicate action to Profile rows and made the empty Profile
+  creation workflow explicit, localized, and confirmation-backed.
+- Normalized bounded Opening starter payloads so common string and partial-object
+  options render safely without granting malformed remote data action behavior.
+- Reworked the Activity Bar mark with a larger, square, theme-aware signal-fork
+  silhouette verified for legibility in both dark and light VS Code themes.
+
 ## 0.22.1
 
 - Corrected the README and product, architecture, performance, Profile schema,

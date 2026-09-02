@@ -13,6 +13,7 @@ import { MetricsCollector } from './metrics';
 import { createSnapshot, reduceEvent, resetReducerState } from './reducer';
 import { ReplayEngine, type ReplaySpeed } from '../replay/replayEngine';
 import { selectOpeningFallback } from '../opening/fallbackResolver';
+import { normalizeOpeningStarters } from '../opening/starterNormalizer';
 import { localize } from '../l10n';
 import { diagnosticUrl, diagnosticValue, logAt } from '../logging';
 import { extractNetworkCorrelation, mergeNetworkCorrelation } from '../observability/correlation';
@@ -198,7 +199,7 @@ export class SessionController implements vscode.Disposable {
     this.snapshot.sessionState = 'loadingOpening'; this.snapshot.errors = []; this.changed();
     const opening = this.profile.opening;
     if (!opening || opening.mode === 'disabled') { this.snapshot.opening = undefined; this.snapshot.sessionState = 'ready'; this.changed(); return; }
-    if (opening.mode === 'static') { this.snapshot.opening = { message: opening.message ?? '', starters: opening.starters ?? [] }; this.snapshot.sessionState = 'ready'; this.changed(); return; }
+    if (opening.mode === 'static') { this.snapshot.opening = { message: opening.message ?? '', starters: normalizeOpeningStarters(opening.starters) }; this.snapshot.sessionState = 'ready'; this.changed(); return; }
     if (forceFallback) { this.useOpeningFallback(); return; }
     const logId = `opening-${crypto.randomUUID().slice(0, 8)}`;
     const startedAt = Date.now();
@@ -237,9 +238,10 @@ export class SessionController implements vscode.Disposable {
       const message = getPath(data, opening.response?.messagePath ?? '$.message');
       const starters = getPath(data, opening.response?.startersPath ?? '$.options');
       if (typeof message !== 'string') { const fallback = selectOpeningFallback(opening, data, { status: response.status, missingMessage: true }); if (fallback) { this.finishNetworkExchange(networkEntry, 'completed'); logAt(this.log, 'warn', `[${logId}] fallback reason=missing-message elapsed=${formatDuration(Date.now() - startedAt)}`); this.useOpeningFallback(fallback); return; } throw new TurnStageError('OpeningError', localize('Opening response did not contain a message.')); }
-      this.snapshot.opening = this.publicValue({ message, starters: Array.isArray(starters) ? starters as any : [] }); this.snapshot.sessionState = 'ready';
+      const normalizedStarters = normalizeOpeningStarters(starters);
+      this.snapshot.opening = this.publicValue({ message, starters: normalizedStarters }); this.snapshot.sessionState = 'ready';
       this.finishNetworkExchange(networkEntry, 'completed');
-      logAt(this.log, 'info', `[${logId}] completed elapsed=${formatDuration(Date.now() - startedAt)} starters=${Array.isArray(starters) ? starters.length : 0}`);
+      logAt(this.log, 'info', `[${logId}] completed elapsed=${formatDuration(Date.now() - startedAt)} starters=${normalizedStarters.length}`);
     } catch (error) {
       this.finishNetworkExchange(networkEntry, 'failed', error);
       logAt(this.log, 'error', `[${logId}] failed ${scope} phase=${phase} type=${errorType(error)}${errorStatus(error)} elapsed=${formatDuration(Date.now() - startedAt)}${errorEvidence(error)}${safeErrorMessage(error, (value) => this.publicValue(value))}`);
@@ -613,7 +615,7 @@ export class SessionController implements vscode.Disposable {
       return value;
     });
   }
-  private useOpeningFallback(selected?: NonNullable<OpeningDefinition['fallbacks']>[number]): void { const fallback = selected ?? this.profile.opening?.fallbacks?.[0]; if (fallback) { this.snapshot.opening = { message: fallback.message, starters: fallback.starters ?? [] }; this.snapshot.sessionState = 'ready'; } else this.snapshot.sessionState = 'failed'; this.changed(); }
+  private useOpeningFallback(selected?: NonNullable<OpeningDefinition['fallbacks']>[number]): void { const fallback = selected ?? this.profile.opening?.fallbacks?.[0]; if (fallback) { this.snapshot.opening = { message: fallback.message, starters: normalizeOpeningStarters(fallback.starters) }; this.snapshot.sessionState = 'ready'; } else this.snapshot.sessionState = 'failed'; this.changed(); }
   private legacyControlKey(id: string): string { const workspace = vscode.workspace.getWorkspaceFolder(this.profileUri)?.uri.toString() ?? 'no-workspace'; return `turnstage.control.${workspace}.${this.profile.id}.${id}`; }
   private workspaceControlKey(id: string): string { return this.legacyControlKey(id); }
   private globalControlKey(id: string): string { return `turnstage.control.global.${this.profile.id}.${id}`; }

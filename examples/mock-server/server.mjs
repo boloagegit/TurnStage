@@ -73,7 +73,7 @@ async function handleContractOpening(response, body, mode) {
     return json(response, 200, {
       openingMessage: 'Hello, I am a synthetic test assistant. How can I help?',
       optionsInfo: [
-        { id: 'sample-overview', label: 'Show a sample overview', prompt: 'Show a sample overview', behavior: 'send' },
+        'Show a sample overview',
         { id: 'required-inputs', label: 'Which inputs are required?', prompt: 'Which inputs are required?', behavior: 'send' },
       ],
     });

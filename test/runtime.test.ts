@@ -494,7 +494,7 @@ describe('isActive and SessionController.finalizeTurn', () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       payload: {
         greeting: 'Opening loaded from the server.',
-        starters: [{ id: 'starter-1', label: 'Begin', prompt: 'Begin', behavior: 'send' }],
+        starters: ['Begin from a string', { id: 'starter-2', prompt: 'Continue from an object' }],
       },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
@@ -520,7 +520,10 @@ describe('isActive and SessionController.finalizeTurn', () => {
       expect(controller.snapshot.sessionState).toBe('ready');
       expect(controller.snapshot.opening).toEqual({
         message: 'Opening loaded from the server.',
-        starters: [{ id: 'starter-1', label: 'Begin', prompt: 'Begin', behavior: 'send' }],
+        starters: [
+          { id: 'starter-1', label: 'Begin from a string', prompt: 'Begin from a string', behavior: 'send' },
+          { id: 'starter-2', label: 'Continue from an object', prompt: 'Continue from an object', behavior: 'send' },
+        ],
       });
       expect(fetchMock).toHaveBeenCalledWith('https://example.test/opening', expect.objectContaining({
         method: 'POST',

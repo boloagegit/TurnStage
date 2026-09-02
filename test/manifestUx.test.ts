@@ -68,7 +68,23 @@ describe('VS Code contribution UX', () => {
     ]);
     const profileItems = manifest.contributes.menus['view/item/context'];
     expect(profileItems).toContainEqual(expect.objectContaining({ command: 'turnstage.configureProfile', group: 'inline@3' }));
+    expect(profileItems).toContainEqual(expect.objectContaining({ command: 'turnstage.duplicateProfile', group: 'inline@4', when: expect.stringContaining('isWorkspaceTrusted') }));
     expect(manifest.contributes.commands).toContainEqual(expect.objectContaining({ command: 'turnstage.configureProfile', icon: '$(settings)' }));
+    expect(manifest.contributes.commands).toContainEqual(expect.objectContaining({ command: 'turnstage.duplicateProfile', icon: '$(copy)' }));
+
+    const english = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.nls.json'), 'utf8')) as Record<string, string>;
+    const traditionalChinese = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.nls.zh-tw.json'), 'utf8')) as Record<string, string>;
+    expect(english['command.createProfile']).toBe('Create Empty Profile');
+    expect(traditionalChinese['command.createProfile']).toBe('建立空白 Profile');
+  });
+
+  it('uses a theme-aware, square Activity Bar icon that remains legible at native size', () => {
+    const icon = readFileSync(resolve(import.meta.dirname, '..', 'media', 'activity.svg'), 'utf8');
+    expect(icon).toContain('viewBox="0 0 24 24"');
+    expect(icon).toContain('stroke="currentColor"');
+    expect(icon).toContain('fill="currentColor"');
+    expect(icon).toContain('<rect x="2.5" y="2.5" width="19" height="19"');
+    expect(icon).not.toMatch(/#[0-9a-f]{3,8}/iu);
   });
 
   it('uses one native VS Code walkthrough with a persistent sidebar entry', () => {

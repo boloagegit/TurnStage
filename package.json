@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.22.1",
+  "version": "0.22.2",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -125,6 +125,7 @@
         "command": "turnstage.duplicateProfile",
         "title": "%command.duplicateProfile%",
         "category": "%command.category%",
+        "icon": "$(copy)",
         "enablement": "isWorkspaceTrusted"
       },
       {
@@ -457,6 +458,11 @@
           "command": "turnstage.configureProfile",
           "when": "view == turnstage.profiles && viewItem == turnstageProfile",
           "group": "inline@3"
+        },
+        {
+          "command": "turnstage.duplicateProfile",
+          "when": "view == turnstage.profiles && viewItem == turnstageProfile && isWorkspaceTrusted",
+          "group": "inline@4"
         },
         {
           "submenu": "turnstage.profileSession",
