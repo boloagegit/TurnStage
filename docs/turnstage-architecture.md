@@ -133,6 +133,13 @@ matching profile editor and sends an `inspector.focus` message selecting the
 related Network, Raw Events, or Normalized row. Evidence is not written to
 Recorded Runs or exported. Contract execution is skipped in Restricted Mode.
 
+Custom-editor navigation and export actions remain Host-owned. Native Quick
+Pick destinations cross the protocol as a bounded pane/section union. Exported
+URIs are retained in a per-editor, 16-entry Host map and represented in the
+Webview by opaque IDs; Open, Reveal, and Copy Path reject expired or invented
+IDs. Profile dirty state is pushed on document edits and saves rather than
+polled by the Webview.
+
 When a scenario declares `comparison`, `ScenarioTestController` creates two
 independent `SessionController` instances. The baseline runs first without
 profile-specific assertions but with state invariants; the candidate runs the

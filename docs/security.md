@@ -313,6 +313,13 @@ Evidence Bundle CSVs contain structural metadata only; they exclude prompts,
 assistant content, request/response payloads, URLs, headers, raw events, and
 secrets.
 
+Export completion uses opaque, short-lived artifact IDs. The Extension Host
+retains at most 16 verified URIs per editor and resolves Open, Reveal, and Copy
+Path actions only from that map, so a Webview message cannot supply an
+arbitrary filesystem path. Copied result summaries are separately projected
+from structural identifiers, outcomes, timing, and bounded attempt counts and
+never read prompt, response, header, URL, payload, or event content.
+
 The cURL importer is a parser, not a command runner. It accepts a bounded
 allowlist of request flags, rejects shell expansion, command substitution,
 response files, redirects, proxies, certificates, uploads, and unsupported URL

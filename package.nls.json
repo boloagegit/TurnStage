@@ -16,6 +16,7 @@
   "command.deleteProfile": "Delete Profile",
   "command.openProfile": "Open Profile",
   "command.openProfileSection": "Open Profile Section",
+  "command.goTo": "Go to…",
   "command.openGuide": "Open Usage Guide",
   "command.changeDisplayLanguage": "Change Display Language",
   "command.configureProfile": "Configure Profile",

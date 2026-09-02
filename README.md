@@ -415,7 +415,10 @@ Opening & Flow, Request, Stream & Mapping, Chat UI, Scenarios, History & Errors,
 and Security. Every GUI edit is applied as a
 structured `WorkspaceEdit` to the open `.turnstage.jsonc` document, so the
 profile file remains the source of truth and VS Code Undo/Redo continues to
-work. Open JSONC remains available from the configuration toolbar.
+work. Configure shows pushed saved/dirty and validation state without polling,
+and keeps Save, Open JSONC, Validate, and first-issue navigation in its compact
+toolbar. **TurnStage: Go to…** provides native Quick Pick navigation to Chat,
+Debug, Red Team, or common Configure destinations.
 
 Debug's **Network** tab presents every Opening, Conversation Stream attempt,
 retry, and Stop request as a compact request list. Selecting a row exposes
@@ -441,6 +444,7 @@ Commands are registered under the `turnstage` namespace:
 | `turnstage.initializeUser` | Initialize reusable user profiles and a user environment |
 | `turnstage.duplicateProfile` / `turnstage.deleteProfile` | Copy a discovered profile or move it to Trash after confirmation |
 | `turnstage.openProfile` | Open a profile in the custom editor |
+| `turnstage.goTo` | Jump to Chat, Debug, Red Team, or Configure with a native Quick Pick |
 | `turnstage.configureProfile` | Open Profile Configuration for the selected profile |
 | `turnstage.runProfile` | Open/run a selected profile or the built-in Basic demo |
 | `turnstage.startSession` | Explicitly execute a request-backed opening |

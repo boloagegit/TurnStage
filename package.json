@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.22.2",
+  "version": "0.22.3",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -59,6 +59,7 @@
     "onCommand:turnstage.deleteProfile",
     "onCommand:turnstage.openProfile",
     "onCommand:turnstage.openProfileSection",
+    "onCommand:turnstage.goTo",
     "onCommand:turnstage.openGuide",
     "onCommand:turnstage.changeDisplayLanguage",
     "onCommand:turnstage.configureProfile",
@@ -143,6 +144,11 @@
       {
         "command": "turnstage.openProfileSection",
         "title": "%command.openProfileSection%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "turnstage.goTo",
+        "title": "%command.goTo%",
         "category": "%command.category%"
       },
       {

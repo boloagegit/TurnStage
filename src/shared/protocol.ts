@@ -15,6 +15,11 @@ export const WORKSPACE_SECTIONS = [
 ] as const;
 export type WorkspaceSection = typeof WORKSPACE_SECTIONS[number];
 export type InspectorTargetTab = 'Network' | 'Raw Events' | 'Normalized';
+export type WorkspaceDestination =
+  | { pane: 'chat' }
+  | { pane: 'debug'; tab: 'Network' | 'Raw Events' | 'Normalized' | 'Metrics' | 'Errors' | 'Runs' }
+  | { pane: 'adversarial'; section: 'results' | 'cases' | 'campaigns' | 'timeline' }
+  | { pane: 'configure'; section: WorkspaceSection };
 
 interface Envelope { protocolVersion: 1; editorInstanceId: string; requestId: string }
 type WithoutEnvelope<T> = T extends unknown ? Omit<T, keyof Envelope> : never;
@@ -74,6 +79,8 @@ export type WebviewMessage = Envelope & (
   | { type: 'webview.ready' }
   | { type: 'profile.validate' }
   | { type: 'profile.openAsText' }
+  | { type: 'profile.save' }
+  | { type: 'profile.openFirstIssue' }
   | { type: 'profile.patch'; path: Array<string | number>; value: unknown }
   | { type: 'control.set'; controlId: string; value: unknown }
   | { type: 'session.start' }
@@ -101,6 +108,8 @@ export type WebviewMessage = Envelope & (
   | { type: 'run.export'; runId: string }
   | { type: 'run.delete'; runId: string }
   | { type: 'run.clear' }
+  | { type: 'artifact.action'; artifactId: string; action: 'open' | 'reveal' | 'copyPath' }
+  | { type: 'testExplorer.open' }
   | { type: 'adversarial.file'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkSuite' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate' }
   | { type: 'adversarial.openLinkedSuite'; path: string }
   | { type: 'adversarial.catalog.request'; force?: boolean }
@@ -130,9 +139,11 @@ export type WebviewMessage = Envelope & (
 export type HostMessage = Envelope & (
   | { type: 'host.ready'; trusted: boolean; remoteName?: string; locale: string; direction: 'ltr' | 'rtl' }
   | { type: 'workspace.section'; section: WorkspaceSection }
+  | { type: 'workspace.navigate'; destination: WorkspaceDestination }
   | { type: 'inspector.focus'; tab: InspectorTargetTab; evidenceId?: string; networkId?: string; sequence?: number; messageId?: string }
   | { type: 'profile.snapshot'; profile?: TurnStageProfile; parseError?: string; version: number; environments: string[] }
   | { type: 'profile.validation'; diagnostics: Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number }> }
+  | { type: 'profile.editState'; dirty: boolean }
   | { type: 'profile.validated'; valid: boolean }
   | { type: 'session.snapshot'; snapshot: SessionSnapshot; runs: LocalRunSummary[]; requestPreview?: unknown; networkEntries?: NetworkExchange[] }
   | { type: 'session.delta'; delta: SessionDelta }
@@ -141,16 +152,17 @@ export type HostMessage = Envelope & (
   | { type: 'action.feedback'; actionId: string; sourceMessageId: string; status: 'success' | 'error'; message: string }
   | { type: 'form.accepted'; formId: string; sourceMessageId?: string }
   | { type: 'run.imported'; path: string; runId: string; duplicate: boolean }
-  | { type: 'run.exported'; path: string }
+  | { type: 'run.exported'; path: string; artifactId?: string }
   | { type: 'run.history.changed'; deletedCount: number; deletedBytes: number }
-  | { type: 'adversarial.operation'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkSuite' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string }
+  | { type: 'adversarial.operation'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkSuite' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string; artifactId?: string }
   | { type: 'adversarial.catalog'; catalog: AdversarialCaseCatalog }
   | { type: 'test.operation'; operation: TestOperationSnapshot }
   | { type: 'test.results'; results: AdversarialResultSummary[] }
   | { type: 'campaign.dashboard'; dashboard: CampaignDashboardV1 }
   | { type: 'campaign.preview'; campaignId: string; selectedCases: number; plannedAttempts: number; plannedRequests: number; maximumDurationMs: number; maxConcurrency: number; warnings: string[] }
+  | { type: 'campaign.exported'; path: string; artifactId: string }
   | { type: 'test.timeline'; evidenceId: string; timeline: EvidenceTimelineSummary }
-  | { type: 'test.exported'; kind: 'report' | 'evidenceBundle'; path: string }
+  | { type: 'test.exported'; kind: 'report' | 'evidenceBundle'; path: string; artifactId?: string }
   | { type: 'connection.result'; result: ConnectionDoctorSummary }
   | { type: 'adversarial.captured'; detail: string }
   | { type: 'visual.result'; operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselinePath: string; diffPath?: string }
@@ -231,7 +243,7 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   if (!isRecord(value) || !hasEnvelope(value, instanceId)) return false;
   const message = value;
   switch (message.type) {
-    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'test.runAll': case 'test.cancel': case 'test.evidenceBundle.export': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
+    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'profile.save': case 'profile.openFirstIssue': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'testExplorer.open': case 'test.runAll': case 'test.cancel': case 'test.evidenceBundle.export': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
     case 'adversarial.catalog.request': return message.force === undefined || typeof message.force === 'boolean';
     case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
     case 'adversarial.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
@@ -257,6 +269,7 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
     case 'run.replay.speed': return typeof message.speed === 'number' && replaySpeeds.has(message.speed);
     case 'run.export': return isBoundedString(message.runId);
     case 'run.delete': return isBoundedId(message.runId);
+    case 'artifact.action': return isBoundedId(message.artifactId) && ['open', 'reveal', 'copyPath'].includes(String(message.action));
     case 'visual.baseline.save': case 'visual.compare': return isVisualCapture(message);
     default: return false;
   }
@@ -269,9 +282,11 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
   switch (message.type) {
     case 'host.ready': return typeof message.trusted === 'boolean' && optionalBoundedString(message.remoteName) && isBoundedString(message.locale, 64) && (message.direction === 'ltr' || message.direction === 'rtl');
     case 'workspace.section': return isWorkspaceSection(message.section);
+    case 'workspace.navigate': return isWorkspaceDestination(message.destination);
     case 'inspector.focus': return (message.tab === 'Network' || message.tab === 'Raw Events' || message.tab === 'Normalized') && optionalBoundedString(message.evidenceId) && optionalBoundedString(message.networkId) && optionalBoundedString(message.messageId) && (message.sequence === undefined || (Number.isInteger(message.sequence) && Number(message.sequence) >= 0));
     case 'profile.snapshot': return (message.profile === undefined || (isRecord(message.profile) && isStructuredValue(message.profile, MAX_HOST_VALUE_NODES))) && optionalBoundedString(message.parseError) && Number.isInteger(message.version) && Array.isArray(message.environments) && message.environments.every((item) => isBoundedString(item));
     case 'profile.validation': return Array.isArray(message.diagnostics) && message.diagnostics.length <= 10_000 && message.diagnostics.every((item) => isRecord(item) && (item.severity === 'error' || item.severity === 'warning') && isBoundedString(item.message, MAX_TEXT_LENGTH) && Number.isInteger(item.offset) && Number(item.offset) >= 0 && Number.isInteger(item.length) && Number(item.length) >= 0);
+    case 'profile.editState': return typeof message.dirty === 'boolean';
     case 'profile.validated': return typeof message.valid === 'boolean';
     case 'session.snapshot': return isRecord(message.snapshot) && Array.isArray(message.runs) && isStructuredValue(message.snapshot, MAX_HOST_VALUE_NODES) && isStructuredValue(message.runs, MAX_HOST_VALUE_NODES) && (message.requestPreview === undefined || isStructuredValue(message.requestPreview, MAX_HOST_VALUE_NODES)) && (message.networkEntries === undefined || (Array.isArray(message.networkEntries) && isStructuredValue(message.networkEntries, MAX_HOST_VALUE_NODES)));
     case 'session.delta': return isSessionDelta(message.delta);
@@ -280,9 +295,9 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'action.feedback': return isBoundedString(message.actionId) && isBoundedString(message.sourceMessageId) && (message.status === 'success' || message.status === 'error') && isBoundedString(message.message, MAX_TEXT_LENGTH);
     case 'form.accepted': return isBoundedString(message.formId) && optionalBoundedString(message.sourceMessageId);
     case 'run.imported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedString(message.runId) && typeof message.duplicate === 'boolean';
-    case 'run.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH);
+    case 'run.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && optionalBoundedString(message.artifactId);
     case 'run.history.changed': return Number.isInteger(message.deletedCount) && Number(message.deletedCount) >= 0 && Number(message.deletedCount) <= 100 && Number.isSafeInteger(message.deletedBytes) && Number(message.deletedBytes) >= 0 && Number(message.deletedBytes) <= 100 * 1024 * 1024;
-    case 'adversarial.operation': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path);
+    case 'adversarial.operation': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path) && optionalBoundedString(message.artifactId);
     case 'adversarial.catalog': return isAdversarialCaseCatalog(message.catalog);
     case 'test.operation': return isRecord(message.operation)
       && ['runAll', 'rerunFailed', 'rerunUnstable', 'rerunIncomplete'].includes(String(message.operation.action))
@@ -292,8 +307,9 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'test.results': return isAdversarialResults(message.results) && isStructuredValue(message.results, MAX_HOST_VALUE_NODES);
     case 'campaign.dashboard': return isRecord(message.dashboard) && isStructuredValue(message.dashboard, MAX_HOST_VALUE_NODES);
     case 'campaign.preview': return isBoundedString(message.campaignId) && [message.selectedCases, message.plannedAttempts, message.plannedRequests, message.maximumDurationMs, message.maxConcurrency].every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0) && Array.isArray(message.warnings) && message.warnings.length <= 100 && message.warnings.every((entry) => isBoundedString(entry, 4096));
+    case 'campaign.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedId(message.artifactId);
     case 'test.timeline': return isBoundedString(message.evidenceId) && isRecord(message.timeline) && isStructuredValue(message.timeline, MAX_HOST_VALUE_NODES);
-    case 'test.exported': return (message.kind === 'report' || message.kind === 'evidenceBundle') && isBoundedString(message.path, MAX_TEXT_LENGTH);
+    case 'test.exported': return (message.kind === 'report' || message.kind === 'evidenceBundle') && isBoundedString(message.path, MAX_TEXT_LENGTH) && optionalBoundedString(message.artifactId);
     case 'connection.result': return isConnectionDoctorResult(message.result) && isStructuredValue(message.result, MAX_HOST_VALUE_NODES);
     case 'adversarial.captured': return isBoundedString(message.detail, MAX_TEXT_LENGTH);
     case 'visual.result': return (message.operation === 'baseline' || message.operation === 'compare') && ['saved', 'passed', 'failed'].includes(String(message.status)) && optionalBoundedString(message.baselinePath) && optionalBoundedString(message.diffPath) && (message.differencePercent === undefined || (typeof message.differencePercent === 'number' && Number.isFinite(message.differencePercent) && message.differencePercent >= 0 && message.differencePercent <= 100));
@@ -396,4 +412,12 @@ function isEvidenceLocation(value: unknown): boolean {
 
 export function isWorkspaceSection(value: unknown): value is WorkspaceSection {
   return typeof value === 'string' && (WORKSPACE_SECTIONS as readonly string[]).includes(value);
+}
+
+export function isWorkspaceDestination(value: unknown): value is WorkspaceDestination {
+  if (!isRecord(value)) return false;
+  if (value.pane === 'chat') return Object.keys(value).length === 1;
+  if (value.pane === 'debug') return ['Network', 'Raw Events', 'Normalized', 'Metrics', 'Errors', 'Runs'].includes(String(value.tab));
+  if (value.pane === 'adversarial') return ['results', 'cases', 'campaigns', 'timeline'].includes(String(value.section));
+  return value.pane === 'configure' && isWorkspaceSection(value.section);
 }

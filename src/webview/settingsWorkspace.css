@@ -19,6 +19,7 @@
 .settings-subtitle { margin-top: 1px; overflow: hidden; color: var(--vscode-descriptionForeground); font-size: .769em; white-space: nowrap; }
 .settings-subtitle code, .settings-section-count code { font-family: var(--vscode-editor-font-family); }
 .settings-header-actions, .settings-actions { display: flex; align-items: center; gap: var(--ts-space-1); }.settings-header-actions button { min-height: var(--ts-control-height); }
+.profile-edit-status { max-width: 11em; overflow: hidden; color: var(--vscode-descriptionForeground); font-size: .769em; text-overflow: ellipsis; white-space: nowrap; }.profile-edit-status.is-dirty { color: var(--vscode-editorWarning-foreground); }.profile-edit-status.has-issues { color: var(--vscode-errorForeground); }
 .settings-section-picker { flex: 1 1 auto; min-width: 0; max-width: 18em; }
 .settings-section-picker select { border-color: var(--vscode-dropdown-border, var(--vscode-input-border, transparent)); background: var(--vscode-dropdown-background, var(--vscode-input-background)); color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); }
 .settings-section-picker option { background: var(--vscode-dropdown-listBackground, var(--vscode-dropdown-background, var(--vscode-input-background))); color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); }
@@ -101,7 +102,7 @@
 .red-team-section > .settings-card-heading { margin-bottom: var(--ts-space-4); padding-bottom: var(--ts-space-2); border-bottom: 1px solid var(--vscode-editorWidget-border); }
 .red-team-section > .settings-card-heading h2 { font-size: 1.077em; }
 .adversarial-case-collection { container-type: inline-size; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--ts-space-2); margin-top: var(--ts-space-3); }
-.adversarial-case-toolbar { display: grid; grid-template-columns: minmax(13em, 1fr) minmax(8em, auto) minmax(9em, auto) auto auto; align-items: center; gap: var(--ts-space-1); }
+.adversarial-case-toolbar { display: grid; grid-template-columns: minmax(13em, 1fr) minmax(8em, auto) minmax(9em, auto) auto auto auto; align-items: center; gap: var(--ts-space-1); }
 .adversarial-case-toolbar label { min-width: 0; }.adversarial-case-toolbar input, .adversarial-case-toolbar select { width: 100%; min-width: 0; }
 .adversarial-case-search { min-width: 12em !important; }
 .adversarial-case-more-filters { position: relative; }
@@ -148,9 +149,11 @@
 .adversarial-result-toolbar { display: grid; grid-template-columns: minmax(12em, 1fr) minmax(9em, .45fr) minmax(9em, .45fr); gap: var(--ts-space-2); margin-block-end: var(--ts-space-3); }
 .adversarial-result-toolbar label { display: grid; gap: 2px; min-width: 0; color: var(--vscode-descriptionForeground); font-size: .769em; }
 .adversarial-result-toolbar input, .adversarial-result-toolbar select { width: 100%; min-width: 0; font-size: var(--vscode-font-size, 13px); }
+.collection-filter-actions { display: flex; grid-column: 1 / -1; align-items: center; justify-content: flex-end; gap: var(--ts-space-1); }.collection-filter-actions button { border-color: var(--vscode-button-border, var(--vscode-editorWidget-border)); background: transparent; color: var(--vscode-foreground); }.collection-filter-actions button:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }.collection-filter-actions button[aria-pressed="true"] { border-color: var(--vscode-focusBorder); background: var(--vscode-list-inactiveSelectionBackground); color: var(--vscode-foreground); }
 .adversarial-result-table-wrap { min-width: 0; overflow-x: auto; border: 1px solid var(--vscode-editorWidget-border); }
 .adversarial-result-table { width: 100%; min-width: 52em; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.adversarial-result-table th { padding: var(--ts-space-1) var(--ts-space-2); color: var(--vscode-descriptionForeground); background: var(--vscode-editorWidget-background); font-size: .769em; font-weight: 600; text-align: start; }
+.adversarial-result-table th { position: sticky; z-index: 2; inset-block-start: 0; padding: var(--ts-space-1) var(--ts-space-2); color: var(--vscode-descriptionForeground); background: var(--vscode-editorWidget-background); font-size: .769em; font-weight: 600; text-align: start; }
+.adversarial-result-table th:first-child, .adversarial-result-table td:first-child { position: sticky; inset-inline-start: 0; background: var(--vscode-editor-background); }.adversarial-result-table thead th:first-child { z-index: 3; background: var(--vscode-editorWidget-background); }.adversarial-result-table tbody tr.is-timeline-selected td:first-child { background: var(--vscode-list-inactiveSelectionBackground, var(--vscode-editor-background)); }
 .adversarial-result-table td { min-width: 0; padding: var(--ts-space-2); border-top: 1px solid var(--vscode-editorWidget-border); vertical-align: middle; }
 .adversarial-result-table tbody tr.is-timeline-selected { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; background: var(--vscode-list-inactiveSelectionBackground, transparent); }
 .adversarial-result-cell-stack { display: grid; min-width: 0; overflow: hidden; gap: 2px; }
@@ -164,6 +167,7 @@
 .adversarial-outcome { display: inline-flex; align-items: center; gap: var(--ts-space-1); font-weight: 600; }.adversarial-outcome .product-icon { width: 1em; height: 1em; font-size: 1em; }.adversarial-outcome--resisted { color: var(--vscode-testing-iconPassed); }.adversarial-outcome--attackSucceeded { color: var(--vscode-testing-iconFailed); }.adversarial-outcome--indeterminate, .adversarial-outcome--infrastructureError { color: var(--vscode-testing-iconErrored, var(--vscode-editorWarning-foreground)); }
 .adversarial-result-sample small { color: var(--vscode-descriptionForeground); font-size: .846em; }
 .adversarial-result-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ts-space-1); }
+.adversarial-result-table mark { padding: 0; color: var(--vscode-editor-findMatchForeground, inherit); background: var(--vscode-editor-findMatchHighlightBackground, var(--vscode-editor-selectionBackground)); }
 .adversarial-rerun-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ts-space-1); }.adversarial-rerun-actions details { position: relative; }.adversarial-rerun-actions summary { display: flex; align-items: center; min-height: var(--ts-control-height); padding: var(--ts-space-1) var(--ts-space-2); border: 1px solid var(--vscode-button-secondaryBackground); border-radius: 2px; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); cursor: pointer; }.adversarial-rerun-actions details > div { position: absolute; z-index: 6; inset-block-start: calc(100% + 2px); inset-inline-end: 0; display: grid; min-width: 9em; gap: 1px; padding: var(--ts-space-1); border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border)); background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); box-shadow: 0 3px 10px var(--vscode-widget-shadow, rgba(0,0,0,.35)); }
 .adversarial-rerun-actions .adversarial-rerun-secondary { border-color: var(--vscode-button-border, var(--vscode-editorWidget-border)); background: transparent; color: var(--vscode-foreground); }
 .adversarial-rerun-actions .adversarial-rerun-secondary:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-foreground); }

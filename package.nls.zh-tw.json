@@ -16,6 +16,7 @@
   "command.deleteProfile": "刪除 Profile",
   "command.openProfile": "開啟 Profile",
   "command.openProfileSection": "開啟 Profile 區段",
+  "command.goTo": "前往…",
   "command.openGuide": "開啟使用指南",
   "command.changeDisplayLanguage": "變更顯示語言",
   "command.configureProfile": "設定 Profile",

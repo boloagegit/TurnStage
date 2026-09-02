@@ -300,7 +300,11 @@ try {
   assert.equal(await page.getByRole('navigation', { name: 'Profile configuration sections' }).count(), 0, 'Embedded Configure must not add another navigation rail');
   assert.equal(await page.getByRole('combobox', { name: 'Profile configuration sections' }).inputValue(), 'general', 'Embedded Configure uses one compact section picker');
   assert.equal(await page.locator('[data-message-id="assistant-1"][data-selected="true"]').count(), 0, 'Configure must hide Debug message selection styling');
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-dirty', type: 'profile.editState', dirty: true } })));
+  await page.getByText('Unsaved changes', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Save Profile' }).isEnabled(), true, 'Configure must expose pushed dirty state and an explicit save action without polling');
   await page.screenshot({ path: resolve(artifactDirectory, 'profile-config-right-pane-dark.png'), fullPage: true });
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-saved', type: 'profile.editState', dirty: false } })));
   await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('request');
   await page.getByRole('heading', { level: 1, name: 'Request' }).waitFor();
   await page.getByRole('heading', { name: 'Connection Doctor' }).waitFor();
@@ -379,6 +383,7 @@ try {
   await page.locator('.adversarial-case-collection').screenshot({ path: resolve(artifactDirectory, 'adversarial-case-catalog-page-2-dark.png') });
   await page.getByRole('button', { name: 'Previous page' }).click();
   await page.getByRole('searchbox', { name: 'Search adversarial cases' }).fill('linked-case-30');
+  await page.getByText('1 of 31 cases', { exact: true }).waitFor();
   assert.equal(await page.getByText('1 of 31 cases', { exact: true }).count(), 1, 'Case search must narrow the full unified catalog');
   assert.equal(await adversarialCaseTable.locator('tbody > tr').count(), 1, 'A filtered catalog must mount only matching rows');
   await adversarialCaseTable.getByRole('button', { name: 'Open source' }).click();
@@ -435,6 +440,15 @@ try {
   assert.equal(await adversarialResults.getByRole('columnheader', { name: 'Repeatability' }).count(), 1, 'The result table must explain repeated-run samples with a named column');
   await assertAdversarialResultLayout(adversarialResults, 'Dark theme');
   await adversarialResults.screenshot({ path: resolve(artifactDirectory, 'adversarial-results-dark.png') });
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-export', type: 'test.exported', kind: 'report', path: 'turnstage-report.html', artifactId: 'artifact-1' } })));
+  const exportNotice = page.locator('.operation-status').filter({ hasText: 'Test report exported' });
+  await exportNotice.waitFor();
+  assert.equal(await exportNotice.getByRole('button', { name: 'Open' }).count(), 1, 'Export completion must offer a direct open action');
+  assert.equal(await exportNotice.getByRole('button', { name: 'Reveal in file explorer' }).count(), 1, 'Export completion must offer a reveal action');
+  assert.equal(await exportNotice.getByRole('button', { name: 'Copy path' }).count(), 1, 'Export completion must offer a copy-path action');
+  assert.equal(await exportNotice.evaluate((element) => getComputedStyle(element).position), 'relative', 'Operation feedback must reserve layout space instead of overlaying controls');
+  await page.screenshot({ path: resolve(artifactDirectory, 'export-actions-dark.png'), fullPage: true });
+  await exportNotice.getByRole('button', { name: 'Dismiss notification' }).click();
   const attackResult = adversarialResults.getByRole('row').filter({ hasText: 'Known two-turn probe' });
   await attackResult.getByRole('button', { name: /Review timeline|Timeline selected/ }).click();
   const findingTimelineAction = page.getByRole('button', { name: 'Open Forbidden URL observed evidence at 1,840 ms' });

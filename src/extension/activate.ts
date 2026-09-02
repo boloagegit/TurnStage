@@ -6,7 +6,7 @@ import { ProfileMigrator } from './config/profileMigration';
 import { ProfileDuplicateDiagnostics } from './config/profileDuplicateDiagnostics';
 import { TurnStageEditorProvider } from './editors/turnstageEditorProvider';
 import { SecretService } from './security/security';
-import { isWorkspaceSection, type WorkspaceSection } from '../shared/protocol';
+import { isWorkspaceSection, type WorkspaceDestination, type WorkspaceSection } from '../shared/protocol';
 import {
   ProfileScopeTreeItem,
   ProfileTreeItem,
@@ -145,6 +145,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const sectionId = isProfileSectionId(section) ? section : undefined;
     if (!uri || !sectionId) return;
     await openProfileSection(editor, uri, sectionId);
+  });
+  command('goTo', async (item?: ProfileTreeItem | vscode.Uri) => {
+    let uri = asUri(item) ?? activeCustomEditorUri();
+    if (!uri) {
+      const entries = await repository.discover();
+      const selected = entries.length === 1 ? entries[0] : await vscode.window.showQuickPick(entries.map((entry) => ({ label: entry.profile?.name || entry.profile?.id || vscode.workspace.asRelativePath(entry.uri), description: entry.scope === 'user' ? vscode.l10n.t('User Profile') : vscode.l10n.t('Workspace Profile'), detail: entry.uri.toString(), uri: entry.uri })), { title: vscode.l10n.t('TurnStage: Go to…'), placeHolder: vscode.l10n.t('Choose a Profile') });
+      uri = selected?.uri;
+    }
+    if (!uri) { void showNotification('information', vscode.l10n.t('Create or open a TurnStage Profile first.')); return; }
+    const destinations: Array<vscode.QuickPickItem & { destination: WorkspaceDestination }> = [
+      { label: '$(comment-discussion) ' + vscode.l10n.t('Chat'), description: vscode.l10n.t('Compose and inspect the conversation'), destination: { pane: 'chat' } },
+      { label: '$(debug-alt) ' + vscode.l10n.t('Debug: Network'), description: vscode.l10n.t('Requests, responses, and timing'), destination: { pane: 'debug', tab: 'Network' } },
+      { label: '$(list-tree) ' + vscode.l10n.t('Debug: Raw Events'), description: vscode.l10n.t('Raw stream evidence'), destination: { pane: 'debug', tab: 'Raw Events' } },
+      { label: '$(beaker) ' + vscode.l10n.t('Red Team: Results'), description: vscode.l10n.t('Latest outcomes and evidence'), destination: { pane: 'adversarial', section: 'results' } },
+      { label: '$(table) ' + vscode.l10n.t('Red Team: Cases'), description: vscode.l10n.t('Adversarial case catalog'), destination: { pane: 'adversarial', section: 'cases' } },
+      { label: '$(server-process) ' + vscode.l10n.t('Red Team: Campaigns'), description: vscode.l10n.t('Bounded batch execution'), destination: { pane: 'adversarial', section: 'campaigns' } },
+      { label: '$(settings-gear) ' + vscode.l10n.t('Configure: General'), description: vscode.l10n.t('Profile identity and runtime context'), destination: { pane: 'configure', section: 'general' } },
+      { label: '$(symbol-event) ' + vscode.l10n.t('Configure: Stream & Mapping'), description: vscode.l10n.t('Transport and event mapping'), destination: { pane: 'configure', section: 'stream-mapping' } },
+      { label: '$(shield) ' + vscode.l10n.t('Configure: Security'), description: vscode.l10n.t('Trust and allowed actions'), destination: { pane: 'configure', section: 'security' } },
+    ];
+    const selected = await vscode.window.showQuickPick(destinations, { title: vscode.l10n.t('TurnStage: Go to…'), placeHolder: vscode.l10n.t('Choose a destination') });
+    if (!selected) return;
+    await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor', { viewColumn: vscode.ViewColumn.Active, preserveFocus: false });
+    await editor.showDestination(uri, selected.destination);
   });
   command('configureProfile', async (item?: ProfileTreeItem | vscode.Uri) => { const uri = asUri(item) ?? activeCustomEditorUri(); if (!uri) { void showNotification('error', vscode.l10n.t('Open a profile in the TurnStage editor first.')); return; } await openProfileSection(editor, uri, 'general'); });
   command('runProfile', async (item?: ProfileTreeItem | vscode.Uri) => { const uri = asUri(item) ?? vscode.Uri.parse('turnstage-demo:/basic-sse-chat.turnstage.jsonc'); const controller = await openAndWaitForController(editor, uri); if (!controller) { void showNotification('error', vscode.l10n.t('The TurnStage profile editor did not become ready in time.')); return; } if (!canStartNetwork(controller.profile.opening?.mode)) return; await controller.startSession(); });

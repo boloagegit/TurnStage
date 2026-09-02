@@ -55,6 +55,14 @@ describe('Extension host editor lifecycle', () => {
     expect(editorSource).toContain('this.pendingSections.set(key, section);');
   });
 
+  it('offers bounded native navigation and Host-owned artifact actions', () => {
+    expect(activateSource).toContain("command('goTo'");
+    expect(editorSource).toContain('async showDestination(uri: vscode.Uri, destination: WorkspaceDestination)');
+    expect(editorSource).toContain('while (artifacts.size > 16)');
+    expect(editorSource).toContain("message.type === 'artifact.action'");
+    expect(editorSource).toContain("vscode.env.clipboard.writeText(artifact.path)");
+  });
+
   it('offers a localized snooze action and persists it globally', () => {
     expect(activateSource).toContain("vscode.l10n.t('Do not show again')");
     expect(activateSource).toContain("configuration.update('notifications.enabled', false, vscode.ConfigurationTarget.Global)");

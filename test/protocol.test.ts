@@ -27,6 +27,10 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'run.delete', runId: 'run-1' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'run.delete', runId: '' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'run.clear' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'profile.save' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'artifact.action', artifactId: 'artifact-1', action: 'open' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'artifact.action', artifactId: '', action: 'open' }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'artifact.action', artifactId: 'artifact-1', action: 'delete' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'uri.open', uri: 'https://example.test/docs' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.file', action: 'importCsv' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.file', action: 'linkSuite' }, 'editor-1')).toBe(true);
@@ -58,6 +62,9 @@ describe('cross-boundary message validation', () => {
   it('validates Host messages before the Webview consumes them', () => {
     expect(isHostMessage({ ...envelope, type: 'host.ready', trusted: true, locale: 'zh-tw', direction: 'ltr' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'workspace.section', section: 'legacy' }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'workspace.navigate', destination: { pane: 'adversarial', section: 'results' } }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'workspace.navigate', destination: { pane: 'adversarial', section: 'unknown' } }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'profile.editState', dirty: true }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'profile.validation', diagnostics: [{ severity: 'fatal', message: 'bad', offset: 0, length: 1 }] }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'profile.validated', valid: true }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'profile.validated', valid: 'yes' }, 'editor-1')).toBe(false);
@@ -83,7 +90,9 @@ describe('cross-boundary message validation', () => {
     const boundedResult = { profileId: 'profile', scenarioId: 'case', scenarioName: 'Case', outcome: 'resisted', durationMs: 1, attemptedTurns: 1, completedTurns: 1, plannedTurns: 1, findingCount: 0, issueCount: 0, evidenceId: 'aggregate', primaryLocation: { kind: 'profile', path: 'tests.scenarios' }, availableLocations: [], repetitions: { requestedAttempts: 1, completedAttempts: 1, skippedAttempts: 0, sampleComplete: true, stability: 'stable-pass', counts: { resisted: 1, attackSucceeded: 0, indeterminate: 0, infrastructureError: 0 }, attempts: [{ attempt: 1, outcome: 'resisted', durationMs: 1, attemptedTurns: 1, completedTurns: 1, evidenceId: 'attempt-1', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [] }] } };
     expect(isHostMessage({ ...envelope, type: 'test.results', results: [boundedResult] }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.results', results: [{ ...boundedResult, repetitions: { ...boundedResult.repetitions, attempts: Array.from({ length: 101 }, (_, index) => ({ ...boundedResult.repetitions.attempts[0], attempt: index + 1 })) } }] }, 'editor-1')).toBe(false);
-    expect(isHostMessage({ ...envelope, type: 'test.exported', kind: 'report', path: '/tmp/report.html' }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'test.exported', kind: 'report', path: '/tmp/report.html', artifactId: 'artifact-1' }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'campaign.exported', path: 'results.jsonl', artifactId: 'artifact-2' }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'adversarial.operation', action: 'exportCsv', status: 'completed', detail: 'Exported.', path: 'cases.csv', artifactId: 'artifact-3' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running' } }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 100, completedCases: 24, totalAttempts: 120, completedAttempts: 31, maxConcurrency: 3, activeCaseNames: ['Case 25'] } } }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 10, completedCases: 11, totalAttempts: 10, completedAttempts: 0, maxConcurrency: 3 } } }, 'editor-1')).toBe(false);

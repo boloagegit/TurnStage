@@ -3,6 +3,19 @@ type MessageValues = Record<string, string | number>;
 let locale = typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en';
 
 const zhTw: Record<string, string> = {
+  'Campaign results exported to {path}': 'Campaign 結果已匯出至 {path}',
+  'Copy path': '複製路徑',
+  'Copy safe summary': '複製安全摘要',
+  'Needs attention': '需要處理',
+  'Open': '開啟',
+  'Open Test Explorer': '開啟 Test Explorer',
+  'Problems only': '只顯示問題',
+  'Reveal in file explorer': '在檔案總管中顯示',
+  'Save Profile': '儲存 Profile',
+  'Saved': '已儲存',
+  'Show first issue': '顯示第一個問題',
+  'Unlinked suite {path}.': '已取消連結測試套件 {path}。',
+  'Unsaved changes': '有未儲存的變更',
   'All outcomes': '所有結果',
   'All samples': '所有樣本',
   'Case name or ID': '案例名稱或 ID',

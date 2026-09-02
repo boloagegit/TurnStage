@@ -69,7 +69,7 @@ describe('Webview UI checkpoint', () => {
       version: 4,
       scrollPositions: { chat: 0, adversarial: 10_000_000 },
       adversarialCaseCollection: { query: '', mode: 'all', source: 'all', tag: 'all', sort: 'sourceOrder', page: 0, pageSize: 25 },
-      adversarialResultCollection: { query: '', outcome: 'all', stability: 'all', page: 0, pageSize: 25 },
+      adversarialResultCollection: { query: '', outcome: 'all', stability: 'all', attentionOnly: false, page: 0, pageSize: 25 },
       networkInspector: { query: 'q'.repeat(512), detailTab: 'Headers' },
       collapsedEventTurns: { raw: ['ok'], normalized: [] },
       acceptedForms: ['ok']

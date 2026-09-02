@@ -27,6 +27,7 @@ export type ProductIconName =
   | 'ellipsis'
   | 'diff'
   | 'file-code'
+  | 'folder-opened'
   | 'go-to-file'
   | 'info'
   | 'list-tree'
@@ -66,6 +67,7 @@ const codicons: Record<ProductIconName, string> = {
   ellipsis: 'ellipsis',
   diff: 'diff',
   'file-code': 'file-code',
+  'folder-opened': 'folder-opened',
   'go-to-file': 'go-to-file',
   info: 'info',
   'list-tree': 'list-tree',

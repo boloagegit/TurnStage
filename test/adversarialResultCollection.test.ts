@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AdversarialResultSummary } from '../src/shared/types';
-import { filterAdversarialResults, normalizeAdversarialResultCollectionState } from '../src/webview/SettingsWorkspace';
+import { filterAdversarialResults, normalizeAdversarialResultCollectionState, safeResultSummary } from '../src/webview/SettingsWorkspace';
 
 function result(id: string, outcome: AdversarialResultSummary['outcome'], stability?: NonNullable<AdversarialResultSummary['repetitions']>['stability']): AdversarialResultSummary {
   return {
@@ -13,12 +13,24 @@ function result(id: string, outcome: AdversarialResultSummary['outcome'], stabil
 
 describe('adversarial result collection', () => {
   it('normalizes malformed and oversized persisted filters', () => {
-    expect(normalizeAdversarialResultCollectionState({ query: 'x'.repeat(600), outcome: 'bad', stability: 'bad', page: 999, pageSize: 999 })).toEqual({ query: 'x'.repeat(512), outcome: 'all', stability: 'all', page: 19, pageSize: 25 });
+    expect(normalizeAdversarialResultCollectionState({ query: 'x'.repeat(600), outcome: 'bad', stability: 'bad', attentionOnly: 'yes', page: 999, pageSize: 999 })).toEqual({ query: 'x'.repeat(512), outcome: 'all', stability: 'all', attentionOnly: false, page: 19, pageSize: 25 });
   });
 
   it('filters by bounded identity text, outcome, and sample stability', () => {
     const results = [result('alpha', 'resisted', 'stable-pass'), result('beta', 'attackSucceeded', 'stable-fail'), result('gamma', 'indeterminate')];
     expect(filterAdversarialResults(results, { query: 'BETA', outcome: 'attackSucceeded', stability: 'stable-fail', page: 0, pageSize: 25 }).map((item) => item.scenarioId)).toEqual(['beta']);
     expect(filterAdversarialResults(results, { query: '', outcome: 'all', stability: 'single-run', page: 0, pageSize: 25 }).map((item) => item.scenarioId)).toEqual(['gamma']);
+    expect(filterAdversarialResults(results, { query: '', outcome: 'all', stability: 'all', attentionOnly: true, page: 0, pageSize: 25 }).map((item) => item.scenarioId)).toEqual(['beta', 'gamma']);
+  });
+
+  it('keeps copied summaries bounded to non-content evidence metadata', () => {
+    const value = { ...result('safe', 'attackSucceeded', 'unstable'), prompt: 'private prompt', response: 'private response', url: 'https://secret.test', headers: { authorization: 'secret' } } as AdversarialResultSummary;
+    const summary = safeResultSummary(value);
+    expect(summary).toContain('caseId: safe');
+    expect(summary).toContain('outcome: attackSucceeded');
+    expect(summary).not.toContain('private prompt');
+    expect(summary).not.toContain('private response');
+    expect(summary).not.toContain('secret.test');
+    expect(summary).not.toContain('authorization');
   });
 });

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.22.3
+
+- Added the native **TurnStage: Go to…** picker for direct Chat, Debug, Red Team,
+  and Configure navigation, plus pushed save/validation state in Configure.
+- Made result and event triage faster with deferred search, attention/problem
+  presets, active-filter counts, clear actions, actionable empty states, and
+  sticky Red Team result headers while preserving bounded pagination.
+- Replaced overlay notifications with in-flow status, added Host-verified Open,
+  Reveal, and Copy Path actions for exports, and added a prompt-free safe result
+  summary. Destructive case edits and suite unlinking now share bounded undo.
+
 ## 0.22.2
 
 - Added a one-click duplicate action to Profile rows and made the empty Profile
