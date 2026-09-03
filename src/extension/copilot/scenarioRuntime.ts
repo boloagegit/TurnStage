@@ -33,6 +33,7 @@ import type { DiagnosticInput, DiagnosticOutcome, TimingStage } from './diagnost
 import { applyTextEdits, computeProfileDigest, createProfilePatchDraft, verifyProfilePatchDraft } from './remediation/planner';
 import { ProfilePatchError } from './remediation/contracts';
 import { createQualityDisclosureGrant, QualityGrantStore, QualityPolicyError, validateQualityRubrics } from './quality/policy';
+import { isPossibleProxyBuffering } from '../connection/networkPath';
 import { ProfileRepository, EnvironmentRepository } from '../config/profileRepository';
 import { ProfileCodec } from '../config/profileCodec';
 import { ProfileValidator } from '../config/profileValidator';
@@ -489,7 +490,7 @@ function diagnosticInput(result: ScenarioRunResult | undefined, evidence: import
   const firstChunk = snapshot.metrics.firstChunkLatency ?? network?.timing.firstChunk;
   const firstEvent = snapshot.metrics.firstEventLatency;
   const ttft = snapshot.metrics.ttft;
-  const proxyBuffered = typeof firstChunk === 'number' && firstChunk >= 250 && typeof firstEvent === 'number' && typeof ttft === 'number' && Math.abs(firstEvent - firstChunk) <= 20 && Math.abs(ttft - firstChunk) <= 20;
+  const proxyBuffered = isPossibleProxyBuffering({ firstChunkLatencyMs: firstChunk, firstEventLatencyMs: firstEvent, ttftMs: ttft });
   const repetition = result?.repetitions ? {
     requestedAttempts: result.repetitions.requestedAttempts,
     sampleComplete: result.repetitions.sampleComplete,

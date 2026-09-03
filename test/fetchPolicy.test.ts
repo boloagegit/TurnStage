@@ -25,6 +25,12 @@ describe('fetchWithRedirectPolicy', () => {
     await expect(fetchWithRedirectPolicy(prepared(), new AbortController().signal)).rejects.toMatchObject({ type: 'CrossOriginRedirectError' });
   });
 
+  it('never carries invalid-certificate access across origins', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(null, { status: 307, headers: { Location: 'https://other.example.test/stream' } })) as typeof fetch;
+    await expect(fetchWithRedirectPolicy(prepared({ redirectPolicy: 'follow', tls: { allowInvalidCertificates: true } }), new AbortController().signal))
+      .rejects.toMatchObject({ type: 'InsecureTlsCrossOriginRedirectError' });
+  });
+
   it('strips credentials and known secret values when cross-origin follow is explicit', async () => {
     const calls: RequestInit[] = [];
     globalThis.fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {

@@ -44,8 +44,9 @@ export class RequestBuilder {
     const resolvedBody = await resolveTemplate(variant?.body ?? definition.body, context, resolveSecret);
     const body = resolvedBody === undefined ? undefined : JSON.stringify(resolvedBody);
     const knownSecrets = [...new Set(secretValues)];
-    const redacted = redactKnownSecrets({ method: definition.method, url, headers: redactHeaders(headers), body: redactDeep(resolvedBody), variantId: variant?.id }, knownSecrets) as PreparedRequest['redacted'];
-    return { method: definition.method, url, headers, body, timeoutMs: definition.timeoutMs ?? 120_000, idleTimeoutMs: definition.idleTimeoutMs, reconnect: definition.reconnect, redirectPolicy: definition.redirectPolicy, maxRedirects: definition.maxRedirects, secretValues: knownSecrets, redacted };
+    const tls = definition.tls?.allowInvalidCertificates === true ? { allowInvalidCertificates: true } : undefined;
+    const redacted = redactKnownSecrets({ method: definition.method, url, headers: redactHeaders(headers), body: redactDeep(resolvedBody), variantId: variant?.id, ...(tls ? { tls } : {}) }, knownSecrets) as PreparedRequest['redacted'];
+    return { method: definition.method, url, headers, body, timeoutMs: definition.timeoutMs ?? 120_000, idleTimeoutMs: definition.idleTimeoutMs, reconnect: definition.reconnect, redirectPolicy: definition.redirectPolicy, maxRedirects: definition.maxRedirects, ...(tls ? { tls } : {}), secretValues: knownSecrets, redacted };
   }
 }
 

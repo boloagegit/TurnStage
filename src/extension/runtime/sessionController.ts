@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { ChatMessage, ControlDefinition, InteractionContext, LocalRun, LocalRunSummary, MetricsSnapshot, NetworkExchange, NetworkExchangeKind, NormalizedEvent, OpeningDefinition, PreparedRequest, RawStreamEvent, RemoteSessionReference, RuntimeErrorData, ScenarioFaultDefinition, ScenarioRunEvidence, SessionSnapshot, TurnResult, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
+import type { ChatMessage, ConnectionNetworkPathSummary, ControlDefinition, InteractionContext, LocalRun, LocalRunSummary, MetricsSnapshot, NetworkExchange, NetworkExchangeKind, NormalizedEvent, OpeningDefinition, PreparedRequest, RawStreamEvent, RemoteSessionReference, RuntimeErrorData, ScenarioFaultDefinition, ScenarioRunEvidence, SessionSnapshot, TurnResult, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
 import { MappingEngine } from '../mapping/mappingEngine';
 import { RequestBuilder } from '../request/requestBuilder';
 import { getPath } from '../request/templateResolver';
@@ -19,6 +19,8 @@ import { localize } from '../l10n';
 import { diagnosticUrl, diagnosticValue, logAt } from '../logging';
 import { extractNetworkCorrelation, mergeNetworkCorrelation } from '../observability/correlation';
 import { fetchBoundedText } from '../transport/boundedFetch';
+import { networkPathDebugLine, networkPathInfoLine } from '../connection/networkPath';
+import { captureVSCodeNetworkPath, resolveVSCodeInsecureTlsRoute, type VSCodeNetworkPathInspector } from '../connection/vscodeNetworkPath';
 
 const MAX_NETWORK_ENTRIES = 50;
 const MAX_NETWORK_RESPONSE_PREVIEW_CHARS = 64 * 1024;
@@ -218,6 +220,7 @@ export class SessionController implements vscode.Disposable {
     const scope = requestScopeEvidence(this.profile.id, this.environment.id);
     let phase = 'building-request';
     let networkEntry: NetworkExchange | undefined;
+    let networkPathInspector: VSCodeNetworkPathInspector | undefined;
     this.openingAbortController?.abort(new TurnStageError('SupersededRequestError', localize('A newer opening request replaced this request.')));
     const openingController = new AbortController();
     this.openingAbortController = openingController;
@@ -227,6 +230,8 @@ export class SessionController implements vscode.Disposable {
       this.registerRequestSecrets(request);
       this.requestPreview = this.publicValue(request.redacted);
       networkEntry = this.beginNetworkExchange('opening', request, startedAt);
+      networkPathInspector = captureVSCodeNetworkPath(request.url);
+      logNetworkPathStart(this.log, logId, networkPathInspector.assess({ tlsVerificationDisabled: request.tls?.allowInvalidCertificates === true }));
       phase = 'waiting-headers';
       logAt(this.log, 'info', `[${logId}] start ${scope} method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} build=${formatDuration(Date.now() - startedAt)} requestHeaders=${Object.keys(request.headers).length} headerBytes=${requestHeaderBytes(request)} bodyBytes=${requestBodyBytes(request)} timeout=${formatDuration(request.timeoutMs ?? 30_000)}`);
       const bounded = await fetchBoundedText(request, {
@@ -242,6 +247,7 @@ export class SessionController implements vscode.Disposable {
           logAt(this.log, 'info', `[${logId}] headers status=${response.status} latency=${formatDuration(Date.now() - startedAt)} contentType=${quoteDiagnostic(this.publicValue(response.headers.get('content-type') ?? 'none'))}${responseHeaderEvidence(response.headers, (value) => this.publicValue(value))}`);
         },
         onTruncate: () => { if (networkEntry) networkEntry.responseBodyTruncated = true; },
+        ...(request.tls?.allowInvalidCertificates === true ? { insecureTlsRoute: resolveVSCodeInsecureTlsRoute(request.url) } : {}),
       });
       const { response, text: responseText } = bounded; let data: unknown = responseText;
       try { data = responseText ? JSON.parse(responseText) : {}; } catch { /* fallback matching can still inspect status */ }
@@ -257,6 +263,7 @@ export class SessionController implements vscode.Disposable {
       logAt(this.log, 'info', `[${logId}] completed elapsed=${formatDuration(Date.now() - startedAt)} starters=${normalizedStarters.length} blocks=${blocks.length}`);
     } catch (error) {
       this.finishNetworkExchange(networkEntry, 'failed', error);
+      logNetworkPathFindings(this.log, logId, networkPathInspector?.assess(networkPathObservation(this.snapshot, networkEntry)));
       logAt(this.log, 'error', `[${logId}] failed ${scope} phase=${phase} type=${errorType(error)}${errorStatus(error)} elapsed=${formatDuration(Date.now() - startedAt)}${errorEvidence(error)}${safeErrorMessage(error, (value) => this.publicValue(value))}`);
       const type = error instanceof TurnStageError ? error.type : 'NetworkError'; const fallback = selectOpeningFallback(opening, undefined, { errorType: type }) ?? (opening.failurePolicy?.useFallbackOnNetworkError ? opening.fallbacks?.[0] : undefined);
       if (opening.failurePolicy?.useFallbackOnNetworkError && fallback) this.useOpeningFallback(fallback);
@@ -296,6 +303,7 @@ export class SessionController implements vscode.Disposable {
     let lastEventName: string | undefined;
     let terminalEventSeen = false;
     let networkEntry: NetworkExchange | undefined;
+    let networkPathInspector: VSCodeNetworkPathInspector | undefined;
     this.synchronizeEventIdentity();
     this.currentTurn = {
       clientRequestId,
@@ -307,6 +315,8 @@ export class SessionController implements vscode.Disposable {
       const request = await this.requestBuilder().build(this.profile.conversation.send, this.contextFor(text, interaction, clientRequestId, startedAt));
       this.registerRequestSecrets(request);
       this.requestPreview = this.publicValue(request.redacted);
+      networkPathInspector = captureVSCodeNetworkPath(request.url);
+      logNetworkPathStart(this.log, logId, networkPathInspector.assess({ tlsVerificationDisabled: request.tls?.allowInvalidCertificates === true }));
       const protocol = this.profile.stream.transport === 'fixture' ? 'ndjson' : this.profile.stream.transport;
       logAt(this.log, 'info', `[${logId}] start ${scope} method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} variant=${quoteDiagnostic(request.redacted.variantId ?? 'default')} protocol=${protocol} build=${formatDuration(Date.now() - startedAt)} requestHeaders=${Object.keys(request.headers).length} headerBytes=${requestHeaderBytes(request)} bodyBytes=${requestBodyBytes(request)} timeout=${formatDuration(request.timeoutMs)} idleTimeout=${formatDuration(request.idleTimeoutMs)} reconnectMax=${Math.min(5, Math.max(0, request.reconnect?.maxAttempts ?? 0))}`);
       this.snapshot.messages.push({ id: `user-${clientRequestId}`, role: 'user', status: 'completed', createdAt: Date.now(), completedAt: Date.now(), parts: [{ type: 'text', text }], citations: [], actions: [], followups: [], metadata: { clientRequestId } });
@@ -315,6 +325,7 @@ export class SessionController implements vscode.Disposable {
       this.snapshot.turnState = 'waitingStart'; this.changed(); this.abortController = new AbortController(); phase = 'waiting-headers';
       const transport = new HttpStreamTransport({
         faults: this.runtimeOptions.faults,
+        ...(request.tls?.allowInvalidCertificates === true ? { insecureTlsRoute: resolveVSCodeInsecureTlsRoute(request.url) } : {}),
         onDiagnostic: (event) => {
           if (event.type === 'attempt.started') {
             networkEntry = this.beginNetworkExchange('stream', request, Date.now(), protocol as RawStreamEvent['protocol'], event.attempt);
@@ -367,6 +378,7 @@ export class SessionController implements vscode.Disposable {
         else await this.finalizeTurn({ type: 'failed', error: toError(errors.unexpectedEnd()) });
       }
       this.finishNetworkExchange(networkEntry, result.aborted ? 'aborted' : (this.snapshot as SessionSnapshot).turnState === 'failed' ? 'failed' : 'completed');
+      logNetworkPathFindings(this.log, logId, networkPathInspector.assess(networkPathObservation(this.snapshot, networkEntry)));
       logAt(this.log, 'info', `[${logId}] ended ${scope} state=${this.snapshot.turnState} elapsed=${formatDuration(Date.now() - startedAt)} headers=${headerCount} chunks=${chunkCount} events=${eventCount} bytes=${byteCount} reconnects=${result.reconnectCount}${streamDiagnosticSummary(this.snapshot, { lastEventName, lastEventAt, maxChunkGap, terminalEventSeen })}`);
     } catch (error) {
       if (error instanceof TurnStageError && typeof error.details.reconnectCount === 'number') this.metrics.reconnectCount(error.details.reconnectCount);
@@ -374,6 +386,7 @@ export class SessionController implements vscode.Disposable {
       const level = error instanceof TurnStageError && error.type === 'UserAbortError' ? 'info' : 'error';
       if (error instanceof TurnStageError && typeof error.details.responseBody === 'string') this.appendNetworkResponse(networkEntry, this.publicValue(error.details.responseBody));
       this.finishNetworkExchange(networkEntry, error instanceof TurnStageError && error.type === 'UserAbortError' ? 'aborted' : 'failed', error);
+      logNetworkPathFindings(this.log, logId, networkPathInspector?.assess(networkPathObservation(this.snapshot, networkEntry)));
       logAt(this.log, level, `[${logId}] failed ${scope} phase=${failurePhase} type=${errorType(error)}${errorStatus(error)} elapsed=${formatDuration(Date.now() - startedAt)} headers=${headerCount} chunks=${chunkCount} events=${eventCount} bytes=${byteCount}${streamDiagnosticSummary(this.snapshot, { lastEventName, lastEventAt, maxChunkGap, terminalEventSeen })}${errorEvidence(error)}${safeErrorMessage(error, (value) => this.publicValue(value))}`);
       await this.finalizeTurn({ type: error instanceof TurnStageError && error.type === 'UserAbortError' ? 'aborted' : 'failed', ...(error instanceof TurnStageError && error.type === 'UserAbortError' ? { reason: 'user_cancel' } : { error: toError(error) }) } as TurnResult);
     }
@@ -407,6 +420,8 @@ export class SessionController implements vscode.Disposable {
         const logId = `stop-${(this.currentTurn?.clientRequestId ?? crypto.randomUUID()).slice(0, 8)}`;
         const startedAt = Date.now();
         const networkEntry = this.beginNetworkExchange('stop', request, startedAt);
+        const networkPathInspector = captureVSCodeNetworkPath(request.url);
+        logNetworkPathStart(this.log, logId, networkPathInspector.assess({ tlsVerificationDisabled: request.tls?.allowInvalidCertificates === true }));
         const scope = requestScopeEvidence(this.profile.id, this.environment.id);
         logAt(this.log, 'info', `[${logId}] start ${scope} method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))} build=${formatDuration(Date.now() - startedAt)} requestHeaders=${Object.keys(request.headers).length} headerBytes=${requestHeaderBytes(request)} bodyBytes=${requestBodyBytes(request)} timeout=${formatDuration(request.timeoutMs ?? 30_000)}`);
         try {
@@ -421,14 +436,17 @@ export class SessionController implements vscode.Disposable {
               logAt(this.log, 'info', `[${logId}] headers status=${response.status} latency=${formatDuration(Date.now() - startedAt)} contentType=${quoteDiagnostic(this.publicValue(response.headers.get('content-type') ?? 'none'))}${responseHeaderEvidence(response.headers, (value) => this.publicValue(value))}`);
             },
             onTruncate: () => { networkEntry.responseBodyTruncated = true; },
+            ...(request.tls?.allowInvalidCertificates === true ? { insecureTlsRoute: resolveVSCodeInsecureTlsRoute(request.url) } : {}),
           });
           const { response } = preview;
           this.appendNetworkResponse(networkEntry, preview.text);
           if (preview.truncated) networkEntry.responseBodyTruncated = true;
           this.finishNetworkExchange(networkEntry, response.ok ? 'completed' : 'failed', response.ok ? undefined : new TurnStageError('HttpStatusError', localize('HTTP {status}.', { status: response.status }), { status: response.status }));
+          logNetworkPathFindings(this.log, logId, networkPathInspector.assess(networkPathObservation(this.snapshot, networkEntry)));
           logAt(this.log, response.ok ? 'info' : 'warn', `[${logId}] ended status=${response.status} elapsed=${formatDuration(Date.now() - startedAt)}`);
         } catch (error) {
           this.finishNetworkExchange(networkEntry, 'failed', error);
+          logNetworkPathFindings(this.log, logId, networkPathInspector.assess(networkPathObservation(this.snapshot, networkEntry)));
           throw error;
         } finally { this.stopAbortController = undefined; }
       }
@@ -700,6 +718,7 @@ export class SessionController implements vscode.Disposable {
       url: this.publicValue(request.redacted.url),
       ...(request.redacted.variantId ? { variantId: this.publicValue(request.redacted.variantId) } : {}),
       ...(protocol ? { protocol } : {}),
+      tlsVerification: request.tls?.allowInvalidCertificates === true ? 'disabled' : 'strict',
       state: 'pending',
       startedAt,
       requestHeaders: networkRequestHeaders(request),
@@ -910,4 +929,29 @@ function streamDiagnosticSummary(snapshot: SessionSnapshot, state: { lastEventNa
 function formatDuration(value: number | undefined): string { return value === undefined ? 'none' : `${Math.max(0, Math.round(value))}ms`; }
 function quoteDiagnostic(value: unknown): string { return JSON.stringify(diagnosticValue(value)); }
 function safeJson(value: unknown): string { try { return JSON.stringify(value, null, 2) ?? ''; } catch { return String(value); } }
-function toError(error: unknown): RuntimeErrorData { if (error instanceof TurnStageError) return { type: error.type, message: error.message, status: typeof error.details.status === 'number' ? error.details.status : undefined, retrySafe: !['ConfigValidationError', 'MissingSecretError', 'WorkspaceTrustError'].includes(error.type) }; return { type: 'UnexpectedError', message: safeMessage(error), retrySafe: false }; }
+function toError(error: unknown): RuntimeErrorData { if (error instanceof TurnStageError) return { type: error.type, message: error.message, status: typeof error.details.status === 'number' ? error.details.status : undefined, retrySafe: !['ConfigValidationError', 'MissingSecretError', 'WorkspaceTrustError'].includes(error.type), ...(typeof error.details.networkCode === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(error.details.networkCode) ? { networkCode: error.details.networkCode } : {}) }; return { type: 'UnexpectedError', message: safeMessage(error), retrySafe: false }; }
+
+function networkPathObservation(snapshot: SessionSnapshot, exchange: NetworkExchange | undefined): Parameters<VSCodeNetworkPathInspector['assess']>[0] {
+  const responseHeaders = exchange?.responseHeaders;
+  return {
+    status: exchange?.status ?? exchange?.error?.status,
+    viaHeaderObserved: Boolean(responseHeaders && Object.keys(responseHeaders).some((name) => name.toLocaleLowerCase() === 'via')),
+    errorCode: exchange?.error?.networkCode,
+    tlsVerificationDisabled: exchange?.tlsVerification === 'disabled',
+    timing: {
+      firstChunkLatencyMs: snapshot.metrics.firstChunkLatency ?? exchange?.timing.firstChunk,
+      firstEventLatencyMs: snapshot.metrics.firstEventLatency,
+      ttftMs: snapshot.metrics.ttft,
+    },
+  };
+}
+
+function logNetworkPathStart(output: vscode.OutputChannel, logId: string, summary: ConnectionNetworkPathSummary): void {
+  logAt(output, 'info', `[${logId}] ${networkPathInfoLine(summary)}`);
+  logAt(output, 'debug', () => `[${logId}] ${networkPathDebugLine(summary)}`);
+}
+
+function logNetworkPathFindings(output: vscode.OutputChannel, logId: string, summary: ConnectionNetworkPathSummary | undefined): void {
+  if (!summary?.findings.length) return;
+  for (const finding of summary.findings) logAt(output, 'warn', `[${logId}] network-path finding=${finding} confidence=${summary.confidence}`);
+}

@@ -56,6 +56,14 @@ describe('ProfileValidator', () => {
     expect(new ProfileValidator().validate(validProfile(), undefined, environments)).toEqual([]);
   });
 
+  it('accepts an explicit TLS bypass boolean and rejects malformed TLS configuration', () => {
+    const profile = validProfile();
+    profile.conversation.send.tls = { allowInvalidCertificates: true };
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
+    (profile.conversation.send as unknown as { tls: unknown }).tls = { allowInvalidCertificates: 'yes' };
+    expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain('TLS configuration must use a boolean allowInvalidCertificates value.');
+  });
+
   it('rejects allowlisted commands that can replace or restart the VS Code window', () => {
     const profile = validProfile();
     profile.security = { allowedCommands: ['workbench.action.files.openFile', 'workbench.action.reloadWindow'] };

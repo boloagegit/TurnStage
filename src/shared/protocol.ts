@@ -236,11 +236,25 @@ function isConnectionDoctorResult(value: unknown): boolean {
   const counts = ['rawEventCount', 'normalizedEventCount', 'mappedEventCount', 'unmatchedEventCount', 'parseErrorCount', 'mappingErrorCount'];
   if (!counts.every((key) => Number.isSafeInteger(value[key]) && Number(value[key]) >= 0 && Number(value[key]) <= 1_000_000)) return false;
   if (typeof value.terminalEventSeen !== 'boolean' || typeof value.terminalMapped !== 'boolean') return false;
+  if (value.networkPath !== undefined && !isConnectionNetworkPath(value.networkPath)) return false;
   return Array.isArray(value.findings) && value.findings.length <= 32 && value.findings.every((finding) => isRecord(finding)
     && isBoundedString(finding.id)
     && ['http', 'protocol', 'timing', 'stream', 'mapping', 'terminal'].includes(String(finding.category))
     && ['info', 'warning', 'error'].includes(String(finding.severity))
     && isBoundedString(finding.message, MAX_TEXT_LENGTH));
+}
+
+function isConnectionNetworkPath(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (!['local', 'remote'].includes(String(value.runtime))
+    || !['off', 'on', 'fallback', 'override', 'unknown'].includes(String(value.proxySupport))
+    || !['likely-proxied', 'direct-possible', 'unknown'].includes(String(value.route))
+    || !['strong', 'medium', 'low'].includes(String(value.confidence))) return false;
+  if (!['strict', 'disabled'].includes(String(value.tlsVerification))) return false;
+  if (!['proxyConfigured', 'environmentProxyConfigured', 'noProxyConfigured', 'systemCertificates', 'proxyStrictSSL', 'useLocalProxyConfiguration', 'viaHeaderObserved'].every((key) => typeof value[key] === 'boolean')) return false;
+  if (value.noProxyMatch !== undefined && typeof value.noProxyMatch !== 'boolean') return false;
+  const allowedFindings = ['proxy-authentication-required', 'corporate-ca-not-trusted', 'possible-proxy-buffering', 'tls-verification-disabled'];
+  return Array.isArray(value.findings) && value.findings.length <= allowedFindings.length && value.findings.every((finding) => allowedFindings.includes(String(finding)));
 }
 
 function hasEnvelope(message: Record<string, unknown>, instanceId: string): boolean {

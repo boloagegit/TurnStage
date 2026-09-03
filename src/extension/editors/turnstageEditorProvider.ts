@@ -23,7 +23,9 @@ import { adversarialCsvTemplate, parseAdversarialCsv, serializeAdversarialCsv } 
 import { createAdversarialSuite, isSafeAdversarialSuitePath, normalizeAdversarialSuite, parseAdversarialSuite, serializeAdversarialSuite } from '../testing/adversarialSuite';
 import { parseAdversarialSource } from '../testing/adversarialSource';
 import { buildEvidenceTimeline } from '../testing/evidenceTimeline';
+import { networkPathDebugLine, networkPathInfoLine } from '../connection/networkPath';
 import { analyzeConnectionProbe } from '../connection/protocolProbe';
+import { inspectVSCodeNetworkPath } from '../connection/vscodeNetworkPath';
 import { loadFixture } from '../runtime/fixtureLoader';
 import type { ScenarioTestController } from '../testing/scenarioTestController';
 import { parseAdversarialJsonl, serializeAdversarialJsonl, serializeCampaignResultsJsonl } from '../testing/adversarialJsonl';
@@ -516,6 +518,19 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
             try {
               const snapshot = controller.snapshot;
               const network = controller.getLatestConnectionExchange();
+              const requestPreview = controller.requestPreview;
+              const requestUrl = network?.url ?? (typeof requestPreview?.url === 'string' ? requestPreview.url : controller.profile.conversation.send.url);
+              const networkPath = inspectVSCodeNetworkPath(requestUrl, {
+                status: network?.status ?? network?.error?.status,
+                viaHeaderObserved: headerValue(network?.responseHeaders, 'via') !== undefined,
+                errorCode: network?.error?.networkCode,
+                tlsVerificationDisabled: network?.tlsVerification === 'disabled',
+                timing: {
+                  firstChunkLatencyMs: snapshot.metrics.firstChunkLatency ?? network?.timing.firstChunk,
+                  firstEventLatencyMs: snapshot.metrics.firstEventLatency,
+                  ttftMs: snapshot.metrics.ttft,
+                },
+              });
               const result = analyzeConnectionProbe({
                 status: network?.status,
                 contentType: headerValue(network?.responseHeaders, 'content-type'),
@@ -550,8 +565,12 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
                 terminalMapped: result.fingerprint.terminalMapped,
                 safe: result.safe,
                 findings: result.findings.map((finding) => ({ id: finding.id, category: finding.category, severity: finding.severity, message: finding.message })),
+                networkPath,
               };
-              operation.complete({ protocol: result.fingerprint.protocol, safe: result.safe, findings: result.findings.length });
+              logAt(this.output, 'info', `[${operation.id}] ${networkPathInfoLine(networkPath)}`);
+              logAt(this.output, 'debug', () => `[${operation.id}] ${networkPathDebugLine(networkPath)}`);
+              for (const finding of networkPath.findings) logAt(this.output, 'warn', `[${operation.id}] network-path finding=${finding} confidence=${networkPath.confidence}`);
+              operation.complete({ protocol: result.fingerprint.protocol, safe: result.safe, findings: result.findings.length, route: networkPath.route });
               await post({ type: 'connection.result', result: latestConnectionResult }, message.requestId);
             } catch (error) {
               operation.fail({ reason: error instanceof Error ? error.name : 'Error' });

@@ -226,7 +226,8 @@
       findings: [
         { id: 'terminal-not-mapped', category: 'terminal', severity: 'error', message: 'A terminal event was observed but no terminal mapping completed the turn.' },
         { id: 'unmatched-events', category: 'mapping', severity: 'warning', message: 'One bounded stream event did not match any configured mapping.' }
-      ]
+      ],
+      networkPath: { runtime: 'local', proxySupport: 'override', proxyConfigured: true, environmentProxyConfigured: false, noProxyConfigured: true, noProxyMatch: false, systemCertificates: true, proxyStrictSSL: true, useLocalProxyConfiguration: false, viaHeaderObserved: false, tlsVerification: 'strict', route: 'likely-proxied', confidence: 'medium', findings: ['possible-proxy-buffering'] }
     };
     const campaignDashboard = {
       profileId: profile.id,

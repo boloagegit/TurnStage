@@ -885,6 +885,7 @@ describe('Webview DOM behavior', () => {
         rawEventCount: 4, normalizedEventCount: 3, mappedEventCount: 3, unmatchedEventCount: 1,
         parseErrorCount: 0, mappingErrorCount: 0, terminalEventSeen: true, terminalMapped: false, safe: false,
         findings: [{ id: 'terminal-not-mapped', category: 'terminal', severity: 'error', message: 'A terminal response signal was observed but no normalized terminal event was mapped.' }],
+        networkPath: { runtime: 'local', proxySupport: 'override', proxyConfigured: true, environmentProxyConfigured: false, noProxyConfigured: true, noProxyMatch: false, systemCertificates: true, proxyStrictSSL: true, useLocalProxyConfiguration: false, viaHeaderObserved: false, tlsVerification: 'strict', route: 'likely-proxied', confidence: 'medium', findings: ['possible-proxy-buffering'] },
       }}
     />);
 
@@ -892,12 +893,31 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByText('Connection needs attention')).toBeTruthy();
     expect(screen.getByText('Observed, not mapped')).toBeTruthy();
     expect(screen.getByText('Terminal not mapped')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Network path' })).toBeTruthy();
+    expect(screen.getByText('Likely using an intermediary')).toBeTruthy();
+    expect(screen.getByText(/intermediary may have buffered the stream/i)).toBeTruthy();
     expect(container.querySelectorAll('.settings-preview .json-token--key').length).toBeGreaterThan(0);
     expect(within(container.querySelector('.settings-preview') as HTMLElement).getByRole('searchbox', { name: 'Search JSON' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Analyze latest response' }));
     expect(post).toHaveBeenCalledWith({ type: 'connection.analyze' });
+    await user.click(screen.getByRole('button', { name: 'Open diagnostic output' }));
+    expect(post).toHaveBeenCalledWith({ type: 'output.open' });
     await user.click(screen.getByRole('button', { name: 'Ask Copilot to diagnose this configuration' }));
     expect(post).toHaveBeenCalledWith({ type: 'copilot.profileDoctor' });
+  });
+
+  it('edits invalid-certificate access explicitly and keeps the security consequence visible', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const insecureProfile = structuredClone(profile);
+    insecureProfile.conversation.send.tls = { allowInvalidCertificates: true };
+    render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={insecureProfile} snapshot={snapshot} post={post} />);
+
+    expect(screen.getByRole('alert').textContent).toMatch(/credentials and response content can be intercepted/i);
+    const checkbox = screen.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' });
+    expect((checkbox as HTMLInputElement).checked).toBe(true);
+    await user.click(checkbox);
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['conversation', 'send', 'tls'], value: undefined });
   });
 
   it('uses one compact section picker instead of another navigation rail when embedded', async () => {

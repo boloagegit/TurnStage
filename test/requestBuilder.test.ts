@@ -10,9 +10,9 @@ describe('RequestBuilder', () => {
     const request = await new RequestBuilder(async () => undefined).build({
       method: 'POST', url: 'https://example.test/stream',
       reconnect: { maxAttempts: 2, baseDelayMs: 10, maxDelayMs: 100, retryOnStatuses: [429, 503] },
-      redirectPolicy: 'same-origin', maxRedirects: 3,
+      redirectPolicy: 'same-origin', maxRedirects: 3, tls: { allowInvalidCertificates: true },
     }, {});
-    expect(request).toMatchObject({ reconnect: { maxAttempts: 2, baseDelayMs: 10, maxDelayMs: 100, retryOnStatuses: [429, 503] }, redirectPolicy: 'same-origin', maxRedirects: 3 });
+    expect(request).toMatchObject({ reconnect: { maxAttempts: 2, baseDelayMs: 10, maxDelayMs: 100, retryOnStatuses: [429, 503] }, redirectPolicy: 'same-origin', maxRedirects: 3, tls: { allowInvalidCertificates: true }, redacted: { tls: { allowInvalidCertificates: true } } });
   });
   it('selects the first matching variant and resolves typed body values', async () => {
     const builder = new RequestBuilder(async (name) => name === 'apiKey' ? 'top-secret' : undefined);

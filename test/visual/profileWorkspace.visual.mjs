@@ -334,8 +334,22 @@ try {
   await page.getByRole('heading', { name: 'Connection Doctor' }).waitFor();
   assert.equal(await page.getByText('Connection needs attention', { exact: true }).count(), 1, 'Connection Doctor must expose a clear fail-closed status');
   assert.equal(await page.getByText('Terminal not mapped', { exact: true }).count(), 1, 'Connection Doctor must expose the terminal mapping cause without payload content');
+  assert.equal(await page.getByRole('heading', { name: 'Network path' }).count(), 1, 'Connection Doctor must expose the network path assessment');
+  assert.equal(await page.getByText('Likely using an intermediary', { exact: true }).count(), 1, 'Network path must avoid claiming a proxy route as certain');
+  assert.equal(await page.getByRole('button', { name: 'Open diagnostic output' }).count(), 1, 'Connection Doctor must provide direct access to correlated Output evidence');
   assert.equal(await page.getByRole('button', { name: 'Ask Copilot to diagnose this configuration' }).count(), 1, 'Connection Doctor must expose an explicit Copilot handoff only when attention is required');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-dark.png') });
+  const tlsBypass = page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' });
+  await tlsBypass.scrollIntoViewIfNeeded();
+  assert.equal(await tlsBypass.isChecked(), false, 'Invalid-certificate access must default to off');
+  await tlsBypass.click();
+  await page.waitForFunction(() => (document.getElementById('settings-request-allow-invalid-certificates'))?.checked === true);
+  const tlsWarning = page.getByRole('alert').filter({ hasText: 'Certificate verification is disabled for this Profile.' });
+  await tlsWarning.waitFor();
+  assert.ok((await tlsWarning.innerText()).includes('can be intercepted'), 'Unsafe TLS access must keep its interception warning visible');
+  await page.locator('#request-resilience-heading').locator('xpath=ancestor::section[1]').screenshot({ path: resolve(artifactDirectory, 'request-tls-warning-dark.png') });
+  await tlsBypass.click();
+  await page.waitForFunction(() => (document.getElementById('settings-request-allow-invalid-certificates'))?.checked === false);
   await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('scenario-tests');
   await page.getByRole('heading', { level: 1, name: 'Scenarios' }).waitFor();
   assert.equal(await page.locator('.scenario-editor').count(), 1, 'Configure must keep the conversation contract separate from adversarial cases');
@@ -849,10 +863,16 @@ try {
   await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('request');
   await page.getByRole('heading', { name: 'Connection Doctor' }).waitFor();
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-light.png') });
+  await page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' }).click();
+  await page.getByRole('alert').filter({ hasText: 'Certificate verification is disabled for this Profile.' }).waitFor();
+  const lightTlsCard = page.locator('#request-resilience-heading').locator('xpath=ancestor::section[1]');
+  await lightTlsCard.screenshot({ path: resolve(artifactDirectory, 'request-tls-warning-light.png') });
 
   await page.emulateMedia({ forcedColors: 'active' });
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-high-contrast.png') });
+  await lightTlsCard.screenshot({ path: resolve(artifactDirectory, 'request-tls-warning-high-contrast.png') });
   await page.emulateMedia({ forcedColors: 'none' });
+  await page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' }).click();
 
   await page.getByRole('tab', { name: 'Red Team' }).click();
   await page.getByRole('tab', { name: /Results:/ }).click();
@@ -998,7 +1018,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, networkPayloadJsonHighlighting: true, defaultDebugNetwork: true, compactEventEmptyStates: true, sessionAutoStartLoading: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, networkPayloadJsonHighlighting: true, defaultDebugNetwork: true, compactEventEmptyStates: true, sessionAutoStartLoading: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, requestScopedTlsWarning: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

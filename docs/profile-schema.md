@@ -456,7 +456,10 @@ the JSON Schema request definition makes `variants` optional in general.
         "retryOnStatuses": [429, 502, 503, 504]
       },
       "redirectPolicy": "same-origin",
-      "maxRedirects": 5
+      "maxRedirects": 5,
+      "tls": {
+        "allowInvalidCertificates": false
+      }
     }
   }
 }
@@ -475,6 +478,18 @@ be HTTP 4xx/5xx codes. Reconnect occurs only before the first stream event.
 `maxRedirects` limited to 0–10. Cross-origin `follow` never forwards standard
 credential headers or header values containing a secret resolved for the
 current request.
+
+`tls.allowInvalidCertificates` defaults to `false`. When explicitly set to
+`true`, TurnStage uses a request-local HTTPS dispatcher that skips validation
+of the target server certificate. It never changes VS Code's global TLS state
+or `NODE_TLS_REJECT_UNAUTHORIZED`. The option is honored only in a Trusted
+Workspace and only when TurnStage can preserve an explicit direct route
+(`NO_PROXY` or `http.proxySupport: off`) or an explicit manual proxy
+(`http.proxy` or the standard proxy environment variables). A system/PAC-only
+route fails closed because an isolated dispatcher cannot safely inherit VS
+Code's private proxy resolver. This mode can expose credentials and response
+content to interception; installing the company CA in the system trust store
+is preferred.
 
 The request context contains these top-level objects:
 

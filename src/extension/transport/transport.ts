@@ -3,13 +3,15 @@ import { DEFAULT_MAX_EVENT_BYTES, NdjsonParser, SseParser, toRawEvent } from './
 import { TurnStageError } from '../errors';
 import { localize } from '../l10n';
 import { fetchWithRedirectPolicy } from './fetchPolicy';
+import type { InsecureTlsRoute } from '../connection/vscodeNetworkPath';
+import { createRequestFetch, type RequestFetchHandle } from './requestFetch';
 
 export const DEFAULT_MAX_ERROR_BODY_BYTES = 4_096;
 export type TransportDiagnostic =
   | { type: 'attempt.started'; attempt: number; remainingTimeoutMs?: number }
   | { type: 'retry.scheduled'; attempt: number; nextAttempt: number; delayMs: number; errorType: string; status?: number }
   | { type: 'timeout.fired'; attempt: number; kind: 'total' | 'idle'; elapsedMs: number; sawData: boolean };
-export interface HttpStreamTransportOptions { maxErrorBodyBytes?: number; maxEventBytes?: number; onDiagnostic?: (event: TransportDiagnostic) => void; faults?: ScenarioFaultDefinition }
+export interface HttpStreamTransportOptions { maxErrorBodyBytes?: number; maxEventBytes?: number; onDiagnostic?: (event: TransportDiagnostic) => void; faults?: ScenarioFaultDefinition; insecureTlsRoute?: InsecureTlsRoute }
 export type StreamSinkEventResult = void | boolean;
 export interface StreamSink { onHeaders(latencyMs: number, contentType: string, status?: number, headers?: Record<string, string>): void; onChunk(bytes: number, latencyMs: number): void; onEvent(event: RawStreamEvent): Promise<StreamSinkEventResult> | StreamSinkEventResult }
 /**
@@ -60,6 +62,7 @@ export class HttpStreamTransport {
     let sawData = false;
     const localAbort = new AbortController();
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let requestFetch: RequestFetchHandle | undefined;
     const abort = () => localAbort.abort(signal.reason); signal.addEventListener('abort', abort, { once: true });
     if (request.timeoutMs) totalTimer = setTimeout(() => {
       this.diagnostic({ type: 'timeout.fired', attempt, kind: 'total', elapsedMs: Date.now() - startedAt, sawData });
@@ -76,7 +79,8 @@ export class HttpStreamTransport {
       const faults = this.options.faults;
       if (faults?.delayBeforeRequestMs) await abortableDelay(faults.delayBeforeRequestMs, localAbort.signal);
       if (faults?.httpStatus) throw new TurnStageError('FaultLabHttpStatusError', localize('Fault Lab injected HTTP {status}.', { status: faults.httpStatus }), { status: faults.httpStatus, sawData: false, faultLab: true });
-      const response = await fetchWithRedirectPolicy(request, localAbort.signal);
+      requestFetch = await createRequestFetch(request, this.options.insecureTlsRoute);
+      const response = await fetchWithRedirectPolicy(request, localAbort.signal, requestFetch.fetch);
       const contentType = response.headers.get('content-type') ?? ''; sink.onHeaders(Date.now() - startedAt, contentType, response.status, Object.fromEntries(response.headers.entries()));
       if (!response.ok) { const retryAfterMs = parseRetryAfter(response.headers.get('retry-after')); const body = await readResponseBodyPrefix(response, normalizeByteLimit(this.options.maxErrorBodyBytes, DEFAULT_MAX_ERROR_BODY_BYTES)); throw new TurnStageError('HttpStatusError', localize('HTTP {status}: {detail}', { status: response.status, detail: body || response.statusText }), { status: response.status, retryAfterMs, sawData, responseBody: body }); }
       const expected = protocol === 'sse' ? 'text/event-stream' : protocol === 'ndjson' ? /ndjson|jsonl/ : undefined;
@@ -120,7 +124,7 @@ export class HttpStreamTransport {
       throw new TurnStageError('NetworkError', error instanceof Error ? error.message : String(error), { sawData, ...(networkCode ? { networkCode } : {}) });
     } finally {
       if (reader) { try { reader.releaseLock(); } catch { /* The reader may already be released by fetch. */ } }
-      signal.removeEventListener('abort', abort); if (totalTimer) clearTimeout(totalTimer); if (idleTimer) clearTimeout(idleTimer);
+      signal.removeEventListener('abort', abort); if (totalTimer) clearTimeout(totalTimer); if (idleTimer) clearTimeout(idleTimer); if (requestFetch) await requestFetch.dispose();
     }
   }
 

@@ -3,6 +3,8 @@ import { TurnStageError } from '../errors';
 import { localize } from '../l10n';
 import { fetchWithRedirectPolicy } from './fetchPolicy';
 import { networkErrorCode } from './transport';
+import type { InsecureTlsRoute } from '../connection/vscodeNetworkPath';
+import { createRequestFetch, type RequestFetchHandle } from './requestFetch';
 
 export interface BoundedFetchTextOptions {
   maxBytes: number;
@@ -14,6 +16,7 @@ export interface BoundedFetchTextOptions {
   onHeaders?: (response: Response) => void;
   onChunk?: (totalBytes: number) => void;
   onTruncate?: (observedBytes: number) => void;
+  insecureTlsRoute?: InsecureTlsRoute;
 }
 
 export interface BoundedFetchTextResult {
@@ -28,9 +31,11 @@ export async function fetchBoundedText(request: PreparedRequest, options: Bounde
   const controller = options.controller ?? new AbortController();
   const timeoutError = new TurnStageError('TimeoutError', options.timeoutMessage ?? localize('The request timeout elapsed.'));
   let timedOut = false;
+  let requestFetch: RequestFetchHandle | undefined;
   const timer = setTimeout(() => { timedOut = true; controller.abort(timeoutError); }, options.timeoutMs);
   try {
-    const response = await fetchWithRedirectPolicy(request, controller.signal);
+    requestFetch = await createRequestFetch(request, options.insecureTlsRoute);
+    const response = await fetchWithRedirectPolicy(request, controller.signal, requestFetch.fetch);
     options.onHeaders?.(response);
     const body = await readBoundedText(response, options.maxBytes, options.onChunk);
     if (body.truncated) options.onTruncate?.(body.bytes);
@@ -50,6 +55,7 @@ export async function fetchBoundedText(request: PreparedRequest, options: Bounde
     throw new TurnStageError('NetworkError', error instanceof Error ? error.message : String(error), code ? { networkCode: code } : {});
   } finally {
     clearTimeout(timer);
+    if (requestFetch) await requestFetch.dispose();
   }
 }
 

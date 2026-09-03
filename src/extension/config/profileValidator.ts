@@ -262,6 +262,7 @@ export class ProfileValidator {
       if (reconnect?.maxDelayMs !== undefined && (!Number.isInteger(reconnect.maxDelayMs) || reconnect.maxDelayMs < 0 || reconnect.maxDelayMs > 120_000)) out.push(issue(tree, [...path.split('.'), 'reconnect', 'maxDelayMs'], localize('Reconnect maximum delay must be an integer from 0 to 120000.')));
       if (request.redirectPolicy !== undefined && !['same-origin', 'follow', 'error'].includes(request.redirectPolicy)) out.push(issue(tree, [...path.split('.'), 'redirectPolicy'], localize('Unsupported redirect policy: {policy}.', { policy: String(request.redirectPolicy) })));
       if (request.maxRedirects !== undefined && (!Number.isInteger(request.maxRedirects) || request.maxRedirects < 0 || request.maxRedirects > 10)) out.push(issue(tree, [...path.split('.'), 'maxRedirects'], localize('Maximum redirects must be an integer from 0 to 10.')));
+      if (request.tls !== undefined && (!request.tls || typeof request.tls !== 'object' || Array.isArray(request.tls) || (request.tls.allowInvalidCertificates !== undefined && typeof request.tls.allowInvalidCertificates !== 'boolean'))) out.push(issue(tree, [...path.split('.'), 'tls'], localize('TLS configuration must use a boolean allowInvalidCertificates value.')));
     }
     const maxRuns = profile.history?.localRuns?.maxRuns;
     if (maxRuns !== undefined && (!Number.isInteger(maxRuns) || maxRuns < 1 || maxRuns > 100)) out.push(issue(tree, ['history', 'localRuns', 'maxRuns'], localize('Local run retention must be an integer from 1 to 100.')));

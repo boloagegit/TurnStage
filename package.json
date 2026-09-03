@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.22.8",
+  "version": "0.22.9",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -1574,7 +1574,8 @@
     "jsonc-parser": "^3.3.1",
     "pngjs": "^7.0.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "undici": "^7.29.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",

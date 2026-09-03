@@ -713,6 +713,7 @@ export interface RequestDefinition {
   reconnect?: { maxAttempts?: number; baseDelayMs?: number; maxDelayMs?: number; retryOnStatuses?: number[] };
   redirectPolicy?: 'same-origin' | 'follow' | 'error';
   maxRedirects?: number;
+  tls?: { allowInvalidCertificates?: boolean };
 }
 
 export interface StopDefinition {
@@ -909,6 +910,7 @@ export interface NetworkExchange {
   url: string;
   variantId?: string;
   protocol?: RawStreamEvent['protocol'];
+  tlsVerification?: 'strict' | 'disabled';
   state: NetworkExchangeState;
   startedAt: number;
   completedAt?: number;
@@ -948,6 +950,24 @@ export interface ConnectionDoctorFinding {
   message: string;
 }
 
+export type NetworkPathFinding = 'proxy-authentication-required' | 'corporate-ca-not-trusted' | 'possible-proxy-buffering' | 'tls-verification-disabled';
+export interface ConnectionNetworkPathSummary {
+  runtime: 'local' | 'remote';
+  proxySupport: 'off' | 'on' | 'fallback' | 'override' | 'unknown';
+  proxyConfigured: boolean;
+  environmentProxyConfigured: boolean;
+  noProxyConfigured: boolean;
+  noProxyMatch?: boolean;
+  systemCertificates: boolean;
+  proxyStrictSSL: boolean;
+  useLocalProxyConfiguration: boolean;
+  viaHeaderObserved: boolean;
+  tlsVerification: 'strict' | 'disabled';
+  route: 'likely-proxied' | 'direct-possible' | 'unknown';
+  confidence: 'strong' | 'medium' | 'low';
+  findings: NetworkPathFinding[];
+}
+
 export interface ConnectionDoctorSummary {
   protocol: 'sse' | 'ndjson' | 'json' | 'text-stream' | 'unknown';
   confidence: 'high' | 'medium' | 'low';
@@ -962,6 +982,7 @@ export interface ConnectionDoctorSummary {
   terminalMapped: boolean;
   safe: boolean;
   findings: ConnectionDoctorFinding[];
+  networkPath?: ConnectionNetworkPathSummary;
 }
 
 export interface SessionSnapshot {
@@ -1024,10 +1045,10 @@ export interface RemoteSessionReference {
   environmentId?: string;
 }
 
-export interface RuntimeErrorData { type: string; message: string; suggestion?: string; status?: number; ruleId?: string; rawSequence?: number; retrySafe?: boolean }
+export interface RuntimeErrorData { type: string; message: string; suggestion?: string; status?: number; ruleId?: string; rawSequence?: number; retrySafe?: boolean; networkCode?: string }
 export type TurnResult = { type: 'completed' } | { type: 'failed'; error: RuntimeErrorData } | { type: 'aborted'; reason: string };
 
-export interface PreparedRequest { method: string; url: string; headers: Record<string, string>; body?: string; timeoutMs?: number; idleTimeoutMs?: number; reconnect?: RequestDefinition['reconnect']; redirectPolicy?: RequestDefinition['redirectPolicy']; maxRedirects?: number; /** Host-only values used to scrub previews, events, errors, and persisted runs. */ secretValues?: string[]; redacted: { method: string; url: string; headers: Record<string, string>; body?: unknown; variantId?: string } }
+export interface PreparedRequest { method: string; url: string; headers: Record<string, string>; body?: string; timeoutMs?: number; idleTimeoutMs?: number; reconnect?: RequestDefinition['reconnect']; redirectPolicy?: RequestDefinition['redirectPolicy']; maxRedirects?: number; tls?: RequestDefinition['tls']; /** Host-only values used to scrub previews, events, errors, and persisted runs. */ secretValues?: string[]; redacted: { method: string; url: string; headers: Record<string, string>; body?: unknown; variantId?: string; tls?: { allowInvalidCertificates: boolean } } }
 
 export interface LocalRun {
   id: string;

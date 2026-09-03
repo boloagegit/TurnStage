@@ -1,6 +1,7 @@
 import type { PreparedRequest } from '../../shared/types';
 import { TurnStageError } from '../errors';
 import { localize } from '../l10n';
+import type { TurnStageFetch } from './requestFetch';
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const SENSITIVE_HEADER_NAMES = new Set([
@@ -16,7 +17,7 @@ const SENSITIVE_HEADER_NAMES = new Set([
 ]);
 
 /** Fetch a prepared request while enforcing TurnStage's bounded redirect policy. */
-export async function fetchWithRedirectPolicy(request: PreparedRequest, signal: AbortSignal): Promise<Response> {
+export async function fetchWithRedirectPolicy(request: PreparedRequest, signal: AbortSignal, fetcher: TurnStageFetch = globalThis.fetch): Promise<Response> {
   const policy = request.redirectPolicy ?? 'same-origin';
   const maxRedirects = Math.min(10, Math.max(0, request.maxRedirects ?? 5));
   let url = validatedHttpUrl(request.url);
@@ -25,9 +26,10 @@ export async function fetchWithRedirectPolicy(request: PreparedRequest, signal: 
   let headers = new Headers(request.headers);
 
   for (let redirects = 0; ; redirects += 1) {
-    const response = await fetch(url.toString(), {
+    if (signal.aborted) throw signal.reason ?? new TurnStageError('UserAbortError', localize('The request was cancelled.'));
+    const response = await fetcher(url.toString(), {
       method,
-      headers,
+      headers: Object.fromEntries(headers.entries()),
       body: method === 'GET' || method === 'HEAD' ? undefined : body,
       redirect: 'manual',
       signal,
@@ -41,6 +43,9 @@ export async function fetchWithRedirectPolicy(request: PreparedRequest, signal: 
     if (!location) throw redirectError('InvalidRedirectError', localize('The redirect response did not include a Location header.'), response.status, url);
     const nextUrl = validatedHttpUrl(location, url);
     const crossesOrigin = nextUrl.origin !== url.origin;
+    if (crossesOrigin && request.tls?.allowInvalidCertificates === true) {
+      throw redirectError('InsecureTlsCrossOriginRedirectError', localize('Invalid-certificate access cannot follow a redirect to a different origin.'), response.status, nextUrl);
+    }
     if (crossesOrigin && policy === 'same-origin') {
       throw redirectError('CrossOriginRedirectError', localize('The request was blocked from redirecting to a different origin.'), response.status, nextUrl);
     }

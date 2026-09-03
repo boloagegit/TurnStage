@@ -1,6 +1,6 @@
 import React, { useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AdversarialCaseCatalog, LinkedAdversarialCaseDetail, LinkedAdversarialCaseSummary, MappingTestResult, TestOperationSnapshot, WebviewPayload } from '../shared/protocol';
-import type { AdversarialForbidDefinition, AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TestCampaignDefinition, TurnStageProfile } from '../shared/types';
+import type { AdversarialForbidDefinition, AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, ConnectionNetworkPathSummary, NetworkPathFinding, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TestCampaignDefinition, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
@@ -347,7 +347,7 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
   return <div className="settings-section-stack">
     <section className="settings-card connection-doctor" aria-labelledby="connection-doctor-heading">
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="connection-doctor-heading">{t('Connection Doctor')}</h2><p className="settings-card-description">{t('Analyze the latest bounded HTTP, stream, mapping, timing, and terminal evidence. Response content and secrets are never copied into the result.')}</p></div><button type="button" disabled={!snapshot} onClick={() => post({ type: 'connection.analyze' })}>{t('Analyze latest response')}</button></div>
-      {!connectionResult ? <p className="settings-empty">{t(snapshot ? 'Run a request, then analyze its latest connection evidence.' : 'Start the profile before analyzing connection evidence.')}</p> : <>
+      {!connectionResult ? <><p className="settings-empty">{t(snapshot ? 'Run a request, then analyze its latest connection evidence.' : 'Start the profile before analyzing connection evidence.')}</p><button type="button" className="settings-inline-action" onClick={() => post({ type: 'output.open' })}>{t('Open diagnostic output')}</button></> : <>
         <div className={`connection-doctor__status connection-doctor__status--${connectionResult.safe ? 'ready' : 'attention'}`} role="status">
           <ProductIcon name={connectionResult.safe ? 'check' : 'warning'} />
           <div><strong>{t(connectionResult.safe ? 'No blocking connection issue found' : 'Connection needs attention')}</strong><span>{t('{protocol} · {confidence} confidence · HTTP {status}', { protocol: connectionResult.protocol.toUpperCase(), confidence: t(localizeHumanized(connectionResult.confidence)), status: connectionResult.status === undefined ? '—' : formatNumber(connectionResult.status) })}</span></div>
@@ -358,8 +358,9 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
           <div><dt>{t('Unmatched')}</dt><dd>{formatNumber(connectionResult.unmatchedEventCount)}</dd></div>
           <div><dt>{t('Terminal')}</dt><dd>{t(connectionResult.terminalMapped ? 'Observed and mapped' : connectionResult.terminalEventSeen ? 'Observed, not mapped' : 'Not observed')}</dd></div>
         </dl>
+        {connectionResult.networkPath && <NetworkPathSummaryView summary={connectionResult.networkPath} />}
         <ul className="connection-doctor__findings">{connectionResult.findings.map((finding) => <li className={`is-${finding.severity}`} key={finding.id}><ProductIcon name={finding.severity === 'error' || finding.severity === 'warning' ? 'warning' : 'info'} /><div><strong>{t(localizeHumanized(finding.id))}</strong><span>{t(finding.message)}</span></div></li>)}</ul>
-        {!connectionResult.safe && <button type="button" className="settings-inline-action" onClick={() => post({ type: 'copilot.profileDoctor' })}>{t('Ask Copilot to diagnose this configuration')}</button>}
+        <div className="connection-doctor__actions"><button type="button" className="settings-inline-action" onClick={() => post({ type: 'output.open' })}>{t('Open diagnostic output')}</button>{!connectionResult.safe && <button type="button" className="settings-inline-action" onClick={() => post({ type: 'copilot.profileDoctor' })}>{t('Ask Copilot to diagnose this configuration')}</button>}</div>
       </>}
     </section>
     <section className="settings-card" aria-labelledby="request-definition-heading">
@@ -394,6 +395,10 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
         </SettingField>
         <NumberSettingField label={t('Maximum redirects')} id="settings-max-redirects" value={request.maxRedirects} placeholder="5" min={0} max={10} onCommit={(value) => patch(['conversation', 'send', 'maxRedirects'], value)} />
       </div>
+      <SettingCheckboxGroup legend={t('TLS certificate verification')} hint={t('Keep certificate verification enabled unless a development or company endpoint cannot use a trusted certificate chain.') }>
+        <SettingCheckbox id="settings-request-allow-invalid-certificates" label={t('Allow invalid server certificates for this request')} checked={request.tls?.allowInvalidCertificates === true} onChange={(checked) => patch(['conversation', 'send', 'tls'], checked ? { allowInvalidCertificates: true } : undefined)} />
+      </SettingCheckboxGroup>
+      {request.tls?.allowInvalidCertificates === true && <p className="settings-callout settings-callout-warning" role="alert"><strong>{t('Certificate verification is disabled for this Profile.')}</strong> {t('TurnStage will accept an untrusted or mismatched server certificate only for this request. Credentials and response content can be intercepted. System-managed PAC proxy routes are rejected because they cannot be preserved safely.')}</p>}
     </section>
 
     <section className="settings-card" aria-labelledby="request-payload-heading">
@@ -414,6 +419,35 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
       <JsonPreview value={requestPreview ?? request} label={t('Redacted request')} />
     </section>
   </div>;
+}
+
+function NetworkPathSummaryView({ summary }: { summary: ConnectionNetworkPathSummary }): React.JSX.Element {
+  const routeLabel = summary.route === 'likely-proxied' ? 'Likely using an intermediary' : summary.route === 'direct-possible' ? 'Direct connection may be used' : 'Route could not be confirmed';
+  const routeDetail = summary.route === 'likely-proxied'
+    ? 'Settings or response evidence indicate that a proxy or intermediary may handle this request.'
+    : summary.route === 'direct-possible'
+      ? 'The configured route allows a direct request, but transparent network controls may still apply.'
+      : 'VS Code may use system or managed proxy rules that TurnStage cannot confirm from one request.';
+  return <section className={`connection-network-path connection-network-path--${summary.route}`} aria-labelledby="connection-network-path-heading">
+    <div className="connection-network-path__heading"><div><h3 id="connection-network-path-heading">{t('Network path')}</h3><strong>{t(routeLabel)}</strong></div><span>{t('{confidence} confidence', { confidence: t(localizeHumanized(summary.confidence)) })}</span></div>
+    <p>{t(routeDetail)}</p>
+    <dl>
+      <div><dt>{t('Extension Host')}</dt><dd>{t(summary.runtime === 'remote' ? 'Remote' : 'Local')}</dd></div>
+      <div><dt>{t('Proxy support')}</dt><dd>{t(localizeHumanized(summary.proxySupport))}</dd></div>
+      <div><dt>{t('Configured proxy')}</dt><dd>{t(summary.proxyConfigured || summary.environmentProxyConfigured ? 'Detected' : 'Not detected')}</dd></div>
+      <div><dt>{t('NO_PROXY match')}</dt><dd>{t(summary.noProxyMatch === true ? 'Rule matched' : summary.noProxyMatch === false ? 'Rule did not match' : 'Not confirmed')}</dd></div>
+      <div><dt>{t('System certificates')}</dt><dd>{t(summary.systemCertificates ? 'Certificate loading enabled' : 'Certificate loading disabled')}</dd></div>
+      <div><dt>{t('TLS verification')}</dt><dd>{t(summary.tlsVerification === 'disabled' ? 'Disabled for this request' : 'Strict')}</dd></div>
+    </dl>
+    {summary.findings.length > 0 && <ul>{summary.findings.map((finding) => <li key={finding}><ProductIcon name="warning" /><span>{t(networkPathFindingText(finding))}</span></li>)}</ul>}
+  </section>;
+}
+
+function networkPathFindingText(finding: NetworkPathFinding): string {
+  if (finding === 'tls-verification-disabled') return 'Server certificate verification was disabled for this request.';
+  if (finding === 'proxy-authentication-required') return 'The proxy requires authentication (HTTP 407).';
+  if (finding === 'corporate-ca-not-trusted') return 'The TLS failure can occur when this Extension Host does not trust a company certificate.';
+  return 'The first chunk, first event, and first text arrived together after a delay. An intermediary may have buffered the stream.';
 }
 
 function StreamMappingSection({ profile, snapshot, mappingTestResult, post, patch }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; mappingTestResult?: MappingTestResult; post: SettingsWorkspacePost; patch: (path: PatchPath, value: unknown) => void }): React.JSX.Element {

@@ -395,6 +395,10 @@ function sanitizeRuntimeError(value: unknown): RuntimeErrorData | undefined {
     if (typeof record.retrySafe !== 'boolean') return undefined;
     error.retrySafe = record.retrySafe;
   }
+  if (record.networkCode !== undefined) {
+    if (typeof record.networkCode !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(record.networkCode)) return undefined;
+    error.networkCode = record.networkCode;
+  }
   return error;
 }
 
