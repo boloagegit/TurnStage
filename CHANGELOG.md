@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.22.7
+
+- Request-backed openings now start automatically once when a trusted Profile
+  editor opens. Concurrent start commands share the same in-flight request, and
+  Webview rehydration or Profile metadata edits do not silently repeat it.
+- Added a compact, theme-aware loading state and locked the composer and restart
+  action until opening context is ready. Failures remain explicit and retryable.
+- Kept non-chat workflows side-effect free: opening test evidence, replaying a
+  run, and importing or exporting runs do not auto-call the configured backend.
+- Added trusted and Restricted Mode Extension Host coverage with a real local
+  mock server that verifies one opening request versus zero, plus visual,
+  accessibility, duplicate-call, and lifecycle regression coverage.
+
 ## 0.22.5
 
 - Blocked VS Code lifecycle commands from Profile actions and contained

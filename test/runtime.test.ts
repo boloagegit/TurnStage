@@ -524,6 +524,7 @@ describe('isActive and SessionController.finalizeTurn', () => {
       } as TurnStageProfile;
       const controller = new SessionController(profile, {} as never, { version: 1, id: 'env', name: 'Environment', variables: {} }, {} as never, { get: vi.fn() } as never, { list: vi.fn(async () => []), save: vi.fn(async () => undefined) } as never, vi.fn(), { appendLine: vi.fn() } as never);
 
+      await Promise.all([controller.startSession(), controller.startSession()]);
       await controller.startSession();
 
       expect(controller.snapshot.sessionState).toBe('ready');
@@ -542,6 +543,7 @@ describe('isActive and SessionController.finalizeTurn', () => {
         method: 'POST',
         body: JSON.stringify({ actor: 'user-a' }),
       }));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();
     }

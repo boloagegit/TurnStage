@@ -391,6 +391,10 @@
   color: var(--mcp-muted);
 }
 
+.mobile-chat-preview__session-start--loading > .codicon-loading {
+  animation: codicon-spin 1.5s steps(30) infinite;
+}
+
 .mobile-chat-preview__session-start-copy {
   min-width: 0;
 }

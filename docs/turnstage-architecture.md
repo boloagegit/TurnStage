@@ -94,8 +94,11 @@ changes are batched and posted as bounded raw/normalized append deltas plus
 message remove/upsert changes and changed run/request/network projections. A
 session identity change, event-retention discontinuity, or Webview mismatch
 requests another full checkpoint rather than applying an uncertain delta. A
-static opening starts immediately after a valid controller is created. A
-request-backed opening stays `notStarted` until **Start Session** is invoked.
+static or disabled opening starts immediately after a valid controller is
+created. A request-backed opening also starts once in a trusted workspace, but
+the editor does not repeat that network call when the Webview rehydrates or the
+Profile document reloads. Concurrent start commands share the in-flight opening
+operation; failures remain explicit and retryable.
 
 ## Conversation contract tests
 

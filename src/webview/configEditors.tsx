@@ -57,7 +57,7 @@ export function FlowEditor({ profile, post }: { profile: TurnStageProfile; post:
     <header className="page-heading"><div><h2>{t('Conversation flow')}</h2><p>{t('Configure opening, request variants, stop behavior, recovery, and local run retention.')}</p></div><button onClick={() => post({ type: 'profile.validate' })}>{t('Validate profile')}</button></header>
 
     <section className="config-section" aria-labelledby="opening-heading">
-      <div className="section-heading"><div><h3 id="opening-heading">{t('Opening')}</h3><p>{t('Static content never makes a network request. Request mode waits for an explicit Start Session action.')}</p></div></div>
+      <div className="section-heading"><div><h3 id="opening-heading">{t('Opening')}</h3><p>{t('Static content never makes a network request. Request mode starts once when the Profile opens, then requires an explicit retry after a failure.')}</p></div></div>
       <div className="form-grid">
         <Field label={t('Opening mode')} hint={t('The same mode is used when New Conversation resets the session.')}>
           <select aria-label={t('Opening mode')} value={openingMode} onChange={(event) => patch(['opening', 'mode'], event.target.value)}>

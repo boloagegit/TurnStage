@@ -35,6 +35,23 @@ describe('Extension host editor lifecycle', () => {
     expect(editorSource).not.toContain("this.pendingSections.get(documentKey) ?? 'test'");
   });
 
+  it('auto-starts one request-backed opening without blocking Webview hydration', () => {
+    expect(editorSource).toContain('let requestOpeningAutoStartAttempted = false;');
+    expect(editorSource).toContain("observeBackground(controller.startSession(), 'session-auto-start')");
+    expect(editorSource).toContain('vscode.workspace.isTrusted && !requestOpeningAutoStartAttempted');
+    expect(editorSource).toContain("controller.snapshot.sessionState === 'notStarted'");
+    expect(editorSource).not.toContain("await controller.startSession(); else sendSession()");
+  });
+
+  it('does not auto-start network openings for evidence, replay, import, or export operations', () => {
+    expect(editorSource).toContain('private readonly pendingAutoStartSuppressions = new Set<string>();');
+    expect(editorSource).toContain('this.pendingAutoStartSuppressions.delete(documentKey)');
+    expect(editorSource).toContain('if (!this.getController(uri)) this.suppressNextAutoStart(uri);');
+    expect(activateSource).toContain('openAndWaitForController(editor, uri, true)');
+    expect(activateSource).toContain('editor.suppressNextAutoStart(uri)');
+    expect(activateSource).toContain('editor.clearAutoStartSuppression(uri)');
+  });
+
   it('drops late Webview messages after the panel is disposed', () => {
     expect(editorSource).toContain('if (disposed) return false;');
     expect(editorSource).toContain('if (disposed || isDisposedWebviewError(error)) return false;');

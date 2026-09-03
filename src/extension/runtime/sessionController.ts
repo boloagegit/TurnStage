@@ -45,6 +45,7 @@ export class SessionController implements vscode.Disposable {
   private replayTask?: Promise<void>;
   private replayMetrics?: MetricsSnapshot;
   private readonly runStorageBytes = new Map<string, number>();
+  private activeOpening?: Promise<void>;
   private activeRequest?: Promise<void>;
   private activeStop?: Promise<void>;
   private disposed = false;
@@ -196,6 +197,16 @@ export class SessionController implements vscode.Disposable {
   }
 
   async startSession(forceFallback = false): Promise<void> {
+    if (this.disposed) return;
+    if (this.activeOpening) return this.activeOpening;
+    if (!forceFallback && this.snapshot.sessionState === 'ready') return;
+    const operation = this.performStartSession(forceFallback);
+    this.activeOpening = operation;
+    try { await operation; }
+    finally { if (this.activeOpening === operation) this.activeOpening = undefined; }
+  }
+
+  private async performStartSession(forceFallback = false): Promise<void> {
     if (this.profile.opening?.mode === 'request' && !vscode.workspace.isTrusted) { this.snapshot.errors.push(toError(errors.trust())); this.snapshot.sessionState = 'failed'; this.changed(); return; }
     this.snapshot.sessionState = 'loadingOpening'; this.snapshot.errors = []; this.changed();
     const opening = this.profile.opening;
@@ -557,7 +568,7 @@ export class SessionController implements vscode.Disposable {
       try { await this.finalizeTurn({ type: 'aborted', reason: 'panel_disposed' }); }
       catch (error) { logAt(this.log, 'error', () => `[session] disposal finalization failed type=${errorType(error)}`); }
     }
-    const pending = [this.activeRequest, this.activeStop, this.replayTask].filter((operation): operation is Promise<void> => Boolean(operation));
+    const pending = [this.activeOpening, this.activeRequest, this.activeStop, this.replayTask].filter((operation): operation is Promise<void> => Boolean(operation));
     if (pending.length) await Promise.allSettled(pending);
   }
 

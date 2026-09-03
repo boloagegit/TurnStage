@@ -373,8 +373,9 @@ valid option.
 `mode` is:
 
 - `static`: uses `message` and `starters` without a network request;
-- `request`: runs when the user invokes **Start Session** (and is blocked by
-  Workspace Trust when untrusted);
+- `request`: starts once when a trusted Profile editor opens; it is blocked by
+  Workspace Trust when untrusted and does not repeat during Webview rehydration
+  or a Profile document reload;
 - `disabled`: no opening message.
 
 `request` is a request definition without variants in the shared TypeScript
@@ -382,9 +383,10 @@ model. The schema is permissive through its request reference. A request
 opening reads the response paths (defaults `$.message` and `$.options`) and
 requires the message value to be a string. Fallbacks are evaluated in order
 against response data, HTTP status, missing-message state, or error type. An
-unconditional fallback acts as a catch-all. When `allowRetry` is enabled, a
-failed opening exposes Retry; configured fallback and request-inspection
-actions are also shown when applicable.
+unconditional fallback acts as a catch-all. A failed opening exposes Retry;
+configured fallback and request-inspection actions are also shown when
+applicable. While the opening is loading, the composer and session restart
+action remain disabled so a first turn cannot race incomplete opening context.
 
 `response.blocks` is optional and does not replace `messagePath` or
 `startersPath`. It maps backend-specific response data into one of five

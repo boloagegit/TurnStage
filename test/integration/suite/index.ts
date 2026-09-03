@@ -36,7 +36,7 @@ export async function run(): Promise<void> {
   await assertProfileDiscovery(profileUri);
   await assertConversationContractReports(workspaceRoot);
   await assertCopilotToolBoundary(workspaceRoot);
-  await assertCustomEditorAndTextFallback(profileUri);
+  await assertCustomEditorAndTextFallback(profileUri, process.env.TURNSTAGE_MOCK_BASE_URL);
   await assertReplayCloseReopenLifecycle();
   await assertDiagnostics(profileDirectory, profileUri);
   await assertFileDiscoveryAfterCreateAndChange(profileDirectory);
@@ -335,14 +335,26 @@ async function invokeToolJson(name: string, input: Record<string, unknown>): Pro
   return JSON.parse(text) as { ok?: boolean; data?: unknown; error?: { code?: string } };
 }
 
-async function assertCustomEditorAndTextFallback(profileUri: vscode.Uri): Promise<void> {
+async function assertCustomEditorAndTextFallback(profileUri: vscode.Uri, mockBaseUrl: string | undefined): Promise<void> {
+  assert.ok(mockBaseUrl, 'The custom editor integration requires the local mock-server URL');
+  await postMockProbe(`${mockBaseUrl}/__turnstage_test/opening/reset`);
   const document = await vscode.workspace.openTextDocument(profileUri);
-  await vscode.commands.executeCommand('turnstage.runProfile', profileUri);
+  await vscode.commands.executeCommand('vscode.openWith', profileUri, 'turnstage.profileEditor', { viewColumn: vscode.ViewColumn.Active, preserveFocus: false });
   const customTab = await waitFor(() => activeTabInput() instanceof vscode.TabInputCustom ? activeTabInput() : undefined, 'the TurnStage custom editor tab');
   assert.equal((customTab as vscode.TabInputCustom).viewType, 'turnstage.profileEditor');
   assert.equal((customTab as vscode.TabInputCustom).uri.toString(), profileUri.toString());
   await waitFor(() => vscode.window.tabGroups.activeTabGroup.activeTab?.label === 'Integration Profile · TurnStage' ? true : undefined, 'the custom editor to replace the backing JSONC filename with the profile title');
   assert.ok(vscode.workspace.textDocuments.some((item) => item.uri.toString() === profileUri.toString()), 'Custom editor must be backed by the shared TextDocument');
+  const expectedOpeningRequests = vscode.workspace.isTrusted ? 1 : 0;
+  if (vscode.workspace.isTrusted) {
+    await waitFor(async () => {
+      const metrics = await postMockProbe(`${mockBaseUrl}/__turnstage_test/opening/metrics`) as { requests?: number };
+      return metrics.requests === expectedOpeningRequests ? metrics : undefined;
+    }, 'the request-backed opening to auto-start exactly once');
+  } else {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(((await postMockProbe(`${mockBaseUrl}/__turnstage_test/opening/metrics`)) as { requests?: number }).requests, expectedOpeningRequests, 'Restricted Mode must not auto-start a network-backed opening');
+  }
 
   // Hiding a custom editor disposes its webview DOM because the provider uses
   // retainContextWhenHidden: false. Revealing the same tab must keep using the
@@ -357,6 +369,8 @@ async function assertCustomEditorAndTextFallback(profileUri: vscode.Uri): Promis
   const revealedTab = await waitFor(() => activeTabInput() instanceof vscode.TabInputCustom ? activeTabInput() : undefined, 'the revealed TurnStage custom editor tab');
   assert.equal((revealedTab as vscode.TabInputCustom).viewType, 'turnstage.profileEditor');
   assert.equal((revealedTab as vscode.TabInputCustom).uri.toString(), profileUri.toString());
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.equal(((await postMockProbe(`${mockBaseUrl}/__turnstage_test/opening/metrics`)) as { requests?: number }).requests, expectedOpeningRequests, 'Rehydrating the Webview must not repeat the opening request');
 
   // A host-side edit must remain visible while the custom editor is open. It
   // exercises the provider document listener and proves the document model
@@ -371,6 +385,8 @@ async function assertCustomEditorAndTextFallback(profileUri: vscode.Uri): Promis
   await waitFor(() => vscode.window.tabGroups.activeTabGroup.activeTab?.label === 'Integration Profile Synced · TurnStage' ? true : undefined, 'the profile name to update the custom editor tab');
   await document.save();
   assert.ok(activeTabInput() instanceof vscode.TabInputCustom, 'The custom editor should survive a TextDocument change');
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.equal(((await postMockProbe(`${mockBaseUrl}/__turnstage_test/opening/metrics`)) as { requests?: number }).requests, expectedOpeningRequests, 'Editing Profile metadata must not silently repeat the opening request');
 
   await vscode.commands.executeCommand('turnstage.openAsText', profileUri);
   const textTab = await waitFor(() => activeTabInput() instanceof vscode.TabInputText ? activeTabInput() : undefined, 'Open as Text to activate a text tab');

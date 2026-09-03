@@ -289,9 +289,11 @@ does not store the value.
 
 - `static` displays the configured message immediately and makes no opening
   request.
-- `request` runs only after **Start Session** (or the explicit start command),
+- `request` starts automatically once when a trusted Profile editor opens,
   resolves the response message and starter paths, and can use a configured
-  fallback for a network failure.
+  fallback for a network failure. Rehydrating the Webview or editing Profile
+  metadata does not silently repeat the request; a failed opening exposes an
+  explicit retry.
 - `disabled` leaves the session ready without an opening message.
 
 Opening requests have a bounded timeout and expose retry, configured fallback,

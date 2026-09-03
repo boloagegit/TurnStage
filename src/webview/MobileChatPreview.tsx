@@ -330,7 +330,7 @@ export function MobileChatPreview({
           <ProductIcon name="circle-filled" />
           <span>{humanize(sessionState)}</span>
         </span>
-        {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon="debug-restart" label={t('Restart session')} type="button" disabled={!trusted || active} onClick={() => post({ type: 'conversation.new' })} />}
+        {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon="debug-restart" label={t('Restart session')} type="button" disabled={!trusted || active || snapshot.sessionState === 'loadingOpening'} onClick={() => post({ type: 'conversation.new' })} />}
       </div>
       <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
       {onConfigure && <IconButton icon="settings-gear" label={t('Configure profile')} type="button" onClick={onConfigure} />}
@@ -350,17 +350,18 @@ export function MobileChatPreview({
           <div ref={messagesRef} className="mobile-chat-preview__messages" role="log" aria-label={t('Conversation messages')} aria-live="polite" aria-relevant="additions text">
             {hiddenMessageCount > 0 && <button className="mobile-chat-preview__load-history" type="button" onClick={() => setVisibleMessageLimit((current) => Math.min(1_000, current + DEFAULT_VISIBLE_CHAT_MESSAGES))}>{t('Show {count} earlier messages', { count: formatNumber(Math.min(DEFAULT_VISIBLE_CHAT_MESSAGES, hiddenMessageCount)) })}</button>}
             {snapshot?.sessionState === 'notStarted' && profile.opening?.mode === 'request' && <StartSessionCard post={post} trusted={trusted} headingId={`${previewId}-start-heading`} />}
+            {snapshot?.sessionState === 'loadingOpening' && profile.opening?.mode === 'request' && <OpeningLoading headingId={`${previewId}-opening-loading-heading`} />}
             {snapshot?.sessionState === 'failed' && profile.opening?.mode === 'request' && <OpeningError profile={profile} snapshot={snapshot} post={post} trusted={trusted} headingId={`${previewId}-opening-error-heading`} />}
             {opening && componentVisible(profile, 'opening') && <OpeningCard profile={profile} opening={opening} active={active} trusted={trusted} setDraft={setDraft} send={send} post={post} headingId={`${previewId}-opening-heading`} />}
       {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} snapshot={snapshot} messageTagEventIndex={messageTagEventIndex} post={post} send={send} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback} onActionFeedback={onMessageActionFeedback} />)}
             {!snapshot && <p className="mobile-chat-preview__empty" role="status">{t('Loading conversation…')}</p>}
-            {snapshot && snapshotMessages.length === 0 && !opening && snapshot.sessionState !== 'notStarted' && <p className="mobile-chat-preview__empty">{t('No messages yet. Send a message to begin.')}</p>}
+            {snapshot && snapshotMessages.length === 0 && !opening && snapshot.sessionState === 'ready' && <p className="mobile-chat-preview__empty">{t('No messages yet. Send a message to begin.')}</p>}
             {continuationBlocked && <p className="mobile-chat-preview__continuation" role="status">{t('Continuation is disabled after this error. Start a new conversation to send another message.')}</p>}
             {showJumpToLatest && <button className="mobile-chat-preview__jump-to-latest" type="button" onClick={jumpToLatest} aria-label={t('Jump to latest')}><ProductIcon name="arrow-down" />{t('Jump to latest')}</button>}
           </div>
         </div>
 
-        <MobileComposer profile={profile} active={active} turnState={snapshot?.turnState} continuationBlocked={continuationBlocked} trusted={trusted} draft={draft} setDraft={setDraft} send={send} post={post} />
+        <MobileComposer profile={profile} active={active} sessionReady={snapshot?.sessionState === 'ready'} turnState={snapshot?.turnState} continuationBlocked={continuationBlocked} trusted={trusted} draft={draft} setDraft={setDraft} send={send} post={post} />
       </div>
       </div>
     </div>
@@ -487,6 +488,16 @@ function StartSessionCard({ post, trusted, headingId }: { post: PostMessage; tru
   </section>;
 }
 
+function OpeningLoading({ headingId }: { headingId: string }): React.JSX.Element {
+  return <section className="mobile-chat-preview__session-start mobile-chat-preview__session-start--loading" role="status" aria-labelledby={headingId}>
+    <ProductIcon name="loading" />
+    <div className="mobile-chat-preview__session-start-copy">
+      <h3 id={headingId}>{t('Loading opening…')}</h3>
+      <p>{t('TurnStage is starting this session automatically.')}</p>
+    </div>
+  </section>;
+}
+
 function OpeningError({ profile, snapshot, post, trusted, headingId }: { profile: TurnStageProfile; snapshot: SessionSnapshot; post: PostMessage; trusted: boolean; headingId: string }): React.JSX.Element {
   const error = snapshot.errors.at(-1)?.message ?? t('The opening content could not be loaded.');
   return <section className="mobile-chat-preview__opening-error" role="alert" aria-labelledby={headingId}>
@@ -540,7 +551,7 @@ function StarterButton({ starter, active, trusted, setDraft, send, post }: { sta
   return <button className="mobile-chat-preview__chip" type="button" disabled={active || !trusted} onClick={invoke}>{starter.label}</button>;
 }
 
-function MobileComposer({ profile, active, turnState, continuationBlocked, trusted, draft, setDraft, send, post }: { profile: TurnStageProfile; active: boolean; turnState?: TurnState; continuationBlocked: boolean; trusted: boolean; draft: string; setDraft: SetDraft; send: SendMessage; post: PostMessage }): React.JSX.Element {
+function MobileComposer({ profile, active, sessionReady, turnState, continuationBlocked, trusted, draft, setDraft, send, post }: { profile: TurnStageProfile; active: boolean; sessionReady: boolean; turnState?: TurnState; continuationBlocked: boolean; trusted: boolean; draft: string; setDraft: SetDraft; send: SendMessage; post: PostMessage }): React.JSX.Element {
   const composing = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputId = useId();
@@ -549,7 +560,7 @@ function MobileComposer({ profile, active, turnState, continuationBlocked, trust
   const composerLocked = interactionLocked(profile, 'composer', active);
   const stopping = turnState === 'stopping';
   const actionLabel = active ? stopActionLabel(turnState) : t('Send message');
-  const canSend = trusted && !active && !continuationBlocked && !composerLocked;
+  const canSend = trusted && sessionReady && !active && !continuationBlocked && !composerLocked;
   const showAction = !active || composer.showStopWhileStreaming;
   const submit = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -570,7 +581,7 @@ function MobileComposer({ profile, active, turnState, continuationBlocked, trust
       submit();
     }
   };
-  const inputDisabled = !trusted || continuationBlocked || (active && composerLocked);
+  const inputDisabled = !trusted || !sessionReady || continuationBlocked || (active && composerLocked);
   useLayoutEffect(() => resizeComposerTextarea(textareaRef.current), [draft, composer.multiline]);
   useEffect(() => {
     const textarea = textareaRef.current;

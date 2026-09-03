@@ -50,6 +50,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private readonly evidencePosters = new Map<string, Set<(evidence: ScenarioRunEvidence, result: ScenarioRunResult | undefined, target: { tab: InspectorTargetTab; evidenceId: string; networkId?: string; sequence?: number; messageId?: string }) => Promise<boolean>>>();
   private readonly pendingSections = new Map<string, WorkspaceSection>();
   private readonly pendingDestinations = new Map<string, WorkspaceDestination>();
+  private readonly pendingAutoStartSuppressions = new Set<string>();
   private readonly resultPosters = new Map<string, Set<(results: AdversarialResultSummary[]) => Thenable<boolean>>>();
   private readonly campaignPosters = new Map<string, Set<(dashboard: CampaignDashboardV1) => Thenable<boolean>>>();
   private readonly activeCampaignRuns = new Map<string, { campaignId: string; cancellation: vscode.CancellationTokenSource }>();
@@ -70,6 +71,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     panel.title = profileEditorTitle(Buffer.byteLength(initialText) <= MAX_PROFILE_BYTES ? this.codec.parse(initialText).profile?.name : undefined, resourceTitle);
     const instanceId = crypto.randomUUID(); panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] }; panel.webview.html = this.html(panel.webview, instanceId);
     let controller: SessionController | undefined; let documentVersion = -1; let loadTimer: ReturnType<typeof setTimeout> | undefined; let disposed = false; let latestConnectionResult: ConnectionDoctorSummary | undefined;
+    let requestOpeningAutoStartAttempted = false;
     let profileSnapshot: Extract<HostPayload, { type: 'profile.snapshot' }> | undefined;
     let validationSnapshot: Extract<HostPayload, { type: 'profile.validation' }> | undefined;
     const artifacts = new Map<string, { uri: vscode.Uri; openUri: vscode.Uri; path: string }>();
@@ -215,9 +217,14 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           if (!fixtureUri) logAt(this.output, 'warn', `[fixture] profile ${parsed.profile.id} is not inside a workspace folder`);
           else try { controller.addBuiltInFixture(await loadFixture(fixtureUri)); } catch (error) { logAt(this.output, 'error', `[fixture] ${error instanceof Error ? error.message : String(error)}`); }
         }
-        if (parsed.profile.opening?.mode === 'static') await controller.startSession(); else sendSession();
-        if (disposed || document.version !== version) { await disposeController(); return; }
         this.controllers.set(document.uri.toString(), controller);
+        if (parsed.profile.opening?.mode !== 'request') observeBackground(controller.startSession(), 'session-auto-start');
+        else if (!this.pendingAutoStartSuppressions.delete(documentKey) && vscode.workspace.isTrusted && !requestOpeningAutoStartAttempted) {
+          requestOpeningAutoStartAttempted = true;
+          logAt(this.output, 'debug', `[session] auto-start profile=${parsed.profile.id} mode=request`);
+          observeBackground(controller.startSession(), 'session-auto-start');
+        } else sendSession(true);
+        if (disposed || document.version !== version) { await disposeController(); return; }
       }
     };
     const rehydrate = async () => {
@@ -231,7 +238,17 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const scheduleLoad = () => { if (loadTimer) clearTimeout(loadTimer); loadTimer = setTimeout(() => { loadTimer = undefined; void load().catch((error) => logAt(this.output, 'error', `[editor] ${error instanceof Error ? error.stack ?? error.message : String(error)}`)); }, DOCUMENT_CHANGE_DEBOUNCE_MS); };
     const documentListener = vscode.workspace.onDidChangeTextDocument((event) => { if (event.document.uri.toString() === document.uri.toString()) { observeBackground(post({ type: 'profile.editState', dirty: true }), 'document-change'); scheduleLoad(); } });
     const saveListener = vscode.workspace.onDidSaveTextDocument((saved) => { if (saved.uri.toString() === document.uri.toString()) observeBackground(post({ type: 'profile.editState', dirty: false }), 'document-save'); });
-    const trustListener = vscode.workspace.onDidGrantWorkspaceTrust(() => { if (controller) controller.snapshot.trusted = true; observeBackground(post({ type: 'workspaceTrust.changed', trusted: true }), 'workspace-trust'); sendSession(); });
+    const trustListener = vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      if (controller) {
+        controller.snapshot.trusted = true;
+        if (controller.profile.opening?.mode === 'request' && controller.snapshot.sessionState === 'notStarted' && !requestOpeningAutoStartAttempted) {
+          requestOpeningAutoStartAttempted = true;
+          logAt(this.output, 'debug', `[session] auto-start profile=${controller.profile.id} mode=request after=workspace-trust`);
+          observeBackground(controller.startSession(), 'session-auto-start-after-trust');
+        } else sendSession(true);
+      }
+      observeBackground(post({ type: 'workspaceTrust.changed', trusted: true }), 'workspace-trust');
+    });
     const postHostReady = (requestId?: string) => {
       const locale = configuredLocale();
       return post({ type: 'host.ready', trusted: vscode.workspace.isTrusted, remoteName: vscode.env.remoteName, locale, direction: textDirection(locale) }, requestId);
@@ -649,6 +666,8 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   }
 
   getController(uri?: vscode.Uri): SessionController | undefined { return uri ? this.controllers.get(uri.toString()) : [...this.controllers.values()].at(-1); }
+  suppressNextAutoStart(uri: vscode.Uri): void { this.pendingAutoStartSuppressions.add(uri.toString()); }
+  clearAutoStartSuppression(uri: vscode.Uri): void { this.pendingAutoStartSuppressions.delete(uri.toString()); }
   async drainPending(): Promise<void> {
     for (const active of this.activeCampaignRuns.values()) active.cancellation.cancel();
     await Promise.allSettled([...this.pendingCampaignRuns, ...this.pendingLinkedCaseWrites, ...this.pendingDisposals, ...[...this.controllers.values()].map((controller) => controller.disposeAndWait())]);
@@ -697,9 +716,12 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     else this.pendingDestinations.set(key, destination);
   }
   async showScenarioEvidence(uri: vscode.Uri, evidence: ScenarioRunEvidence, location: ScenarioEvidenceLocation, evidenceId: string, result?: ScenarioRunResult): Promise<boolean> {
-    await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor', { viewColumn: vscode.ViewColumn.Active, preserveFocus: false });
-    await this.showSection(uri, 'test');
-    if (!await this.waitForController(uri)) return false;
+    if (!this.getController(uri)) this.suppressNextAutoStart(uri);
+    try {
+      await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor', { viewColumn: vscode.ViewColumn.Active, preserveFocus: false });
+      await this.showSection(uri, 'test');
+      if (!await this.waitForController(uri)) return false;
+    } finally { this.clearAutoStartSuppression(uri); }
     const target = { ...inspectorTarget(location, evidence), evidenceId };
     const posters = [...(this.evidencePosters.get(uri.toString()) ?? [])];
     if (!posters.length) return false;

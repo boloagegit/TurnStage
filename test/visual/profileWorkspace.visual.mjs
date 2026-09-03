@@ -927,6 +927,24 @@ try {
   const narrowSessionStartFits = await sessionStart.evaluate((section) => section.scrollWidth <= section.clientWidth + 1);
   assert.equal(narrowSessionStartFits, true, 'Narrow session startup row must not overflow horizontally');
   await startPage.locator('.mobile-chat-preview__device').screenshot({ path: resolve(artifactDirectory, 'session-start-compact-narrow-dark.png') });
+  await startPage.setViewportSize({ width: 960, height: 640 });
+  await startPage.evaluate(() => {
+    const harness = globalThis.__turnstageHarness;
+    const snapshot = { ...harness.snapshot };
+    delete snapshot.opening;
+    harness.dispatch({
+      type: 'session.snapshot',
+      snapshot: { ...snapshot, sessionState: 'loadingOpening', turnState: 'idle', messages: [], rawEvents: [], normalizedEvents: [], errors: [] },
+      runs: [],
+      networkEntries: []
+    });
+  });
+  const openingLoading = startPage.locator('.mobile-chat-preview__session-start--loading');
+  await openingLoading.getByRole('heading', { name: 'Loading opening…' }).waitFor();
+  assert.equal(await openingLoading.getByRole('button').count(), 0, 'Automatic opening state must not show a redundant Start session action');
+  assert.equal(await startPage.getByRole('textbox', { name: 'Message' }).isDisabled(), true, 'Composer must remain disabled until the automatic opening finishes');
+  assert.equal(await startPage.getByRole('button', { name: 'Restart session' }).isDisabled(), true, 'Restart must remain disabled while the opening request is active');
+  await startPage.locator('.mobile-chat-preview__device').screenshot({ path: resolve(artifactDirectory, 'session-auto-start-loading-dark.png') });
   await startPage.close();
 
   await page.keyboard.press('Tab');
@@ -937,7 +955,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, networkPayloadJsonHighlighting: true, defaultDebugNetwork: true, compactEventEmptyStates: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, networkPayloadJsonHighlighting: true, defaultDebugNetwork: true, compactEventEmptyStates: true, sessionAutoStartLoading: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

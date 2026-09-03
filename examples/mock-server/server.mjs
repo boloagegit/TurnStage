@@ -16,6 +16,7 @@ const sse = (event, data) => `event: ${event}\ndata: ${typeof data === 'string' 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const contractSessions = new Map();
 const intermittentAttempts = new Map();
+const openingProbe = { requests: 0 };
 const concurrencyProbe = {
   active: 0,
   maxActive: 0,
@@ -139,6 +140,8 @@ const server = http.createServer(async (request, response) => {
   if (request.method !== 'POST') return json(response, 405, { code: 'METHOD_NOT_ALLOWED' });
   if (request.url === '/__turnstage_test/concurrency/reset') { resetConcurrencyProbe(); return json(response, 200, concurrencyProbeSnapshot()); }
   if (request.url === '/__turnstage_test/concurrency/metrics') return json(response, 200, concurrencyProbeSnapshot());
+  if (request.url === '/__turnstage_test/opening/reset') { openingProbe.requests = 0; return json(response, 200, openingProbe); }
+  if (request.url === '/__turnstage_test/opening/metrics') return json(response, 200, openingProbe);
   const body = await readBody(request); if (!body) return json(response, 400, { code: 'INVALID_JSON' });
   const mode = request.headers['x-turnstage-mode'] ?? body.mode ?? 'normal';
   if (request.url === '/basic/chat/stream') beginConcurrencyProbe(response, body);
@@ -146,6 +149,7 @@ const server = http.createServer(async (request, response) => {
   if (request.url === '/v1/chat/stream') return handleContractStream(request, response, body, mode);
   if (request.url === '/v1/chat/stop') return handleContractStop(response, body);
   if (request.url === '/agent/opening') {
+    openingProbe.requests += 1;
     if (mode === 'opening-timeout') { await delay(450); return json(response, 504, { code: 'OPENING_TIMEOUT_FIXTURE' }); }
     if (mode === 'fallback') return json(response, 404, { code: 'OPENING_NOT_FOUND' });
     if (mode === 'network-error') { request.socket.destroy(); return; }

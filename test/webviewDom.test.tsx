@@ -51,6 +51,20 @@ describe('Webview DOM behavior', () => {
     expect(within(start as HTMLElement).getByRole('button', { name: 'Start session' })).toBeTruthy();
   });
 
+  it('shows one compact status while an opening request starts automatically', () => {
+    const openingProfile: TurnStageProfile = { ...profile, opening: { mode: 'request' } };
+    const loading: SessionSnapshot = { ...snapshot, sessionState: 'loadingOpening', turnState: 'idle', messages: [], opening: undefined };
+    const { container } = render(<MobileChatPreview {...mobileProps({ profile: openingProfile, snapshot: loading })} />);
+
+    const status = screen.getByRole('status', { name: 'Loading opening…' });
+    expect(status.classList.contains('mobile-chat-preview__session-start--loading')).toBe(true);
+    expect(within(status).getByText('TurnStage is starting this session automatically.')).toBeTruthy();
+    expect(within(status).queryByRole('button')).toBeNull();
+    expect(container.textContent).not.toContain('No messages yet. Send a message to begin.');
+    expect(screen.getByRole('textbox', { name: 'Message' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Restart session' }).hasAttribute('disabled')).toBe(true);
+  });
+
   it('renders bounded opening response blocks and keeps choice behavior interactive', async () => {
     const user = userEvent.setup();
     const setDraft = vi.fn();
