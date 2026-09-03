@@ -37,7 +37,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const diagnostics = vscode.languages.createDiagnosticCollection('turnstage');
   const repository = new ProfileRepository(context.globalStorageUri);
   const environments = new EnvironmentRepository(context.globalStorageUri);
-  const duplicateDiagnostics = new ProfileDuplicateDiagnostics(repository, diagnostics);
+  const duplicateDiagnostics = new ProfileDuplicateDiagnostics(repository, diagnostics, output);
   const tree = new ProfileTreeProvider(repository, (entries) => duplicateDiagnostics.refresh(entries));
   const visualRegression = new VisualRegressionService(context);
   const secrets = new SecretService(context);
@@ -74,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       };
     },
   });
-  context.subscriptions.push(output, loggingConfiguration, campaignStatus, diagnostics, tree, duplicateDiagnostics, demoProvider, scenarioTests, ...copilotTools, ...(copilotParticipant ? [copilotParticipant] : []), scenarioTests.onDidChangeResults(({ uri, results }) => { void editor.publishTestResults(uri, results); }), scenarioTests.onDidChangeCampaigns(({ uri, dashboard }) => { void editor.publishCampaignDashboard(uri, dashboard); }), scenarioTests.onDidChangeCampaignProgress((progress) => {
+  context.subscriptions.push(output, loggingConfiguration, campaignStatus, diagnostics, tree, duplicateDiagnostics, demoProvider, scenarioTests, ...copilotTools, ...(copilotParticipant ? [copilotParticipant] : []), scenarioTests.onDidChangeResults(({ uri, results }) => { void editor.publishTestResults(uri, results).catch((error) => logAt(output, 'error', () => `[tests] publish results failed type=${error instanceof Error ? error.name : 'Error'}`)); }), scenarioTests.onDidChangeCampaigns(({ uri, dashboard }) => { void editor.publishCampaignDashboard(uri, dashboard).catch((error) => logAt(output, 'error', () => `[tests] publish campaign failed type=${error instanceof Error ? error.name : 'Error'}`)); }), scenarioTests.onDidChangeCampaignProgress((progress) => {
     if (progress.state === 'running') activeCampaignProgress.set(progress.runId, progress);
     else activeCampaignProgress.delete(progress.runId);
     const current = [...activeCampaignProgress.values()].at(-1);
@@ -409,15 +409,19 @@ function displayProfilePath(uri: vscode.Uri, repository: ProfileRepository): str
 type NotificationKind = 'information' | 'error';
 
 async function showNotification(kind: NotificationKind, message: string): Promise<void> {
-  const configuration = vscode.workspace.getConfiguration('turnstage');
-  if (configuration.get<boolean>('notifications.enabled', true) === false) return;
-  const doNotShowAgain = vscode.l10n.t('Do not show again');
-  const openOutput = vscode.l10n.t('Open TurnStage Output');
-  const action = kind === 'error'
-    ? await vscode.window.showErrorMessage(message, openOutput, doNotShowAgain)
-    : await vscode.window.showInformationMessage(message, doNotShowAgain);
-  if (action === openOutput) activeOutput?.show(true);
-  if (action === doNotShowAgain) {
-    try { await configuration.update('notifications.enabled', false, vscode.ConfigurationTarget.Global); } catch { /* notification preferences are best effort */ }
+  try {
+    const configuration = vscode.workspace.getConfiguration('turnstage');
+    if (configuration.get<boolean>('notifications.enabled', true) === false) return;
+    const doNotShowAgain = vscode.l10n.t('Do not show again');
+    const openOutput = vscode.l10n.t('Open TurnStage Output');
+    const action = kind === 'error'
+      ? await vscode.window.showErrorMessage(message, openOutput, doNotShowAgain)
+      : await vscode.window.showInformationMessage(message, doNotShowAgain);
+    if (action === openOutput) activeOutput?.show(true);
+    if (action === doNotShowAgain) {
+      try { await configuration.update('notifications.enabled', false, vscode.ConfigurationTarget.Global); } catch { /* notification preferences are best effort */ }
+    }
+  } catch (error) {
+    if (activeOutput) logAt(activeOutput, 'error', () => `[notification] failed type=${error instanceof Error ? error.name : 'Error'}`);
   }
 }

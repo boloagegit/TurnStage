@@ -88,6 +88,9 @@ The current UI includes these performance-conscious choices:
 - adaptive Assistant reveal segments even a large single-event response into a
   bounded visual schedule and catches up within `maxVisualLagMs`; it never delays
   canonical events, TTFT, evidence, or terminal state;
+- Opening response normalization visits at most 8 configured blocks, 20 items
+  per block, and 200 nodes for a JSON detail block before publishing one
+  canonical snapshot; no provider-specific renderer or editor runtime is loaded;
 - preview size, orientation, and zoom controls mount in a native disclosure only
   when requested so narrow toolbars retain their primary actions;
 - CSS uses VS Code theme variables and reduced-motion rules rather than a
@@ -211,8 +214,9 @@ microbenchmarks and do not substitute for a VS Code UI trace.
 | Serialize bounded delta | 0.0011 ms mean; 925,761.69 runs/s | Node 26.3.1, 2026-09-01 | Same update as the full-snapshot comparison |
 | Serialize equivalent full snapshot | 1.6936 ms mean; 590.45 runs/s | Node 26.3.1, 2026-09-01 | 5,001 events and 500 messages |
 | Plan one-million-character adaptive reveal | 66.8725 ms mean; 14.9538 runs/s | Node 26.3.1, 2026-09-01 | Segmentation/planning microbenchmark, not elapsed visual reveal time |
+| Normalize maximum opening response | 0.0471 ms mean; 21,230.41 runs/s | Node 26.3.1, 2026-09-03 | 8 blocks, 20 choices, 20 fields, and bounded JSON projections |
 | Abort, timeout, disconnect cleanup | Unit paths passed; UI trace not measured | Vitest, 2026-09-01 | Do not infer browser responsiveness |
-| Production bundle sizes | 638,593 B host; 601,461 B Webview JS; 166,266 B CSS; 179,614 B CLI | esbuild, 2026-09-03 | Minified, `vscode` external; integration bundle excluded from VSIX |
+| Production bundle sizes | 646,114 B host; 616,242 B Webview JS; 170,985 B CSS; 188,487 B CLI | esbuild, 2026-09-03 | Minified, `vscode` external; integration bundle excluded from VSIX |
 
 ## Current performance limitations
 

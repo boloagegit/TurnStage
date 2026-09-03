@@ -495,6 +495,8 @@ describe('isActive and SessionController.finalizeTurn', () => {
       payload: {
         greeting: 'Opening loaded from the server.',
         starters: ['Begin from a string', { id: 'starter-2', prompt: 'Continue from an object' }],
+        optionsInfo: [{ option: 'Inspect quota' }],
+        quota: { used: 2, limit: 10 },
       },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
@@ -507,7 +509,14 @@ describe('isActive and SessionController.finalizeTurn', () => {
         opening: {
           mode: 'request',
           request: { method: 'POST', url: 'https://example.test/opening', body: { actor: { $value: 'controls.actor' } } },
-          response: { messagePath: '$.payload.greeting', startersPath: '$.payload.starters' },
+          response: {
+            messagePath: '$.payload.greeting',
+            startersPath: '$.payload.starters',
+            blocks: [
+              { id: 'suggestions', kind: 'choices', path: '$.payload.optionsInfo', itemLabelPath: '$.option', itemPromptPath: '$.option' },
+              { id: 'quota', label: 'Usage', kind: 'meter', path: '$.payload.quota', valuePath: '$.used', maxPath: '$.limit' },
+            ],
+          },
         },
         controls: [{ id: 'actor', type: 'text', label: 'Actor', default: 'user-a' }],
         conversation: { send: { method: 'POST', url: 'https://example.test/stream' } },
@@ -523,6 +532,10 @@ describe('isActive and SessionController.finalizeTurn', () => {
         starters: [
           { id: 'starter-1', label: 'Begin from a string', prompt: 'Begin from a string', behavior: 'send' },
           { id: 'starter-2', label: 'Continue from an object', prompt: 'Continue from an object', behavior: 'send' },
+        ],
+        blocks: [
+          { id: 'suggestions', kind: 'choices', items: [{ id: 'suggestions-1', label: 'Inspect quota', prompt: 'Inspect quota', behavior: 'send' }], empty: false },
+          { id: 'quota', label: 'Usage', kind: 'meter', value: 2, max: 10, empty: false },
         ],
       });
       expect(fetchMock).toHaveBeenCalledWith('https://example.test/opening', expect.objectContaining({

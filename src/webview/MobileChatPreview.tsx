@@ -11,14 +11,16 @@ import type {
   MessageMetric,
   MessagePart,
   MessageTagRule,
+  OpeningInfoBlock,
   SessionSnapshot,
   Starter,
   TurnState,
   TurnStageProfile
 } from '../shared/types';
-import { formatDuration, formatNumber, t } from './i18n';
+import { formatDateTime, formatDuration, formatNumber, t } from './i18n';
 import { IconButton, ProductIcon } from './Icon';
 import { JsonSyntax } from './JsonViewer';
+import { ClipboardButton } from './ClipboardButton';
 import { SafeMarkdown } from './SafeMarkdown';
 import { captureChatScreenshot, copyChatScreenshotToClipboard } from './chatScreenshot';
 import { resolveComposer, resolveMessageActions, resolveMessageActionVisibility, resolveStreaming, type ResolvedStreaming } from './uiConfig';
@@ -495,11 +497,31 @@ function OpeningCard({ profile, opening, active, trusted, setDraft, send, post, 
   return <section className="mobile-chat-preview__opening" aria-labelledby={headingId}>
     <span className="mobile-chat-preview__opening-avatar" aria-hidden="true">{profile.name.trim().charAt(0).toUpperCase() || 'T'}</span>
     <div className="mobile-chat-preview__opening-content"><h3 className="mobile-chat-preview__opening-label" id={headingId}>{t('Opening')}</h3><p className="mobile-chat-preview__opening-message">{opening.message}</p>
+      {opening.blocks?.length ? <OpeningBlocks blocks={opening.blocks} active={active} trusted={trusted} setDraft={setDraft} send={send} /> : null}
       {componentVisible(profile, 'starters') && opening.starters.length > 0 && <div className="mobile-chat-preview__starter-list" aria-label={t('Starter prompts')}>
         {opening.starters.map((starter) => <StarterButton key={starter.id} starter={starter} active={active} trusted={trusted} setDraft={setDraft} send={send} post={post} />)}
       </div>}
     </div>
   </section>;
+}
+
+function OpeningBlocks({ blocks, active, trusted, setDraft, send }: { blocks: OpeningInfoBlock[]; active: boolean; trusted: boolean; setDraft: SetDraft; send: SendMessage }): React.JSX.Element {
+  return <div className="mobile-chat-preview__opening-blocks">{blocks.map((block) => <section className={`mobile-chat-preview__opening-block mobile-chat-preview__opening-block--${block.kind}`} key={block.id} aria-label={block.label || t('Opening information')}>
+    {block.label ? <h4>{block.label}</h4> : null}
+    {block.empty ? <span className="mobile-chat-preview__opening-block-empty">{t('No information available')}</span> : block.kind === 'choices' ? <div className="mobile-chat-preview__starter-list" aria-label={block.label || t('Suggested choices')}>{block.items.map((item) => <StarterButton key={item.id} starter={item} active={active} trusted={trusted} setDraft={setDraft} send={send} post={() => undefined} />)}</div> : block.kind === 'fields' ? <dl>{block.items.map((item) => <div key={item.id}><dt>{item.label}</dt><dd>{formatOpeningField(item.value, item.format)}</dd></div>)}</dl> : block.kind === 'meter' ? <div className="mobile-chat-preview__opening-meter"><div><strong>{formatNumber(block.value ?? 0)}</strong><span> / {formatNumber(block.max ?? 0)}{block.unit ? ` ${block.unit}` : ''}</span></div><progress aria-label={block.label || t('Usage')} value={Math.max(0, Math.min(block.value ?? 0, block.max ?? 0))} max={block.max || 1} />{block.resetAt ? <span>{t('Resets {time}', { time: formatOpeningDate(block.resetAt) })}</span> : null}</div> : block.kind === 'status' ? <span className={`mobile-chat-preview__opening-status is-${block.tone}`}>{block.value}</span> : <details open={!block.defaultCollapsed}><summary>{block.label ? t('View details') : t('Opening information')}</summary><pre className="json"><code><JsonSyntax value={block.value} /></code><ClipboardButton text={safeJson(block.value)} label={t('Copy JSON')} /></pre></details>}
+  </section>)}</div>;
+}
+
+function formatOpeningField(value: string, format: 'text' | 'number' | 'datetime' | 'percent'): string {
+  if (format === 'number') { const number = Number(value); return Number.isFinite(number) ? formatNumber(number) : value; }
+  if (format === 'percent') { const number = Number(value); return Number.isFinite(number) ? `${formatNumber(number)}%` : value; }
+  if (format === 'datetime') return formatOpeningDate(value);
+  return value;
+}
+
+function formatOpeningDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : formatDateTime(date);
 }
 
 function StarterButton({ starter, active, trusted, setDraft, send, post }: { starter: Starter; active: boolean; trusted: boolean; setDraft: SetDraft; send: SendMessage; post: PostMessage }): React.JSX.Element {

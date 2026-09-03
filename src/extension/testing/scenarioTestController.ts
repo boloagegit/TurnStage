@@ -226,7 +226,7 @@ export class ScenarioTestController implements vscode.Disposable {
     this.controller.createRunProfile(localize('Run Conversation Contracts'), vscode.TestRunProfileKind.Run, async (request, token) => { await this.run(request, token); }, true);
 
     const watcher = vscode.workspace.createFileSystemWatcher('**/*.{turnstage,adversarial}.{json,jsonc,csv}');
-    const refresh = () => { void this.refresh(); };
+    const refresh = () => { void this.refresh().catch((error) => logAt(this.output, 'error', () => `[tests] refresh failed type=${error instanceof Error ? error.name : 'Error'}`)); };
     watcher.onDidCreate(refresh);
     watcher.onDidChange(refresh);
     watcher.onDidDelete(refresh);

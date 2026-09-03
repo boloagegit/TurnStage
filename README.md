@@ -20,7 +20,9 @@ renderer and inspector.
 - JSONC profiles and environments with JSON Schema association plus a semantic
   validator and a version-0-to-1 migration command with backup/diff review.
 - Static, request-backed, and disabled openings; starter buttons can send or
-  fill the composer.
+  fill the composer. Optional response blocks map provider-specific choices,
+  fields, quota meters, status, or JSON details into canonical theme-aware UI
+  without backend-specific components.
 - POST/HTTP streaming through the Extension Host, including SSE parsing and
   line-delimited NDJSON parsing, abort, total/idle timeouts, bounded pre-data
   reconnect, controlled redirects, and unexpected-end handling.

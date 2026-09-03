@@ -7,6 +7,7 @@ const editorSource = readFileSync(resolve(root, 'src/extension/editors/turnstage
 const activateSource = readFileSync(resolve(root, 'src/extension/activate.ts'), 'utf8');
 const scenarioTestSource = readFileSync(resolve(root, 'src/extension/testing/scenarioTestController.ts'), 'utf8');
 const scenarioReportSource = readFileSync(resolve(root, 'src/extension/testing/scenarioReport.ts'), 'utf8');
+const duplicateDiagnosticsSource = readFileSync(resolve(root, 'src/extension/config/profileDuplicateDiagnostics.ts'), 'utf8');
 
 describe('Extension host editor lifecycle', () => {
   it('debounces profile document changes and cancels pending work on disposal', () => {
@@ -89,8 +90,17 @@ describe('Extension host editor lifecycle', () => {
 
   it('updates open profile editors when the display-language preference changes', () => {
     expect(editorSource).toContain("event.affectsConfiguration('turnstage.displayLanguage')");
-    expect(editorSource).toContain('void postHostReady()');
+    expect(editorSource).toContain("observeBackground(postHostReady(), 'display-language')");
     expect(editorSource).toContain('configurationListener.dispose()');
+  });
+
+  it('contains rejected background refresh and Webview operations', () => {
+    expect(editorSource).toContain('const observeBackground =');
+    expect(editorSource).toContain("observeBackground(postTestOperation(");
+    expect(scenarioTestSource).toContain("this.refresh().catch((error) => logAt(this.output, 'error'");
+    expect(duplicateDiagnosticsSource).toContain("this.refresh().catch((error) => logAt(this.output, 'error'");
+    expect(activateSource).toContain("editor.publishTestResults(uri, results).catch((error) => logAt(output, 'error'");
+    expect(activateSource).toContain("[notification] failed type=");
   });
 
   it('requires confirmation before a command restarts the current session', () => {

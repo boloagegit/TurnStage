@@ -94,7 +94,7 @@
     },
     "history": { "type": "object", "additionalProperties": true },
     "errorPolicy": { "type": "object", "additionalProperties": { "type": "boolean" } },
-    "security": { "type": "object", "additionalProperties": false, "properties": { "allowedUriSchemes": { "type": "array", "items": { "enum": ["https", "http", "file"] } }, "allowedDomains": { "type": "array", "items": { "type": "string" } }, "allowedCommands": { "type": "array", "items": { "type": "string" } } } },
+    "security": { "type": "object", "additionalProperties": false, "properties": { "allowedUriSchemes": { "type": "array", "items": { "enum": ["https", "http", "file"] } }, "allowedDomains": { "type": "array", "items": { "type": "string" } }, "allowedCommands": { "type": "array", "items": { "type": "string", "not": { "enum": ["vscode.openFolder", "workbench.action.reloadWindow", "workbench.action.restartExtensionHost", "workbench.action.closeWindow", "workbench.action.quit", "workbench.action.files.openFolder", "workbench.action.files.openFileFolder", "workbench.action.remote.close"] } } } } },
     "metrics": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }, "messageEnabled": { "type": "array", "items": { "type": "string" }, "uniqueItems": true } } },
     "tests": { "$ref": "#/$defs/tests" }
   },
@@ -114,7 +114,60 @@
       }
     },
     "control": { "type": "object", "required": ["id", "type", "label"], "additionalProperties": true, "properties": { "id": { "type": "string" }, "type": { "enum": ["select", "boolean", "text"] }, "label": { "type": "string" }, "persist": { "enum": ["workspace", "global", "none", "secret"] }, "options": { "type": "array", "items": { "type": "object", "required": ["label", "value"], "properties": { "label": { "type": "string" }, "value": { "type": "string" } } } } } },
-    "opening": { "type": "object", "required": ["mode"], "additionalProperties": true, "properties": { "mode": { "enum": ["static", "request", "disabled"] }, "message": { "type": "string" }, "starters": { "type": "array", "items": { "$ref": "#/$defs/starter" } }, "request": { "$ref": "#/$defs/request" } } },
+    "opening": {
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": true,
+      "properties": {
+        "mode": { "enum": ["static", "request", "disabled"] },
+        "message": { "type": "string" },
+        "starters": { "type": "array", "items": { "$ref": "#/$defs/starter" } },
+        "request": { "$ref": "#/$defs/request" },
+        "response": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "messagePath": { "$ref": "#/$defs/openingResponsePath" },
+            "startersPath": { "$ref": "#/$defs/openingResponsePath" },
+            "blocks": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/openingResponseBlock" } }
+          }
+        }
+      }
+    },
+    "openingResponsePath": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^\\$?(?:\\.[A-Za-z0-9_-]+)*$|^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$" },
+    "openingResponseField": {
+      "type": "object",
+      "required": ["id", "label", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "path": { "$ref": "#/$defs/openingResponsePath" },
+        "format": { "enum": ["text", "number", "datetime", "percent"] }
+      }
+    },
+    "openingResponseBlock": {
+      "type": "object",
+      "required": ["id", "kind", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "kind": { "enum": ["choices", "fields", "meter", "status", "json"] },
+        "path": { "$ref": "#/$defs/openingResponsePath" },
+        "emptyPolicy": { "enum": ["hide", "show"] },
+        "itemLabelPath": { "$ref": "#/$defs/openingResponsePath" },
+        "itemPromptPath": { "$ref": "#/$defs/openingResponsePath" },
+        "behavior": { "enum": ["send", "fill"] },
+        "fields": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/openingResponseField" } },
+        "valuePath": { "$ref": "#/$defs/openingResponsePath" },
+        "maxPath": { "$ref": "#/$defs/openingResponsePath" },
+        "resetAtPath": { "$ref": "#/$defs/openingResponsePath" },
+        "unit": { "type": "string", "maxLength": 32 },
+        "tone": { "enum": ["neutral", "info", "success", "warning", "error"] },
+        "defaultCollapsed": { "type": "boolean" }
+      }
+    },
     "starter": { "type": "object", "required": ["id", "label", "prompt", "behavior"], "properties": { "id": { "type": "string" }, "label": { "type": "string" }, "prompt": { "type": "string" }, "behavior": { "enum": ["send", "fill", "action"] }, "actionId": { "type": "string" } } },
     "condition": { "type": "object", "additionalProperties": false, "properties": { "path": { "type": "string" }, "event": { "type": "string" }, "operator": { "enum": ["equals", "notEquals", "exists", "notExists", "oneOf", "contains", "startsWith", "endsWith", "regex"] }, "value": {} } },
     "request": { "type": "object", "required": ["method", "url"], "additionalProperties": true, "properties": { "method": { "enum": ["POST", "GET", "PUT", "PATCH", "DELETE"] }, "url": { "type": "string" }, "headers": { "type": "object", "additionalProperties": { "type": "string" } }, "body": {}, "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 900000 }, "idleTimeoutMs": { "type": "integer", "minimum": 1, "maximum": 900000 }, "reconnect": { "type": "object", "additionalProperties": false, "properties": { "maxAttempts": { "type": "integer", "minimum": 0, "maximum": 5 }, "baseDelayMs": { "type": "integer", "minimum": 0, "maximum": 30000 }, "maxDelayMs": { "type": "integer", "minimum": 0, "maximum": 120000 }, "retryOnStatuses": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "integer", "minimum": 400, "maximum": 599 } } } }, "redirectPolicy": { "enum": ["same-origin", "follow", "error"] }, "maxRedirects": { "type": "integer", "minimum": 0, "maximum": 10 }, "variants": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "body"], "properties": { "id": { "type": "string" }, "when": { "$ref": "#/$defs/condition" }, "body": {}, "headers": { "type": "object", "additionalProperties": { "type": "string" } } } } } } },

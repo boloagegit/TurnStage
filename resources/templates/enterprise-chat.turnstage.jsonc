@@ -23,7 +23,13 @@
         "openingMsgArgs": [{ "placeholder": "sampleValue", "value": "123456" }]
       }
     },
-    "response": { "messagePath": "$.openingMessage", "startersPath": "$.optionsInfo" },
+    "response": {
+      "messagePath": "$.openingMessage",
+      "blocks": [
+        { "id": "suggestions", "label": "Suggested questions", "kind": "choices", "path": "$.optionsInfo", "itemLabelPath": "$.option", "itemPromptPath": "$.option", "behavior": "send" },
+        { "id": "quota", "label": "Usage", "kind": "meter", "path": "$.quota", "valuePath": "$.used", "maxPath": "$.limit", "resetAtPath": "$.resetAt", "unit": "requests" }
+      ]
+    },
     "fallbacks": [{ "match": { "path": "$.code", "operator": "equals", "value": 7021 }, "message": "Hello, I am a synthetic test assistant. How can I help?" }],
     "failurePolicy": { "allowRetry": true, "useFallbackOnNetworkError": true }
   },

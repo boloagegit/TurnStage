@@ -75,6 +75,14 @@ bounded hop count. The default is same-origin only; explicit cross-origin
 following strips common credential headers and any header whose value contains
 a secret resolved for that request.
 
+Opening response blocks are presentation-only projections owned by the
+Extension Host. Profiles may select bounded dotted paths and fixed display
+types, but responses cannot supply HTML, CSS, commands, scripts, or visual
+styles. At most 8 blocks and 20 items per block cross into the Webview; text,
+JSON node count, and JSON depth are bounded, common sensitive JSON keys are
+masked, and registered secret values receive the existing value-based
+redaction before the snapshot is published.
+
 When `vscode.workspace.isTrusted` is false:
 
 - profile discovery, editing, validation, and built-in fixture replay remain
@@ -90,8 +98,10 @@ When `vscode.workspace.isTrusted` is false:
 
 The host checks trust even when a command is invoked directly. The
 `invokeAction` path rejects profile commands in an untrusted workspace and then
-enforces an allowlist for `vscodeCommand.invoke:<id>`. Treat profile actions and
-allowlisted commands as privileged and review them before running.
+enforces an allowlist for `vscodeCommand.invoke:<id>`. Commands that can reload,
+restart, replace, or close the current VS Code window remain blocked even when
+allowlisted. Treat other profile actions and allowlisted commands as privileged
+and review them before running.
 
 Linked adversarial editing is also a privileged write. The Webview supplies a
 case identity and source revision, never an arbitrary filesystem path. The Host
@@ -226,7 +236,8 @@ after the user clicks a rendered action. Built-in actions include copy, retry,
 abort, new conversation, and clear conversation. A command action must use the
 `vscodeCommand.invoke:` prefix and match an exact string in
 `profile.security.allowedCommands`; the profile cannot execute a shell or
-arbitrary JavaScript.
+arbitrary JavaScript. TurnStage also rejects known lifecycle commands that can
+reload, restart, replace, or close the current VS Code window.
 
 Forms are declarative data. The Webview supports text, textarea, tel, email,
 number, select, and checkbox fields, and validates required values, maximum

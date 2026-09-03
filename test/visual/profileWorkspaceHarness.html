@@ -104,7 +104,11 @@
       environment: 'local',
       conversation: { send: { method: 'POST', url: 'http://localhost/chat' } },
       stream: { transport: 'sse', mappings: [{ id: 'message', match: { event: 'message' }, emit: { type: 'content.text.delta', text: { path: '$.text' } } }] },
-      opening: { mode: 'static', message: 'Send a message to watch six SSE events arrive over about 3.6 seconds.', starters: [] },
+      opening: query.get('openingBlocks') === 'true' ? { mode: 'request', request: { method: 'POST', url: 'http://localhost/chat/opening' }, response: { messagePath: '$.content', blocks: [
+        { id: 'suggestions', label: 'Suggested questions', kind: 'choices', path: '$.optionsInfo', itemLabelPath: '$.option', itemPromptPath: '$.option', behavior: 'send' },
+        { id: 'quota', label: 'Usage', kind: 'meter', path: '$.quota', valuePath: '$.used', maxPath: '$.limit', resetAtPath: '$.resetAt', unit: 'requests' },
+        { id: 'account', label: 'Account', kind: 'fields', path: '$.account', fields: [{ id: 'plan', label: 'Plan', path: '$.plan', format: 'text' }, { id: 'region', label: 'Region', path: '$.region', format: 'text' }] }
+      ] } } : { mode: 'static', message: 'Send a message to watch six SSE events arrive over about 3.6 seconds.', starters: [] },
       ui: {
         layout: { preset, inspectorPosition, ...(inspectorWidth ? { inspectorWidth } : {}) },
         composer: { placeholder: 'Type a message for the slow SSE stream…', multiline, enterBehavior: 'send', showStopWhileStreaming },
@@ -188,6 +192,12 @@
     ];
     const snapshot = {
       sessionId: 'visual', sessionState: 'ready', turnState: active ? 'streaming' : 'completed', conversationId: 'conversation-1', title: 'Slow SSE Visual Proof', trusted: true, controls: {}, droppedEventCount: 0, errors: [], rawEvents,
+      ...(query.get('openingBlocks') === 'true' ? { opening: { message: 'Welcome to the synthetic workspace.', starters: [], blocks: [
+        { id: 'suggestions', label: 'Suggested questions', kind: 'choices', items: [{ id: 'suggestions-1', label: 'Review current usage', prompt: 'Review current usage', behavior: 'send' }, { id: 'suggestions-2', label: 'Explain available tests', prompt: 'Explain available tests', behavior: 'fill' }], empty: false },
+        { id: 'account', label: 'Account', kind: 'fields', items: [{ id: 'plan', label: 'Plan', value: 'Free', format: 'text' }, { id: 'region', label: 'Region', value: 'Taiwan', format: 'text' }], empty: false },
+        { id: 'quota', label: 'Usage', kind: 'meter', value: 48, max: 100, resetAt: '2026-12-31T16:00:00.000Z', unit: 'requests', empty: false },
+        { id: 'health', label: 'Service', kind: 'status', value: 'Available', tone: 'success', empty: false }
+      ] } } : {}),
       normalizedEvents: rawEvents.map((item) => ({ version: 1, type: item.sse.event, sequence: item.sequence, rawSequence: item.sequence, turnId: item.turnId, turnIndex: item.turnIndex, turnSequence: item.turnSequence, receivedAt: item.receivedAt })),
       messages: [
         { id: 'user-context', role: 'user', status: 'completed', createdAt: 900, parts: [{ type: 'text', text: 'Explain the safety boundary before the probe.' }], citations: [], actions: [], followups: [], metadata: { clientRequestId: 'visual-turn-1', rawSequences: [1, 2, 3] } },

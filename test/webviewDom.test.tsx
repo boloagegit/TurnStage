@@ -38,6 +38,32 @@ describe('Webview DOM behavior', () => {
     expect(within(opening).queryByText('Assistant')).toBeNull();
   });
 
+  it('renders bounded opening response blocks and keeps choice behavior interactive', async () => {
+    const user = userEvent.setup();
+    const setDraft = vi.fn();
+    const send = vi.fn();
+    const openingProfile: TurnStageProfile = { ...profile, opening: { mode: 'request' } };
+    const openingSnapshot: SessionSnapshot = { ...snapshot, opening: {
+      message: 'Welcome.', starters: [], blocks: [
+        { id: 'suggestions', label: 'Suggested questions', kind: 'choices', items: [{ id: 'suggestions-1', label: 'Review usage', prompt: 'Explain my usage', behavior: 'fill' }], empty: false },
+        { id: 'account', label: 'Account', kind: 'fields', items: [{ id: 'plan', label: 'Plan', value: 'Free', format: 'text' }], empty: false },
+        { id: 'quota', label: 'Usage', kind: 'meter', value: 48, max: 100, resetAt: '2026-09-04T00:00:00.000Z', unit: 'requests', empty: false },
+        { id: 'health', label: 'Service', kind: 'status', value: 'Available', tone: 'success', empty: false },
+        { id: 'details', label: 'Details', kind: 'json', value: { model: 'fixture' }, defaultCollapsed: true, empty: false },
+      ],
+    } };
+    render(<MobileChatPreview {...mobileProps({ profile: openingProfile, snapshot: openingSnapshot, setDraft, send })} />);
+
+    expect(screen.getByText('Suggested questions')).toBeTruthy();
+    expect(screen.getByText('Free')).toBeTruthy();
+    expect(screen.getByRole('progressbar', { name: 'Usage' }).getAttribute('value')).toBe('48');
+    expect(screen.getByText('Available')).toBeTruthy();
+    expect(screen.getByText('Details')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Review usage' }));
+    expect(setDraft).toHaveBeenCalledWith('Explain my usage');
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('switches viewport presets, accepts custom dimensions, rotates, and changes zoom', async () => {
     const user = userEvent.setup();
     const onViewportChange = vi.fn();
@@ -827,6 +853,25 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'messageActionVisibility'], value: 'interaction' });
     await user.click(screen.getByRole('button', { name: 'Add tag rule' }));
     expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['ui', 'messageTags'], value: [expect.objectContaining({ id: 'tag-1', source: 'normalizedEvent', path: 'type', operator: 'equals' })] });
+  });
+
+  it('configures opening response blocks without editing raw JSON', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured: TurnStageProfile = { ...profile, opening: { mode: 'request', response: { messagePath: '$.content', startersPath: '$.options', blocks: [
+      { id: 'quota', label: 'Usage', kind: 'meter', path: '$.quota', valuePath: '$.used', maxPath: '$.limit', resetAtPath: '$.resetAt' },
+    ] } } };
+    render(<SettingsWorkspace section="opening-flow" onSectionChange={vi.fn()} profile={configured} post={post} />);
+
+    expect((screen.getByRole('textbox', { name: 'Opening message path' }) as HTMLInputElement).value).toBe('$.content');
+    expect((screen.getByRole('combobox', { name: 'Block type' }) as HTMLSelectElement).value).toBe('meter');
+    expect((screen.getByRole('textbox', { name: 'Current value path' }) as HTMLInputElement).value).toBe('$.used');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'New response block type' }), 'status');
+    await user.click(screen.getByRole('button', { name: 'Add block' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['opening', 'response', 'blocks'], value: [
+      configured.opening!.response!.blocks![0],
+      expect.objectContaining({ id: 'status', kind: 'status', path: '$', valuePath: '$', tone: 'neutral' }),
+    ] });
   });
 
   it('adds a conversation contract through the Scenarios configuration surface', async () => {

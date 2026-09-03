@@ -74,8 +74,9 @@ async function handleContractOpening(response, body, mode) {
       openingMessage: 'Hello, I am a synthetic test assistant. How can I help?',
       optionsInfo: [
         'Show a sample overview',
-        { id: 'required-inputs', label: 'Which inputs are required?', prompt: 'Which inputs are required?', behavior: 'send' },
+        { option: 'Which inputs are required?' },
       ],
+      quota: { used: 48, limit: 100, resetAt: '2026-12-31T16:00:00.000Z' },
     });
   }
   return json(response, 200, { code: 7021, message: 'No configured opening message' });

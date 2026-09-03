@@ -5,13 +5,14 @@
  * no precomputed or representative numbers.
  */
 import { bench, describe } from 'vitest';
-import type { ChatMessage, RawStreamEvent, SessionSnapshot, StreamDefinition } from '../src/shared/types';
+import type { ChatMessage, OpeningResponseBlockDefinition, RawStreamEvent, SessionSnapshot, StreamDefinition } from '../src/shared/types';
 import { MappingEngine } from '../src/extension/mapping/mappingEngine';
 import { NdjsonParser, SseParser } from '../src/extension/transport/streamParser';
 import { EventBuffer } from '../src/extension/runtime/eventBuffer';
 import { createSnapshot, reduceEvent } from '../src/extension/runtime/reducer';
 import { applySessionDelta, SessionDeltaTracker } from '../src/shared/sessionDelta';
 import { advanceGraphemeBoundary, calculateRevealStep } from '../src/webview/streamingReveal';
+import { normalizeOpeningResponseBlocks } from '../src/extension/opening/responseBlockNormalizer';
 
 const sseChunks = [
   'event: message\ndata: {"text":"first"}\n\n',
@@ -48,6 +49,20 @@ const benchmarkTracker = new SessionDeltaTracker();
 benchmarkTracker.checkpoint({ snapshot: benchmarkSnapshot, runs: [], networkEntries: [] });
 const benchmarkDelta = benchmarkTracker.next({ snapshot: benchmarkNextSnapshot, runs: [], networkEntries: [] })!;
 const largeRevealText = '回'.repeat(1_000_000);
+const openingPayload = {
+  options: Array.from({ length: 20 }, (_, index) => ({ label: `Option ${index + 1}`, prompt: `Run option ${index + 1}` })),
+  account: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`field${index + 1}`, `Value ${index + 1}`])),
+  quota: { used: 48, limit: 100, resetAt: '2026-12-31T16:00:00.000Z' },
+  status: 'Available',
+  details: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`group${index + 1}`, Array.from({ length: 20 }, (__, child) => ({ child, value: 'x'.repeat(32) }))])),
+};
+const openingDefinitions: OpeningResponseBlockDefinition[] = [
+  { id: 'choices', kind: 'choices', path: '$.options', itemLabelPath: '$.label', itemPromptPath: '$.prompt' },
+  { id: 'fields', kind: 'fields', path: '$.account', fields: Array.from({ length: 20 }, (_, index) => ({ id: `field${index + 1}`, label: `Field ${index + 1}`, path: `$.field${index + 1}` })) },
+  { id: 'meter', kind: 'meter', path: '$.quota', valuePath: '$.used', maxPath: '$.limit', resetAtPath: '$.resetAt' },
+  { id: 'status', kind: 'status', path: '$.status' },
+  ...Array.from({ length: 4 }, (_, index): OpeningResponseBlockDefinition => ({ id: `json${index + 1}`, kind: 'json', path: '$.details' })),
+];
 
 describe('TurnStage stream benchmarks', () => {
   bench('parse representative SSE chunks', () => {
@@ -116,5 +131,9 @@ describe('TurnStage stream benchmarks', () => {
       const step = calculateRevealStep(largeRevealText.length - position, 600, 36, elapsed);
       position = advanceGraphemeBoundary(largeRevealText, position, step);
     }
+  });
+
+  bench('normalize the maximum configured opening response', () => {
+    normalizeOpeningResponseBlocks(openingPayload, openingDefinitions);
   });
 });

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.22.5
+
+- Blocked VS Code lifecycle commands from Profile actions and contained
+  background refresh, Webview post, and disposal failures so they are logged
+  without becoming unhandled Extension Host rejections.
+
+- Added bounded Opening response blocks so provider-specific `optionsInfo`,
+  quota, account fields, status, and JSON details can be mapped into canonical
+  theme-aware UI without custom code. Configure now provides structured block
+  and field controls while existing message and starter paths remain compatible.
+
 ## 0.22.4
 
 - Added direct structured editing for an individual case in a linked adversarial

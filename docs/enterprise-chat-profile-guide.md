@@ -23,7 +23,10 @@ environment supplies this as `${env.baseUrl}`; it contains no credential.
 The opening request is configured under `opening.request` and posts the actor,
 task, block, tags, and opening-message arguments to `/v1/chat/opening`. A `7021`
 response selects the configured fallback greeting. `optionsInfo`, when present,
-becomes starter prompts through `opening.response.startersPath`.
+becomes starter prompts through `opening.response.startersPath`, or can be
+rendered through a bounded `choices` response block when each item uses a
+provider-specific shape. Quota and account metadata can use `meter` and
+`fields` blocks without changing the response schema.
 
 The first send variant is selected while `conversation.id` does not exist. It
 sends the trimmed input, displayed opening message, and synthetic conversation

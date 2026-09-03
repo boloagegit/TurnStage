@@ -335,7 +335,28 @@ valid option.
     },
     "response": {
       "messagePath": "$.message",
-      "startersPath": "$.options"
+      "startersPath": "$.options",
+      "blocks": [
+        {
+          "id": "suggestions",
+          "label": "Suggested questions",
+          "kind": "choices",
+          "path": "$.optionsInfo",
+          "itemLabelPath": "$.option",
+          "itemPromptPath": "$.option",
+          "behavior": "send"
+        },
+        {
+          "id": "quota",
+          "label": "Usage",
+          "kind": "meter",
+          "path": "$.quota",
+          "valuePath": "$.used",
+          "maxPath": "$.limit",
+          "resetAtPath": "$.resetAt",
+          "unit": "requests"
+        }
+      ]
     },
     "fallbacks": [{
       "message": "Hello, I am a test assistant. What would you like to explore?",
@@ -364,6 +385,27 @@ against response data, HTTP status, missing-message state, or error type. An
 unconditional fallback acts as a catch-all. When `allowRetry` is enabled, a
 failed opening exposes Retry; configured fallback and request-inspection
 actions are also shown when applicable.
+
+`response.blocks` is optional and does not replace `messagePath` or
+`startersPath`. It maps backend-specific response data into one of five
+canonical presentation types:
+
+- `choices`: an array of suggested prompts, with relative item label/prompt
+  paths and `send` or `fill` behavior;
+- `fields`: up to 20 labelled values with `text`, `number`, `datetime`, or
+  `percent` display formats;
+- `meter`: finite current and maximum values, with optional unit and reset time;
+- `status`: a scalar value with a configured neutral, info, success, warning,
+  or error tone;
+- `json`: a bounded, syntax-highlighted details disclosure.
+
+Every block has an ID, data path, optional label, and `emptyPolicy` (`hide` by
+default or `show`). Paths use bounded dotted lookup syntax and `$` means the
+selected value's root. A Profile can define at most 8 blocks. Runtime
+normalization retains at most 20 items per block, limits text and JSON depth,
+redacts sensitive JSON keys, and never accepts backend HTML, CSS, commands, or
+scripts. **Configure → Opening & Flow** provides structured controls for this
+contract; direct JSONC editing remains available.
 
 Starters have `id`, `label`, `prompt`, and `behavior` (`send`, `fill`, or
 `action`), with an optional `actionId`. `send` submits immediately, while
@@ -553,7 +595,8 @@ active-turn locks.
 
 `security` accepts `allowedUriSchemes` (`https`, `http`, `file`),
 `allowedDomains`, and `allowedCommands`. URI and command checks are host-side;
-see [security.md](security.md).
+known commands that reload, restart, replace, or close the current VS Code
+window are rejected even when allowlisted. See [security.md](security.md).
 
 `metrics.enabled` is a unique string array for run-level metric presentation.
 `metrics.messageEnabled` optionally restricts which metrics are rendered below

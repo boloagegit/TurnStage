@@ -635,6 +635,22 @@ try {
   await page.getByLabel('Assistant streaming indicator').scrollIntoViewIfNeeded();
   await page.screenshot({ path: resolve(artifactDirectory, 'chat-ui-streaming-settings-dark.png'), fullPage: true });
 
+  await page.goto(`${url}?openingBlocks=true&section=opening-flow`);
+  await waitForProfile();
+  const openingBlocks = page.locator('.mobile-chat-preview__opening-block');
+  assert.equal(await openingBlocks.count(), 4, 'Opening must render choices, fields, meter, and status from one canonical block list');
+  assert.equal(await page.getByRole('progressbar', { name: 'Usage' }).getAttribute('value'), '48', 'Opening meter must expose the provider quota value');
+  assert.equal(await page.getByRole('button', { name: 'Review current usage' }).count(), 1, 'Opening choices must remain directly interactive');
+  await page.locator('.mobile-chat-preview__opening').screenshot({ path: resolve(artifactDirectory, 'opening-response-blocks-dark.png') });
+  assert.equal(await page.locator('.opening-response-block').count(), 3, 'Opening configuration must expose each response block through structured controls');
+  assert.equal(await page.getByRole('combobox', { name: 'Block type', exact: true }).count(), 1, 'Only the initially expanded response block should mount its detailed controls');
+  await page.locator('.opening-response-block').first().locator('.opening-response-block__toggle').click();
+  assert.equal(await page.getByRole('combobox', { name: 'Block type', exact: true }).count(), 0, 'An expanded response block must collapse back to a compact row');
+  await page.locator('.opening-response-block').filter({ hasText: 'Usage' }).locator('.opening-response-block__toggle').click();
+  assert.equal(await page.getByRole('combobox', { name: 'Block type', exact: true }).count(), 1, 'A compact response block row must expand its detailed controls on demand');
+  await page.locator('.opening-response-blocks__toolbar').scrollIntoViewIfNeeded();
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'opening-response-block-settings-dark.png') });
+
   await page.goto(url);
   await waitForProfile();
 

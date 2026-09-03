@@ -56,6 +56,15 @@ describe('ProfileValidator', () => {
     expect(new ProfileValidator().validate(validProfile(), undefined, environments)).toEqual([]);
   });
 
+  it('rejects allowlisted commands that can replace or restart the VS Code window', () => {
+    const profile = validProfile();
+    profile.security = { allowedCommands: ['workbench.action.files.openFile', 'workbench.action.reloadWindow'] };
+
+    expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain(
+      'Command workbench.action.reloadWindow is blocked because it can reload, restart, or close VS Code.',
+    );
+  });
+
   it('accepts a valid declarative scenario with step and profile assertions', () => {
     const profile = validProfile();
     profile.controls = [
@@ -459,6 +468,38 @@ describe('ProfileValidator', () => {
       'Template path "env.missing" references an unknown environment variable.',
       'Unknown starter action id: unknown.action.',
       'Duplicate action id: same-action.',
+    ]));
+  });
+
+  it('accepts bounded opening response blocks and rejects unsafe or ambiguous definitions', () => {
+    const valid = validProfile();
+    valid.opening = { mode: 'request', response: { messagePath: '$.content', blocks: [
+      { id: 'suggestions', kind: 'choices', path: '$.optionsInfo', itemLabelPath: '$.option', itemPromptPath: '$.option' },
+      { id: 'quota', kind: 'meter', path: '$.quota', valuePath: '$.used', maxPath: '$.limit' },
+    ] } };
+    expect(new ProfileValidator().validate(valid)).toEqual([]);
+
+    const duplicatedLegacyPath = validProfile();
+    duplicatedLegacyPath.opening = { mode: 'request', response: { startersPath: '$.optionsInfo', blocks: [
+      { id: 'suggestions', kind: 'choices', path: '$.optionsInfo' },
+    ] } };
+    expect(new ProfileValidator().validate(duplicatedLegacyPath)).toContainEqual(expect.objectContaining({
+      severity: 'warning',
+      message: 'Opening choices block duplicates the legacy starter path and may render the same options twice.',
+    }));
+
+    const invalid = validProfile();
+    invalid.opening = { mode: 'request', response: { blocks: [
+      { id: 'duplicate', kind: 'fields', path: '$.account', fields: [{ id: 'same', label: '', path: '$.__proto__' }, { id: 'same', label: 'Plan', path: '$.plan' }] },
+      { id: 'duplicate', kind: 'meter', path: '$.quota', valuePath: '$.constructor', maxPath: '' },
+    ] } };
+    const messages = new ProfileValidator().validate(invalid).map((entry) => entry.message);
+    expect(messages).toEqual(expect.arrayContaining([
+      'Opening field label must contain 1 to 80 characters.',
+      'Opening field path must be a safe dotted path.',
+      'Duplicate opening field id: same.',
+      'Opening meter path must be a safe dotted path.',
+      'Duplicate opening block id: duplicate.',
     ]));
   });
 

@@ -1,8 +1,8 @@
 import React, { useEffect, useId, useState } from 'react';
 import type { MappingTestInput, MappingTestResult, WebviewPayload } from '../shared/protocol';
-import type { MappingRule, MessageTagRule, RawStreamEvent, RequestVariant, TurnStageProfile } from '../shared/types';
+import type { MappingRule, MessageTagRule, OpeningResponseBlockDefinition, OpeningResponseBlockKind, OpeningResponseFieldDefinition, RawStreamEvent, RequestVariant, TurnStageProfile } from '../shared/types';
 import { formatNumber, localizeHumanized, t } from './i18n';
-import { IconButton } from './Icon';
+import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
 import { JsonSyntax } from './JsonViewer';
 import { DEFAULT_MESSAGE_ACTIONS, resolveMessageActionVisibility, resolveStreaming, type MessageActionId } from './uiConfig';
@@ -74,8 +74,10 @@ export function FlowEditor({ profile, post }: { profile: TurnStageProfile; post:
           <Field label={t('Opening request (JSON)')} hint={t('Uses the same request contract as conversation requests, without variants.')} wide>
             <JsonPatchEditor ariaLabel={t('Opening request JSON')} value={profile.opening?.request ?? { method: 'POST', url: '' }} onCommit={(value) => patch(['opening', 'request'], value)} />
           </Field>
-          <Field label={t('Opening response paths (JSON)')} hint={t('Map the response message and starter prompts from the opening response.')} wide>
-            <JsonPatchEditor ariaLabel={t('Opening response paths JSON')} value={profile.opening?.response ?? { messagePath: '$.message', startersPath: '$.starters' }} onCommit={(value) => patch(['opening', 'response'], value)} />
+          <Field label={t('Opening message path')} hint={t('Required text shown before the first turn.')}><PatchText aria-label={t('Opening message path')} value={profile.opening?.response?.messagePath ?? '$.message'} spellCheck={false} onCommit={(value) => patch(['opening', 'response', 'messagePath'], value)} /></Field>
+          <Field label={t('Legacy starter path')} hint={t('Existing starter mappings remain supported. Do not map the same choices through both the legacy path and a response block.')}><PatchText aria-label={t('Legacy starter path')} value={profile.opening?.response?.startersPath ?? '$.options'} spellCheck={false} onCommit={(value) => patch(['opening', 'response', 'startersPath'], value)} /></Field>
+          <Field label={t('Additional response blocks')} hint={t('Map provider-specific choices, fields, quota, status, or JSON into bounded opening UI.')} wide>
+            <OpeningResponseBlocksEditor blocks={profile.opening?.response?.blocks ?? []} onChange={(blocks) => patch(['opening', 'response', 'blocks'], blocks)} />
           </Field>
           <Field label={t('Opening fallbacks (JSON)')} hint={t('Fallback entries are evaluated in declaration order.')} wide>
             <JsonPatchEditor ariaLabel={t('Opening fallbacks JSON')} value={profile.opening?.fallbacks ?? []} onCommit={(value) => patch(['opening', 'fallbacks'], value)} />
@@ -159,6 +161,79 @@ export function FlowEditor({ profile, post }: { profile: TurnStageProfile; post:
 
     <p className="muted">{t('All changes use WorkspaceEdit and participate in VS Code Undo/Redo. Comments and surrounding JSONC formatting are preserved where the parser can make a local edit.')}</p>
   </div>;
+}
+
+function OpeningResponseBlocksEditor({ blocks, onChange }: { blocks: OpeningResponseBlockDefinition[]; onChange: (blocks: OpeningResponseBlockDefinition[]) => void }): React.JSX.Element {
+  const [newKind, setNewKind] = useState<OpeningResponseBlockKind>('choices');
+  const replace = (index: number, block: OpeningResponseBlockDefinition) => onChange(blocks.map((item, itemIndex) => itemIndex === index ? block : item));
+  const remove = (index: number) => onChange(blocks.filter((_, itemIndex) => itemIndex !== index));
+  const move = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= blocks.length) return;
+    const next = [...blocks]; [next[index], next[target]] = [next[target]!, next[index]!]; onChange(next);
+  };
+  const add = () => {
+    const id = uniqueId(blocks.map((block) => block.id), newKind === 'meter' ? 'usage' : newKind);
+    onChange([...blocks, createOpeningBlock(newKind, id)]);
+  };
+  return <div className="opening-response-blocks">
+    <div className="opening-response-blocks__toolbar"><span>{blocks.length === 1 ? t('{count} response block', { count: formatNumber(blocks.length) }) : t('{count} response blocks', { count: formatNumber(blocks.length) })}</span><div><select aria-label={t('New response block type')} value={newKind} onChange={(event) => setNewKind(event.target.value as OpeningResponseBlockKind)}>{openingBlockKinds.map((kind) => <option value={kind} key={kind}>{openingBlockKindLabel(kind)}</option>)}</select><button type="button" disabled={blocks.length >= 8} onClick={add}>{t('Add block')}</button></div></div>
+    {blocks.length ? <ol className="opening-response-blocks__list">{blocks.map((block, index) => <li key={`${block.id}-${index}`}><OpeningResponseBlockCard block={block} index={index} count={blocks.length} onChange={(value) => replace(index, value)} onMove={(direction) => move(index, direction)} onDelete={() => remove(index)} /></li>)}</ol> : <div className="empty-state compact"><strong>{t('No additional response blocks')}</strong><p>{t('The opening message and legacy starter path still work normally.')}</p></div>}
+    {blocks.length >= 8 ? <p className="field-hint">{t('Opening responses are limited to 8 blocks.')}</p> : null}
+  </div>;
+}
+
+const openingBlockKinds: OpeningResponseBlockKind[] = ['choices', 'fields', 'meter', 'status', 'json'];
+function openingBlockKindLabel(kind: OpeningResponseBlockKind): string {
+  return t(kind === 'choices' ? 'Choices' : kind === 'fields' ? 'Fields' : kind === 'meter' ? 'Meter' : kind === 'status' ? 'Status' : 'JSON details');
+}
+
+function createOpeningBlock(kind: OpeningResponseBlockKind, id: string): OpeningResponseBlockDefinition {
+  const base = { id, label: '', path: '$', emptyPolicy: 'hide' as const };
+  if (kind === 'choices') return { ...base, kind, itemLabelPath: '$.label', itemPromptPath: '$.prompt', behavior: 'send' };
+  if (kind === 'fields') return { ...base, kind, fields: [{ id: 'value', label: t('Value'), path: '$.value', format: 'text' }] };
+  if (kind === 'meter') return { ...base, kind, valuePath: '$.used', maxPath: '$.limit', resetAtPath: '$.resetAt' };
+  if (kind === 'status') return { ...base, kind, valuePath: '$', tone: 'neutral' };
+  return { ...base, kind, defaultCollapsed: true };
+}
+
+function OpeningResponseBlockCard({ block, index, count, onChange, onMove, onDelete }: { block: OpeningResponseBlockDefinition; index: number; count: number; onChange: (block: OpeningResponseBlockDefinition) => void; onMove: (direction: -1 | 1) => void; onDelete: () => void }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(index === 0);
+  const changeKind = (kind: OpeningResponseBlockKind) => onChange({ ...createOpeningBlock(kind, block.id), label: block.label, path: block.path, emptyPolicy: block.emptyPolicy });
+  const update = (value: Partial<OpeningResponseBlockDefinition>) => onChange({ ...block, ...value } as OpeningResponseBlockDefinition);
+  return <article className="opening-response-block">
+    <header><button type="button" className="opening-response-block__toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}><ProductIcon name={expanded ? 'chevron-down' : 'chevron-right'} /><span><strong>{block.label || openingBlockKindLabel(block.kind)}</strong><code>{block.id} · {openingBlockKindLabel(block.kind)}</code></span></button><div><IconButton type="button" icon="arrow-up" label={t('Move block up')} disabled={index === 0} onClick={() => onMove(-1)} /><IconButton type="button" icon="arrow-down" label={t('Move block down')} disabled={index === count - 1} onClick={() => onMove(1)} /><IconButton type="button" icon="trash" label={t('Delete response block')} onClick={onDelete} /></div></header>
+    {expanded && <div className="form-grid opening-response-block__fields">
+      <Field label={t('Block type')}><select aria-label={t('Block type')} value={block.kind} onChange={(event) => changeKind(event.target.value as OpeningResponseBlockKind)}>{openingBlockKinds.map((kind) => <option value={kind} key={kind}>{openingBlockKindLabel(kind)}</option>)}</select></Field>
+      <Field label={t('Block ID')}><PatchText aria-label={t('Block ID')} value={block.id} spellCheck={false} onCommit={(id) => update({ id })} /></Field>
+      <Field label={t('Label')} hint={t('Optional heading shown above the block.')}><PatchText aria-label={t('Response block label')} value={block.label ?? ''} onCommit={(label) => update({ label: label || undefined })} /></Field>
+      <Field label={t('Data path')} hint={t('Dotted path in the opening response; use $ for its root.')}><PatchText aria-label={t('Response block data path')} value={block.path} spellCheck={false} onCommit={(path) => update({ path })} /></Field>
+      <Field label={t('When data is empty')}><select aria-label={t('Empty response block behavior')} value={block.emptyPolicy ?? 'hide'} onChange={(event) => update({ emptyPolicy: event.target.value as 'hide' | 'show' })}><option value="hide">{t('Hide block')}</option><option value="show">{t('Show empty state')}</option></select></Field>
+      {block.kind === 'choices' && <>
+        <Field label={t('Choice label path')}><PatchText aria-label={t('Choice label path')} value={block.itemLabelPath ?? '$.label'} spellCheck={false} onCommit={(itemLabelPath) => onChange({ ...block, itemLabelPath })} /></Field>
+        <Field label={t('Choice prompt path')}><PatchText aria-label={t('Choice prompt path')} value={block.itemPromptPath ?? '$.prompt'} spellCheck={false} onCommit={(itemPromptPath) => onChange({ ...block, itemPromptPath })} /></Field>
+        <Field label={t('Choice behavior')}><select aria-label={t('Choice behavior')} value={block.behavior ?? 'send'} onChange={(event) => onChange({ ...block, behavior: event.target.value as 'send' | 'fill' })}><option value="send">{t('Send immediately')}</option><option value="fill">{t('Fill composer')}</option></select></Field>
+      </>}
+      {block.kind === 'fields' && <Field label={t('Displayed fields')} hint={t('Each field reads a path relative to the block data path.')} wide><OpeningResponseFieldsEditor fields={block.fields} onChange={(fields) => onChange({ ...block, fields })} /></Field>}
+      {block.kind === 'meter' && <>
+        <Field label={t('Current value path')}><PatchText aria-label={t('Current value path')} value={block.valuePath} spellCheck={false} onCommit={(valuePath) => onChange({ ...block, valuePath })} /></Field>
+        <Field label={t('Maximum value path')}><PatchText aria-label={t('Maximum value path')} value={block.maxPath} spellCheck={false} onCommit={(maxPath) => onChange({ ...block, maxPath })} /></Field>
+        <Field label={t('Reset time path')}><PatchText aria-label={t('Reset time path')} value={block.resetAtPath ?? ''} spellCheck={false} onCommit={(resetAtPath) => onChange({ ...block, resetAtPath: resetAtPath || undefined })} /></Field>
+        <Field label={t('Unit')}><PatchText aria-label={t('Meter unit')} value={block.unit ?? ''} onCommit={(unit) => onChange({ ...block, unit: unit || undefined })} /></Field>
+      </>}
+      {block.kind === 'status' && <>
+        <Field label={t('Status value path')}><PatchText aria-label={t('Status value path')} value={block.valuePath ?? '$'} spellCheck={false} onCommit={(valuePath) => onChange({ ...block, valuePath })} /></Field>
+        <Field label={t('Status tone')}><select aria-label={t('Status tone')} value={block.tone ?? 'neutral'} onChange={(event) => onChange({ ...block, tone: event.target.value as NonNullable<typeof block.tone> })}>{(['neutral', 'info', 'success', 'warning', 'error'] as const).map((tone) => <option key={tone} value={tone}>{localizeHumanized(tone)}</option>)}</select></Field>
+      </>}
+      {block.kind === 'json' && <Field label={t('JSON details')}><Checkbox label={t('Collapsed by default')} checked={block.defaultCollapsed ?? true} onChange={(defaultCollapsed) => onChange({ ...block, defaultCollapsed })} /></Field>}
+    </div>}
+  </article>;
+}
+
+function OpeningResponseFieldsEditor({ fields, onChange }: { fields: OpeningResponseFieldDefinition[]; onChange: (fields: OpeningResponseFieldDefinition[]) => void }): React.JSX.Element {
+  const replace = (index: number, field: OpeningResponseFieldDefinition) => onChange(fields.map((item, itemIndex) => itemIndex === index ? field : item));
+  const add = () => { const id = uniqueId(fields.map((field) => field.id), 'field'); onChange([...fields, { id, label: t('Field'), path: '$.value', format: 'text' }]); };
+  return <div className="opening-response-fields"><div className="opening-response-fields__heading"><span>{fields.length === 1 ? t('{count} field', { count: formatNumber(fields.length) }) : t('{count} fields', { count: formatNumber(fields.length) })}</span><button type="button" disabled={fields.length >= 20} onClick={add}>{t('Add field')}</button></div>{fields.map((field, index) => <div className="opening-response-field" key={`${field.id}-${index}`}><PatchText aria-label={t('Field ID')} value={field.id} spellCheck={false} onCommit={(id) => replace(index, { ...field, id })} /><PatchText aria-label={t('Field label')} value={field.label} onCommit={(label) => replace(index, { ...field, label })} /><PatchText aria-label={t('Field path')} value={field.path} spellCheck={false} onCommit={(path) => replace(index, { ...field, path })} /><select aria-label={t('Field format')} value={field.format ?? 'text'} onChange={(event) => replace(index, { ...field, format: event.target.value as OpeningResponseFieldDefinition['format'] })}>{(['text', 'number', 'datetime', 'percent'] as const).map((format) => <option key={format} value={format}>{localizeHumanized(format)}</option>)}</select><IconButton type="button" icon="trash" label={t('Delete field')} onClick={() => onChange(fields.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</div>;
 }
 
 function VariantCard({ index, variant, post, onDelete }: { index: number; variant: RequestVariant; post: Post; onDelete: (index: number) => void }): React.JSX.Element {

@@ -14,6 +14,7 @@ import { createSnapshot, reduceEvent, resetReducerState } from './reducer';
 import { ReplayEngine, type ReplaySpeed } from '../replay/replayEngine';
 import { selectOpeningFallback } from '../opening/fallbackResolver';
 import { normalizeOpeningStarters } from '../opening/starterNormalizer';
+import { normalizeOpeningResponseBlocks } from '../opening/responseBlockNormalizer';
 import { localize } from '../l10n';
 import { diagnosticUrl, diagnosticValue, logAt } from '../logging';
 import { extractNetworkCorrelation, mergeNetworkCorrelation } from '../observability/correlation';
@@ -239,9 +240,10 @@ export class SessionController implements vscode.Disposable {
       const starters = getPath(data, opening.response?.startersPath ?? '$.options');
       if (typeof message !== 'string') { const fallback = selectOpeningFallback(opening, data, { status: response.status, missingMessage: true }); if (fallback) { this.finishNetworkExchange(networkEntry, 'completed'); logAt(this.log, 'warn', `[${logId}] fallback reason=missing-message elapsed=${formatDuration(Date.now() - startedAt)}`); this.useOpeningFallback(fallback); return; } throw new TurnStageError('OpeningError', localize('Opening response did not contain a message.')); }
       const normalizedStarters = normalizeOpeningStarters(starters);
-      this.snapshot.opening = this.publicValue({ message, starters: normalizedStarters }); this.snapshot.sessionState = 'ready';
+      const blocks = normalizeOpeningResponseBlocks(data, opening.response?.blocks);
+      this.snapshot.opening = this.publicValue({ message, starters: normalizedStarters, ...(blocks.length ? { blocks } : {}) }); this.snapshot.sessionState = 'ready';
       this.finishNetworkExchange(networkEntry, 'completed');
-      logAt(this.log, 'info', `[${logId}] completed elapsed=${formatDuration(Date.now() - startedAt)} starters=${normalizedStarters.length}`);
+      logAt(this.log, 'info', `[${logId}] completed elapsed=${formatDuration(Date.now() - startedAt)} starters=${normalizedStarters.length} blocks=${blocks.length}`);
     } catch (error) {
       this.finishNetworkExchange(networkEntry, 'failed', error);
       logAt(this.log, 'error', `[${logId}] failed ${scope} phase=${phase} type=${errorType(error)}${errorStatus(error)} elapsed=${formatDuration(Date.now() - startedAt)}${errorEvidence(error)}${safeErrorMessage(error, (value) => this.publicValue(value))}`);
@@ -543,7 +545,7 @@ export class SessionController implements vscode.Disposable {
     this.currentTurn = undefined;
   }
 
-  dispose(): void { void this.disposeAndWait(); }
+  dispose(): void { void this.disposeAndWait().catch((error) => logAt(this.log, 'error', () => `[session] disposal failed type=${errorType(error)}`)); }
   async disposeAndWait(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
@@ -551,7 +553,10 @@ export class SessionController implements vscode.Disposable {
     this.openingAbortController?.abort(new TurnStageError('PanelDisposedError', localize('The editor panel was closed.')));
     this.stopAbortController?.abort(new TurnStageError('PanelDisposedError', localize('The editor panel was closed.')));
     this.abortController?.abort(new TurnStageError('PanelDisposedError', localize('The editor panel was closed.')));
-    if (isActive(this.snapshot.turnState)) await this.finalizeTurn({ type: 'aborted', reason: 'panel_disposed' });
+    if (isActive(this.snapshot.turnState)) {
+      try { await this.finalizeTurn({ type: 'aborted', reason: 'panel_disposed' }); }
+      catch (error) { logAt(this.log, 'error', () => `[session] disposal finalization failed type=${errorType(error)}`); }
+    }
     const pending = [this.activeRequest, this.activeStop, this.replayTask].filter((operation): operation is Promise<void> => Boolean(operation));
     if (pending.length) await Promise.allSettled(pending);
   }

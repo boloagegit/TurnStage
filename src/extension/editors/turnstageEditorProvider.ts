@@ -31,6 +31,7 @@ import { ExternalAdversarialSuiteRepository, isExternalAdversarialSuiteReference
 import { loadLinkedAdversarialCaseCatalog } from '../testing/adversarialCatalog';
 import { LinkedAdversarialCaseConflictError, loadEditableLinkedAdversarialCase, saveEditableLinkedAdversarialCase } from '../testing/linkedAdversarialCase';
 import { SessionDeltaTracker } from '../../shared/sessionDelta';
+import { isBlockedLifecycleCommand } from '../../shared/vscodeCommandPolicy';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -84,6 +85,11 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         if (disposed || isDisposedWebviewError(error)) return false;
         throw error;
       }
+    };
+    const observeBackground = (operation: PromiseLike<unknown>, action: string): void => {
+      void Promise.resolve(operation).catch((error) => {
+        if (!disposed) logAt(this.output, 'error', () => `[editor] background=${action} type=${error instanceof Error ? error.name : 'Error'}`);
+      });
     };
     const registerArtifact = (uri: vscode.Uri, openUri = uri): { artifactId: string; path: string } => {
       const artifactId = crypto.randomUUID();
@@ -167,7 +173,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       else { sessionDeltaTracker.checkpoint(payload); queueSessionPost(payload); }
     }, boundedNumber(vscode.workspace.getConfiguration('turnstage').get('streamBatchIntervalMs', 32), 16, 1000, 32), Number.MAX_SAFE_INTEGER);
     const syncTurnActiveContext = () => {
-      if (panel.active) void vscode.commands.executeCommand('setContext', 'turnstage.turnActive', Boolean(controller && isActive(controller.snapshot.turnState)));
+      if (panel.active) observeBackground(vscode.commands.executeCommand('setContext', 'turnstage.turnActive', Boolean(controller && isActive(controller.snapshot.turnState))), 'set-context');
     };
     const sendSession = (immediate = false) => { latestConnectionResult = undefined; if (controller) sessionBatcher.add(undefined, immediate); syncTurnActiveContext(); };
     const load = async () => {
@@ -223,15 +229,15 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       await postFullSession();
     };
     const scheduleLoad = () => { if (loadTimer) clearTimeout(loadTimer); loadTimer = setTimeout(() => { loadTimer = undefined; void load().catch((error) => logAt(this.output, 'error', `[editor] ${error instanceof Error ? error.stack ?? error.message : String(error)}`)); }, DOCUMENT_CHANGE_DEBOUNCE_MS); };
-    const documentListener = vscode.workspace.onDidChangeTextDocument((event) => { if (event.document.uri.toString() === document.uri.toString()) { void post({ type: 'profile.editState', dirty: true }); scheduleLoad(); } });
-    const saveListener = vscode.workspace.onDidSaveTextDocument((saved) => { if (saved.uri.toString() === document.uri.toString()) void post({ type: 'profile.editState', dirty: false }); });
-    const trustListener = vscode.workspace.onDidGrantWorkspaceTrust(() => { if (controller) controller.snapshot.trusted = true; void post({ type: 'workspaceTrust.changed', trusted: true }); sendSession(); });
+    const documentListener = vscode.workspace.onDidChangeTextDocument((event) => { if (event.document.uri.toString() === document.uri.toString()) { observeBackground(post({ type: 'profile.editState', dirty: true }), 'document-change'); scheduleLoad(); } });
+    const saveListener = vscode.workspace.onDidSaveTextDocument((saved) => { if (saved.uri.toString() === document.uri.toString()) observeBackground(post({ type: 'profile.editState', dirty: false }), 'document-save'); });
+    const trustListener = vscode.workspace.onDidGrantWorkspaceTrust(() => { if (controller) controller.snapshot.trusted = true; observeBackground(post({ type: 'workspaceTrust.changed', trusted: true }), 'workspace-trust'); sendSession(); });
     const postHostReady = (requestId?: string) => {
       const locale = configuredLocale();
       return post({ type: 'host.ready', trusted: vscode.workspace.isTrusted, remoteName: vscode.env.remoteName, locale, direction: textDirection(locale) }, requestId);
     };
     const configurationListener = vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration('turnstage.displayLanguage')) void postHostReady();
+      if (event.affectsConfiguration('turnstage.displayLanguage')) observeBackground(postHostReady(), 'display-language');
     });
     const viewStateListener = panel.onDidChangeViewState(syncTurnActiveContext);
     const messageListener = panel.webview.onDidReceiveMessage(async (raw: unknown) => {
@@ -350,7 +356,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           const onProgress = (next: NonNullable<TestOperationSnapshot['progress']>): void => {
             progress = next;
             const currentState = this.latestTestOperations.get(documentKey)?.state;
-            void postTestOperation({ action, state: currentState === 'cancelling' ? 'cancelling' : 'running', progress: next });
+            observeBackground(postTestOperation({ action, state: currentState === 'cancelling' ? 'cancelling' : 'running', progress: next }), 'test-progress');
           };
           try {
             const state = message.type === 'test.runAll' ? await this.scenarioTests.runAll(onProgress) : await this.scenarioTests.rerunLatest(document.uri, message.status, onProgress);
@@ -636,7 +642,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         logAt(this.output, 'error', () => `[editor] action=${message.type} type=${type}`);
         await post({ type: 'request.error', error: { type, message: error instanceof Error ? error.message : String(error) } }, message.requestId);
         const openOutput = localize('Open TurnStage Output');
-        void vscode.window.showErrorMessage(localize('TurnStage could not complete {action}.', { action: message.type }), openOutput).then((choice) => { if (choice === openOutput) this.output.show(true); });
+        observeBackground(vscode.window.showErrorMessage(localize('TurnStage could not complete {action}.', { action: message.type }), openOutput).then((choice) => { if (choice === openOutput) this.output.show(true); }), 'error-notification');
       }
     });
     panel.onDidDispose(() => { disposed = true; sessionBatcher.dispose(); if (loadTimer) clearTimeout(loadTimer); this.activeCampaignRuns.get(documentKey)?.cancellation.cancel(); void disposeController(); posters.delete(postSection); if (!posters.size) { this.sectionPosters.delete(documentKey); this.pendingSections.delete(documentKey); } navigationPosters.delete(postNavigation); if (!navigationPosters.size) { this.navigationPosters.delete(documentKey); this.pendingDestinations.delete(documentKey); } resultPosters.delete(postResults); if (!resultPosters.size) this.resultPosters.delete(documentKey); campaignPosters.delete(postCampaigns); if (!campaignPosters.size) this.campaignPosters.delete(documentKey); evidencePosters.delete(postEvidence); if (!evidencePosters.size) this.evidencePosters.delete(documentKey); documentListener.dispose(); saveListener.dispose(); trustListener.dispose(); configurationListener.dispose(); viewStateListener.dispose(); messageListener.dispose(); });
@@ -879,7 +885,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       return;
     }
     const allowed = controller.profile.security?.allowedCommands ?? [];
-    if (action?.actionId.startsWith('vscodeCommand.invoke:')) { if (!vscode.workspace.isTrusted) throw new Error(localize('Profile commands are disabled in untrusted workspaces.')); const command = action.actionId.slice('vscodeCommand.invoke:'.length); if (!allowed.includes(command)) throw new Error(localize('Command {command} is not allowlisted.', { command })); await vscode.commands.executeCommand(command); return; }
+    if (action?.actionId.startsWith('vscodeCommand.invoke:')) { if (!vscode.workspace.isTrusted) throw new Error(localize('Profile commands are disabled in untrusted workspaces.')); const command = action.actionId.slice('vscodeCommand.invoke:'.length); if (!allowed.includes(command)) throw new Error(localize('Command {command} is not allowlisted.', { command })); if (isBlockedLifecycleCommand(command)) throw new Error(localize('Command {command} is blocked because it can reload, restart, or close VS Code.', { command })); await vscode.commands.executeCommand(command); return; }
     if (action.actionId === 'message.retry') { await controller.retry(); return; }
     if (['input.fill', 'event.inspect', 'form.open', 'form.submit', 'form.cancel'].includes(action.actionId)) return;
     throw new Error(localize('This response action is not supported: {action}.', { action: action.actionId }));

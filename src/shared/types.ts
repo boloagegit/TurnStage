@@ -611,13 +611,79 @@ export interface Starter {
   actionId?: string;
 }
 
+export type OpeningResponseBlockKind = 'choices' | 'fields' | 'meter' | 'status' | 'json';
+export type OpeningValueFormat = 'text' | 'number' | 'datetime' | 'percent';
+export type OpeningBlockEmptyPolicy = 'hide' | 'show';
+
+export interface OpeningResponseFieldDefinition {
+  id: string;
+  label: string;
+  path: string;
+  format?: OpeningValueFormat;
+}
+
+interface OpeningResponseBlockBase {
+  id: string;
+  label?: string;
+  kind: OpeningResponseBlockKind;
+  path: string;
+  emptyPolicy?: OpeningBlockEmptyPolicy;
+}
+
+export interface OpeningChoicesBlockDefinition extends OpeningResponseBlockBase {
+  kind: 'choices';
+  itemLabelPath?: string;
+  itemPromptPath?: string;
+  behavior?: 'send' | 'fill';
+}
+
+export interface OpeningFieldsBlockDefinition extends OpeningResponseBlockBase {
+  kind: 'fields';
+  fields: OpeningResponseFieldDefinition[];
+}
+
+export interface OpeningMeterBlockDefinition extends OpeningResponseBlockBase {
+  kind: 'meter';
+  valuePath: string;
+  maxPath: string;
+  resetAtPath?: string;
+  unit?: string;
+}
+
+export interface OpeningStatusBlockDefinition extends OpeningResponseBlockBase {
+  kind: 'status';
+  valuePath?: string;
+  tone?: 'neutral' | 'info' | 'success' | 'warning' | 'error';
+}
+
+export interface OpeningJsonBlockDefinition extends OpeningResponseBlockBase {
+  kind: 'json';
+  defaultCollapsed?: boolean;
+}
+
+export type OpeningResponseBlockDefinition =
+  | OpeningChoicesBlockDefinition
+  | OpeningFieldsBlockDefinition
+  | OpeningMeterBlockDefinition
+  | OpeningStatusBlockDefinition
+  | OpeningJsonBlockDefinition;
+
+export interface OpeningChoiceItem { id: string; label: string; prompt: string; behavior: 'send' | 'fill' }
+export interface OpeningFieldItem { id: string; label: string; value: string; format: OpeningValueFormat }
+export type OpeningInfoBlock =
+  | { id: string; label?: string; kind: 'choices'; items: OpeningChoiceItem[]; empty: boolean }
+  | { id: string; label?: string; kind: 'fields'; items: OpeningFieldItem[]; empty: boolean }
+  | { id: string; label?: string; kind: 'meter'; value?: number; max?: number; resetAt?: string; unit?: string; empty: boolean }
+  | { id: string; label?: string; kind: 'status'; value?: string; tone: 'neutral' | 'info' | 'success' | 'warning' | 'error'; empty: boolean }
+  | { id: string; label?: string; kind: 'json'; value?: unknown; defaultCollapsed: boolean; empty: boolean };
+
 export interface OpeningDefinition {
   mode: 'static' | 'request' | 'disabled';
   trigger?: 'sessionStart';
   message?: string;
   starters?: Starter[];
   request?: Omit<RequestDefinition, 'variants'>;
-  response?: { messagePath?: string; startersPath?: string };
+  response?: { messagePath?: string; startersPath?: string; blocks?: OpeningResponseBlockDefinition[] };
   fallbacks?: Array<{ match?: MatchCondition; message: string; starters?: Starter[] }>;
   failurePolicy?: { allowRetry?: boolean; useFallbackOnNetworkError?: boolean };
 }
@@ -904,7 +970,7 @@ export interface SessionSnapshot {
   turnState: TurnState;
   conversationId?: string;
   title?: string;
-  opening?: { message: string; starters: Starter[] };
+  opening?: { message: string; starters: Starter[]; blocks?: OpeningInfoBlock[] };
   messages: ChatMessage[];
   rawEvents: RawStreamEvent[];
   normalizedEvents: NormalizedEvent[];

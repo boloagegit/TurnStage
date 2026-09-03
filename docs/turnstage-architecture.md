@@ -239,6 +239,10 @@ event supplies them.
 - `request`: builds and sends the configured request, parses a JSON response,
   and reads `messagePath`/`startersPath` (defaults `$.message`/`$.options`).
 
+Optional response-block definitions are normalized in the Extension Host into
+bounded choices, fields, meter, status, or JSON projections before crossing the
+Host/Webview boundary; the Webview never interprets provider templates.
+
 Opening requests are host-side and are blocked in an untrusted workspace. If a
 request-backed opening fails, the controller records the redacted request and
 exposes retry, configured fallback, and request-inspection actions. Fallbacks

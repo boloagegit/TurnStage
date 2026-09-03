@@ -277,6 +277,17 @@ describe('profile command allowlist', () => {
     await expect(invoke('run-command', controller(['workbench.action.test']))).rejects.toThrow('Profile commands are disabled in untrusted workspaces.');
     expect(mock.commands.executeCommand).not.toHaveBeenCalled();
   });
+
+  it.each([
+    'workbench.action.reloadWindow',
+    'workbench.action.restartExtensionHost',
+    'workbench.action.closeWindow',
+    'workbench.action.quit',
+    'vscode.openFolder',
+  ])('rejects lifecycle command %s even when it is explicitly allowlisted', async (command) => {
+    await expect(invoke('run-command', controller([command], command))).rejects.toThrow('is blocked because it can reload, restart, or close VS Code');
+    expect(mock.commands.executeCommand).not.toHaveBeenCalled();
+  });
 });
 
 describe('response action dispatch', () => {

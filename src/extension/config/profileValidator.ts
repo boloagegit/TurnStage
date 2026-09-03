@@ -1,5 +1,5 @@
 import { findNodeAtLocation, type Node } from 'jsonc-parser';
-import type { AdversarialForbidDefinition, MatchCondition, RequestDefinition, ScenarioAssertionDefinition, ScenarioComparisonTargetDefinition, ScenarioDefinition, ScenarioPerformanceMetric, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
+import type { AdversarialForbidDefinition, MatchCondition, OpeningResponseBlockDefinition, RequestDefinition, ScenarioAssertionDefinition, ScenarioComparisonTargetDefinition, ScenarioDefinition, ScenarioPerformanceMetric, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
 import { localize } from '../l10n';
 import { isSafeAssertionRegex, isValidAssertionPath } from '../testing/assertionEvaluator';
 import { isValidComparisonPath } from '../testing/scenarioComparison';
@@ -9,6 +9,8 @@ import { isSafeAdversarialSuitePath, MAX_ADVERSARIAL_REPETITIONS, MAX_ADVERSARIA
 import { validateSourceBinding } from '../testing/impactMapping';
 import { validateQualityRubrics } from '../copilot/quality/policy';
 import { isSafeRegexPattern } from '../../shared/regexSafety';
+import { isSafeOpeningResponsePath, MAX_OPENING_BLOCK_ITEMS, MAX_OPENING_RESPONSE_BLOCKS } from '../opening/responseBlockNormalizer';
+import { isBlockedLifecycleCommand } from '../../shared/vscodeCommandPolicy';
 
 export interface ValidationIssue { severity: 'error' | 'warning'; message: string; offset: number; length: number }
 
@@ -123,6 +125,57 @@ function validateAdversarialForbid(value: unknown, tree: Node | undefined, path:
 
 function hasAdversarialForbid(value: AdversarialForbidDefinition): boolean { return Boolean(value.urls || value.ctas || value.tools || value.content?.length || value.events?.length); }
 
+function validateOpeningBlocks(value: unknown, startersPath: unknown, tree: Node | undefined, out: ValidationIssue[]): void {
+  const basePath = ['opening', 'response', 'blocks'];
+  if (value === undefined) return;
+  if (!Array.isArray(value)) { out.push(issue(tree, basePath, localize('Opening response blocks must be an array.'))); return; }
+  if (value.length > MAX_OPENING_RESPONSE_BLOCKS) out.push(issue(tree, basePath, localize('Opening response can define at most {count} blocks.', { count: String(MAX_OPENING_RESPONSE_BLOCKS) })));
+  const ids: string[] = [];
+  value.forEach((raw, index) => {
+    const path = [...basePath, index];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { out.push(issue(tree, path, localize('Opening response block must be an object.'))); return; }
+    const block = raw as Partial<OpeningResponseBlockDefinition> & Record<string, unknown>;
+    if (typeof block.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(block.id)) out.push(issue(tree, [...path, 'id'], localize('Opening block id must use 1 to 64 letters, numbers, dots, underscores, or hyphens.')));
+    else ids.push(block.id);
+    if (block.label !== undefined && (typeof block.label !== 'string' || !block.label.trim() || block.label.length > 80)) out.push(issue(tree, [...path, 'label'], localize('Opening block label must contain 1 to 80 characters.')));
+    if (!['choices', 'fields', 'meter', 'status', 'json'].includes(String(block.kind))) out.push(issue(tree, [...path, 'kind'], localize('Unsupported opening block kind: {kind}.', { kind: String(block.kind) })));
+    if (!isSafeOpeningResponsePath(block.path)) out.push(issue(tree, [...path, 'path'], localize('Opening block path must be a safe dotted path up to 256 characters.')));
+    if (block.emptyPolicy !== undefined && !['hide', 'show'].includes(String(block.emptyPolicy))) out.push(issue(tree, [...path, 'emptyPolicy'], localize('Opening block empty policy must be hide or show.')));
+    if (block.kind === 'choices') {
+      if (typeof startersPath === 'string' && block.path === startersPath) out.push(issue(tree, [...path, 'path'], localize('Opening choices block duplicates the legacy starter path and may render the same options twice.'), 'warning'));
+      for (const key of ['itemLabelPath', 'itemPromptPath'] as const) if (block[key] !== undefined && !isSafeOpeningResponsePath(block[key])) out.push(issue(tree, [...path, key], localize('Opening choice item path must be a safe dotted path.')));
+      if (block.behavior !== undefined && !['send', 'fill'].includes(String(block.behavior))) out.push(issue(tree, [...path, 'behavior'], localize('Opening choice behavior must be send or fill.')));
+    }
+    if (block.kind === 'fields') {
+      if (!Array.isArray(block.fields) || block.fields.length > MAX_OPENING_BLOCK_ITEMS) out.push(issue(tree, [...path, 'fields'], localize('Opening fields block must contain at most {count} fields.', { count: String(MAX_OPENING_BLOCK_ITEMS) })));
+      else {
+        const fieldIds: string[] = [];
+        block.fields.forEach((rawField, fieldIndex) => {
+          const fieldPath = [...path, 'fields', fieldIndex];
+          if (!rawField || typeof rawField !== 'object' || Array.isArray(rawField)) { out.push(issue(tree, fieldPath, localize('Opening field must be an object.'))); return; }
+          const field = rawField as unknown as Record<string, unknown>;
+          if (typeof field.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(field.id)) out.push(issue(tree, [...fieldPath, 'id'], localize('Opening field id is invalid.'))); else fieldIds.push(field.id);
+          if (typeof field.label !== 'string' || !field.label.trim() || field.label.length > 80) out.push(issue(tree, [...fieldPath, 'label'], localize('Opening field label must contain 1 to 80 characters.')));
+          if (!isSafeOpeningResponsePath(field.path)) out.push(issue(tree, [...fieldPath, 'path'], localize('Opening field path must be a safe dotted path.')));
+          if (field.format !== undefined && !['text', 'number', 'datetime', 'percent'].includes(String(field.format))) out.push(issue(tree, [...fieldPath, 'format'], localize('Unsupported opening field format: {format}.', { format: String(field.format) })));
+        });
+        for (const duplicate of duplicates(fieldIds)) out.push(issue(tree, [...path, 'fields'], localize('Duplicate opening field id: {id}.', { id: duplicate })));
+      }
+    }
+    if (block.kind === 'meter') {
+      for (const key of ['valuePath', 'maxPath'] as const) if (!isSafeOpeningResponsePath(block[key])) out.push(issue(tree, [...path, key], localize('Opening meter path must be a safe dotted path.')));
+      if (block.resetAtPath !== undefined && !isSafeOpeningResponsePath(block.resetAtPath)) out.push(issue(tree, [...path, 'resetAtPath'], localize('Opening meter reset path must be a safe dotted path.')));
+      if (block.unit !== undefined && (typeof block.unit !== 'string' || block.unit.length > 32)) out.push(issue(tree, [...path, 'unit'], localize('Opening meter unit must be at most 32 characters.')));
+    }
+    if (block.kind === 'status') {
+      if (block.valuePath !== undefined && !isSafeOpeningResponsePath(block.valuePath)) out.push(issue(tree, [...path, 'valuePath'], localize('Opening status value path must be a safe dotted path.')));
+      if (block.tone !== undefined && !['neutral', 'info', 'success', 'warning', 'error'].includes(String(block.tone))) out.push(issue(tree, [...path, 'tone'], localize('Unsupported opening status tone: {tone}.', { tone: String(block.tone) })));
+    }
+    if (block.kind === 'json' && block.defaultCollapsed !== undefined && typeof block.defaultCollapsed !== 'boolean') out.push(issue(tree, [...path, 'defaultCollapsed'], localize('Opening JSON defaultCollapsed must be boolean.')));
+  });
+  for (const duplicate of duplicates(ids)) out.push(issue(tree, basePath, localize('Duplicate opening block id: {id}.', { id: duplicate })));
+}
+
 function validateCampaigns(value: unknown, tree: Node | undefined, out: ValidationIssue[]): void {
   const basePath = ['tests', 'campaigns'];
   if (!Array.isArray(value) || value.length > 50) {
@@ -190,6 +243,7 @@ export class ProfileValidator {
     if (sourceProfile.tests !== undefined && (!sourceProfile.tests || typeof sourceProfile.tests !== 'object' || Array.isArray(sourceProfile.tests) || !Array.isArray((sourceProfile.tests as Record<string, unknown>).scenarios))) out.push(issue(tree, ['tests'], localize('Tests must contain a scenarios array.')));
     if (out.length) return out;
     if (profile.version !== 1) out.push(issue(tree, ['version'], localize('Unsupported config version: {version}.', { version: String(profile.version) })));
+    validateOpeningBlocks(profile.opening?.response?.blocks, profile.opening?.response?.startersPath, tree, out);
     if (!profile.id?.trim()) out.push(issue(tree, ['id'], localize('Profile id is required.')));
     else if (!/^[a-z0-9][a-z0-9-]*$/.test(profile.id)) out.push(issue(tree, ['id'], localize('Profile id must use lowercase letters, numbers, and hyphens.')));
     if (!profile.name?.trim()) out.push(issue(tree, ['name'], localize('Profile name is required.')));
@@ -423,6 +477,9 @@ export class ProfileValidator {
     const stop = profile.conversation.stop;
     if (stop?.strategy === 'abortThenRequest' && !stop.request) out.push(issue(tree, ['conversation', 'stop'], localize('abortThenRequest requires a stop request.')));
     for (const scheme of profile.security?.allowedUriSchemes ?? []) if (!['https', 'http', 'file'].includes(scheme)) out.push(issue(tree, ['security', 'allowedUriSchemes'], localize('URI scheme "{scheme}" is not supported.', { scheme })));
+    for (const [index, command] of (profile.security?.allowedCommands ?? []).entries()) {
+      if (typeof command === 'string' && isBlockedLifecycleCommand(command)) out.push(issue(tree, ['security', 'allowedCommands', index], localize('Command {command} is blocked because it can reload, restart, or close VS Code.', { command })));
+    }
     const layoutPreset = profile.ui?.layout?.preset as unknown;
     if (layoutPreset !== undefined && !['chat-only', 'split-inspector', 'chat-with-metrics', 'compact'].includes(String(layoutPreset))) out.push(issue(tree, ['ui', 'layout', 'preset'], localize('Unknown UI layout preset: {value}.', { value: String(layoutPreset) })));
     const inspectorPosition = profile.ui?.layout?.inspectorPosition as unknown;

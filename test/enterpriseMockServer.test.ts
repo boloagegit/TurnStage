@@ -38,7 +38,8 @@ describe('generic POST plus SSE chat mock contract', () => {
     const configured = await postJson('/v1/chat/opening', openingBody, { 'X-TurnStage-Mode': 'opening-options' });
     expect(configured.data).toMatchObject({
       openingMessage: expect.any(String),
-      optionsInfo: expect.arrayContaining([expect.objectContaining({ behavior: 'send', prompt: expect.any(String) })]),
+      optionsInfo: expect.arrayContaining([expect.objectContaining({ option: expect.any(String) })]),
+      quota: { used: 48, limit: 100, resetAt: '2026-12-31T16:00:00.000Z' },
     });
     expect((configured.data as { optionsInfo: unknown[] }).optionsInfo[0]).toBe('Show a sample overview');
   });

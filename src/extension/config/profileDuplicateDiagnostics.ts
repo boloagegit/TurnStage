@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ProfileRepository, type ProfileEntry } from './profileRepository';
 import { localize } from '../l10n';
+import { logAt } from '../logging';
 
 const duplicateCode = 'duplicate-profile-id';
 
@@ -9,7 +10,7 @@ export class ProfileDuplicateDiagnostics implements vscode.Disposable {
   private readonly knownUris = new Map<string, vscode.Uri>();
   private debounce?: ReturnType<typeof setTimeout>;
 
-  constructor(private readonly repository: ProfileRepository, private readonly collection: vscode.DiagnosticCollection) {
+  constructor(private readonly repository: ProfileRepository, private readonly collection: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel) {
     const watchers = (vscode.workspace.workspaceFolders ?? []).map((folder) => {
       const glob = vscode.workspace.getConfiguration('turnstage', folder.uri).get('profileGlob', '.vscode/turnstage/profiles/*.turnstage.jsonc');
       return vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, glob));
@@ -57,7 +58,10 @@ export class ProfileDuplicateDiagnostics implements vscode.Disposable {
 
   private scheduleRefresh(): void {
     if (this.debounce) clearTimeout(this.debounce);
-    this.debounce = setTimeout(() => void this.refresh(), 200);
+    this.debounce = setTimeout(() => {
+      this.debounce = undefined;
+      void this.refresh().catch((error) => logAt(this.output, 'error', () => `[profiles] duplicate diagnostics refresh failed type=${error instanceof Error ? error.name : 'Error'}`));
+    }, 200);
   }
 
   private async createDiagnostic(entry: ProfileEntry, id: string, conflicts: ProfileEntry[]): Promise<vscode.Diagnostic | undefined> {

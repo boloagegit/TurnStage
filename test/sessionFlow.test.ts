@@ -227,8 +227,25 @@ describe('SessionController end-to-end functional flow', () => {
       { appendLine: vi.fn() } as never,
     );
 
+    await controller.setControl('mode', 'opening-options');
     await controller.startSession();
-    expect(controller.snapshot).toMatchObject({ sessionState: 'ready', opening: { message: 'Hello, I am a synthetic test assistant. How can I help?' } });
+    expect(controller.snapshot).toMatchObject({
+      sessionState: 'ready',
+      opening: {
+        message: 'Hello, I am a synthetic test assistant. How can I help?',
+        blocks: [
+          {
+            id: 'suggestions',
+            kind: 'choices',
+            items: [
+              { label: 'Show a sample overview', prompt: 'Show a sample overview' },
+              { label: 'Which inputs are required?', prompt: 'Which inputs are required?' },
+            ],
+          },
+          { id: 'quota', kind: 'meter', value: 48, max: 100, resetAt: '2026-12-31T16:00:00.000Z', unit: 'requests' },
+        ],
+      },
+    });
     expect(controller.getNetworkEntries()[0]).toMatchObject({ kind: 'opening', status: 200, state: 'completed' });
 
     await controller.send('  第一輪問題  ', { kind: 'manual' });

@@ -12,6 +12,8 @@ import type {
 import type { ScenarioSession } from '../extension/testing/scenarioRunner';
 import { MappingEngine } from '../extension/mapping/mappingEngine';
 import { selectOpeningFallback } from '../extension/opening/fallbackResolver';
+import { normalizeOpeningResponseBlocks } from '../extension/opening/responseBlockNormalizer';
+import { normalizeOpeningStarters } from '../extension/opening/starterNormalizer';
 import { getPath, resolveTemplate } from '../extension/request/templateResolver';
 import { createSnapshot, reduceEvent } from '../extension/runtime/reducer';
 import { HttpStreamTransport } from '../extension/transport/transport';
@@ -47,7 +49,7 @@ export class NodeScenarioSession implements ScenarioSession {
     this.snapshot.sessionState = 'loadingOpening';
     if (!opening || opening.mode === 'disabled') { this.snapshot.opening = undefined; this.snapshot.sessionState = 'ready'; return; }
     if (opening.mode === 'static') {
-      this.snapshot.opening = { message: opening.message ?? '', starters: structuredClone(opening.starters ?? []) };
+      this.snapshot.opening = { message: opening.message ?? '', starters: normalizeOpeningStarters(opening.starters) };
       this.snapshot.sessionState = 'ready';
       return;
     }
@@ -87,14 +89,17 @@ export class NodeScenarioSession implements ScenarioSession {
         if (fallback) { entry.state = 'failed'; this.useOpeningFallback(fallback); return; }
         throw new Error(`Opening request failed with HTTP ${response.status}.`);
       }
-      const message = getPath(data, opening.response?.messagePath ?? '$.message');
-      const starters = getPath(data, opening.response?.startersPath ?? '$.options');
+      const safeData = redactKnownValues(data, request.secretValues);
+      const message = getPath(safeData, opening.response?.messagePath ?? '$.message');
+      const starters = getPath(safeData, opening.response?.startersPath ?? '$.options');
       if (typeof message !== 'string') {
         const fallback = selectOpeningFallback(opening, data, { status: response.status, missingMessage: true });
         if (fallback) { entry.state = 'completed'; this.useOpeningFallback(fallback); return; }
         throw new Error('Opening response did not contain a message.');
       }
-      this.snapshot.opening = { message, starters: Array.isArray(starters) ? structuredClone(starters) : [] };
+      const normalizedStarters = normalizeOpeningStarters(starters);
+      const blocks = normalizeOpeningResponseBlocks(safeData, opening.response?.blocks);
+      this.snapshot.opening = { message, starters: normalizedStarters, ...(blocks.length ? { blocks } : {}) };
       this.snapshot.sessionState = 'ready';
       entry.state = 'completed';
     } catch (error) {
@@ -219,7 +224,7 @@ export class NodeScenarioSession implements ScenarioSession {
   }
 
   private useOpeningFallback(fallback: NonNullable<NonNullable<TurnStageProfile['opening']>['fallbacks']>[number]): void {
-    this.snapshot.opening = { message: fallback.message, starters: structuredClone(fallback.starters ?? []) };
+    this.snapshot.opening = { message: fallback.message, starters: normalizeOpeningStarters(fallback.starters) };
     this.snapshot.sessionState = 'ready';
   }
 
@@ -228,6 +233,15 @@ export class NodeScenarioSession implements ScenarioSession {
     if (this.snapshot.normalizedEvents.length > MAX_EVENTS) { const count = this.snapshot.normalizedEvents.length - MAX_EVENTS; this.snapshot.normalizedEvents.splice(0, count); this.snapshot.droppedNormalizedEventCount = (this.snapshot.droppedNormalizedEventCount ?? 0) + count; }
     if (this.snapshot.messages.length > MAX_MESSAGES) { const count = this.snapshot.messages.length - MAX_MESSAGES; this.snapshot.messages.splice(0, count); this.snapshot.droppedMessageCount = (this.snapshot.droppedMessageCount ?? 0) + count; }
   }
+}
+
+function redactKnownValues(value: unknown, secrets: readonly string[] = []): unknown {
+  if (!secrets.length || value === undefined || value === null) return value;
+  if (typeof value === 'string') return secrets.filter(Boolean).reduce((result, secret) => result.split(secret).join('••••••••'), value);
+  if (typeof value === 'number' || typeof value === 'boolean') return secrets.some((secret) => Object.is(secret, value)) ? '••••••••' : value;
+  if (Array.isArray(value)) return value.map((item) => redactKnownValues(item, secrets));
+  if (typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, redactKnownValues(child, secrets)]));
+  return value;
 }
 
 async function buildRequest(definition: RequestDefinition, context: Record<string, unknown>, getSecret: (name: string) => Promise<string | undefined>): Promise<PreparedRequest> {
