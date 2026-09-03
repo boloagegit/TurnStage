@@ -740,6 +740,25 @@ describe('Webview DOM behavior', () => {
     expect(eventRows(eventList)[0]?.textContent).toMatch(/custom_card/i);
   });
 
+  it('keeps empty Raw and Normalized event views compact and only offers session start before initialization', () => {
+    const notStarted = { ...snapshot, sessionState: 'notStarted' as const, turnState: 'idle' as const };
+    const { container, rerender } = render(<Inspector profile={profile} snapshot={notStarted} tab="Raw Events" setTab={vi.fn()} requestPreview={{}} />);
+
+    expect(screen.getByText('No raw events yet')).toBeTruthy();
+    expect(container.querySelector('.event-filters')).toBeNull();
+    const start = screen.getByRole('button', { name: 'Start session' });
+    expect(start.classList.contains('event-empty__action')).toBe(true);
+    expect(start.classList.contains('link-button')).toBe(true);
+
+    rerender(<Inspector profile={profile} snapshot={snapshot} tab="Normalized" setTab={vi.fn()} requestPreview={{}} />);
+    expect(screen.getByText('No normalized events yet')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Start session' })).toBeNull();
+
+    rerender(<Inspector profile={profile} snapshot={{ ...snapshot, turnState: 'streaming' }} active tab="Raw Events" setTab={vi.fn()} requestPreview={{}} />);
+    expect(screen.getByText('Waiting for events from the active request…')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Start session' })).toBeNull();
+  });
+
   it('shows Chrome-like network rows with redacted request and response details', async () => {
     const user = userEvent.setup();
     const entries: NetworkExchange[] = [
@@ -749,7 +768,7 @@ describe('Webview DOM behavior', () => {
       },
       {
         id: 'stream-1', kind: 'stream', attempt: 1, method: 'POST', url: 'https://api.example.test/v1/chat/stream', variantId: 'first-turn', protocol: 'sse', state: 'failed', startedAt: 2_000, completedAt: 32_000, status: 200,
-        requestHeaders: { Authorization: 'Bearer local-debug-token', Accept: 'text/event-stream' }, requestBody: { message: 'Hello' }, responseHeaders: { 'content-type': 'text/event-stream' }, responseBodyPreview: 'event: start\ndata: {}', error: { type: 'IdleTimeoutError', message: 'The stream idle timeout elapsed.' }, timing: { headers: 50, firstChunk: 80, total: 30_000, timeout: 120_000, idleTimeout: 30_000 }, transferredBytes: 24, eventCount: 1,
+        requestHeaders: { Authorization: 'Bearer local-debug-token', Accept: 'text/event-stream' }, requestBody: '{"message":"Hello","attempt":1,"stream":true}', responseHeaders: { 'content-type': 'text/event-stream' }, responseBodyPreview: 'event: start\ndata: {}', error: { type: 'IdleTimeoutError', message: 'The stream idle timeout elapsed.' }, timing: { headers: 50, firstChunk: 80, total: 30_000, timeout: 120_000, idleTimeout: 30_000 }, transferredBytes: 24, eventCount: 1,
       },
     ];
     const { container } = render(<NetworkInspector entries={entries} />);
@@ -761,6 +780,10 @@ describe('Webview DOM behavior', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Payload' }));
     expect(container.querySelector('.network-detail-panel:not([hidden]) .json code')?.textContent).toContain('"message": "Hello"');
+    expect(container.querySelectorAll('.network-detail-panel:not([hidden]) .json-token--key')).toHaveLength(3);
+    expect(container.querySelectorAll('.network-detail-panel:not([hidden]) .json-token--string')).toHaveLength(1);
+    expect(container.querySelectorAll('.network-detail-panel:not([hidden]) .json-token--number')).toHaveLength(1);
+    expect(container.querySelectorAll('.network-detail-panel:not([hidden]) .json-token--boolean')).toHaveLength(1);
     await user.click(screen.getByRole('tab', { name: 'Response' }));
     expect(screen.getByText(/event: start/)).toBeTruthy();
     await user.click(within(list).getByRole('option', { name: /opening/i }));

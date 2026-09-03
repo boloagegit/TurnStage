@@ -32,6 +32,7 @@ type ScrollPositionKey = typeof scrollPositionKeys[number];
 const networkDetailTabs = ['Headers', 'Payload', 'Response', 'Timing'] as const;
 type NetworkDetailTab = typeof networkDetailTabs[number];
 const inspectorTabs = ['Network', 'Raw Events', 'Normalized', 'Metrics', 'Errors', 'Runs'] as const; type InspectorTab = typeof inspectorTabs[number];
+export const DEFAULT_INSPECTOR_TAB: InspectorTab = 'Network';
 export const DEFAULT_SPLIT_PERCENT = 64;
 export const ACCESSIBLE_EVENT_WINDOW_SIZE = 200;
 export const DEFAULT_EVENT_FILTERS: EventFilterState = { query: '', turn: 'all', eventType: 'all', mapping: 'all', issue: 'all', terminal: 'all' };
@@ -55,7 +56,7 @@ function App(): React.JSX.Element {
   const [configurationSection, setConfigurationSection] = useState<SettingsSectionId>(isSettingsSectionId(savedState?.configurationSection) ? savedState.configurationSection : savedSection === 'test' ? 'general' : savedSection);
   const [rightPaneMode, setRightPaneMode] = useState<RightPaneMode>(isRightPaneMode(savedState?.rightPaneMode) ? savedState.rightPaneMode : savedSection === 'test' ? 'debug' : 'configure');
   const [redTeamSection, setRedTeamSection] = useState<RedTeamSectionId>(RED_TEAM_SECTIONS.includes(savedState?.redTeamSection as RedTeamSectionId) ? savedState!.redTeamSection as RedTeamSectionId : 'results');
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>(savedInspectorTab === 'Request' ? 'Network' : isInspectorTab(savedInspectorTab) ? savedInspectorTab : 'Raw Events'); const [draft, setDraft] = useState(savedState?.draft ?? ''); const [splitPercent, setSplitPercent] = useState(initialSplitPercent(savedState?.splitPercent, savedSplitCustomized)); const [splitCustomized, setSplitCustomized] = useState(savedSplitCustomized); const [selectedMessageId, setSelectedMessageId] = useState(savedState?.selectedMessageId); const [selectedRawSequence, setSelectedRawSequence] = useState(savedState?.selectedRawSequence); const [selectedNetworkId, setSelectedNetworkId] = useState(savedState?.selectedNetworkId);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>(savedInspectorTab === 'Request' ? 'Network' : isInspectorTab(savedInspectorTab) ? savedInspectorTab : DEFAULT_INSPECTOR_TAB); const [draft, setDraft] = useState(savedState?.draft ?? ''); const [splitPercent, setSplitPercent] = useState(initialSplitPercent(savedState?.splitPercent, savedSplitCustomized)); const [splitCustomized, setSplitCustomized] = useState(savedSplitCustomized); const [selectedMessageId, setSelectedMessageId] = useState(savedState?.selectedMessageId); const [selectedRawSequence, setSelectedRawSequence] = useState(savedState?.selectedRawSequence); const [selectedNetworkId, setSelectedNetworkId] = useState(savedState?.selectedNetworkId);
   const [activeEvidenceId, setActiveEvidenceId] = useState(savedState?.activeEvidenceId);
   const [chatViewport, setChatViewport] = useState<ChatViewportState>(isChatViewportState(savedState?.chatViewport) ? savedState.chatViewport : { ...DEFAULT_CHAT_VIEWPORT });
   const [eventFilters, setEventFilters] = useState<InspectorEventFilters>(() => normalizeInspectorEventFilters(savedState?.eventFilters));
@@ -527,6 +528,31 @@ function adversarialStabilityLabel(stability: NonNullable<AdversarialResultSumma
 
 export const JsonBlock = JsonViewer;
 
+export function EventEmptyState({ eventKind, filtersActive, active, canStart, interactive, onClear, onStart }: { eventKind: 'raw' | 'normalized'; filtersActive: boolean; active: boolean; canStart: boolean; interactive: boolean; onClear: () => void; onStart: () => void }): React.JSX.Element {
+  const heading = filtersActive
+    ? t('No events match the current filters.')
+    : t(eventKind === 'raw' ? 'No raw events yet' : 'No normalized events yet');
+  const description = filtersActive
+    ? t('Adjust or clear the filters to show events.')
+    : active
+      ? t('Waiting for events from the active request…')
+      : t(eventKind === 'raw'
+        ? 'Raw transport events appear after a request starts.'
+        : 'Normalized events appear when raw data matches a stream mapping.');
+  return <div className="event-empty" role="status">
+    <ProductIcon name={active ? 'loading' : 'info'} />
+    <div className="event-empty__content">
+      <strong>{heading}</strong>
+      <p>{description}</p>
+      {filtersActive
+        ? <button type="button" className="link-button event-empty__action" disabled={!interactive} onClick={onClear}>{t('Clear filters')}</button>
+        : canStart && !active
+          ? <button type="button" className="link-button event-empty__action" disabled={!interactive} onClick={onStart}>{t('Start session')}</button>
+          : null}
+    </div>
+  </div>;
+}
+
 export function Inspector({ profile, snapshot, runs = [], networkEntries = [], active = false, tab, setTab, requestPreview, full = false, interactive = true, eventFilters = normalizeInspectorEventFilters(), onEventFiltersChange = () => undefined, collapsedEventTurns = normalizeCollapsedEventTurns(), onCollapsedEventTurnsChange = () => undefined, onCreateMapping, selectedSequence, selectedNetworkId, onSelectEvent, scrollPositions = {}, onScrollPositionChange = () => undefined, networkInspector, onNetworkInspectorChange }: { profile?: TurnStageProfile; snapshot?: SessionSnapshot; runs?: LocalRunSummary[]; networkEntries?: NetworkExchange[]; active?: boolean; tab: InspectorTab; setTab: (tab: InspectorTab) => void; requestPreview: unknown; full?: boolean; interactive?: boolean; eventFilters?: InspectorEventFilters; onEventFiltersChange?: (filters: InspectorEventFilters) => void; collapsedEventTurns?: CollapsedEventTurns; onCollapsedEventTurnsChange?: (turns: CollapsedEventTurns) => void; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; selectedNetworkId?: string; onSelectEvent?: (event: Record<string, unknown>) => void; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; onScrollPositionChange?: (key: ScrollPositionKey, value: number) => void; networkInspector?: NetworkInspectorState; onNetworkInspectorChange?: (state: NetworkInspectorState) => void }): React.JSX.Element {
   const availableTabs: InspectorTab[] = profile && !componentVisible(profile, 'metrics') ? inspectorTabs.filter((item): item is InspectorTab => item !== 'Metrics') : [...inspectorTabs];
   const effectiveTab = availableTabs.includes(tab) ? tab : availableTabs[0]!;
@@ -542,11 +568,13 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
   const filtered = useMemo(() => data.filter((item) => eventMatchesFilters(item, effectiveFilters, eventKind, terminalRawSequences)), [data, effectiveFilters, eventKind, terminalRawSequences]);
   const updateFilters = (patch: Partial<EventFilterState>) => onEventFiltersChange({ ...eventFilters, [eventKind]: { ...filters, ...patch } });
   const filtersActive = filters.query !== '' || filters.turn !== 'all' || filters.eventType !== 'all' || filters.mapping !== 'all' || filters.issue !== 'all' || filters.terminal !== 'all';
+  const clearEventFilters = () => onEventFiltersChange({ ...eventFilters, [eventKind]: { ...DEFAULT_EVENT_FILTERS } });
+  const showEventFilters = data.length > 0 || filtersActive;
   const panelContent = effectiveTab === 'Network'
     ? <NetworkInspector entries={networkEntries} legacyRequestPreview={requestPreview} selectedEntryId={selectedNetworkId} state={networkInspector} onStateChange={onNetworkInspectorChange} />
     : effectiveTab === 'Raw Events' || effectiveTab === 'Normalized'
-      ? <div className="event-inspector">
-        <div className="event-filters">
+      ? <div className={`event-inspector${showEventFilters ? '' : ' event-inspector--empty'}`}>
+        {showEventFilters && <div className="event-filters">
           <label className="event-search"><span className="sr-only">{t('Search events')}</span><input type="search" value={filters.query} placeholder={t('Search events')} aria-label={t('Search events')} disabled={!interactive} onChange={(event) => updateFilters({ query: event.target.value })} /></label>
           <label className="event-turn-filter"><span className="sr-only">{t('Conversation turn')}</span><select value={turns.some((turn) => turn.key === filters.turn) ? filters.turn : 'all'} aria-label={t('Conversation turn')} onChange={(event) => updateFilters({ turn: event.target.value })} disabled={!interactive}><option value="all">{t('All turns')}</option>{turns.map((turn) => <option key={turn.key} value={turn.key}>{turn.label} ({formatNumber(turn.count)})</option>)}</select></label>
           <details className="event-filter-more">
@@ -556,13 +584,13 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
               {eventKind === 'raw' && <label><span>{t('Mapping status')}</span><select value={filters.mapping} aria-label={t('Mapping status')} onChange={(event) => updateFilters({ mapping: event.target.value as EventMappingFilter })} disabled={!interactive}><option value="all">{t('All mappings')}</option><option value="matched">{t('Matched')}</option><option value="unmatched">{t('Unmatched')}</option></select></label>}
               {eventKind === 'raw' && <label><span>{t('Event health')}</span><select value={filters.issue} aria-label={t('Event health')} onChange={(event) => updateFilters({ issue: event.target.value as EventIssueFilter })} disabled={!interactive}><option value="all">{t('All health')}</option><option value="problem">{t('Problems only')}</option><option value="valid">{t('Valid')}</option><option value="parse-error">{t('Parse errors')}</option><option value="mapping-error">{t('Mapping errors')}</option></select></label>}
               <label><span>{t('Terminal status')}</span><select value={filters.terminal} aria-label={t('Terminal status')} onChange={(event) => updateFilters({ terminal: event.target.value as EventTerminalFilter })} disabled={!interactive}><option value="all">{t('All events')}</option><option value="terminal">{t('Terminal')}</option><option value="non-terminal">{t('Non-terminal')}</option></select></label>
-              <button type="button" aria-label={t('Clear event filters')} disabled={!interactive || !filtersActive} onClick={() => onEventFiltersChange({ ...eventFilters, [eventKind]: { ...DEFAULT_EVENT_FILTERS } })}>{t('Clear filters')}</button>
+              <button type="button" aria-label={t('Clear event filters')} disabled={!interactive || !filtersActive} onClick={clearEventFilters}>{t('Clear filters')}</button>
             </div>
           </details>
           {eventKind === 'raw' && <button type="button" className="event-problems-filter" aria-pressed={filters.issue === 'problem'} disabled={!interactive} onClick={() => updateFilters({ issue: filters.issue === 'problem' ? 'all' : 'problem' })}>{t('Problems only')}</button>}
           <span role="status">{t('{filtered} of {total}', { filtered: formatNumber(filtered.length), total: formatNumber(data.length) })}</span>
-        </div>
-        {filtered.length ? <VirtualEvents items={filtered} messages={snapshot?.messages ?? []} kind={eventKind} eventDeltas={eventDeltas} terminalRawSequences={terminalRawSequences} label={t(effectiveTab)} collapsedTurnKeys={collapsedEventTurns[eventKind]} onCollapsedTurnKeysChange={(keys) => onCollapsedEventTurnsChange({ ...collapsedEventTurns, [eventKind]: keys })} onCreateMapping={effectiveTab === 'Raw Events' && interactive ? onCreateMapping : undefined} selectedSequence={selectedSequence} onSelectEvent={onSelectEvent} initialScrollTop={scrollPositions[`events.${eventKind}`]} onScrollTopChange={(value) => onScrollPositionChange(`events.${eventKind}`, value)} /> : <div className="empty-state compact empty-state--action"><strong>{t(filtersActive ? 'No events match the current filters.' : 'No events recorded yet.')}</strong>{filtersActive ? <button type="button" onClick={() => onEventFiltersChange({ ...eventFilters, [eventKind]: { ...DEFAULT_EVENT_FILTERS } })}>{t('Clear filters')}</button> : <button type="button" disabled={!interactive || active} onClick={() => post({ type: 'session.start' })}>{t('Start session')}</button>}</div>}
+        </div>}
+        {filtered.length ? <VirtualEvents items={filtered} messages={snapshot?.messages ?? []} kind={eventKind} eventDeltas={eventDeltas} terminalRawSequences={terminalRawSequences} label={t(effectiveTab)} collapsedTurnKeys={collapsedEventTurns[eventKind]} onCollapsedTurnKeysChange={(keys) => onCollapsedEventTurnsChange({ ...collapsedEventTurns, [eventKind]: keys })} onCreateMapping={effectiveTab === 'Raw Events' && interactive ? onCreateMapping : undefined} selectedSequence={selectedSequence} onSelectEvent={onSelectEvent} initialScrollTop={scrollPositions[`events.${eventKind}`]} onScrollTopChange={(value) => onScrollPositionChange(`events.${eventKind}`, value)} /> : <EventEmptyState eventKind={eventKind} filtersActive={filtersActive} active={active} canStart={snapshot?.sessionState === 'notStarted'} interactive={interactive} onClear={clearEventFilters} onStart={() => post({ type: 'session.start' })} />}
       </div>
       : effectiveTab === 'Metrics'
         ? <MetricGrid metrics={snapshot?.metrics} enabled={profile?.metrics?.enabled} />
@@ -650,13 +678,18 @@ export function NetworkInspector({ entries, legacyRequestPreview, selectedEntryI
 }
 
 function NetworkDetailContent({ entry, tab }: { entry: NetworkExchange; tab: NetworkDetailTab }): React.JSX.Element {
-  if (tab === 'Payload') return entry.requestBody === undefined ? <p className="muted network-detail-empty">{t('No request payload.')}</p> : <JsonBlock value={entry.requestBody} />;
+  if (tab === 'Payload') return entry.requestBody === undefined ? <p className="muted network-detail-empty">{t('No request payload.')}</p> : <JsonBlock value={parseJsonValue(entry.requestBody)} />;
   if (tab === 'Response') {
     const parsed = parseJsonPreview(entry.responseBodyPreview);
     return <div className="network-response">{parsed.ok ? <JsonBlock value={parsed.value} /> : <pre>{entry.responseBodyPreview || t('No response body captured.')}</pre>}{entry.responseBodyTruncated && <p className="warning">{t('Response preview was truncated at the safety limit.')}</p>}</div>;
   }
   if (tab === 'Timing') return <dl className="network-properties"><NetworkProperty label={t('Started')} value={formatDateTime(entry.startedAt)} /><NetworkProperty label={t('Headers')} value={optionalDuration(entry.timing.headers)} /><NetworkProperty label={t('First chunk')} value={optionalDuration(entry.timing.firstChunk)} /><NetworkProperty label={t('Total')} value={optionalDuration(entry.timing.total)} /><NetworkProperty label={t('Request timeout')} value={optionalDuration(entry.timing.timeout)} /><NetworkProperty label={t('Idle timeout')} value={optionalDuration(entry.timing.idleTimeout)} />{entry.timing.retryDelay !== undefined && <NetworkProperty label={t('Retry delay')} value={formatDuration(entry.timing.retryDelay)} />}</dl>;
   return <div className="network-headers"><dl className="network-properties"><NetworkProperty label={t('Request URL')} value={entry.url} /><NetworkProperty label={t('Request method')} value={entry.method} /><NetworkProperty label={t('Status')} value={entry.status === undefined ? localizeHumanized(entry.state) : String(entry.status)} /><NetworkProperty label={t('Request type')} value={t(networkKindLabel(entry.kind))} />{entry.variantId && <NetworkProperty label={t('Variant')} value={entry.variantId} />}</dl>{entry.correlation && <section><h4>{t('Correlation')}</h4><dl className="network-properties">{entry.correlation.traceId && <NetworkProperty label={t('Trace ID')} value={entry.correlation.traceId} />}{entry.correlation.spanId && <NetworkProperty label={t('Span ID')} value={entry.correlation.spanId} />}{entry.correlation.traceFlags && <NetworkProperty label={t('Trace flags')} value={entry.correlation.traceFlags} />}{entry.correlation.requestId && <NetworkProperty label={entry.correlation.requestIdHeader ?? t('Request ID')} value={entry.correlation.requestId} />}</dl></section>}<NetworkHeaderGroup title={t('Request headers')} headers={entry.requestHeaders} /><NetworkHeaderGroup title={t('Response headers')} headers={entry.responseHeaders ?? {}} />{entry.error && <section><h4>{t('Error')}</h4><JsonBlock value={entry.error} /></section>}</div>;
+}
+
+function parseJsonValue(value: unknown): unknown {
+  if (typeof value !== 'string' || !/^[\s]*[{[]/u.test(value)) return value;
+  try { return JSON.parse(value) as unknown; } catch { return value; }
 }
 
 function parseJsonPreview(value: string | undefined): { ok: true; value: unknown } | { ok: false } {

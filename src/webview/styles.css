@@ -167,6 +167,14 @@ summary { cursor: pointer; min-height: 24px; }.sources ol { padding-inline-start
 .inspector-content { display: flex; flex-direction: column; height: 100%; min-height: 0; }.inspector-content.full { padding-block: 0 12px; padding-inline: 12px; background: var(--vscode-editor-background); }
 .mini-tabs { flex: 0 0 auto; min-height: 32px; padding-inline: 2px; font-size: 11px; background: var(--vscode-editor-background); }.mini-tabs button { min-height: 31px; padding: 4px 7px; }
 .event-inspector { display: grid; grid-template-rows: auto minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
+.event-inspector--empty { grid-template-rows: minmax(0, 1fr); }
+.event-empty { display: grid; grid-template-columns: var(--ts-icon-size) minmax(0, 1fr); align-self: start; gap: var(--ts-space-2); max-width: 42em; margin: var(--ts-space-3); padding: var(--ts-space-2); color: var(--vscode-descriptionForeground); }
+.event-empty > .product-icon { margin-block-start: 2px; color: var(--vscode-icon-foreground, var(--vscode-foreground)); }
+.event-empty > .codicon-loading { animation: codicon-spin 1.5s steps(30) infinite; }
+.event-empty__content { display: grid; justify-items: start; min-width: 0; gap: 2px; }
+.event-empty__content strong { color: var(--vscode-editor-foreground); font-weight: 600; }
+.event-empty__content p { margin: 0; }
+.event-empty__action { justify-self: start; width: auto; margin-block-start: 2px; }
 .event-browser { display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; overflow: hidden; }
 .event-browser--detail { grid-template-rows: minmax(120px, 42%) minmax(0, 1fr); }
 .event-browser--accessible-window { grid-template-rows: auto minmax(0, 1fr); }
@@ -193,7 +201,12 @@ summary { cursor: pointer; min-height: 24px; }.sources ol { padding-inline-start
 .json-toolbar { display: flex; flex: 0 0 auto; align-items: center; gap: var(--ts-space-2); min-height: 34px; padding: var(--ts-space-1) var(--ts-space-2); border-bottom: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-editor-background); }
 .json-toolbar label { flex: 1 1 180px; min-width: 0; }.json-toolbar input { width: 100%; min-height: 26px; height: 26px; }.json-toolbar > span { flex: 0 0 auto; color: var(--vscode-descriptionForeground); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .json-view > pre { flex: 1 1 auto; min-height: 0; height: auto; margin: 0; border: 0; border-radius: 0; }
-.json-token--key { color: var(--vscode-symbolIcon-propertyForeground, var(--vscode-debugTokenExpression-name, var(--vscode-editor-foreground))); }.json-token--string { color: var(--vscode-symbolIcon-stringForeground, var(--vscode-debugTokenExpression-string, var(--vscode-editor-foreground))); }.json-token--number { color: var(--vscode-symbolIcon-numberForeground, var(--vscode-debugTokenExpression-number, var(--vscode-editor-foreground))); }.json-token--boolean, .json-token--null { color: var(--vscode-symbolIcon-booleanForeground, var(--vscode-debugTokenExpression-boolean, var(--vscode-editor-foreground))); }.json-token--punctuation { color: var(--vscode-descriptionForeground); }
+.json-token--key { color: var(--vscode-symbolIcon-propertyForeground, var(--vscode-debugTokenExpression-name, var(--vscode-charts-blue, #4e94ce))); font-weight: 600; }.json-token--string { color: var(--vscode-symbolIcon-stringForeground, var(--vscode-debugTokenExpression-string, var(--vscode-charts-orange, #ce9178))); }.json-token--number { color: var(--vscode-symbolIcon-numberForeground, var(--vscode-debugTokenExpression-number, var(--vscode-charts-green, #89b482))); }.json-token--boolean, .json-token--null { color: var(--vscode-symbolIcon-booleanForeground, var(--vscode-debugTokenExpression-boolean, var(--vscode-charts-purple, #b180d7))); }.json-token--punctuation { color: var(--vscode-descriptionForeground); }
+body.vscode-light .json-token--key { color: var(--vscode-symbolIcon-propertyForeground, var(--vscode-debugTokenExpression-name, var(--vscode-charts-blue, #0451a5))); }
+body.vscode-light .json-token--string { color: var(--vscode-symbolIcon-stringForeground, var(--vscode-debugTokenExpression-string, var(--vscode-charts-orange, #a31515))); }
+body.vscode-light .json-token--number { color: var(--vscode-symbolIcon-numberForeground, var(--vscode-debugTokenExpression-number, var(--vscode-charts-green, #098658))); }
+body.vscode-light .json-token--boolean, body.vscode-light .json-token--null { color: var(--vscode-symbolIcon-booleanForeground, var(--vscode-debugTokenExpression-boolean, var(--vscode-charts-purple, #7a3e9d))); }
+body.vscode-high-contrast .json-token, body.vscode-high-contrast-light .json-token { color: var(--vscode-editor-foreground); }
 .json-view mark { border-radius: 1px; background: var(--vscode-editor-findMatchHighlightBackground, var(--vscode-editor-findMatchBackground)); color: inherit; outline: 1px solid var(--vscode-editor-findMatchHighlightBorder, transparent); }
 .event-status { display: inline-flex; align-items: center; justify-content: center; color: var(--vscode-descriptionForeground); }.event-status .product-icon { font-size: 12px; }.event-status--matched { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }.event-status--error { color: var(--vscode-errorForeground); }.event-status--terminal { color: var(--vscode-debugIcon-stopForeground, var(--vscode-errorForeground)); }.event-status--unmatched { color: var(--vscode-descriptionForeground); }
 .event-filters { display: flex; align-items: center; flex-wrap: wrap; gap: var(--ts-space-1); min-height: 38px; padding: var(--ts-space-1) var(--ts-space-2); border-bottom: 1px solid var(--vscode-editorWidget-border); }

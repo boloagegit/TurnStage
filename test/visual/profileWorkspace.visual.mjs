@@ -153,6 +153,7 @@ try {
   assert.equal(await page.locator('.mobile-chat-preview__app-header').getByRole('button').count(), 0, 'Harness actions must stay outside the simulated Chat header');
   assert.equal(await sessionTools.getByRole('button', { name: 'Restart session' }).locator('.codicon-debug-restart').count(), 1, 'Restart session must use the specific VS Code restart Codicon');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Debug is the default right-panel mode');
+  assert.equal(await page.getByRole('tab', { name: 'Network' }).getAttribute('aria-selected'), 'true', 'Network is the default Debug view for a new Webview state');
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'false', 'Red Team remains directly available beside Debug');
   assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'false', 'Configure remains directly available beside Debug');
   await page.getByRole('tab', { name: 'Debug' }).focus();
@@ -172,6 +173,14 @@ try {
   assert.ok((await page.getByRole('region', { name: 'Request details' }).innerText()).includes('IdleTimeoutError'), 'Failed request details must expose the timeout class');
   await page.getByRole('tab', { name: 'Payload' }).click();
   assert.ok((await page.getByRole('tabpanel', { name: 'Payload' }).innerText()).includes('Why did this time out?'), 'Payload view must expose the redacted request payload');
+  const payloadColors = await page.getByRole('tabpanel', { name: 'Payload' }).evaluate((panel) => ({
+    key: getComputedStyle(panel.querySelector('.json-token--key')).color,
+    string: getComputedStyle(panel.querySelector('.json-token--string')).color,
+    punctuation: getComputedStyle(panel.querySelector('.json-token--punctuation')).color,
+  }));
+  assert.notEqual(payloadColors.key, payloadColors.string, 'Network Payload JSON keys and strings must use distinct syntax colors');
+  assert.notEqual(payloadColors.key, payloadColors.punctuation, 'Network Payload JSON keys and punctuation must remain visually distinct');
+  await page.getByRole('tabpanel', { name: 'Payload' }).screenshot({ path: resolve(artifactDirectory, 'network-payload-json-dark.png') });
   await page.getByRole('tab', { name: 'Response' }).click();
   assert.ok((await page.getByRole('tabpanel', { name: 'Response' }).innerText()).includes('Working'), 'Response view must expose the bounded response preview');
   await page.getByRole('tab', { name: 'Timing' }).click();
@@ -783,6 +792,15 @@ try {
   assert.ok(lightContrast.header >= 4.5, `Light-theme chat header contrast must be at least 4.5:1, received ${lightContrast.header}`);
   assert.ok(lightContrast.composer >= 4.5, `Light-theme composer contrast must be at least 4.5:1, received ${lightContrast.composer}`);
   await page.screenshot({ path: resolve(artifactDirectory, 'wide-light.png'), fullPage: true });
+  await page.getByRole('tab', { name: 'Payload' }).click();
+  const lightPayloadColors = await page.getByRole('tabpanel', { name: 'Payload' }).evaluate((panel) => ({
+    key: getComputedStyle(panel.querySelector('.json-token--key')).color,
+    string: getComputedStyle(panel.querySelector('.json-token--string')).color,
+    punctuation: getComputedStyle(panel.querySelector('.json-token--punctuation')).color,
+  }));
+  assert.notEqual(lightPayloadColors.key, lightPayloadColors.string, 'Light-theme Payload keys and strings must use distinct syntax colors');
+  assert.notEqual(lightPayloadColors.key, lightPayloadColors.punctuation, 'Light-theme Payload keys and punctuation must remain visually distinct');
+  await page.getByRole('tabpanel', { name: 'Payload' }).screenshot({ path: resolve(artifactDirectory, 'network-payload-json-light.png') });
 
   await page.getByRole('tab', { name: 'Configure' }).click();
   await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('request');
@@ -851,6 +869,35 @@ try {
   assert.equal(zoomScreenshot.readUInt32BE(16), zoomViewport.width * 2, '200% evidence PNG must retain the doubled physical width');
   assert.equal(zoomScreenshot.readUInt32BE(20), zoomViewport.height * 2, '200% evidence PNG must retain the doubled physical height');
 
+  const emptyPage = await browser.newPage({ viewport: { width: 960, height: 640 } });
+  await emptyPage.goto(url);
+  await emptyPage.locator('.mobile-chat-preview__app-header strong').waitFor();
+  assert.equal(await emptyPage.getByRole('tab', { name: 'Network' }).getAttribute('aria-selected'), 'true', 'A fresh Webview must open Debug on Network');
+  await emptyPage.evaluate(() => {
+    const harness = globalThis.__turnstageHarness;
+    harness.dispatch({
+      type: 'session.snapshot',
+      snapshot: { ...harness.snapshot, sessionState: 'notStarted', turnState: 'idle', messages: [], rawEvents: [], normalizedEvents: [], metrics: { eventCount: 0, byteCount: 0, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0 }, errors: [] },
+      runs: [],
+      networkEntries: []
+    });
+  });
+  await emptyPage.getByRole('tab', { name: 'Raw Events' }).click();
+  const rawEmpty = emptyPage.locator('.event-empty');
+  await rawEmpty.getByText('No raw events yet').waitFor();
+  assert.equal(await emptyPage.locator('.event-filters').count(), 0, 'Empty event views must not reserve space for inactive filters');
+  const startBounds = await rawEmpty.getByRole('button', { name: 'Start session' }).evaluate((button) => {
+    const bounds = button.getBoundingClientRect();
+    return { width: bounds.width, height: bounds.height };
+  });
+  assert.ok(startBounds.width < 120 && startBounds.height <= 28, `Empty-state Start session must stay compact; received ${startBounds.width}x${startBounds.height}`);
+  await emptyPage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'raw-events-empty-compact-dark.png') });
+  await emptyPage.getByRole('tab', { name: 'Normalized' }).click();
+  await emptyPage.getByText('No normalized events yet').waitFor();
+  assert.ok(await emptyPage.locator('.event-empty').getByText('Normalized events appear when raw data matches a stream mapping.').count(), 'Normalized empty state must explain when data appears');
+  await emptyPage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'events-empty-compact-dark.png') });
+  await emptyPage.close();
+
   await page.keyboard.press('Tab');
   const focus = await page.evaluate(() => {
     const activeElement = document.activeElement;
@@ -859,7 +906,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, networkPayloadJsonHighlighting: true, defaultDebugNetwork: true, compactEventEmptyStates: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

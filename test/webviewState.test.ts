@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeNetworkInspectorState, normalizeScrollPosition, normalizeWebviewState, shouldApplyProfileInspectorDefault } from '../src/webview/main';
+import { DEFAULT_INSPECTOR_TAB, normalizeNetworkInspectorState, normalizeScrollPosition, normalizeWebviewState, shouldApplyProfileInspectorDefault } from '../src/webview/main';
 
 describe('Webview UI checkpoint', () => {
   it('restores a bounded v4 checkpoint without accepting arbitrary scroll keys', () => {
@@ -47,6 +47,7 @@ describe('Webview UI checkpoint', () => {
   });
 
   it('migrates the legacy Request tab and only applies profile defaults without a saved inspector tab', () => {
+    expect(DEFAULT_INSPECTOR_TAB).toBe('Network');
     const legacy = normalizeWebviewState({ inspectorTab: 'Request' });
     expect(legacy?.inspectorTab).toBe('Network');
     expect(shouldApplyProfileInspectorDefault(legacy)).toBe(false);
