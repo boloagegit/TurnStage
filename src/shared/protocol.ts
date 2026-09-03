@@ -39,7 +39,7 @@ export interface MappingTestResult {
   parseError?: string;
 }
 
-export type TestOperationAction = 'runAll' | 'rerunFailed' | 'rerunUnstable' | 'rerunIncomplete';
+export type TestOperationAction = 'runAll' | 'runCase' | 'rerunFailed' | 'rerunUnstable' | 'rerunIncomplete';
 export type TestOperationState = 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
 export interface TestOperationProgress {
   totalCases: number;
@@ -122,6 +122,7 @@ export type WebviewMessage = Envelope & (
   | { type: 'adversarial.case.request'; sourcePath: string; scenarioId: string }
   | { type: 'adversarial.case.save'; sourcePath: string; scenarioId: string; expectedRevision: string; scenario: ScenarioDefinition }
   | { type: 'test.runAll' }
+  | { type: 'test.runCase'; scenarioId: string; suiteId?: string }
   | { type: 'test.rerun'; status: 'failed' | 'unstable' | 'incomplete' }
   | { type: 'test.cancel' }
   | { type: 'test.timeline.open'; evidenceId: string }
@@ -260,6 +261,7 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
     case 'adversarial.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
     case 'adversarial.case.request': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId);
     case 'adversarial.case.save': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId) && isRevision(message.expectedRevision) && isRecord(message.scenario) && isStructuredValue(message.scenario, MAX_HOST_VALUE_NODES);
+    case 'test.runCase': return isBoundedId(message.scenarioId) && (message.suiteId === undefined || isBoundedId(message.suiteId));
     case 'test.rerun': return ['failed', 'unstable', 'incomplete'].includes(String(message.status));
     case 'test.timeline.open': return isBoundedString(message.evidenceId);
     case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
@@ -315,7 +317,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'adversarial.case.loaded': case 'adversarial.case.saved': return isLinkedAdversarialCaseDetail(message.detail);
     case 'adversarial.case.error': return isBoundedString(message.sourcePath, 4096) && isBoundedId(message.scenarioId) && isBoundedString(message.message, 4096) && typeof message.conflict === 'boolean';
     case 'test.operation': return isRecord(message.operation)
-      && ['runAll', 'rerunFailed', 'rerunUnstable', 'rerunIncomplete'].includes(String(message.operation.action))
+      && ['runAll', 'runCase', 'rerunFailed', 'rerunUnstable', 'rerunIncomplete'].includes(String(message.operation.action))
       && ['running', 'cancelling', 'completed', 'cancelled', 'failed'].includes(String(message.operation.state))
       && optionalBoundedString(message.operation.detail)
       && (message.operation.progress === undefined || isTestOperationProgress(message.operation.progress));

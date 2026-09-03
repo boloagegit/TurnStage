@@ -6,8 +6,8 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AdversarialResultSummary, ChatMessage, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
-import { MobileChatPreview, resizeComposerTextarea } from '../src/webview/MobileChatPreview';
-import { ACCESSIBLE_EVENT_WINDOW_SIZE, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, eventTimeDeltas, EvidenceReviewBar, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, resolveActiveEvidence, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
+import { MobileChatPreview, resizeComposerTextarea, resolveResponseActivity } from '../src/webview/MobileChatPreview';
+import { ACCESSIBLE_EVENT_WINDOW_SIZE, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, eventTimeDeltas, EvidenceReviewBar, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, resolveActiveEvidence, resolveMessageInspectionTarget, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
 import { AdversarialWorkspace, SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
 
@@ -504,6 +504,33 @@ describe('Webview DOM behavior', () => {
     expect((screen.getByRole('button', { name: 'Stopping…' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('distinguishes sending, waiting, delayed, and receiving response activity without fake progress', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const userMessage: ChatMessage = { ...assistantMessage('user-waiting', 'Explain this result'), role: 'user', createdAt: 9_500 };
+    const base = { ...snapshot, messages: [userMessage], metrics: { ...snapshot.metrics, requestStartedAt: 9_500 } };
+    const { rerender } = render(<MobileChatPreview {...mobileProps({ snapshot: { ...base, turnState: 'submitting' }, active: true })} />);
+
+    expect(screen.getByText('Sending message…')).toBeTruthy();
+    rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...base, turnState: 'waitingStart' }, active: true })} />);
+    expect(screen.getByText('Waiting for response…')).toBeTruthy();
+    rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...base, turnState: 'waitingStart', metrics: { ...base.metrics, requestStartedAt: 5_500 } }, active: true })} />);
+    expect(screen.getByText('Still waiting · 4 s')).toBeTruthy();
+
+    const pending: ChatMessage = { ...assistantMessage('assistant-receiving', ''), status: 'streaming', completedAt: undefined };
+    rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...base, turnState: 'streaming', messages: [userMessage, pending] }, active: true })} />);
+    expect(screen.getByText('Receiving response…')).toBeTruthy();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
+  it('resolves the delayed waiting threshold deterministically', () => {
+    expect(resolveResponseActivity('submitting', 0)).toBe('sending');
+    expect(resolveResponseActivity('waitingStart', 2_999)).toBe('waiting');
+    expect(resolveResponseActivity('waitingStart', 3_000)).toBe('delayed');
+    expect(resolveResponseActivity('streaming', 0)).toBe('receiving');
+    expect(resolveResponseActivity('completed', 10_000)).toBeUndefined();
+  });
+
   it.each(['caret', 'dots', 'shimmer'] as const)('renders the %s effect only for a streaming Assistant response', (effect) => {
     const streamingMessage: ChatMessage = { ...assistantMessage('streaming', 'Partial response'), status: 'streaming', completedAt: undefined };
     render(<MobileChatPreview {...mobileProps({ profile: { ...profile, ui: { ...profile.ui, streaming: { effect, speedMs: 1_200, intensityPercent: 80 } } }, snapshot: { ...snapshot, turnState: 'streaming', messages: [streamingMessage] }, active: true })} />);
@@ -965,6 +992,7 @@ describe('Webview DOM behavior', () => {
     expect(within(redTeamNavigation).getByRole('tab', { name: 'Campaigns: 0' })).toBeTruthy();
     expect(within(redTeamNavigation).getByRole('tab', { name: 'Cases: 0' })).toBeTruthy();
     await user.click(within(redTeamNavigation).getByRole('tab', { name: 'Results: 1' }));
+    expect(screen.queryByRole('button', { name: 'Run all' })).toBeNull();
     expect(screen.getAllByText('Attack succeeded').length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: 'Open evidence' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'message', messageId: 'assistant-1' } });
@@ -997,9 +1025,13 @@ describe('Webview DOM behavior', () => {
 
     expect(container.querySelectorAll('.adversarial-case-table tbody > tr').length).toBe(25);
     expect(screen.getByText('100 of 100 cases')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Run all' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.runAll' });
     await user.click(screen.getByRole('button', { name: 'Next page' }));
     expect(screen.getByText('Case 26')).toBeTruthy();
     expect(screen.getByText('Page 2 of 4')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Run case Case 26' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.runCase', scenarioId: 'case-26', suiteId: 'security' });
     await user.type(screen.getByRole('searchbox', { name: 'Search adversarial cases' }), 'case-100');
     expect(container.querySelectorAll('.adversarial-case-table tbody > tr').length).toBe(1);
     expect(screen.getByText('Case 100')).toBeTruthy();
@@ -1087,13 +1119,15 @@ describe('Webview DOM behavior', () => {
     await user.click(screen.getByRole('button', { name: 'Open linked suite tests/safety.adversarial.csv' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.openLinkedSuite', path: 'tests/safety.adversarial.csv' });
     expect(screen.getByRole('button', { name: 'Unlink suite tests/safety.adversarial.csv' })).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('Running all adversarial cases');
+    expect((screen.getByRole('button', { name: 'Running all…' }) as HTMLButtonElement).disabled).toBe(true);
     rerender(<AdversarialWorkspace profile={linked} post={post} activeSection="results" testOperation={operation} />);
-    expect(screen.getByRole('status').textContent).toContain('Running all TurnStage tests');
+    expect(screen.getByRole('status').textContent).toContain('Running all adversarial cases');
     expect(screen.getByRole('status').textContent).toContain('24 / 100 cases · 31 / 120 attempts');
     expect(screen.getByRole('status').textContent).toContain('Concurrency: 1 active · limit 3 / 8');
     expect(screen.getByRole('status').textContent).toContain('Active: Prompt boundary');
     expect(screen.getByRole('progressbar').getAttribute('value')).toBe('24');
-    expect((screen.getByRole('button', { name: 'Running all…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Running all…' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Stop test run' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.cancel' });
   });
@@ -1101,7 +1135,8 @@ describe('Webview DOM behavior', () => {
   it('restores Red Team expansion and scroll checkpoints', () => {
     const configured = { ...profile, tests: { scenarios: [{ id: 'case-1', name: 'Restored case', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } }] } } as TurnStageProfile;
     const onScrollTopChange = vi.fn();
-    const { container } = render(<AdversarialWorkspace profile={configured} post={vi.fn()} activeSection="cases" expandedCaseId="case-1" onExpandedCaseIdChange={vi.fn()} scrollTop={480} onScrollTopChange={onScrollTopChange} />);
+    const common = { profile: configured, post: vi.fn(), expandedCaseId: 'case-1', onExpandedCaseIdChange: vi.fn(), onScrollTopChange };
+    const { container, rerender } = render(<AdversarialWorkspace {...common} activeSection="cases" scrollTop={480} />);
     const scrollContainer = container.querySelector('.settings-main') as HTMLDivElement;
 
     expect(screen.getByRole('button', { name: 'Close editor' }).getAttribute('aria-expanded')).toBe('true');
@@ -1109,6 +1144,20 @@ describe('Webview DOM behavior', () => {
     scrollContainer.scrollTop = 640;
     fireEvent.scroll(scrollContainer);
     expect(onScrollTopChange).toHaveBeenLastCalledWith(640);
+    rerender(<AdversarialWorkspace {...common} activeSection="results" scrollTop={120} />);
+    expect(scrollContainer.scrollTop).toBe(120);
+    rerender(<AdversarialWorkspace {...common} activeSection="cases" scrollTop={640} />);
+    expect(scrollContainer.scrollTop).toBe(640);
+  });
+
+  it('routes user inspection to its request and assistant inspection to its latest raw event', () => {
+    const turnId = 'turn-1';
+    const userMessage = { id: 'user-1', role: 'user' as const, status: 'completed' as const, createdAt: 1, parts: [], citations: [], actions: [], followups: [], metadata: { clientRequestId: turnId } };
+    const assistantMessage = { id: 'assistant-1', role: 'assistant' as const, status: 'completed' as const, createdAt: 1, parts: [], citations: [], actions: [], followups: [], metadata: { clientRequestId: turnId, rawSequences: [3, 8] } };
+    const network = [{ id: 'network-1', turnId, kind: 'stream' as const, attempt: 1, method: 'POST', url: 'https://example.test', state: 'completed' as const, startedAt: 1, requestHeaders: {}, timing: {}, transferredBytes: 0, eventCount: 2, correlation: {} }];
+
+    expect(resolveMessageInspectionTarget(userMessage, network)).toEqual({ tab: 'Network', turnId, networkId: 'network-1' });
+    expect(resolveMessageInspectionTarget(assistantMessage, network)).toEqual({ tab: 'Raw Events', turnId, sequence: 8 });
   });
 
   it('authors and operates a bounded campaign with baseline, diff, resume, and JSONL actions', async () => {

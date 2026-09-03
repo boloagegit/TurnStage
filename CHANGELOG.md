@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.22.8
+
+- Moved adversarial execution controls into the Cases workspace, added bounded
+  per-case runs, and limited Run all to the active Profile's adversarial cases.
+  Run status, cancellation, and progress remain visible beside the case catalog.
+- Preserved independent scroll positions for every Red Team section and routed
+  user-message inspection to the correlated Network request while Assistant
+  inspection continues to open retained raw-event evidence.
+- Added explicit Sending, Waiting, Delayed, and Receiving response states. The
+  compact activity treatment respects the configured indicator and reduced
+  motion, never invents progress, and leaves Stop available throughout a turn.
+- Prevented delayed event-row focus from overriding the user's next keyboard
+  selection, with updated protocol, Extension Host, accessibility, visual,
+  integration, and performance regression coverage.
+
 ## 0.22.7
 
 - Request-backed openings now start automatically once when a trusted Profile

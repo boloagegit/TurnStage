@@ -42,6 +42,7 @@ export type ProductIconName =
   | 'stop'
   | 'target'
   | 'trash'
+  | 'watch'
   | 'warning';
 
 const codicons: Record<ProductIconName, string> = {
@@ -85,6 +86,7 @@ const codicons: Record<ProductIconName, string> = {
   stop: 'debug-stop',
   target: 'target',
   trash: 'trash',
+  watch: 'watch',
   warning: 'warning'
 };
 

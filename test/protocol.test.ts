@@ -43,6 +43,9 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.case.request', sourcePath: '', scenarioId: 'case-1' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.case.save', sourcePath: 'tests/safety.adversarial.csv', scenarioId: 'case-1', expectedRevision: 'a'.repeat(64), scenario: linkedScenario }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.case.save', sourcePath: 'tests/safety.adversarial.csv', scenarioId: 'case-1', expectedRevision: 'stale', scenario: linkedScenario }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'test.runCase', scenarioId: 'case-1', suiteId: 'safety' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.runCase', scenarioId: '', suiteId: 'safety' }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'test.runCase', scenarioId: 'case-1', suiteId: '' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.cancel' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'connection.analyze' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } }, 'editor-1')).toBe(true);
@@ -103,6 +106,7 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'campaign.exported', path: 'results.jsonl', artifactId: 'artifact-2' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'adversarial.operation', action: 'exportCsv', status: 'completed', detail: 'Exported.', path: 'cases.csv', artifactId: 'artifact-3' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running' } }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runCase', state: 'running', detail: 'case-1' } }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 100, completedCases: 24, totalAttempts: 120, completedAttempts: 31, maxConcurrency: 3, activeCaseNames: ['Case 25'] } } }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 10, completedCases: 11, totalAttempts: 10, completedAttempts: 0, maxConcurrency: 3 } } }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 10, completedCases: 0, totalAttempts: 10, completedAttempts: 0, maxConcurrency: 9 } } }, 'editor-1')).toBe(false);

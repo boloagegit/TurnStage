@@ -417,6 +417,27 @@ export class ScenarioTestController implements vscode.Disposable {
     }
   }
 
+  async runAdversarial(uri: vscode.Uri, onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
+    if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
+    const uriKey = uri.toString();
+    const matches = (await this.describeTests(false)).filter((item) => item.kind === 'case' && item.uri === uriKey && item.adversarial === true);
+    if (!matches.length) throw new Error(localize('No adversarial cases are available for this profile.'));
+    return this.runManualSelection(matches.map((item) => item.id), onProgress);
+  }
+
+  async runCase(uri: vscode.Uri, scenarioId: string, suiteId?: string, onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
+    if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
+    const uriKey = uri.toString();
+    const matches = (await this.describeTests(false)).filter((item) => item.kind === 'case'
+      && item.uri === uriKey
+      && item.caseId === scenarioId
+      && item.adversarial === true
+      && item.suiteId === suiteId);
+    if (!matches.length) throw new Error(localize('This adversarial case is no longer available. Refresh the cases and try again.'));
+    if (matches.length > 1) throw new Error(localize('More than one adversarial case matches this selection. Use Test Explorer to choose the exact case.'));
+    return this.runManualSelection([matches[0]!.id], onProgress);
+  }
+
   async rerunLatest(uri: vscode.Uri, status: 'failed' | 'unstable' | 'incomplete', onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
     if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
     const latest = this.getLatestResults(uri).filter((result) => status === 'failed'
@@ -449,6 +470,19 @@ export class ScenarioTestController implements vscode.Disposable {
     if (!this.activeManualRun || this.activeManualRun.token.isCancellationRequested) return false;
     this.activeManualRun.cancel();
     return true;
+  }
+
+  private async runManualSelection(itemIds: readonly string[], onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
+    if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
+    const cancellation = new vscode.CancellationTokenSource();
+    this.activeManualRun = cancellation;
+    try {
+      const snapshot = await this.runSelection({ itemIds }, cancellation.token, { progress: onProgress });
+      return snapshot.cancelled ? 'cancelled' : 'completed';
+    } finally {
+      if (this.activeManualRun === cancellation) this.activeManualRun = undefined;
+      cancellation.dispose();
+    }
   }
 
   async runSelection(selection: ScenarioRunSelection, token: vscode.CancellationToken, scope: ScenarioRunScope = {}): Promise<ScenarioRunSnapshot> {

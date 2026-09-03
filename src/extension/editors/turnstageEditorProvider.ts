@@ -363,23 +363,28 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
           return;
         }
-        if (message.type === 'test.runAll' || message.type === 'test.rerun') {
+        if (message.type === 'test.runAll' || message.type === 'test.runCase' || message.type === 'test.rerun') {
           if (!this.scenarioTests) throw new Error(localize('Test runtime is unavailable.'));
           const current = this.latestTestOperations.get(documentKey);
           if (current?.state === 'running' || current?.state === 'cancelling') throw new Error(localize('A TurnStage test run is already active.'));
-          const action: TestOperationAction = message.type === 'test.runAll' ? 'runAll' : message.status === 'failed' ? 'rerunFailed' : message.status === 'unstable' ? 'rerunUnstable' : 'rerunIncomplete';
-          await postTestOperation({ action, state: 'running' }, message.requestId);
+          const action: TestOperationAction = message.type === 'test.runAll' ? 'runAll' : message.type === 'test.runCase' ? 'runCase' : message.status === 'failed' ? 'rerunFailed' : message.status === 'unstable' ? 'rerunUnstable' : 'rerunIncomplete';
+          const detail = message.type === 'test.runCase' ? message.scenarioId : undefined;
+          await postTestOperation({ action, state: 'running', ...(detail ? { detail } : {}) }, message.requestId);
           let progress: TestOperationSnapshot['progress'];
           const onProgress = (next: NonNullable<TestOperationSnapshot['progress']>): void => {
             progress = next;
             const currentState = this.latestTestOperations.get(documentKey)?.state;
-            observeBackground(postTestOperation({ action, state: currentState === 'cancelling' ? 'cancelling' : 'running', progress: next }), 'test-progress');
+            observeBackground(postTestOperation({ action, state: currentState === 'cancelling' ? 'cancelling' : 'running', ...(detail ? { detail } : {}), progress: next }), 'test-progress');
           };
           try {
-            const state = message.type === 'test.runAll' ? await this.scenarioTests.runAll(onProgress) : await this.scenarioTests.rerunLatest(document.uri, message.status, onProgress);
-            await postTestOperation({ action, state, ...(progress ? { progress } : {}) }, message.requestId);
+            const state = message.type === 'test.runAll'
+              ? await this.scenarioTests.runAdversarial(document.uri, onProgress)
+              : message.type === 'test.runCase'
+                ? await this.scenarioTests.runCase(document.uri, message.scenarioId, message.suiteId, onProgress)
+                : await this.scenarioTests.rerunLatest(document.uri, message.status, onProgress);
+            await postTestOperation({ action, state, ...(detail ? { detail } : {}), ...(progress ? { progress } : {}) }, message.requestId);
           } catch (error) {
-            await postTestOperation({ action, state: 'failed', ...(progress ? { progress } : {}) }, message.requestId);
+            await postTestOperation({ action, state: 'failed', ...(detail ? { detail } : {}), ...(progress ? { progress } : {}) }, message.requestId);
             throw error;
           }
           return;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_INSPECTOR_TAB, normalizeNetworkInspectorState, normalizeScrollPosition, normalizeWebviewState, shouldApplyProfileInspectorDefault } from '../src/webview/main';
 
 describe('Webview UI checkpoint', () => {
-  it('restores a bounded v4 checkpoint without accepting arbitrary scroll keys', () => {
+  it('restores a bounded v5 checkpoint with independent Red Team scroll positions', () => {
     const restored = normalizeWebviewState({
       version: 4,
       section: 'security',
@@ -19,12 +19,12 @@ describe('Webview UI checkpoint', () => {
       adversarialResultCollection: { query: 'leak', outcome: 'attackSucceeded', stability: 'unstable', page: 2, pageSize: 50 },
       acceptedForms: ['message-1:contact', 'message-1:contact'],
       collapsedEventTurns: { raw: ['turn-1', 'turn-1'], normalized: ['turn-2'] },
-      scrollPositions: { chat: 423.6, 'configure.security': 812, arbitrary: 999, 'events.raw': Number.POSITIVE_INFINITY },
+      scrollPositions: { chat: 423.6, 'adversarial.results': 120, 'adversarial.cases': 640, adversarial: 999, 'configure.security': 812, arbitrary: 999, 'events.raw': Number.POSITIVE_INFINITY },
       networkInspector: { query: 'timeout', selectedId: 'stream-2', detailTab: 'Timing' }
     });
 
     expect(restored).toMatchObject({
-      version: 4,
+      version: 5,
       section: 'security',
       configurationSection: 'security',
       rightPaneMode: 'configure',
@@ -39,11 +39,12 @@ describe('Webview UI checkpoint', () => {
       adversarialResultCollection: { query: 'leak', outcome: 'attackSucceeded', stability: 'unstable', page: 2, pageSize: 50 },
       acceptedForms: ['message-1:contact'],
       collapsedEventTurns: { raw: ['turn-1'], normalized: ['turn-2'] },
-      scrollPositions: { chat: 424, 'configure.security': 812 },
+      scrollPositions: { chat: 424, 'adversarial.results': 120, 'adversarial.cases': 640, 'configure.security': 812 },
       networkInspector: { query: 'timeout', selectedId: 'stream-2', detailTab: 'Timing' }
     });
     expect(restored?.scrollPositions).not.toHaveProperty('arbitrary');
     expect(restored?.scrollPositions).not.toHaveProperty('events.raw');
+    expect(restored?.scrollPositions).not.toHaveProperty('adversarial');
   });
 
   it('migrates the legacy Request tab and only applies profile defaults without a saved inspector tab', () => {
@@ -63,12 +64,12 @@ describe('Webview UI checkpoint', () => {
       expandedAdversarialCaseId: 'x'.repeat(513),
       acceptedForms: ['ok', 42, 'x'.repeat(513)],
       collapsedEventTurns: { raw: ['ok', 42, 'x'.repeat(513)], normalized: 'bad' },
-      scrollPositions: { chat: -20, adversarial: 99_999_999 },
+      scrollPositions: { chat: -20, adversarial: 99_999_999, 'adversarial.timeline': 99_999_999 },
       networkInspector: { query: 'q'.repeat(600), selectedId: 'x'.repeat(513), detailTab: 'Unknown' }
     });
     expect(restored).toEqual({
-      version: 4,
-      scrollPositions: { chat: 0, adversarial: 10_000_000 },
+      version: 5,
+      scrollPositions: { chat: 0, 'adversarial.timeline': 10_000_000 },
       adversarialCaseCollection: { query: '', mode: 'all', source: 'all', tag: 'all', sort: 'sourceOrder', page: 0, pageSize: 25 },
       adversarialResultCollection: { query: '', outcome: 'all', stability: 'all', attentionOnly: false, page: 0, pageSize: 25 },
       networkInspector: { query: 'q'.repeat(512), detailTab: 'Headers' },

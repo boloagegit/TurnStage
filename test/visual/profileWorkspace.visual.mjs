@@ -190,6 +190,12 @@ try {
   assert.ok(!networkHeaders.includes('local-debug-token') && networkHeaders.includes('••••••••'), 'Header view must mask Authorization and response cookies');
   assert.ok(networkHeaders.includes('4bf92f3577b34da6a3ce929d0e0e4736') && networkHeaders.includes('visual-request-2'), 'Header view must expose bounded trace and request correlation identifiers');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'network-timeout-dark.png') });
+  const latestUserMessage = page.locator('.mobile-chat-preview__message--user').filter({ hasText: 'Verify themed streaming layout' });
+  await latestUserMessage.getByRole('button', { name: 'Inspect request' }).click();
+  assert.equal(await page.getByRole('tab', { name: 'Network' }).getAttribute('aria-selected'), 'true', 'Inspect request must route a user message to Network');
+  await page.waitForFunction(() => document.getElementById('network-row-stream-1')?.getAttribute('aria-selected') === 'true');
+  assert.equal(await page.locator('#network-row-stream-1').getAttribute('aria-selected'), 'true', 'Inspect request must select the request from the same conversation turn');
+  await page.screenshot({ path: resolve(artifactDirectory, 'inspect-request-network-dark.png'), fullPage: true });
   await page.getByRole('tab', { name: 'Raw Events' }).click();
   const screenshotButton = page.getByRole('button', { name: 'Copy chat screenshot' });
   await page.keyboard.press('Tab');
@@ -377,11 +383,15 @@ try {
   assert.ok((await activeTestRun.innerText()).includes('24 / 100 cases · 31 / 125 attempts'), 'Run all feedback must expose measurable case and attempt progress');
   assert.ok((await activeTestRun.innerText()).includes('Concurrency: 2 active · limit 3 / 8'), 'Run all feedback must expose active workers and the configured concurrency limit');
   assert.equal(await activeTestRun.getByRole('progressbar').getAttribute('value'), '24', 'Run all feedback must use a determinate progress value after planning');
-  assert.equal(await page.getByRole('button', { name: 'Running all…' }).isDisabled(), true, 'An active Red Team run must disable duplicate starts');
+  assert.equal(await page.getByRole('button', { name: 'Running all…' }).count(), 0, 'Results must stay focused on review and rerun actions');
   assert.equal(await page.getByRole('button', { name: 'Stop test run' }).locator('.codicon-debug-stop').count(), 1, 'An active Red Team run must expose a distinct stop action');
   await activeTestRun.screenshot({ path: resolve(artifactDirectory, 'adversarial-run-active-dark.png') });
-  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run-complete', type: 'test.operation', operation: { action: 'runAll', state: 'completed' } } })));
   await redTeamNavigation.getByRole('tab', { name: /Cases:/ }).click();
+  assert.equal(await page.getByRole('button', { name: 'Running all…' }).isDisabled(), true, 'Cases must own the disabled Run all action while a run is active');
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run-complete', type: 'test.operation', operation: { action: 'runAll', state: 'completed' } } })));
+  await page.getByRole('button', { name: 'Run all' }).click();
+  assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'test.runAll'))).type, 'test.runAll', 'Cases must own the primary Run all action');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-cases-dark.png') });
   const linkedCsv = page.getByText('.vscode/turnstage/tests/security-regression.adversarial.csv', { exact: true });
   await linkedCsv.scrollIntoViewIfNeeded();
   assert.equal(await linkedCsv.count(), 1, 'Red Team must show a directly linked CSV source without copying it into Profile JSONC');
@@ -404,6 +414,9 @@ try {
   await page.getByText('1 of 31 cases', { exact: true }).waitFor();
   assert.equal(await page.getByText('1 of 31 cases', { exact: true }).count(), 1, 'Case search must narrow the full unified catalog');
   assert.equal(await adversarialCaseTable.locator('tbody > tr').count(), 1, 'A filtered catalog must mount only matching rows');
+  await adversarialCaseTable.getByRole('button', { name: 'Run case Linked case 30' }).click();
+  const runCaseMessage = await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'test.runCase'));
+  assert.deepEqual({ scenarioId: runCaseMessage.scenarioId, suiteId: runCaseMessage.suiteId }, { scenarioId: 'linked-case-30', suiteId: 'security-regression' }, 'A case row must run the exact linked suite case');
   await adversarialCaseTable.getByRole('button', { name: 'Edit', exact: true }).click();
   const linkedCaseEditor = page.locator('.linked-case-editor');
   await linkedCaseEditor.getByLabel('Scenario name').waitFor();
@@ -458,11 +471,11 @@ try {
   assert.equal(await adversarialResults.getByRole('button', { name: 'Advisory quality review' }).count(), 1, 'Quality review must remain visibly advisory and separate from formal diagnosis');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'copilot-result-actions-dark.png') });
   await adversarialResults.getByLabel('More actions').first().click();
-  await page.getByLabel('Export adversarial results').click();
+  await page.getByLabel('Export adversarial results', { exact: true }).click();
   assert.equal(await page.getByRole('button', { name: 'HTML report' }).count(), 1, 'Latest results must expose HTML export in the compact export menu');
   assert.equal(await page.getByRole('button', { name: 'Evidence Bundle' }).isEnabled(), true, 'Trusted workspaces must expose the sanitized Evidence Bundle export');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-export-menu-dark.png') });
-  await page.getByLabel('Export adversarial results').click();
+  await page.getByLabel('Export adversarial results', { exact: true }).click();
   assert.equal(await page.locator('.debug-pane').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Red Team configuration must not overflow the right pane horizontally');
   await adversarialResults.scrollIntoViewIfNeeded();
   assert.equal(await adversarialResults.locator('tbody > tr').count(), 2, 'Latest results must render one compact semantic row per result');
@@ -615,6 +628,36 @@ try {
   assert.equal((await adaptiveText.innerText()).includes('END_OF_LARGE_EVENT'), true, 'Adaptive reveal must catch up within the configured visual lag');
   await page.screenshot({ path: resolve(artifactDirectory, 'streaming-adaptive-complete-dark.png'), fullPage: true });
 
+  await page.goto(`${url}?active=true&responseActivity=sending`);
+  await waitForProfile();
+  assert.equal(await page.getByText('Sending message…').count(), 1, 'Submitting must show one compact sending state');
+  assert.equal(await page.locator('.mobile-chat-preview__response-activity .codicon-loading').count(), 1, 'Submitting uses the loading product icon');
+
+  await page.goto(`${url}?active=true&responseActivity=waiting`);
+  await waitForProfile();
+  assert.equal(await page.getByText('Waiting for response…').count(), 1, 'Waiting for the first response event must remain explicit');
+  assert.equal(await page.locator('.mobile-chat-preview__response-dots > span').count(), 3, 'Waiting uses three bounded activity dots');
+  assert.equal(await page.locator('.mobile-chat-preview__part--progress').count(), 0, 'Waiting feedback must not invent server progress');
+  await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'response-waiting-dark.png') });
+
+  await page.goto(`${url}?active=true&responseActivity=delayed`);
+  await waitForProfile();
+  assert.match(await page.locator('.mobile-chat-preview__response-activity').innerText(), /Still waiting · [4-9] s/, 'A long wait must expose elapsed seconds without fake completion');
+  assert.equal(await page.locator('.mobile-chat-preview__response-activity .codicon-watch').count(), 1, 'A delayed response has a distinct, recognizable state');
+  await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'response-delayed-dark.png') });
+
+  await page.goto(`${url}?active=true&responseActivity=receiving`);
+  await waitForProfile();
+  assert.equal(await page.getByText('Receiving response…').count(), 1, 'An empty Assistant stream must show receiving feedback');
+  assert.equal(await page.locator('.mobile-chat-preview__part--progress').count(), 0, 'Receiving feedback must remain distinct from real progress events');
+  await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'response-receiving-dark.png') });
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto(`${url}?active=true&responseActivity=waiting`);
+  await waitForProfile();
+  assert.equal(await page.locator('.mobile-chat-preview__response-dots > span').first().evaluate((element) => getComputedStyle(element).animationName), 'none', 'Reduced motion must disable response activity animation');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+
   await page.goto(`${url}?draft=First%20line%0ASecond%20line%20wraps%20inside%20the%20composer%0AThird%20line`);
   await waitForProfile();
   const idleComposer = page.getByRole('textbox', { name: 'Message' });
@@ -706,8 +749,8 @@ try {
   assert.ok(appliedRedTeamScroll > 0, 'The representative Red Team viewport must have a real reading position to restore');
   await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').rightPaneMode === 'adversarial');
   await page.waitForFunction(() => Boolean(JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').expandedAdversarialCaseId));
-  await page.waitForFunction(() => (JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').scrollPositions?.adversarial ?? 0) > 0);
-  const savedRedTeamScroll = await page.evaluate(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').scrollPositions.adversarial);
+  await page.waitForFunction(() => (JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').scrollPositions?.['adversarial.cases'] ?? 0) > 0);
+  const savedRedTeamScroll = await page.evaluate(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').scrollPositions['adversarial.cases']);
   await page.reload();
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'The saved right-panel mode must survive recreation');

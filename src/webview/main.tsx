@@ -26,8 +26,8 @@ const TERMINAL_FILTERS = new Set<EventTerminalFilter>(['all', 'terminal', 'non-t
 const eventSearchTextCache = new WeakMap<object, string>();
 const rightPaneModes = ['debug', 'adversarial', 'configure'] as const;
 type RightPaneMode = typeof rightPaneModes[number];
-const WEBVIEW_STATE_VERSION = 4;
-const scrollPositionKeys = ['chat', 'adversarial', 'events.raw', 'events.normalized', ...SETTINGS_SECTIONS.map((section) => `configure.${section.id}`)] as const;
+const WEBVIEW_STATE_VERSION = 5;
+const scrollPositionKeys = ['chat', 'adversarial.results', 'adversarial.cases', 'adversarial.campaigns', 'adversarial.timeline', 'events.raw', 'events.normalized', ...SETTINGS_SECTIONS.map((section) => `configure.${section.id}`)] as const;
 type ScrollPositionKey = typeof scrollPositionKeys[number];
 const networkDetailTabs = ['Headers', 'Payload', 'Response', 'Timing'] as const;
 type NetworkDetailTab = typeof networkDetailTabs[number];
@@ -181,20 +181,21 @@ function App(): React.JSX.Element {
   const selectMessage = (messageId: string) => {
     setSelectedMessageId(messageId);
     const message = snapshot?.messages.find((item) => item.id === messageId);
-    const sequences = rawSequencesForMessage(message);
-    const sequence = sequences.at(-1);
+    const target = resolveMessageInspectionTarget(message, networkEntries);
     setRightPaneMode('debug');
-    setInspectorTab('Raw Events');
-    setSelectedRawSequence(sequence);
-    const turn = typeof message?.metadata?.clientRequestId === 'string' ? message.metadata.clientRequestId : 'all';
-    setEventFilters((current) => ({ ...current, raw: { ...DEFAULT_EVENT_FILTERS, turn } }));
+    setInspectorTab(target.tab);
+    setSelectedRawSequence(target.sequence);
+    setSelectedNetworkId(target.networkId);
+    if (target.tab === 'Raw Events') setEventFilters((current) => ({ ...current, raw: { ...DEFAULT_EVENT_FILTERS, turn: target.turnId ?? 'all' } }));
     setMessageActionFeedback({
       actionId: 'message.inspectRaw',
       sourceMessageId: messageId,
-      status: sequence === undefined ? 'info' : 'success',
-      message: sequence === undefined ? t('Opened Debug, but this message has no linked raw events.') : t('Opened raw event #{sequence} in Debug.', { sequence: formatNumber(sequence) }),
+      status: target.sequence === undefined && target.networkId === undefined ? 'info' : 'success',
+      message: target.tab === 'Network'
+        ? target.networkId ? t('Opened the linked request in Network.') : t('Opened Network, but this user message has no linked request.')
+        : target.sequence === undefined ? t('Opened Debug, but this message has no linked raw events.') : t('Opened raw event #{sequence} in Debug.', { sequence: formatNumber(target.sequence) }),
     });
-    if (sequence === undefined) focusAfterRender(() => document.getElementById('right-pane-panel')?.focus());
+    focusAfterRender(() => (target.networkId ? document.getElementById(networkRowId(target.networkId)) : target.sequence === undefined ? document.getElementById('right-pane-panel') : document.getElementById(`inspector-event-${String(target.sequence)}`))?.focus());
   };
   const selectEvent = (event: Record<string, unknown>) => {
     const rawSequence = typeof event.rawSequence === 'number' ? event.rawSequence : typeof event.sequence === 'number' ? event.sequence : undefined;
@@ -381,7 +382,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
           {rightPaneMode === 'debug'
             ? <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} collapsedEventTurns={collapsedEventTurns} onCollapsedEventTurnsChange={setCollapsedEventTurns} onCreateMapping={onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} scrollPositions={scrollPositions} onScrollPositionChange={onScrollPositionChange} networkInspector={networkInspector} onNetworkInspectorChange={setNetworkInspector} />
             : rightPaneMode === 'adversarial'
-              ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} trusted={snapshot?.trusted === true} post={post} scrollTop={scrollPositions.adversarial} onScrollTopChange={(value) => onScrollPositionChange('adversarial', value)} activeSection={redTeamSection} onActiveSectionChange={setRedTeamSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} linkedCaseCatalog={adversarialCaseCatalog} linkedCaseEditor={linkedAdversarialCaseEditor} caseCollection={adversarialCaseCollection} onCaseCollectionChange={setAdversarialCaseCollection} resultCollection={adversarialResultCollection} onResultCollectionChange={setAdversarialResultCollection} />
+              ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} trusted={snapshot?.trusted === true} post={post} scrollTop={scrollPositions[`adversarial.${redTeamSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`adversarial.${redTeamSection}`, value)} activeSection={redTeamSection} onActiveSectionChange={setRedTeamSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} linkedCaseCatalog={adversarialCaseCatalog} linkedCaseEditor={linkedAdversarialCaseEditor} caseCollection={adversarialCaseCollection} onCaseCollectionChange={setAdversarialCaseCollection} resultCollection={adversarialResultCollection} onResultCollectionChange={setAdversarialResultCollection} />
               : <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} profileDirty={profileDirty} diagnostics={diagnostics} post={post} scrollStateKey={configurationSection} scrollTop={scrollPositions[`configure.${configurationSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`configure.${configurationSection}`, value)} />}
         </div>
       </aside>
@@ -401,6 +402,21 @@ export function resolveActiveEvidence(results: readonly AdversarialResultSummary
     if (attempt) return { result, attempt, evidenceId };
   }
   return undefined;
+}
+
+export interface MessageInspectionTarget { tab: 'Network' | 'Raw Events'; turnId?: string; networkId?: string; sequence?: number }
+
+export function resolveMessageInspectionTarget(message: ChatMessage | undefined, networkEntries: readonly NetworkExchange[]): MessageInspectionTarget {
+  const turnId = typeof message?.metadata?.clientRequestId === 'string' ? message.metadata.clientRequestId : undefined;
+  if (message?.role === 'user') {
+    let networkId: string | undefined;
+    for (let index = networkEntries.length - 1; index >= 0; index -= 1) {
+      if (turnId && networkEntries[index]?.turnId === turnId) { networkId = networkEntries[index]!.id; break; }
+    }
+    return { tab: 'Network', ...(turnId ? { turnId } : {}), ...(networkId ? { networkId } : {}) };
+  }
+  const sequence = rawSequencesForMessage(message).at(-1);
+  return { tab: 'Raw Events', ...(turnId ? { turnId } : {}), ...(sequence === undefined ? {} : { sequence }) };
 }
 
 export function EvidenceReviewBar({ results, selection, inspectorTab, onReviewTimeline, onClose }: { results: readonly AdversarialResultSummary[]; selection: ActiveEvidenceSelection; inspectorTab: InspectorTab; onReviewTimeline: () => void; onClose: () => void }): React.JSX.Element {
@@ -893,7 +909,6 @@ export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas,
     setActiveIndex(index);
     setUncontrolledSelectedSequence(eventSequence(row.item));
     onSelectEvent?.(row.item);
-    focusAfterRender(() => document.getElementById(eventRowId(row.item, index))?.focus());
   };
   const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, row: EventTreeRow, index: number) => {
     if (event.key === 'Enter' || event.key === ' ') {

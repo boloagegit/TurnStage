@@ -30,6 +30,16 @@ import './mobileChatPreview.css';
 
 export const CHAT_SCROLL_BOTTOM_THRESHOLD = 48;
 export const DEFAULT_VISIBLE_CHAT_MESSAGES = 200;
+export const RESPONSE_ACTIVITY_DELAYED_MS = 3_000;
+
+export type ResponseActivityPhase = 'sending' | 'waiting' | 'delayed' | 'receiving';
+
+export function resolveResponseActivity(turnState: TurnState | undefined, elapsedMs: number): ResponseActivityPhase | undefined {
+  if (turnState === 'submitting') return 'sending';
+  if (turnState === 'waitingStart') return elapsedMs >= RESPONSE_ACTIVITY_DELAYED_MS ? 'delayed' : 'waiting';
+  if (turnState === 'streaming') return 'receiving';
+  return undefined;
+}
 
 export const CHAT_VIEWPORT_PRESETS = [
   { id: 'mobile-s', label: 'Mobile S', width: 320, height: 568 },
@@ -141,6 +151,20 @@ export function MobileChatPreview({
   const snapshotMessages = useMemo(() => hiddenMessageCount ? allSnapshotMessages.slice(hiddenMessageCount) : allSnapshotMessages, [allSnapshotMessages, hiddenMessageCount]);
   const messageTagEventIndex = useMemo(() => createMessageTagEventIndex(snapshot), [snapshot?.rawEvents, snapshot?.normalizedEvents]);
   const messageContentKey = useMemo(() => getMessageContentKey(snapshotMessages), [snapshotMessages]);
+  const { activeAssistant, latestUserCreatedAt } = useMemo(() => {
+    let assistant: ChatMessage | undefined;
+    let userCreatedAt: number | undefined;
+    for (let index = allSnapshotMessages.length - 1; index >= 0 && (!assistant || userCreatedAt === undefined); index -= 1) {
+      const message = allSnapshotMessages[index]!;
+      if (!assistant && message.role === 'assistant' && (message.status === 'pending' || message.status === 'streaming')) assistant = message;
+      if (userCreatedAt === undefined && message.role === 'user') userCreatedAt = message.createdAt;
+    }
+    return { activeAssistant: assistant, latestUserCreatedAt: userCreatedAt };
+  }, [allSnapshotMessages]);
+  const responseActivityStartedAt = snapshot?.metrics.requestStartedAt ?? latestUserCreatedAt;
+  const responseActivityActive = snapshot?.turnState === 'submitting' || snapshot?.turnState === 'waitingStart';
+  const responseActivityElapsedMs = useActiveElapsedMs(responseActivityStartedAt, responseActivityActive);
+  const responseActivityPhase = resolveResponseActivity(snapshot?.turnState, responseActivityElapsedMs);
   const trusted = snapshot?.trusted === true;
   const opening = snapshot?.opening ?? staticOpening(profile);
   const statusText = previewStatus(snapshot, active, continuationBlocked);
@@ -354,6 +378,7 @@ export function MobileChatPreview({
             {snapshot?.sessionState === 'failed' && profile.opening?.mode === 'request' && <OpeningError profile={profile} snapshot={snapshot} post={post} trusted={trusted} headingId={`${previewId}-opening-error-heading`} />}
             {opening && componentVisible(profile, 'opening') && <OpeningCard profile={profile} opening={opening} active={active} trusted={trusted} setDraft={setDraft} send={send} post={post} headingId={`${previewId}-opening-heading`} />}
       {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} snapshot={snapshot} messageTagEventIndex={messageTagEventIndex} post={post} send={send} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback} onActionFeedback={onMessageActionFeedback} />)}
+            {responseActivityPhase && responseActivityPhase !== 'receiving' && !activeAssistant && <ResponseActivity profile={profile} phase={responseActivityPhase} elapsedMs={responseActivityElapsedMs} animated={resolveStreaming(profile.ui).indicator !== 'none'} />}
             {!snapshot && <p className="mobile-chat-preview__empty" role="status">{t('Loading conversation…')}</p>}
             {snapshot && snapshotMessages.length === 0 && !opening && snapshot.sessionState === 'ready' && <p className="mobile-chat-preview__empty">{t('No messages yet. Send a message to begin.')}</p>}
             {continuationBlocked && <p className="mobile-chat-preview__continuation" role="status">{t('Continuation is disabled after this error. Start a new conversation to send another message.')}</p>}
@@ -640,6 +665,16 @@ function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post,
   const messageMetrics = (message.metrics ?? []).filter((metric) => enabledMessageMetrics.has(metric.id));
   const streaming = resolveStreaming(profile.ui);
   const streamingAssistant = message.role === 'assistant' && (message.status === 'pending' || message.status === 'streaming');
+  const hasVisibleResponseContent = parts.some((part) => {
+    if (part.type === 'text' || part.type === 'markdown' || part.type === 'error') return Boolean(part.text?.trim());
+    if (part.type === 'progress') return componentVisible(profile, 'progress');
+    if (part.type === 'citation-reference') return componentVisible(profile, 'citations');
+    if (part.type === 'tool-call') return componentVisible(profile, 'toolCalls');
+    if (part.type === 'diagnostic') return componentVisible(profile, 'diagnostics');
+    if (part.type === 'usage') return componentVisible(profile, 'usage');
+    if (part.type === 'form') return componentVisible(profile, 'forms') && isFormDefinition(part.form);
+    return false;
+  });
   const trailingTextPartIndex = parts.map((part) => part.type === 'text' || part.type === 'markdown').lastIndexOf(true);
   const streamingStyle = {
     '--mcp-stream-duration': `${streaming.speedMs}ms`,
@@ -660,14 +695,14 @@ function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post,
     <span className="mobile-chat-preview__message-heading"><strong>{roleLabel}</strong><MessageStatus state={message.status} />{messageTags.length > 0 && <span className="mobile-chat-preview__message-tags" aria-label={t('Message tags')}>{messageTags.map((tag) => <span className={`mobile-chat-preview__message-tag mobile-chat-preview__message-tag--${tag.tone}`} key={tag.id}>{tag.label}</span>)}</span>}</span>
     <div className="mobile-chat-preview__message-body">
       {parts.map((part, index) => <MobileMessagePart key={`${part.type}-${index}`} profile={profile} part={part} messageId={message.id} citations={citations} post={post} trusted={trusted} accepted={acceptedForms?.has(formInstanceKey(message.id, part) ?? '')} streaming={message.role === 'assistant' ? streaming : undefined} streamingActive={streamingAssistant && index === trailingTextPartIndex} />)}
-      {streamingAssistant && trailingTextPartIndex < 0 && <StreamingIndicator streaming={streaming} />}
+      {streamingAssistant && !hasVisibleResponseContent && <ResponseActivity phase="receiving" inline animated={streaming.indicator !== 'none'} />}
       {componentVisible(profile, 'citations') && citations.length > 0 && <CitationList profile={profile} citations={citations} post={post} trusted={trusted} />}
       {componentVisible(profile, 'responseActions') && message.status === 'completed' && actions.length > 0 && <div className="mobile-chat-preview__action-row" role="group" aria-label={t('Response actions')}>{primaryActions.map((action) => <ResponseActionButton key={action.id} action={action} messageId={message.id} trusted={trusted} setDraft={setDraft} post={post} onSelectMessage={onSelectMessage} />)}{overflowActions.length > 0 && <details className="mobile-chat-preview__overflow"><summary>{t('More actions')}</summary><div>{overflowActions.map((action) => <ResponseActionButton key={action.id} action={action} messageId={message.id} trusted={trusted} setDraft={setDraft} post={post} onSelectMessage={onSelectMessage} />)}</div></details>}</div>}
       {componentVisible(profile, 'followups') && message.status === 'completed' && followups.length > 0 && <div className="mobile-chat-preview__followups" role="group" aria-label={t('Follow-up questions')}>{primaryFollowups.map((followup) => <button className="mobile-chat-preview__chip" type="button" title={followup.tooltip} key={followup.id} disabled={!trusted} onClick={() => invokeFollowup(followup, message.id, setDraft, send, post)}>{followup.label}</button>)}{overflowFollowups.length > 0 && <details className="mobile-chat-preview__overflow"><summary>{t('More suggestions')}</summary><div>{overflowFollowups.map((followup) => <button className="mobile-chat-preview__chip" type="button" title={followup.tooltip} key={followup.id} disabled={!trusted} onClick={() => invokeFollowup(followup, message.id, setDraft, send, post)}>{followup.label}</button>)}</div></details>}</div>}
       {componentVisible(profile, 'messageMetrics') && (showTtft || showTotalDuration || messageMetrics.length > 0) && <MessageMetrics message={message} metrics={messageMetrics} showTtft={showTtft} showTotalDuration={showTotalDuration} />}
       {messageActions.length > 0 && <footer className={`mobile-chat-preview__message-toolbar mobile-chat-preview__message-toolbar--${messageActionVisibility}`} role="group" aria-label={t('Message actions')}>
         {messageActions.map((actionId) => actionId === 'message.inspectRaw'
-          ? <IconButton key={actionId} icon="target" label={feedback?.actionId === actionId ? feedback.message : t('Inspect message')} type="button" aria-pressed={selected} onClick={() => onSelectMessage?.(message.id)} />
+          ? <IconButton key={actionId} icon="target" label={feedback?.actionId === actionId ? feedback.message : t(message.role === 'user' ? 'Inspect request' : 'Inspect message')} type="button" aria-pressed={selected} onClick={() => onSelectMessage?.(message.id)} />
           : actionId === 'message.copy'
             ? <IconButton key={actionId} icon={feedback?.actionId === actionId ? feedback.status === 'success' ? 'check' : feedback.status === 'error' ? 'warning' : 'copy' : 'copy'} label={feedback?.actionId === actionId ? feedback.message : t('Copy')} type="button" onClick={() => { reportFeedback(actionId, 'pending', t('Copying message…')); post({ type: 'action.invoke', actionId, sourceMessageId: message.id }); }} />
             : actionId === 'message.retry'
@@ -778,6 +813,32 @@ function StreamingIndicator({ streaming }: { streaming: ResolvedStreaming }): Re
   return <span className={`mobile-chat-preview__stream-indicator mobile-chat-preview__stream-indicator--${streaming.effect}`} data-effect={streaming.effect} aria-hidden="true">
     {streaming.effect === 'dots' && <><span /><span /><span /></>}
   </span>;
+}
+
+function ResponseActivity({ profile, phase, elapsedMs = 0, inline = false, animated = true }: { profile?: TurnStageProfile; phase: ResponseActivityPhase; elapsedMs?: number; inline?: boolean; animated?: boolean }): React.JSX.Element {
+  const delayedSeconds = Math.max(3, Math.floor(elapsedMs / 1_000));
+  const accessibleLabel = phase === 'sending' ? t('Sending message…') : phase === 'waiting' ? t('Waiting for response…') : phase === 'delayed' ? t('Still waiting for response…') : t('Receiving response…');
+  const content = <div className={`mobile-chat-preview__response-activity-content mobile-chat-preview__response-activity-content--${phase}`} data-animated={animated ? 'true' : 'false'}>
+    {phase === 'sending' ? <ProductIcon name="loading" /> : phase === 'delayed' ? <ProductIcon name="watch" /> : <span className="mobile-chat-preview__response-dots" aria-hidden="true"><span /><span /><span /></span>}
+    {phase === 'delayed' ? <><span aria-hidden="true">{t('Still waiting · {seconds} s', { seconds: formatNumber(delayedSeconds) })}</span><span className="mobile-chat-preview__sr-only">{accessibleLabel}</span></> : <span>{accessibleLabel}</span>}
+  </div>;
+  if (inline) return <div className="mobile-chat-preview__response-activity mobile-chat-preview__response-activity--inline" role="status" aria-live="polite">{content}</div>;
+  return <div className="mobile-chat-preview__response-activity" role="status" aria-live="polite">
+    <span className="mobile-chat-preview__message-avatar" aria-hidden="true">{profile?.name.trim().charAt(0).toUpperCase() || 'T'}</span>
+    <div><strong>{t('Assistant')}</strong>{content}</div>
+  </div>;
+}
+
+function useActiveElapsedMs(startedAt: number | undefined, active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [active, startedAt]);
+  if (!active || !Number.isFinite(startedAt)) return 0;
+  return Math.max(0, now - Number(startedAt));
 }
 
 export function resizeComposerTextarea(textarea: HTMLTextAreaElement | null): void {
