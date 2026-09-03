@@ -78,6 +78,13 @@
 .adversarial-file-actions summary { display: flex; align-items: center; min-height: var(--ts-control-height); padding: var(--ts-space-1) calc(var(--ts-space-2) + 2px); border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; background: var(--vscode-button-secondaryBackground, var(--vscode-button-background)); color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground)); list-style-position: inside; cursor: pointer; }
 .adversarial-file-actions details > div { position: absolute; z-index: 5; inset-block-start: calc(100% + 2px); inset-inline-start: 0; display: grid; min-width: max-content; gap: 1px; padding: var(--ts-space-1); border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border)); background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); box-shadow: 0 3px 10px var(--vscode-widget-shadow, rgba(0, 0, 0, .35)); }
 .adversarial-file-actions details > div button { width: 100%; text-align: start; }
+.adversarial-case-file-menu { position: relative; }
+.adversarial-case-file-menu > summary { display: grid; place-items: center; width: var(--ts-control-height); min-width: var(--ts-control-height); height: var(--ts-control-height); border: 1px solid transparent; border-radius: 2px; color: var(--vscode-icon-foreground, var(--vscode-foreground)); background: transparent; cursor: pointer; list-style: none; }
+.adversarial-case-file-menu > summary::-webkit-details-marker { display: none; }
+.adversarial-case-file-menu > summary:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+.adversarial-case-file-menu > div { position: absolute; z-index: 8; inset-block-start: calc(100% + 2px); inset-inline-end: 0; display: grid; min-width: max-content; gap: 1px; padding: var(--ts-space-1); border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border)); background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, .28)); }
+.adversarial-case-file-menu > div button { width: 100%; border-color: transparent; color: var(--vscode-menu-foreground, var(--vscode-foreground)); background: transparent; text-align: start; }
+.adversarial-case-file-menu > div button:hover:not(:disabled) { color: var(--vscode-menu-selectionForeground, var(--vscode-foreground)); background: var(--vscode-menu-selectionBackground, var(--vscode-toolbar-hoverBackground)); }
 .settings-undo { display: flex; align-items: center; gap: var(--ts-space-2); min-height: calc(var(--ts-control-height) + var(--ts-space-1)); margin-bottom: var(--ts-space-3); padding: var(--ts-space-1) var(--ts-space-2); border-inline-start: 2px solid var(--vscode-editorInfo-foreground); background: var(--vscode-textBlockQuote-background); }
 .settings-undo > span { flex: 1 1 auto; }
 .settings-undo > button:not(.icon-button) { color: var(--vscode-textLink-foreground); background: transparent; border-color: transparent; }
@@ -98,6 +105,24 @@
 .red-team-section-nav button[aria-selected='true'], .red-team-section-nav button[aria-selected='true']:hover:not(:disabled) { border-bottom-color: var(--vscode-focusBorder); color: var(--vscode-foreground); background: var(--vscode-editor-background); background-image: none; box-shadow: none; }
 .red-team-section-nav button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
 .red-team-section-nav button strong { min-width: 1.6em; color: var(--vscode-foreground); font-size: .769em; font-weight: 600; text-align: end; }
+.automation-section-nav { grid-template-columns: repeat(3, minmax(7em, 1fr)); }
+.automation-search { display: grid; gap: 3px; margin-bottom: var(--ts-space-2); }
+.automation-search > span { color: var(--vscode-descriptionForeground); font-size: .769em; }
+.automation-search input { width: 100%; min-width: 0; }
+.automation-outcome { display: inline-flex; align-items: center; gap: var(--ts-space-1); font-weight: 600; }
+.automation-outcome--passed { color: var(--vscode-testing-iconPassed, var(--vscode-terminal-ansiGreen)); }
+.automation-outcome--failed { color: var(--vscode-testing-iconFailed, var(--vscode-errorForeground)); }
+.automation-outcome--error { color: var(--vscode-testing-iconErrored, var(--vscode-editorWarning-foreground)); }
+.automation-result-table td:nth-child(3) small { display: block; margin-top: 2px; color: var(--vscode-descriptionForeground); }
+.automation-scenario-list { display: grid; gap: 1px; border: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-editorWidget-border); }
+.automation-scenario-row { display: grid; grid-template-columns: minmax(0, 1fr) var(--ts-control-height); gap: var(--ts-space-1); padding: var(--ts-space-1); background: var(--vscode-editor-background); }
+.automation-scenario-row__main { display: flex; align-items: center; justify-content: space-between; gap: var(--ts-space-3); min-width: 0; border-color: transparent; color: var(--vscode-foreground); background: transparent; text-align: start; }
+.automation-scenario-row__main:hover { color: var(--vscode-list-hoverForeground, var(--vscode-foreground)); background: var(--vscode-list-hoverBackground); }
+.automation-scenario-row__main > span { display: grid; min-width: 0; gap: 2px; }
+.automation-scenario-row__main > .automation-scenario-row__summary { justify-items: end; text-align: end; }
+.automation-scenario-row__main strong, .automation-scenario-row__main code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.automation-scenario-row__main code, .automation-scenario-row__main small { color: var(--vscode-descriptionForeground); font-size: .769em; }
+.automation-scenario-editor { grid-column: 1 / -1; min-width: 0; }
 .red-team-section { scroll-margin-top: calc(var(--ts-control-height) + var(--ts-space-4)); }
 .red-team-section > .settings-card-heading { margin-bottom: var(--ts-space-4); padding-bottom: var(--ts-space-2); border-bottom: 1px solid var(--vscode-editorWidget-border); }
 .red-team-section > .settings-card-heading h2 { font-size: 1.077em; }
@@ -289,6 +314,7 @@
 @media (max-width: 46em) { .adversarial-forbid { grid-template-columns: 1fr; }.adversarial-forbid__checks { grid-column: auto; } }
 @media (max-width: 46em) { .red-team-section > .settings-card-heading { align-items: stretch; flex-direction: column; }.adversarial-case-heading-actions { justify-content: flex-start; } }
 @media (max-width: 46em) { .linked-case-editor__notice { grid-template-columns: auto minmax(0, 1fr); }.linked-case-editor__notice > button { grid-column: 2; justify-self: start; }.linked-case-editor__footer { align-items: stretch; flex-direction: column; }.linked-case-editor__footer > div { justify-content: flex-end; } }
+@media (max-width: 38em) { .automation-scenario-row__main { align-items: start; flex-direction: column; }.automation-scenario-row__main > .automation-scenario-row__summary { justify-items: start; text-align: start; } }
 @media (max-width: 46em) { .adversarial-case-toolbar { grid-template-columns: minmax(0, 1fr) minmax(8em, .7fr) auto; }.adversarial-case-search, .adversarial-case-toolbar > label:nth-of-type(3) { grid-column: 1 / -1; }.adversarial-case-pagination { justify-content: space-between; }.adversarial-case-pagination > span { order: -1; width: 100%; } }
 @container (max-width: 46em) { .adversarial-case-toolbar { display: flex; flex-wrap: wrap; }.adversarial-case-search { flex: 1 0 100%; min-width: 0 !important; }.adversarial-case-toolbar > label:not(.adversarial-case-search) { flex: 1 1 8em; }.adversarial-case-more-filters, .adversarial-case-toolbar > .icon-button { flex: 0 0 auto; }.adversarial-case-pagination { justify-content: space-between; }.adversarial-case-pagination > span { order: -1; width: 100%; } }
 @container (max-width: 46em) { .adversarial-result-toolbar, .campaign-master-detail { grid-template-columns: 1fr; }.adversarial-result-table { min-width: 0; table-layout: fixed; }.adversarial-result-table th:nth-child(1) { width: 24%; }.adversarial-result-table th:nth-child(2) { width: 21%; }.adversarial-result-table th:nth-child(3) { width: 29%; }.adversarial-result-table th:nth-child(4), .adversarial-result-table td:nth-child(4) { display: none; }.adversarial-result-table th:nth-child(5) { width: 26%; }.adversarial-result-table td { padding: var(--ts-space-1); overflow-wrap: anywhere; }.adversarial-result-table .adversarial-result-actions { display: grid; width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr) repeat(2, var(--ts-control-height)); justify-content: stretch; }.adversarial-result-table .adversarial-result-actions > .primary { grid-column: 1 / -1; width: 100%; min-width: 0; white-space: nowrap; }.adversarial-result-table .adversarial-result-actions > .icon-button { grid-column: 2; }.adversarial-result-table .adversarial-result-actions > details { grid-column: 3; }.campaign-selector { max-height: 14em; } }

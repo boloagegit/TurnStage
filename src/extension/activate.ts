@@ -74,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       };
     },
   });
-  context.subscriptions.push(output, loggingConfiguration, campaignStatus, diagnostics, tree, duplicateDiagnostics, demoProvider, scenarioTests, ...copilotTools, ...(copilotParticipant ? [copilotParticipant] : []), scenarioTests.onDidChangeResults(({ uri, results }) => { void editor.publishTestResults(uri, results).catch((error) => logAt(output, 'error', () => `[tests] publish results failed type=${error instanceof Error ? error.name : 'Error'}`)); }), scenarioTests.onDidChangeCampaigns(({ uri, dashboard }) => { void editor.publishCampaignDashboard(uri, dashboard).catch((error) => logAt(output, 'error', () => `[tests] publish campaign failed type=${error instanceof Error ? error.name : 'Error'}`)); }), scenarioTests.onDidChangeCampaignProgress((progress) => {
+  context.subscriptions.push(output, loggingConfiguration, campaignStatus, diagnostics, tree, duplicateDiagnostics, demoProvider, scenarioTests, ...copilotTools, ...(copilotParticipant ? [copilotParticipant] : []), scenarioTests.onDidChangeResults(({ uri, results, automationResults }) => { void editor.publishTestResults(uri, results, automationResults).catch((error) => logAt(output, 'error', () => `[tests] publish results failed type=${error instanceof Error ? error.name : 'Error'}`)); }), scenarioTests.onDidChangeCampaigns(({ uri, dashboard }) => { void editor.publishCampaignDashboard(uri, dashboard).catch((error) => logAt(output, 'error', () => `[tests] publish campaign failed type=${error instanceof Error ? error.name : 'Error'}`)); }), scenarioTests.onDidChangeCampaignProgress((progress) => {
     if (progress.state === 'running') activeCampaignProgress.set(progress.runId, progress);
     else activeCampaignProgress.delete(progress.runId);
     const current = [...activeCampaignProgress.values()].at(-1);
@@ -129,10 +129,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   command('changeDisplayLanguage', async () => {
     const configuration = vscode.workspace.getConfiguration('turnstage');
     const current = configuration.get<DisplayLanguagePreference>('displayLanguage', 'auto');
+    const currentValue = typeof current === 'string' ? current.toLowerCase() : 'auto';
     const choices: Array<vscode.QuickPickItem & { value: DisplayLanguagePreference }> = [
-      { label: vscode.l10n.t('Auto (Follow VS Code)'), description: vscode.env.language, value: 'auto', picked: current === 'auto' },
-      { label: '繁體中文', description: 'zh-tw', value: 'zh-tw', picked: current === 'zh-tw' },
-      { label: 'English', description: 'en', value: 'en', picked: current === 'en' },
+      { label: vscode.l10n.t('Auto (Follow VS Code)'), description: vscode.env.language, value: 'auto', picked: currentValue === 'auto' },
+      { label: '繁體中文', description: 'zh-TW', value: 'zh-tw', picked: currentValue === 'zh-tw' },
+      { label: '日本語', description: 'ja', value: 'ja', picked: currentValue === 'ja' },
+      { label: '한국어', description: 'ko', value: 'ko', picked: currentValue === 'ko' },
+      { label: 'English', description: 'en', value: 'en', picked: currentValue === 'en' },
     ];
     const selected = await vscode.window.showQuickPick(choices, {
       title: vscode.l10n.t('Change TurnStage Display Language'),
@@ -158,6 +161,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       { label: '$(comment-discussion) ' + vscode.l10n.t('Chat'), description: vscode.l10n.t('Compose and inspect the conversation'), destination: { pane: 'chat' } },
       { label: '$(debug-alt) ' + vscode.l10n.t('Debug: Network'), description: vscode.l10n.t('Requests, responses, and timing'), destination: { pane: 'debug', tab: 'Network' } },
       { label: '$(list-tree) ' + vscode.l10n.t('Debug: Raw Events'), description: vscode.l10n.t('Raw stream evidence'), destination: { pane: 'debug', tab: 'Raw Events' } },
+      { label: '$(checklist) ' + vscode.l10n.t('Tests: Results'), description: vscode.l10n.t('Functional outcomes and evidence'), destination: { pane: 'tests', section: 'results' } },
+      { label: '$(list-selection) ' + vscode.l10n.t('Tests: Scenarios'), description: vscode.l10n.t('Conversation contracts and execution'), destination: { pane: 'tests', section: 'scenarios' } },
+      { label: '$(server-process) ' + vscode.l10n.t('Tests: Campaigns'), description: vscode.l10n.t('Bounded batch execution'), destination: { pane: 'tests', section: 'campaigns' } },
       { label: '$(beaker) ' + vscode.l10n.t('Red Team: Results'), description: vscode.l10n.t('Latest outcomes and evidence'), destination: { pane: 'adversarial', section: 'results' } },
       { label: '$(table) ' + vscode.l10n.t('Red Team: Cases'), description: vscode.l10n.t('Adversarial case catalog'), destination: { pane: 'adversarial', section: 'cases' } },
       { label: '$(server-process) ' + vscode.l10n.t('Red Team: Campaigns'), description: vscode.l10n.t('Bounded batch execution'), destination: { pane: 'adversarial', section: 'campaigns' } },

@@ -11,6 +11,7 @@ import { NodeCliRuntime } from '../src/cli/nodeRuntime';
 import { NodeScenarioSession } from '../src/cli/nodeSession';
 import { serializeAdversarialCsv } from '../src/extension/testing/adversarialCsv';
 import { parseAdversarialSource } from '../src/extension/testing/adversarialSource';
+import { serializeContractCsv } from '../src/extension/testing/contractCsv';
 import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../src/extension/config/profileValidator';
 import { builtInEnvironment } from '../src/extension/config/defaultEnvironment';
 import { createProvenanceManifest } from '../src/extension/testing/provenance';
@@ -134,6 +135,43 @@ describe('headless CLI contract', () => {
       expect(result.records).toEqual([expect.objectContaining({ id: expect.stringMatching(/^csv-profile\/security-/u), outcome: 'resisted' })]);
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(await import('node:fs/promises').then(({ readFile }) => readFile(join(directory, 'security.adversarial.csv'), 'utf8'))).toBe(csv);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('executes a linked functional CSV suite in place with its stable suite selector', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'turnstage-cli-contract-csv-'));
+    const profile: TurnStageProfile = {
+      version: 1,
+      id: 'functional-csv-profile',
+      name: 'Functional CSV profile',
+      conversation: { send: { method: 'POST', url: 'https://example.test/stream', timeoutMs: 1_000, variants: [{ id: 'default', body: { message: { $value: 'input.text' } } }] } },
+      stream: {
+        transport: 'sse', doneValue: '[DONE]',
+        mappings: [{ id: 'text', match: {}, emit: { type: 'content.text.delta', text: { path: '$.text' } } }],
+      },
+      tests: { contractSuites: ['regression.tests.csv'], scenarios: [] },
+    };
+    const scenarios: ScenarioDefinition[] = [{
+      id: 'linked-functional-case', name: 'Linked functional case', tags: ['linked'],
+      steps: [{ id: 'turn-1', input: 'Run the linked contract', assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }] }],
+    }];
+    const csv = serializeContractCsv(scenarios);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('data: {"text":"Expected response"}\n\ndata: [DONE]\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } })));
+    try {
+      await writeFile(join(directory, 'profile.turnstage.jsonc'), JSON.stringify(profile));
+      await writeFile(join(directory, 'regression.tests.csv'), csv);
+      const result = await new NodeCliRuntime('test', directory).execute({
+        command: 'run', configFiles: ['profile.turnstage.jsonc'],
+        selectors: { profiles: ['functional-csv-profile'], suites: [], cases: ['linked-functional-case'], tags: [], changedFiles: [] },
+        policy: { failFast: false, concurrency: 1, maxRequests: 10 },
+        impact: { workspaceRoot: directory, includeUnbound: true },
+      });
+
+      expect(result.records).toEqual([expect.objectContaining({ id: expect.stringMatching(/^functional-csv-profile\/regression-/u), outcome: 'passed' })]);
+      expect(await import('node:fs/promises').then(({ readFile }) => readFile(join(directory, 'regression.tests.csv'), 'utf8'))).toBe(csv);
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });

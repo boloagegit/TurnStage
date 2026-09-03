@@ -113,7 +113,7 @@ describe('VS Code contribution UX', () => {
     expect(manifest.contributes.configuration.properties['turnstage.displayLanguage']).toMatchObject({
       default: 'auto',
       scope: 'application',
-      enum: ['auto', 'zh-tw', 'en'],
+      enum: ['auto', 'zh-tw', 'ja', 'ko', 'en'],
     });
     expect(manifest.contributes.commands).toContainEqual(expect.objectContaining({ command: 'turnstage.changeDisplayLanguage' }));
   });

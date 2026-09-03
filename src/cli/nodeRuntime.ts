@@ -3,9 +3,10 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { parse, parseTree } from 'jsonc-parser';
 import type { ScenarioCheckResult, ScenarioDefinition, ScenarioRunResult, TurnStageEnvironment, TurnStageProfile } from '../shared/types';
 import type { CliExecutionResult, CliExecutionRuntime, CliRunRequest, CliVerifyRequest } from './contracts';
-import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../extension/config/profileValidator';
+import { ProfileValidator, validateAdversarialScenariosAgainstProfile, validateContractScenariosAgainstProfile } from '../extension/config/profileValidator';
 import { builtInEnvironment } from '../extension/config/defaultEnvironment';
 import { parseAdversarialSource } from '../extension/testing/adversarialSource';
+import { parseContractSource } from '../extension/testing/contractSource';
 import { compareScenarioEvidence } from '../extension/testing/scenarioComparison';
 import { evaluatePerformance } from '../extension/testing/performanceEvaluator';
 import { mapChangedFilesToTests } from '../extension/testing/impactMapping';
@@ -113,6 +114,17 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
     for (const scenario of profile.tests?.scenarios ?? []) {
       if (result.length >= MAX_CLI_CASES) throw new Error('The selected profiles contain too many test cases.');
       result.push({ key: `${profile.id}/inline/${scenario.id}`, profile, scenario, environments: uniqueEnvironments });
+    }
+    for (const suitePath of profile.tests?.contractSuites ?? []) {
+      const path = resolveSafe(workspaceRoot, suitePath);
+      const parsed = parseContractSource(suitePath, await readBoundedUtf8(path, MAX_SUITE_BYTES));
+      if (!parsed.suite || parsed.issues.length) throw new Error('Test suite validation failed.');
+      const scenarios = parsed.scenarios;
+      if (validateContractScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new Error('Test suite is incompatible with its profile.');
+      for (const scenario of scenarios) {
+        if (result.length >= MAX_CLI_CASES) throw new Error('The selected profiles contain too many test cases.');
+        result.push({ key: `${profile.id}/${parsed.suite.id}/${scenario.id}`, profile, scenario, suiteId: parsed.suite.id, suite: parsed.suite, environments: uniqueEnvironments });
+      }
     }
     for (const suitePath of profile.tests?.adversarialSuites ?? []) {
       const path = resolveSafe(workspaceRoot, suitePath);

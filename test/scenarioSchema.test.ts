@@ -27,11 +27,23 @@ describe('scenario profile JSON Schema', () => {
   });
 
   it('exposes closed adversarial case and linked-suite definitions', () => {
-    expect(schema.$defs.tests!.properties).toMatchObject({ adversarialSuites: expect.any(Object) });
+    expect(schema.$defs.tests!.properties).toMatchObject({ contractSuites: expect.any(Object), adversarialSuites: expect.any(Object) });
     expect(schema.$defs.scenario!.properties).toMatchObject({ adversarial: { $ref: '#/$defs/scenarioAdversarial' } });
     expect(schema.$defs.scenario!.properties).toMatchObject({ sourceBinding: { $ref: '#/$defs/sourceBinding' } });
     expect(schema.$defs.scenarioStep!.properties).toMatchObject({ additionalForbid: { $ref: '#/$defs/adversarialForbid' } });
     for (const name of ['scenarioAdversarial', 'adversarialForbid', 'adversarialContentRule', 'sourceBinding']) expect(schema.$defs[name]?.additionalProperties).toBe(false);
+  });
+
+  it('ships a closed standalone schema for linked functional suites', () => {
+    const contractSchema = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'resources', 'schemas', 'turnstage-contract-suite.schema.json'), 'utf8')) as {
+      properties?: Record<string, unknown>;
+      additionalProperties?: boolean;
+      $defs?: Record<string, { additionalProperties?: boolean }>;
+    };
+    expect(contractSchema.additionalProperties).toBe(false);
+    expect(contractSchema.properties).toMatchObject({ format: { const: 'turnstage-contract-suite' }, cases: expect.any(Object) });
+    expect(contractSchema.$defs?.case?.additionalProperties).toBe(false);
+    expect(contractSchema.$defs?.step?.additionalProperties).toBe(false);
   });
 
   it('lists all supported performance metrics in threshold and regression maps', () => {

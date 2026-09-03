@@ -5,11 +5,11 @@ import axe from 'axe-core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { AdversarialResultSummary, ChatMessage, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
+import type { AdversarialResultSummary, AutomationResultSummary, ChatMessage, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 import { MobileChatPreview, resizeComposerTextarea, resolveResponseActivity } from '../src/webview/MobileChatPreview';
 import { ACCESSIBLE_EVENT_WINDOW_SIZE, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, eventTimeDeltas, EvidenceReviewBar, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, resolveActiveEvidence, resolveMessageInspectionTarget, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
-import { AdversarialWorkspace, SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
+import { AdversarialWorkspace, AutomationWorkspace, SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
 
 beforeAll(() => {
   class TestResizeObserver implements ResizeObserver {
@@ -971,10 +971,10 @@ describe('Webview DOM behavior', () => {
     ] });
   });
 
-  it('adds a conversation contract through the Scenarios configuration surface', async () => {
+  it('adds and runs a conversation contract through the Tests workspace', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
-    render(<SettingsWorkspace section="scenario-tests" onSectionChange={vi.fn()} profile={profile} post={post} />);
+    render(<AutomationWorkspace activeSection="scenarios" profile={profile} post={post} />);
 
     await user.click(screen.getAllByRole('button', { name: 'Add scenario' })[0]!);
     expect(post).toHaveBeenCalledWith(expect.objectContaining({
@@ -982,6 +982,71 @@ describe('Webview DOM behavior', () => {
       path: ['tests', 'scenarios'],
       value: [expect.objectContaining({ id: 'scenario-1', steps: [expect.objectContaining({ id: 'step-1' })] })],
     }));
+    const configured = { ...profile, tests: { scenarios: [{ id: 'contract-1', name: 'Contract 1', steps: [{ id: 'turn-1', input: 'Hello' }] }] } } as TurnStageProfile;
+    cleanup();
+    render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} />);
+    await user.click(screen.getByRole('button', { name: 'Run all' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.runContracts' });
+    await user.click(screen.getByRole('button', { name: 'Run scenario Contract 1' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.runCase', scenarioId: 'contract-1', kind: 'contract' });
+  });
+
+  it('bounds 100 automation scenarios to one searchable page', async () => {
+    const user = userEvent.setup();
+    const scenarios = Array.from({ length: 100 }, (_, index) => ({ id: `contract-${index + 1}`, name: `Contract ${index + 1}`, tags: index === 99 ? ['release-critical'] : [], steps: [{ id: 'turn-1', input: 'Hello' }] }));
+    render(<AutomationWorkspace activeSection="scenarios" profile={{ ...profile, tests: { scenarios } }} post={vi.fn()} />);
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(25);
+    expect(screen.getByText('Page 1 of 4')).toBeTruthy();
+    await user.type(screen.getByRole('searchbox'), 'release-critical');
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.getByText('Contract 100')).toBeTruthy();
+  });
+
+  it('lists linked functional cases without loading prompts and routes stable suite actions', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [], contractSuites: ['tests/regression.tests.jsonc'] } };
+    const linkedCaseCatalog = {
+      entries: [{
+        sourcePath: 'tests/regression.tests.jsonc', suiteId: 'regression-suite', suiteName: 'Regression suite',
+        scenarioId: 'linked-contract', scenarioName: 'Linked contract', tags: ['release'], turns: 2, assertions: 3,
+        comparison: true, performance: true, faults: false,
+      }],
+      total: 1, truncated: false, issues: [],
+    };
+    render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} trusted linkedCaseCatalog={linkedCaseCatalog} />);
+
+    expect(screen.getByText('Linked contract')).toBeTruthy();
+    expect(screen.getByText('2 steps · 3 assertions · Comparison · Performance')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('PRIVATE LINKED PROMPT');
+    await user.click(screen.getByRole('button', { name: 'Run scenario Linked contract' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.runCase', scenarioId: 'linked-contract', suiteId: 'regression-suite', kind: 'contract' });
+    await user.click(screen.getByRole('button', { name: 'Linked contract' }));
+    expect(post).toHaveBeenCalledWith({ type: 'contract.case.request', sourcePath: 'tests/regression.tests.jsonc', scenarioId: 'linked-contract' });
+    await user.click(screen.getByRole('button', { name: 'Open source' }));
+    expect(post).toHaveBeenCalledWith({ type: 'contract.openLinkedSuite', path: 'tests/regression.tests.jsonc' });
+  });
+
+  it('shows automation results with evidence and rerun actions outside Red Team', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured = { ...profile, tests: { scenarios: [{ id: 'contract-1', name: 'Contract 1', steps: [{ id: 'turn-1', input: 'Hello' }] }] } } as TurnStageProfile;
+    const automationResults: AutomationResultSummary[] = [{
+      profileId: profile.id, scenarioId: 'contract-1', scenarioName: 'Contract 1', outcome: 'failed', durationMs: 120,
+      passedChecks: 3, failedChecks: 1, completedSteps: 2, evidenceId: 'contract-evidence', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, comparison: true, performance: true,
+    }];
+    const { rerender } = render(<AutomationWorkspace activeSection="results" profile={configured} post={post} trusted automationResults={automationResults} />);
+
+    expect(screen.queryByRole('button', { name: 'Run all' })).toBeNull();
+    expect(screen.getByText('3 passed · 1 failed')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Open evidence' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'contract-evidence', location: { kind: 'message', messageId: 'assistant-1' } });
+    await user.click(screen.getByRole('button', { name: 'Run scenario again' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.runCase', scenarioId: 'contract-1', suiteId: undefined, kind: 'contract' });
+    await user.type(screen.getByRole('searchbox'), 'missing result');
+    rerender(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} trusted automationResults={automationResults} />);
+    expect(screen.getByText('Contract 1')).toBeTruthy();
   });
 
   it('authors, bulk-transfers, and opens evidence for adversarial cases', async () => {
@@ -1321,7 +1386,7 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenLastCalledWith({ type: 'profile.patch', path: ['tests', 'scenarios'], value: configured.tests!.scenarios });
   });
 
-  it('patches CI reporting and comparison performance settings from the Scenarios GUI', async () => {
+  it('keeps test configuration separate from scenario authoring and performance settings', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
     const configured: TurnStageProfile = {
@@ -1342,6 +1407,8 @@ describe('Webview DOM behavior', () => {
     await user.click(screen.getByRole('checkbox', { name: 'JUnit XML' }));
     expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['tests', 'reporting'], value: { formats: ['json', 'junit'], outputDirectory: '.turnstage/reports' } });
 
+    rerender(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} />);
+    await user.click(container.querySelector('.automation-scenario-row__main') as HTMLButtonElement);
     const ttft = screen.getByRole('spinbutton', { name: 'TTFT maximum milliseconds' });
     await user.type(ttft, '900');
     fireEvent.blur(ttft);

@@ -46,7 +46,7 @@ attempt is recorded as indeterminate and resume starts at the next attempt.
 
 ## Inline cases
 
-Use **Configure Profile → Scenarios → Adversarial tests** for individual cases. Each case reuses the Scenario runner but replaces assertions, Compare, Performance, and Fault Lab with an `adversarial` contract:
+Use **Red Team → Cases** for individual cases. Each case reuses the Scenario runner but replaces assertions, Compare, Performance, and Fault Lab with an `adversarial` contract:
 
 ```jsonc
 {
@@ -89,7 +89,7 @@ JSONC is the lossless format. A suite is `Suite → Cases → ordered Turns`; pr
 
 CSV uses one row per turn and repeats case-level fields on every row. JSON arrays are used for content rules and event names so commas and multi-line prompts round-trip safely. It may be linked directly: TurnStage reads it for every discovery/run and does not convert or rewrite it. Import remains available when cases should be copied inline; it validates every row before changing the Profile. Duplicate IDs require an explicit choice to replace or retain with renamed imports.
 
-Workspace-relative links are portable and suitable for Git. The Profile editor may instead link an explicitly selected external JSONC, JSON, or CSV file. TurnStage stores an opaque reference in the Profile and a local authorization in VS Code workspace state, bound to that exact Profile URI. It never embeds the external absolute path in the Profile. The authorization is machine-local and intentionally does not travel with Git, copied Profiles, exports, or another user's workspace; link the file again there. A missing, evicted, or Profile-mismatched authorization fails closed before the file is read. At most 100 external grants are retained for a workspace state.
+Workspace-relative links are portable and suitable for Git. The Profile editor may instead link an explicitly selected external JSONC, JSON, or CSV file. TurnStage stores an opaque reference in the Profile and a local authorization in VS Code workspace state, bound to that exact Profile URI. It never embeds the external absolute path in the Profile. The authorization is machine-local and intentionally does not travel with Git, copied Profiles, exports, or another user's workspace; link the file again there. A missing, evicted, or Profile-mismatched authorization fails closed before the file is read. Functional and adversarial suites share a bounded store of at most 200 external grants per workspace state.
 
 The GUI can import CSV, import a JSONC copy, link a JSONC/JSON/CSV suite, export inline cases as CSV or JSONC, and download a CSV template. A linked CSV remains canonical for the fields its schema supports, including ordered multi-turn cases and repetitions. Use JSONC when suite defaults or metadata not represented by CSV must round-trip losslessly.
 

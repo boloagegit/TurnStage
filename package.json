@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.22.9",
+  "version": "0.22.10",
   "publisher": "turnstage",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -647,6 +647,14 @@
     ],
     "jsonValidation": [
       {
+        "fileMatch": "*.tests.jsonc",
+        "url": "./resources/schemas/turnstage-contract-suite.schema.json"
+      },
+      {
+        "fileMatch": "*.tests.json",
+        "url": "./resources/schemas/turnstage-contract-suite.schema.json"
+      },
+      {
         "fileMatch": "*.adversarial.jsonc",
         "url": "./resources/schemas/turnstage-adversarial-suite.schema.json"
       },
@@ -700,7 +708,7 @@
         "toolReferenceName": "turnstage_find_tests",
         "displayName": "Find TurnStage tests",
         "userDescription": "Find bounded TurnStage behavior tests and their estimated work.",
-        "modelDescription": "Find matching TurnStage profiles, suites, cases, or steps. Use this before running tests. Results are bounded and paginated; do not infer that an empty page means no tests without checking the total and nextCursor.",
+        "modelDescription": "Find matching TurnStage profiles, inline cases, linked functional suites, linked adversarial suites, or steps. Use this before running tests. Results are prompt-free, bounded, and paginated; do not infer that an empty page means no tests without checking the total and nextCursor.",
         "canBeReferencedInPrompt": true,
         "icon": "$(search)",
         "tags": [
@@ -1462,11 +1470,15 @@
           "enum": [
             "auto",
             "zh-tw",
+            "ja",
+            "ko",
             "en"
           ],
           "enumDescriptions": [
             "%setting.displayLanguage.auto%",
             "%setting.displayLanguage.zhTw%",
+            "%setting.displayLanguage.ja%",
+            "%setting.displayLanguage.ko%",
             "%setting.displayLanguage.en%"
           ],
           "default": "auto",

@@ -68,6 +68,8 @@
   "setting.displayLanguage": "Language used in TurnStage profile editors. Auto follows VS Code. Native VS Code labels continue to follow the VS Code display language.",
   "setting.displayLanguage.auto": "Follow the VS Code display language.",
   "setting.displayLanguage.zhTw": "Use Traditional Chinese in TurnStage profile editors.",
+  "setting.displayLanguage.ja": "Use Japanese in TurnStage profile editors.",
+  "setting.displayLanguage.ko": "Use Korean in TurnStage profile editors.",
   "setting.displayLanguage.en": "Use English in TurnStage profile editors.",
   "setting.profileGlob": "Workspace-relative glob used to discover TurnStage profiles.",
   "setting.maxBufferedEvents": "Maximum number of normalized stream events kept in memory for one session.",

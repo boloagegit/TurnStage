@@ -68,6 +68,8 @@
   "setting.displayLanguage": "TurnStage Profile 編輯器使用的語言。「自動」會跟隨 VS Code；VS Code 原生標籤仍跟隨 VS Code 的顯示語言。",
   "setting.displayLanguage.auto": "跟隨 VS Code 的顯示語言。",
   "setting.displayLanguage.zhTw": "TurnStage Profile 編輯器使用繁體中文。",
+  "setting.displayLanguage.ja": "TurnStage Profile 編輯器使用日文。",
+  "setting.displayLanguage.ko": "TurnStage Profile 編輯器使用韓文。",
   "setting.displayLanguage.en": "TurnStage Profile 編輯器使用英文。",
   "setting.profileGlob": "用來探索 TurnStage 設定檔的工作區相對 glob。",
   "setting.maxBufferedEvents": "單一工作階段在記憶體中保留的標準化串流事件數上限。",

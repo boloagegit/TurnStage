@@ -434,7 +434,10 @@ profiles come from the configured workspace glob; user profiles come from
 Test and seven settings sections; selecting a child opens the same Custom
 Editor and the host sends `workspace.section` to select its surface. There is
 no duplicate navigation sidebar inside the Webview. **Test** places a device
-chat preview on the left and a resizable Debug inspector on the right. The
+chat preview on the left and a resizable right pane with Debug, Tests, Red Team,
+and Configure modes. Tests owns deterministic contract authoring, execution,
+results, and bounded campaign access; Red Team owns adversarial cases and
+four-state outcomes. The
 preview provides Responsive plus Mobile (375×812, 390×844, 430×932), Tablet
 (768×1024, 1024×768), and Web (1280×720, 1440×900) sizes. Mobile and Tablet
 retain device chrome; Web uses a centered readable conversation column. Every
@@ -455,7 +458,7 @@ Trusted-Workspace live inspector. The list is cleared on session restart and is
 not part of `LocalRun` persistence or Output logging.
 
 Each settings child renders only its selected General, Opening & Flow, Request,
-Stream & Mapping, Chat UI, Scenarios, History & Errors, or Security section. Raw and
+Stream & Mapping, Chat UI, Test settings, History & Errors, or Security section. Raw and
 normalized event lists use a fixed-height virtual list. Except for the custom
 phone preview, the visual UI follows VS Code editor/pane/list/settings patterns
 and theme variables, semantic form elements, keyboard tab navigation, a

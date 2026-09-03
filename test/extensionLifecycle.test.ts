@@ -116,7 +116,7 @@ describe('Extension host editor lifecycle', () => {
     expect(editorSource).toContain("observeBackground(postTestOperation(");
     expect(scenarioTestSource).toContain("this.refresh().catch((error) => logAt(this.output, 'error'");
     expect(duplicateDiagnosticsSource).toContain("this.refresh().catch((error) => logAt(this.output, 'error'");
-    expect(activateSource).toContain("editor.publishTestResults(uri, results).catch((error) => logAt(output, 'error'");
+    expect(activateSource).toContain("editor.publishTestResults(uri, results, automationResults).catch((error) => logAt(output, 'error'");
     expect(activateSource).toContain("[notification] failed type=");
   });
 
@@ -142,6 +142,7 @@ describe('Extension host editor lifecycle', () => {
     expect(activateSource).toContain("command('runContractTests', () => scenarioTests.runAll())");
     expect(scenarioTestSource).toContain("async runAll(): Promise<'completed' | 'cancelled'>");
     expect(scenarioTestSource).toContain('async runAdversarial(uri: vscode.Uri');
+    expect(scenarioTestSource).toContain('async runContracts(uri: vscode.Uri');
     expect(scenarioTestSource).toContain('async runCase(uri: vscode.Uri');
     expect(scenarioTestSource).toContain('item.adversarial === true');
     expect(activateSource).toContain("command('exportTestReport'");

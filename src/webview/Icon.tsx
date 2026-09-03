@@ -19,6 +19,7 @@ export type ProductIconName =
   | 'desktop-download'
   | 'debug-start'
   | 'debug-restart'
+  | 'debug-rerun'
   | 'device-camera'
   | 'device-desktop'
   | 'device-mobile'
@@ -63,6 +64,7 @@ const codicons: Record<ProductIconName, string> = {
   'desktop-download': 'desktop-download',
   'debug-start': 'debug-start',
   'debug-restart': 'debug-restart',
+  'debug-rerun': 'debug-rerun',
   'device-camera': 'device-camera',
   'device-desktop': 'device-desktop',
   'device-mobile': 'device-mobile',

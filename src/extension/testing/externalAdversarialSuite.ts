@@ -2,7 +2,11 @@ import * as vscode from 'vscode';
 import { isExternalAdversarialSuiteReference } from './externalAdversarialSuiteReference';
 
 const STORAGE_KEY = 'turnstage.externalAdversarialSuites.v1';
-const MAX_GRANTS = 100;
+// Functional and adversarial suites intentionally share the same profile-bound
+// authorization store. Keep the store bounded while allowing each profile
+// schema's two 100-entry linked-suite lists to coexist without immediate
+// eviction on a single machine.
+const MAX_GRANTS = 200;
 
 interface ExternalSuiteGrant {
   version: 1;

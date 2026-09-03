@@ -1,4 +1,4 @@
-import type { AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, SessionDelta, SessionSnapshot, TurnStageProfile } from './types';
+import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, SessionDelta, SessionSnapshot, TurnStageProfile } from './types';
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -18,6 +18,7 @@ export type InspectorTargetTab = 'Network' | 'Raw Events' | 'Normalized';
 export type WorkspaceDestination =
   | { pane: 'chat' }
   | { pane: 'debug'; tab: 'Network' | 'Raw Events' | 'Normalized' | 'Metrics' | 'Errors' | 'Runs' }
+  | { pane: 'tests'; section: 'results' | 'scenarios' | 'campaigns' }
   | { pane: 'adversarial'; section: 'results' | 'cases' | 'campaigns' | 'timeline' }
   | { pane: 'configure'; section: WorkspaceSection };
 
@@ -39,7 +40,7 @@ export interface MappingTestResult {
   parseError?: string;
 }
 
-export type TestOperationAction = 'runAll' | 'runCase' | 'rerunFailed' | 'rerunUnstable' | 'rerunIncomplete';
+export type TestOperationAction = 'runAll' | 'runContracts' | 'runCase' | 'rerunFailed' | 'rerunUnstable' | 'rerunIncomplete';
 export type TestOperationState = 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
 export interface TestOperationProgress {
   totalCases: number;
@@ -75,6 +76,33 @@ export interface AdversarialCaseCatalog {
   issues: Array<{ sourcePath: string; message: string }>;
 }
 export interface LinkedAdversarialCaseDetail {
+  sourcePath: string;
+  sourceFormat: 'csv' | 'jsonc';
+  revision: string;
+  scenario: ScenarioDefinition;
+}
+
+/** Bounded, prompt-free metadata for browsing linked functional test cases. */
+export interface LinkedContractCaseSummary {
+  sourcePath: string;
+  suiteId: string;
+  suiteName: string;
+  scenarioId: string;
+  scenarioName: string;
+  tags: string[];
+  turns: number;
+  assertions: number;
+  comparison: boolean;
+  performance: boolean;
+  faults: boolean;
+}
+export interface ContractCaseCatalog {
+  entries: LinkedContractCaseSummary[];
+  total: number;
+  truncated: boolean;
+  issues: Array<{ sourcePath: string; message: string }>;
+}
+export interface LinkedContractCaseDetail {
   sourcePath: string;
   sourceFormat: 'csv' | 'jsonc';
   revision: string;
@@ -121,8 +149,14 @@ export type WebviewMessage = Envelope & (
   | { type: 'adversarial.catalog.request'; force?: boolean }
   | { type: 'adversarial.case.request'; sourcePath: string; scenarioId: string }
   | { type: 'adversarial.case.save'; sourcePath: string; scenarioId: string; expectedRevision: string; scenario: ScenarioDefinition }
+  | { type: 'contract.file'; action: 'linkSuite' | 'csvTemplate' }
+  | { type: 'contract.openLinkedSuite'; path: string }
+  | { type: 'contract.catalog.request'; force?: boolean }
+  | { type: 'contract.case.request'; sourcePath: string; scenarioId: string }
+  | { type: 'contract.case.save'; sourcePath: string; scenarioId: string; expectedRevision: string; scenario: ScenarioDefinition }
   | { type: 'test.runAll' }
-  | { type: 'test.runCase'; scenarioId: string; suiteId?: string }
+  | { type: 'test.runContracts' }
+  | { type: 'test.runCase'; scenarioId: string; suiteId?: string; kind?: 'adversarial' | 'contract' }
   | { type: 'test.rerun'; status: 'failed' | 'unstable' | 'incomplete' }
   | { type: 'test.cancel' }
   | { type: 'test.timeline.open'; evidenceId: string }
@@ -168,8 +202,13 @@ export type HostMessage = Envelope & (
   | { type: 'adversarial.case.loaded'; detail: LinkedAdversarialCaseDetail }
   | { type: 'adversarial.case.saved'; detail: LinkedAdversarialCaseDetail }
   | { type: 'adversarial.case.error'; sourcePath: string; scenarioId: string; message: string; conflict: boolean }
+  | { type: 'contract.operation'; action: 'linkSuite' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string; artifactId?: string }
+  | { type: 'contract.catalog'; catalog: ContractCaseCatalog }
+  | { type: 'contract.case.loaded'; detail: LinkedContractCaseDetail }
+  | { type: 'contract.case.saved'; detail: LinkedContractCaseDetail }
+  | { type: 'contract.case.error'; sourcePath: string; scenarioId: string; message: string; conflict: boolean }
   | { type: 'test.operation'; operation: TestOperationSnapshot }
-  | { type: 'test.results'; results: AdversarialResultSummary[] }
+  | { type: 'test.results'; results: AdversarialResultSummary[]; automationResults?: AutomationResultSummary[] }
   | { type: 'campaign.dashboard'; dashboard: CampaignDashboardV1 }
   | { type: 'campaign.preview'; campaignId: string; selectedCases: number; plannedAttempts: number; plannedRequests: number; maximumDurationMs: number; maxConcurrency: number; warnings: string[] }
   | { type: 'campaign.exported'; path: string; artifactId: string }
@@ -269,13 +308,18 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   if (!isRecord(value) || !hasEnvelope(value, instanceId)) return false;
   const message = value;
   switch (message.type) {
-    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'profile.save': case 'profile.openFirstIssue': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'testExplorer.open': case 'test.runAll': case 'test.cancel': case 'test.evidenceBundle.export': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
+    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'profile.save': case 'profile.openFirstIssue': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'testExplorer.open': case 'test.runAll': case 'test.runContracts': case 'test.cancel': case 'test.evidenceBundle.export': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
     case 'adversarial.catalog.request': return message.force === undefined || typeof message.force === 'boolean';
     case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
     case 'adversarial.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
     case 'adversarial.case.request': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId);
     case 'adversarial.case.save': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId) && isRevision(message.expectedRevision) && isRecord(message.scenario) && isStructuredValue(message.scenario, MAX_HOST_VALUE_NODES);
-    case 'test.runCase': return isBoundedId(message.scenarioId) && (message.suiteId === undefined || isBoundedId(message.suiteId));
+    case 'contract.file': return message.action === 'linkSuite' || message.action === 'csvTemplate';
+    case 'contract.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
+    case 'contract.catalog.request': return message.force === undefined || typeof message.force === 'boolean';
+    case 'contract.case.request': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId);
+    case 'contract.case.save': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId) && isRevision(message.expectedRevision) && isRecord(message.scenario) && isStructuredValue(message.scenario, MAX_HOST_VALUE_NODES);
+    case 'test.runCase': return isBoundedId(message.scenarioId) && (message.suiteId === undefined || isBoundedId(message.suiteId)) && (message.kind === undefined || message.kind === 'adversarial' || message.kind === 'contract');
     case 'test.rerun': return ['failed', 'unstable', 'incomplete'].includes(String(message.status));
     case 'test.timeline.open': return isBoundedString(message.evidenceId);
     case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
@@ -330,12 +374,17 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'adversarial.catalog': return isAdversarialCaseCatalog(message.catalog);
     case 'adversarial.case.loaded': case 'adversarial.case.saved': return isLinkedAdversarialCaseDetail(message.detail);
     case 'adversarial.case.error': return isBoundedString(message.sourcePath, 4096) && isBoundedId(message.scenarioId) && isBoundedString(message.message, 4096) && typeof message.conflict === 'boolean';
+    case 'contract.operation': return (message.action === 'linkSuite' || message.action === 'csvTemplate') && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path) && optionalBoundedString(message.artifactId);
+    case 'contract.catalog': return isContractCaseCatalog(message.catalog);
+    case 'contract.case.loaded': case 'contract.case.saved': return isLinkedContractCaseDetail(message.detail);
+    case 'contract.case.error': return isBoundedString(message.sourcePath, 4096) && isBoundedId(message.scenarioId) && isBoundedString(message.message, 4096) && typeof message.conflict === 'boolean';
     case 'test.operation': return isRecord(message.operation)
-      && ['runAll', 'runCase', 'rerunFailed', 'rerunUnstable', 'rerunIncomplete'].includes(String(message.operation.action))
+      && ['runAll', 'runContracts', 'runCase', 'rerunFailed', 'rerunUnstable', 'rerunIncomplete'].includes(String(message.operation.action))
       && ['running', 'cancelling', 'completed', 'cancelled', 'failed'].includes(String(message.operation.state))
       && optionalBoundedString(message.operation.detail)
       && (message.operation.progress === undefined || isTestOperationProgress(message.operation.progress));
-    case 'test.results': return isAdversarialResults(message.results) && isStructuredValue(message.results, MAX_HOST_VALUE_NODES);
+    case 'test.results': return isAdversarialResults(message.results) && isStructuredValue(message.results, MAX_HOST_VALUE_NODES)
+      && (message.automationResults === undefined || (isAutomationResults(message.automationResults) && isStructuredValue(message.automationResults, MAX_HOST_VALUE_NODES)));
     case 'campaign.dashboard': return isRecord(message.dashboard) && isStructuredValue(message.dashboard, MAX_HOST_VALUE_NODES);
     case 'campaign.preview': return isBoundedString(message.campaignId) && [message.selectedCases, message.plannedAttempts, message.plannedRequests, message.maximumDurationMs, message.maxConcurrency].every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0) && Array.isArray(message.warnings) && message.warnings.length <= 100 && message.warnings.every((entry) => isBoundedString(entry, 4096));
     case 'campaign.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedId(message.artifactId);
@@ -364,6 +413,25 @@ function isAdversarialCaseCatalog(value: unknown): boolean {
 }
 
 function isLinkedAdversarialCaseDetail(value: unknown): boolean {
+  return isRecord(value)
+    && isBoundedString(value.sourcePath, 4096) && Boolean(value.sourcePath.trim())
+    && (value.sourceFormat === 'csv' || value.sourceFormat === 'jsonc')
+    && isRevision(value.revision)
+    && isRecord(value.scenario) && isStructuredValue(value.scenario, MAX_HOST_VALUE_NODES);
+}
+
+function isContractCaseCatalog(value: unknown): boolean {
+  if (!isRecord(value) || !Array.isArray(value.entries) || value.entries.length > 100 || !Number.isSafeInteger(value.total) || Number(value.total) < 0 || Number(value.total) > 50_000 || typeof value.truncated !== 'boolean') return false;
+  if (!Array.isArray(value.issues) || value.issues.length > 100 || !value.issues.every((entry) => isRecord(entry) && isBoundedString(entry.sourcePath, 4096) && isBoundedString(entry.message, 4096))) return false;
+  return value.entries.every((entry) => isRecord(entry)
+    && [entry.sourcePath, entry.suiteId, entry.suiteName, entry.scenarioId, entry.scenarioName].every((item) => isBoundedString(item, 4096))
+    && Array.isArray(entry.tags) && entry.tags.length <= 20 && entry.tags.every((tag) => isBoundedString(tag, 64))
+    && boundedNonNegativeInteger(entry.turns, 100)
+    && boundedNonNegativeInteger(entry.assertions, 10_100)
+    && ['comparison', 'performance', 'faults'].every((key) => typeof entry[key] === 'boolean'));
+}
+
+function isLinkedContractCaseDetail(value: unknown): boolean {
   return isRecord(value)
     && isBoundedString(value.sourcePath, 4096) && Boolean(value.sourcePath.trim())
     && (value.sourceFormat === 'csv' || value.sourceFormat === 'jsonc')
@@ -441,6 +509,22 @@ function isAdversarialResults(value: unknown): boolean {
   });
 }
 
+function isAutomationResults(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > 500) return false;
+  return value.every((result) => isRecord(result)
+    && isBoundedString(result.profileId)
+    && optionalBoundedString(result.suiteId)
+    && isBoundedString(result.scenarioId)
+    && isBoundedString(result.scenarioName, 4096)
+    && ['passed', 'failed', 'error'].includes(String(result.outcome))
+    && boundedNonNegativeNumber(result.durationMs)
+    && [result.passedChecks, result.failedChecks, result.completedSteps].every((entry) => boundedNonNegativeInteger(entry, 1_000_000))
+    && optionalBoundedString(result.evidenceId)
+    && isEvidenceLocation(result.primaryLocation)
+    && typeof result.comparison === 'boolean'
+    && typeof result.performance === 'boolean');
+}
+
 function boundedNonNegativeInteger(value: unknown, max: number): boolean { return Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= max; }
 function boundedNonNegativeNumber(value: unknown): boolean { return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER; }
 
@@ -459,6 +543,7 @@ export function isWorkspaceDestination(value: unknown): value is WorkspaceDestin
   if (!isRecord(value)) return false;
   if (value.pane === 'chat') return Object.keys(value).length === 1;
   if (value.pane === 'debug') return ['Network', 'Raw Events', 'Normalized', 'Metrics', 'Errors', 'Runs'].includes(String(value.tab));
+  if (value.pane === 'tests') return ['results', 'scenarios', 'campaigns'].includes(String(value.section));
   if (value.pane === 'adversarial') return ['results', 'cases', 'campaigns', 'timeline'].includes(String(value.section));
   return value.pane === 'configure' && isWorkspaceSection(value.section);
 }

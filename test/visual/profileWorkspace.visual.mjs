@@ -154,15 +154,20 @@ try {
   assert.equal(await sessionTools.getByRole('button', { name: 'Restart session' }).locator('.codicon-debug-restart').count(), 1, 'Restart session must use the specific VS Code restart Codicon');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Debug is the default right-panel mode');
   assert.equal(await page.getByRole('tab', { name: 'Network' }).getAttribute('aria-selected'), 'true', 'Network is the default Debug view for a new Webview state');
-  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'false', 'Red Team remains directly available beside Debug');
+  assert.equal(await page.getByRole('tab', { name: 'Tests' }).getAttribute('aria-selected'), 'false', 'Tests remains directly available beside Debug');
+  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'false', 'Red Team remains directly available beside Tests');
   assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'false', 'Configure remains directly available beside Debug');
   await page.getByRole('tab', { name: 'Debug' }).focus();
   await page.keyboard.press('ArrowRight');
-  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'Right Arrow switches to Red Team');
+  assert.equal(await page.getByRole('tab', { name: 'Tests' }).getAttribute('aria-selected'), 'true', 'Right Arrow switches to Tests');
   await page.keyboard.press('ArrowRight');
-  assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'true', 'A second Right Arrow switches to Configure');
+  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'A second Right Arrow switches to Red Team');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'true', 'A third Right Arrow switches to Configure');
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Red Team');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.getByRole('tab', { name: 'Tests' }).getAttribute('aria-selected'), 'true', 'A second Left Arrow switches back to Tests');
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Debug');
   await page.screenshot({ path: resolve(artifactDirectory, 'wide-dark.png'), fullPage: true });
@@ -351,15 +356,11 @@ try {
   await tlsBypass.click();
   await page.waitForFunction(() => (document.getElementById('settings-request-allow-invalid-certificates'))?.checked === false);
   await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('scenario-tests');
-  await page.getByRole('heading', { level: 1, name: 'Scenarios' }).waitFor();
-  assert.equal(await page.locator('.scenario-editor').count(), 1, 'Configure must keep the conversation contract separate from adversarial cases');
-  assert.equal(await page.locator('.scenario-step').count(), 1, 'The contract editor must keep its configured turn compact');
-  assert.equal(await page.locator('.assertion-row').count(), 3, 'The contract editor must render step and final assertions');
+  await page.getByRole('heading', { level: 1, name: 'Test settings' }).waitFor();
+  assert.equal(await page.locator('.scenario-editor').count(), 0, 'Configure must keep executable conversation contracts in Tests');
   assert.equal(await page.getByRole('heading', { name: 'CI reports' }).count(), 1, 'Scenario configuration must expose CI report settings');
   assert.equal(await page.getByRole('heading', { name: 'Visual regression' }).count(), 1, 'Scenario configuration must expose visual baseline settings');
   assert.equal(await page.getByLabel('HTML').isChecked(), true, 'Scenario reports must expose HTML output');
-  assert.equal(await page.locator('.scenario-advanced[open]').count(), 1, 'Configured baseline comparison must remain expanded');
-  assert.equal(await page.locator('.scenario-budget__row').count(), 9, 'Every supported performance metric must be configurable');
   const advisoryReview = page.getByRole('heading', { name: 'Advisory AI review' });
   await advisoryReview.scrollIntoViewIfNeeded();
   assert.equal(await page.getByRole('checkbox', { name: 'Use custom quality rubrics' }).isChecked(), true, 'Advisory review must expose an explicit custom-rubric control');
@@ -367,6 +368,34 @@ try {
   assert.equal(await page.getByLabel('Evaluation guidance').inputValue(), 'The response directly addresses the requested task without unrelated content.', 'Quality criteria must expose concrete evaluation guidance');
   await page.locator('.quality-rubric-editor').screenshot({ path: resolve(artifactDirectory, 'advisory-quality-rubric-dark.png') });
   await page.screenshot({ path: resolve(artifactDirectory, 'scenario-contract-settings-dark.png'), fullPage: true });
+  await page.getByRole('tab', { name: 'Tests' }).click();
+  await page.getByRole('heading', { level: 1, name: 'Automated testing' }).waitFor();
+  const automationNavigation = page.getByRole('tablist', { name: 'Test sections' });
+  assert.equal(await automationNavigation.getByRole('tab').count(), 3, 'Tests must expose Results, Scenarios, and Campaigns');
+  await assertRedTeamTabVisual(automationNavigation, 'Automation dark theme');
+  assert.equal(await page.getByRole('heading', { name: 'Latest test results' }).count(), 1, 'Tests opens on functional automation results');
+  assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 0, 'Results must remain an inspection surface, not the main execution surface');
+  assert.equal(await page.locator('.automation-result-table tbody > tr').count(), 1, 'Automation results must remain distinct from adversarial outcomes');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-dark.png') });
+  await automationNavigation.getByRole('tab', { name: /Scenarios/ }).click();
+  assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 1, 'Scenario execution must live beside the authored contracts');
+  await page.getByText('Linked multi-turn contract', { exact: true }).waitFor();
+  assert.equal(await page.locator('.automation-scenario-row').count(), 2, 'Inline and linked non-adversarial conversation contracts belong in Tests');
+  assert.equal(await page.getByText('Linked regression', { exact: true }).count(), 1, 'A linked contract must identify its source suite without exposing its prompt');
+  await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
+  assert.equal(await page.locator('.scenario-editor').count(), 1, 'Expanding a contract must reveal exactly one editor');
+  assert.equal(await page.locator('.scenario-step').count(), 1, 'The contract editor must keep its configured turn compact');
+  assert.equal(await page.locator('.assertion-row').count(), 3, 'The contract editor must render step and final assertions');
+  assert.equal(await page.locator('.scenario-advanced[open]').count(), 1, 'Configured baseline comparison must remain expanded');
+  assert.equal(await page.locator('.scenario-budget__row').count(), 9, 'Every supported performance metric must be configurable');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-scenarios-dark.png') });
+  await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
+  await page.getByRole('button', { name: 'Linked multi-turn contract', exact: true }).click();
+  await page.getByText('Linked JSONC test case', { exact: true }).waitFor();
+  await page.locator('.linked-case-editor .scenario-editor').waitFor();
+  assert.equal(await page.locator('.scenario-step').count(), 2, 'A linked multi-turn contract must load only after selection and preserve its turns');
+  assert.equal(await page.getByRole('button', { name: 'Save linked case' }).isDisabled(), true, 'An unchanged linked case must not offer an unnecessary write');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-linked-scenario-dark.png') });
   await page.getByRole('tab', { name: 'Red Team' }).click();
   await page.getByRole('heading', { level: 1, name: 'Adversarial testing' }).waitFor();
   const redTeamNavigation = page.getByRole('tablist', { name: 'Red Team sections' });
@@ -559,12 +588,14 @@ try {
   await page.locator('.evidence-review').waitFor({ state: 'hidden' });
   assert.equal(await page.locator('#right-pane-debug-tab').getAttribute('aria-selected'), 'true', 'Closing Evidence Review must preserve the current Debug context');
   await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-closed-dark.png'), fullPage: true });
-  await page.getByRole('tab', { name: 'Configure' }).click();
-  await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('scenario-tests');
+  await page.getByRole('tab', { name: 'Tests' }).click();
+  await page.getByRole('tab', { name: /Scenarios/ }).click();
+  if ((await page.getByRole('button', { name: 'Slow stream contract', exact: true }).getAttribute('aria-expanded')) !== 'true') await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
   await page.locator('.scenario-advanced').filter({ hasText: 'Compare & performance' }).scrollIntoViewIfNeeded();
   assert.equal(await page.locator('.scenario-target-grid fieldset').count(), 2, 'Baseline and candidate targets must both render in the GUI');
   assert.equal(await page.locator('.scenario-budget').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Performance budgets must not overflow the embedded settings pane');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'scenario-comparison-performance-dark.png') });
+  await page.getByRole('tab', { name: 'Configure' }).click();
   await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('general');
   await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
   const displayName = page.getByLabel('Display name');
@@ -874,6 +905,16 @@ try {
   await page.emulateMedia({ forcedColors: 'none' });
   await page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' }).click();
 
+  await page.getByRole('tab', { name: 'Tests' }).click();
+  await page.getByRole('tab', { name: /Results/ }).click();
+  await page.getByRole('heading', { name: 'Latest test results' }).waitFor();
+  await assertRedTeamTabVisual(page.getByRole('tablist', { name: 'Test sections' }), 'Automation light theme');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-light.png') });
+  await page.emulateMedia({ forcedColors: 'active' });
+  await assertRedTeamTabVisual(page.getByRole('tablist', { name: 'Test sections' }), 'Automation high contrast theme');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-high-contrast.png') });
+  await page.emulateMedia({ forcedColors: 'none' });
+
   await page.getByRole('tab', { name: 'Red Team' }).click();
   await page.getByRole('tab', { name: /Results:/ }).click();
   await page.getByRole('heading', { name: 'Latest adversarial results' }).waitFor();
@@ -1010,6 +1051,20 @@ try {
   await startPage.locator('.mobile-chat-preview__device').screenshot({ path: resolve(artifactDirectory, 'session-auto-start-loading-dark.png') });
   await startPage.close();
 
+  for (const localeCase of [
+    { locale: 'ja-JP', tabs: ['デバッグ', 'テスト', 'レッドチーム', '設定'], artifact: 'locale-ja-dark.png' },
+    { locale: 'ko-KR', tabs: ['디버그', '테스트', '레드 팀', '설정'], artifact: 'locale-ko-dark.png' },
+  ]) {
+    const localePage = await browser.newPage({ viewport: { width: 720, height: 640 } });
+    await localePage.goto(`${url}?locale=${encodeURIComponent(localeCase.locale)}`);
+    const localeTabs = localePage.locator('.right-pane-tabs:visible').first();
+    await localeTabs.getByRole('tab', { name: localeCase.tabs[0], exact: true }).waitFor();
+    for (const label of localeCase.tabs) assert.equal(await localeTabs.getByRole('tab', { name: label, exact: true }).count(), 1, `${localeCase.locale}: expected translated primary tab ${label}`);
+    assert.equal(await localeTabs.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, `${localeCase.locale}: primary right-pane tabs must fit without horizontal scrolling at 720px`);
+    await localePage.screenshot({ path: resolve(artifactDirectory, localeCase.artifact), fullPage: true });
+    await localePage.close();
+  }
+
   await page.keyboard.press('Tab');
   const focus = await page.evaluate(() => {
     const activeElement = document.activeElement;
@@ -1018,7 +1073,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, networkPayloadJsonHighlighting: true, defaultDebugNetwork: true, compactEventEmptyStates: true, sessionAutoStartLoading: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, requestScopedTlsWarning: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, networkPayloadJsonHighlighting: true, defaultDebugNetwork: true, compactEventEmptyStates: true, sessionAutoStartLoading: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, requestScopedTlsWarning: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, cjkLocales: ['ja-JP', 'ko-KR'], screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

@@ -120,6 +120,7 @@
       },
       metrics: { messageEnabled: ['ttft', 'totalDuration'] },
       tests: {
+        contractSuites: ['.vscode/turnstage/tests/regression.tests.jsonc'],
         adversarialSuites: ['.vscode/turnstage/tests/security-regression.adversarial.csv'],
         campaigns: [{
           id: 'release-safety',
@@ -282,6 +283,28 @@
       profileId: profile.id, scenarioId: 'safe-tool-boundary', scenarioName: 'Safe tool boundary', outcome: 'resisted', durationMs: 1220, attemptedTurns: 1, completedTurns: 1, plannedTurns: 1, findingCount: 0, issueCount: 0,
       evidenceId: 'visual-evidence-safe', primaryLocation: { kind: 'rawEvent', sequence: 2 }, availableLocations: [{ kind: 'rawEvent', sequence: 2 }, { kind: 'network', networkId: 'stream-1' }]
     }];
+    const automationResults = [{
+      profileId: profile.id, scenarioId: 'slow-stream-contract', scenarioName: 'Slow stream contract', outcome: 'failed', durationMs: 5120,
+      passedChecks: 2, failedChecks: 1, completedSteps: 1, evidenceId: 'visual-contract-evidence', primaryLocation: { kind: 'normalizedEvent', sequence: 4 }, comparison: true, performance: true
+    }];
+    const contractCatalog = {
+      entries: [{
+        sourcePath: '.vscode/turnstage/tests/regression.tests.jsonc',
+        suiteId: 'linked-regression',
+        suiteName: 'Linked regression',
+        scenarioId: 'linked-multi-turn-contract',
+        scenarioName: 'Linked multi-turn contract',
+        tags: ['release', 'linked'],
+        turns: 2,
+        assertions: 2,
+        comparison: false,
+        performance: true,
+        faults: false
+      }],
+      total: 1,
+      truncated: false,
+      issues: []
+    };
     const adversarialCatalog = {
       entries: Array.from({ length: 30 }, (_, index) => ({
         sourcePath: '.vscode/turnstage/tests/security-regression.adversarial.csv',
@@ -356,6 +379,20 @@
           setTimeout(() => dispatch({ type: 'adversarial.catalog', catalog: adversarialCatalog }), 0);
           return;
         }
+        if (message.type === 'contract.catalog.request') {
+          setTimeout(() => dispatch({ type: 'contract.catalog', catalog: contractCatalog }), 0);
+          return;
+        }
+        if (message.type === 'contract.case.request') {
+          const entry = contractCatalog.entries.find((candidate) => candidate.sourcePath === message.sourcePath && candidate.scenarioId === message.scenarioId);
+          if (!entry) { setTimeout(() => dispatch({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: 'Case not found.', conflict: false }), 0); return; }
+          setTimeout(() => dispatch({ type: 'contract.case.loaded', detail: { sourcePath: entry.sourcePath, sourceFormat: 'jsonc', revision: 'c'.repeat(64), scenario: { id: entry.scenarioId, name: entry.scenarioName, tags: entry.tags, performance: { thresholds: { 'metrics.ttft': 2000 } }, steps: [{ id: 'linked-first', name: 'First turn', input: 'Visual linked functional prompt' }, { id: 'linked-follow-up', name: 'Follow-up', input: 'Continue the visual linked contract', assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }] }], assertions: [{ path: 'assistant.text', operator: 'exists' }] } } }), 0);
+          return;
+        }
+        if (message.type === 'contract.case.save') {
+          setTimeout(() => dispatch({ type: 'contract.case.saved', detail: { sourcePath: message.sourcePath, sourceFormat: message.sourcePath.endsWith('.csv') ? 'csv' : 'jsonc', revision: 'd'.repeat(64), scenario: message.scenario } }), 0);
+          return;
+        }
         if (message.type === 'adversarial.case.request') {
           const entry = adversarialCatalog.entries.find((candidate) => candidate.sourcePath === message.sourcePath && candidate.scenarioId === message.scenarioId);
           if (!entry) { setTimeout(() => dispatch({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: 'Case not found.', conflict: false }), 0); return; }
@@ -369,14 +406,15 @@
         }
         if (message.type !== 'webview.ready') return;
         setTimeout(() => {
-          dispatch({ type: 'host.ready', trusted: true, locale: 'en', direction: 'ltr' });
+          const requestedLocale = new URLSearchParams(location.search).get('locale') || 'en';
+          dispatch({ type: 'host.ready', trusted: true, locale: requestedLocale, direction: 'ltr' });
           dispatch({ type: 'profile.snapshot', profile, version: 1, environments: ['local'] });
           dispatch({ type: 'profile.validation', diagnostics: [] });
           dispatch({ type: 'profile.validated', valid: true });
           dispatch({ type: 'session.snapshot', snapshot: JSON.parse(JSON.stringify(snapshot)), runs: JSON.parse(JSON.stringify(runs)), requestPreview: { method: 'POST', url: 'http://localhost/chat' }, networkEntries: JSON.parse(JSON.stringify(networkEntries)) });
           dispatch({ type: 'connection.result', result: connectionResult });
           dispatch({ type: 'campaign.dashboard', dashboard: campaignDashboard });
-          dispatch({ type: 'test.results', results: JSON.parse(JSON.stringify(testResults)) });
+          dispatch({ type: 'test.results', results: JSON.parse(JSON.stringify(testResults)), automationResults: JSON.parse(JSON.stringify(automationResults)) });
         }, 0);
       }
     });

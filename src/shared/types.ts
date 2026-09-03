@@ -25,6 +25,8 @@ export interface TurnStageProfile {
 /** Declarative, profile-owned conversation tests. No field is executable code. */
 export interface ProfileTestsDefinition {
   scenarios: ScenarioDefinition[];
+  /** Workspace-relative sources or opaque, locally authorized external functional test suites. */
+  contractSuites?: string[];
   /** Workspace-relative, Git-friendly adversarial JSONC or CSV source files. */
   /** Workspace-relative sources or opaque, locally authorized external file references. */
   adversarialSuites?: string[];
@@ -36,6 +38,24 @@ export interface ProfileTestsDefinition {
   /** Named, bounded selections that reuse Test Explorer cases. */
   campaigns?: TestCampaignDefinition[];
 }
+
+/** A Git-friendly external collection of functional conversation contracts. */
+export interface ContractSuiteDefinition {
+  $schema?: string;
+  format: 'turnstage-contract-suite';
+  version: 1;
+  id: string;
+  name: string;
+  description?: string;
+  sourceBinding?: ScenarioSourceBinding;
+  cases: ContractSuiteCaseDefinition[];
+}
+
+export type ContractSuiteCaseDefinition = Omit<ScenarioDefinition, 'adversarial'> & {
+  enabled?: boolean;
+  /** Functional suites never accept adversarial settings. */
+  adversarial?: never;
+};
 
 export interface TestCampaignDefinition {
   id: string;
@@ -591,6 +611,23 @@ export interface ScenarioRunResult {
     /** Bounded semantic field paths only; values remain in memory-only evidence. */
     differencePaths: string[];
   };
+}
+
+/** Bounded metadata for the Profile editor's general automation results table. */
+export interface AutomationResultSummary {
+  profileId: string;
+  suiteId?: string;
+  scenarioId: string;
+  scenarioName: string;
+  outcome: 'passed' | 'failed' | 'error';
+  durationMs: number;
+  passedChecks: number;
+  failedChecks: number;
+  completedSteps: number;
+  evidenceId?: string;
+  primaryLocation: ScenarioEvidenceLocation;
+  comparison: boolean;
+  performance: boolean;
 }
 
 export interface ControlDefinition {

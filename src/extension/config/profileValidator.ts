@@ -6,6 +6,7 @@ import { isValidComparisonPath } from '../testing/scenarioComparison';
 import { isSafeReportDirectory } from '../testing/scenarioConfig';
 import { scenarioPerformanceMetrics } from '../testing/performanceEvaluator';
 import { isSafeAdversarialSuitePath, MAX_ADVERSARIAL_REPETITIONS, MAX_ADVERSARIAL_RULES, MAX_ADVERSARIAL_TURNS_PER_CASE } from '../testing/adversarialSuite';
+import { isSafeContractSuitePath } from '../testing/contractSuite';
 import { validateSourceBinding } from '../testing/impactMapping';
 import { validateQualityRubrics } from '../copilot/quality/policy';
 import { isSafeRegexPattern } from '../../shared/regexSafety';
@@ -270,6 +271,16 @@ export class ProfileValidator {
     for (const duplicate of duplicates((profile.controls ?? []).map((control) => control.id))) out.push(issue(tree, ['controls'], localize('Duplicate control id: {id}.', { id: duplicate })));
     for (const duplicate of duplicates((profile.stream?.mappings ?? []).map((mapping) => mapping.id))) out.push(issue(tree, ['stream', 'mappings'], localize('Duplicate mapping id: {id}.', { id: duplicate })));
     const scenarios = profile.tests?.scenarios ?? [];
+    const contractSuites = profile.tests?.contractSuites;
+    if (contractSuites !== undefined) {
+      if (!Array.isArray(contractSuites)) out.push(issue(tree, ['tests', 'contractSuites'], localize('Test suites must contain at most 100 workspace-relative or locally authorized external sources.')));
+      else {
+        if (contractSuites.length > 100) out.push(issue(tree, ['tests', 'contractSuites'], localize('Test suites must contain at most 100 workspace-relative or locally authorized external sources.')));
+        const boundedSuites = contractSuites.slice(0, 100);
+        boundedSuites.forEach((path, index) => { if (!isSafeContractSuitePath(path)) out.push(issue(tree, ['tests', 'contractSuites', index], localize('Test suite path must be a safe workspace-relative .tests.jsonc, .tests.json, or CSV path.'))); });
+        if (duplicates(boundedSuites).length) out.push(issue(tree, ['tests', 'contractSuites'], localize('Test suite paths must be unique.')));
+      }
+    }
     const adversarialSuites = profile.tests?.adversarialSuites;
     if (adversarialSuites !== undefined) {
       if (!Array.isArray(adversarialSuites) || adversarialSuites.length > 100) out.push(issue(tree, ['tests', 'adversarialSuites'], localize('Adversarial suites must contain at most 100 workspace-relative or locally authorized external sources.')));
@@ -570,6 +581,24 @@ export function validateAdversarialScenariosAgainstProfile(
     const candidate: TurnStageProfile = {
       ...profile,
       tests: { ...(profile.tests ?? { scenarios: [] }), scenarios: [scenario], adversarialSuites: undefined },
+    };
+    return validator.validate(candidate, undefined, environments)
+      .filter((entry) => entry.severity === 'error')
+      .map((entry) => ({ ...entry, scenarioId: scenario.id }));
+  });
+}
+
+/** Validate external functional cases using the same Profile-owned contracts as inline scenarios. */
+export function validateContractScenariosAgainstProfile(
+  profile: TurnStageProfile,
+  scenarios: readonly ScenarioDefinition[],
+  environments: TurnStageEnvironment[] = [],
+): Array<ValidationIssue & { scenarioId: string }> {
+  const validator = new ProfileValidator();
+  return scenarios.flatMap((scenario) => {
+    const candidate: TurnStageProfile = {
+      ...profile,
+      tests: { ...(profile.tests ?? { scenarios: [] }), scenarios: [scenario], contractSuites: undefined, adversarialSuites: undefined },
     };
     return validator.validate(candidate, undefined, environments)
       .filter((entry) => entry.severity === 'error')

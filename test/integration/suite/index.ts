@@ -191,8 +191,8 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
   const parsed = JSON.parse(json) as { format?: string; version?: number; summary?: { total?: number; passed?: number; failed?: number; resisted?: number; attackSucceeded?: number }; failureClusters?: Array<{ count?: number; fingerprint?: { digest?: string } }>; scenarios?: Array<{ adversarial?: { outcome?: string; attemptedTurns?: number; completedTurns?: number; plannedTurns?: number; repetitions?: { requestedAttempts?: number; completedAttempts?: number; sampleComplete?: boolean; stability?: string; counts?: Record<string, number> }; reliability?: { completedAttempts?: number; sampleComplete?: boolean; verdict?: string; duration?: { p95Ms?: number } }; timeline?: { entries?: Array<{ phase?: string; location?: { kind?: string } }>; completeness?: string } }; comparison?: { differenceCount?: number } }> };
   assert.equal(parsed.format, 'turnstage-contract-report');
   assert.equal(parsed.version, 2);
-  assert.equal(parsed.summary?.total, 3);
-  assert.equal(parsed.summary?.passed, 2, json);
+  assert.equal(parsed.summary?.total, 4);
+  assert.equal(parsed.summary?.passed, 3, json);
   assert.equal(parsed.summary?.failed, 1, json);
   assert.equal(parsed.summary?.resisted, 1, json);
   assert.equal(parsed.summary?.attackSucceeded, 1, json);
@@ -219,7 +219,7 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
   assert.equal(csvAdversarial?.repetitions?.requestedAttempts, 2, json);
   assert.equal(csvAdversarial?.repetitions?.completedAttempts, 2, json);
   assert.equal(csvAdversarial?.repetitions?.counts?.resisted, 2, json);
-  assert.match(junit, /<testsuite[^>]+tests="3"[^>]+failures="1"/);
+  assert.match(junit, /<testsuite[^>]+tests="4"[^>]+failures="1"/);
   assert.match(junit, /Adversarial attack succeeded/);
   const concurrency = await postMockProbe(`${mockBaseUrl}/__turnstage_test/concurrency/metrics`) as {
     active?: number;
@@ -241,7 +241,7 @@ async function assertConversationContractReports(workspaceRoot: vscode.Uri): Pro
     assert.ok((multiTurnIntervals[index]!.startedAt ?? 0) >= (multiTurnIntervals[index - 1]!.endedAt ?? Number.POSITIVE_INFINITY), `Turns and attempts within one multi-turn case must not overlap: ${JSON.stringify(concurrency)}`);
   }
   console.log(`TurnStage concurrency probe: maxActive=${concurrency.maxActive}; perMessageMax=${Math.max(...Object.values(concurrency.maxActiveByMessage ?? {}), 0)}; multiTurnRequests=${multiTurnIntervals.length}`);
-  for (const forbidden of ['Integration Profile', 'Integration contract', 'Integration adversarial', 'Integration multi-turn attack', 'Integration baseline', 'Integration candidate', 'Hello from Test Explorer', 'Establish context', 'Run the known fixed attack', 'rawEvents', 'requestPreview', 'actual', 'expected']) {
+  for (const forbidden of ['Integration Profile', 'Integration contract', 'Integration linked contracts', 'Integration linked contract', 'Integration adversarial', 'Integration multi-turn attack', 'Integration baseline', 'Integration candidate', 'Hello from Test Explorer', 'Hello from linked Test Explorer suite', 'Establish context', 'Run the known fixed attack', 'rawEvents', 'requestPreview', 'actual', 'expected']) {
     assert.equal(json.includes(forbidden), false, `JSON contract report must exclude ${forbidden}`);
     assert.equal(junit.includes(forbidden), false, `JUnit contract report must exclude ${forbidden}`);
   }
@@ -270,6 +270,18 @@ async function assertCopilotToolBoundary(workspaceRoot: vscode.Uri): Promise<voi
   assert.equal(impactedItems.length, 1, JSON.stringify(impacted));
   assert.equal(impactedItems[0]?.caseId, 'integration-multi-turn-attack');
   assert.match(impactedItems[0]?.selectionReason ?? '', /src\/chat\/stream\.ts/);
+
+  const linkedContracts = await invokeToolJson('turnstage_find_tests', { tag: 'linked-contract', limit: 10 });
+  assert.equal(linkedContracts.ok, true, JSON.stringify(linkedContracts));
+  const linkedItems = ((linkedContracts.data as { tests?: { items?: Array<{ id?: string; profileId?: string; suiteId?: string; caseId?: string; adversarial?: boolean }> } } | undefined)?.tests?.items) ?? [];
+  assert.equal(linkedItems.length, 1, JSON.stringify(linkedContracts));
+  assert.equal(linkedItems[0]?.profileId, 'integration');
+  assert.equal(linkedItems[0]?.suiteId, 'integration-linked-contracts');
+  assert.equal(linkedItems[0]?.caseId, 'integration-linked-contract');
+  assert.equal(linkedItems[0]?.adversarial, false);
+  const linkedValidation = await invokeToolJson('turnstage_validate_tests', { profileId: 'integration', suiteId: 'integration-linked-contracts', caseId: 'integration-linked-contract' });
+  assert.equal(linkedValidation.ok, true, JSON.stringify(linkedValidation));
+  assert.equal((linkedValidation.data as { valid?: boolean } | undefined)?.valid, true, JSON.stringify(linkedValidation));
 
   const validated = await invokeToolJson('turnstage_validate_tests', { profileId: 'integration', caseId: 'integration-multi-turn-attack' });
   assert.equal(validated.ok, true, JSON.stringify(validated));

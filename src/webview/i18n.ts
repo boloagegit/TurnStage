@@ -1,8 +1,51 @@
-type MessageValues = Record<string, string | number>;
+import { ja } from './i18n.ja';
+import { ko } from './i18n.ko';
 
-let locale = typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en';
+type MessageValues = Record<string, string | number>;
+export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
+
+let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Automated testing': '自動化測試',
+  'Keep small cases inline or link a JSONC/CSV suite. Full prompts load only when you edit a case.': '少量案例可直接放在 Profile；大量案例可連結 JSONC／CSV 套件。只有編輯個別案例時才會載入完整提示。',
+  'More test suite actions': '更多測試套件動作',
+  'Refresh linked suites': '重新整理已連結套件',
+  'Scenario name, ID, tag, or suite': '情境名稱、ID、標籤或套件',
+  'Loading linked test cases…': '正在載入已連結的測試案例…',
+  'Only the first {count} linked cases are shown here to protect editor performance. All valid cases remain available in Test Explorer and Copilot tools.': '為保護編輯器效能，此處只顯示前 {count} 個已連結案例；所有有效案例仍可在 Test Explorer 與 Copilot 工具中使用。',
+  'Linked {format} test case': '已連結的 {format} 測試案例',
+  'Edits are written to {source}; the Profile keeps only a safe reference.': '變更會寫回 {source}；Profile 只保留安全的來源參照。',
+  'Linked test case saved and verified from disk.': '已儲存已連結的測試案例，並從磁碟重新驗證。',
+  'Save or discard the current linked test case before opening another case.': '請先儲存或捨棄目前已連結測試案例的變更，再開啟其他案例。',
+  'Save or discard the current linked test case before closing the editor.': '請先儲存或捨棄目前已連結測試案例的變更，再關閉編輯器。',
+  'Saving and verifying the linked test case…': '正在儲存並驗證已連結的測試案例…',
+  'Checks': '檢查',
+  'Comparison': '比較',
+  'Deterministic contract, comparison, and performance outcomes from this Extension Host session.': '此 Extension Host 工作階段中的確定性合約、比較與效能結果。',
+  'Export test results': '匯出測試結果',
+  'Functional, regression, comparison, and performance automation.': '功能、迴歸、比較與效能自動化。',
+  'Latest test results': '最新測試結果',
+  'No automation results in this Extension Host session.': '此 Extension Host 工作階段尚無自動化測試結果。',
+  'No results match the current search.': '沒有符合目前搜尋條件的結果。',
+  'No scenarios match the current search.': '沒有符合目前搜尋條件的情境。',
+  'Performance': '效能',
+  'Run deterministic conversation contracts and inspect bounded evidence without mixing them with adversarial outcomes.': '執行確定性的對話合約並檢視有界限的證據，不與紅隊結果混合。',
+  'Run scenario again': '再次執行情境',
+  'Run scenario {name}': '執行情境「{name}」',
+  'Scenario': '情境',
+  'Scenario authoring and execution live in Tests. Test Explorer remains the authoritative VS Code runner.': '情境編輯與執行位於「測試」；Test Explorer 仍是 VS Code 的權威執行介面。',
+  'Scenario name or ID': '情境名稱或 ID',
+  'Scenario name, ID, or tag': '情境名稱、ID 或標籤',
+  'Search scenarios': '搜尋情境',
+  'Test actions': '測試動作',
+  'Test sections': '測試區段',
+  'Tests': '測試',
+  'Tests toolbar': '測試工具列',
+  '{count} scenarios': '{count} 個情境',
+  '{count} test scenarios': '{count} 個測試情境',
+  '{passed} passed · {failed} failed': '{passed} 項通過 · {failed} 項失敗',
+  '{steps} steps · {assertions} assertions': '{steps} 個步驟 · {assertions} 個斷言',
   'Campaign results exported to {path}': 'Campaign 結果已匯出至 {path}',
   'Copy path': '複製路徑',
   'Copy safe summary': '複製安全摘要',
@@ -1012,6 +1055,8 @@ const zhTw: Record<string, string> = {
   'Indicator intensity (%)': '指示器強度（%）',
   'Assistant streaming intensity': '助理串流效果強度',
   'Scenarios': '測試情境',
+  'Test settings': '測試設定',
+  'Reports, advisory review rubrics, and visual regression settings.': '報告、諮詢式審查準則與視覺迴歸設定。',
   'Multi-turn inputs, assertions, and contract-test setup.': '多輪輸入、斷言與契約測試設定。',
   'Conversation contracts': '對話契約',
   'CI reports': 'CI 報告',
@@ -1364,7 +1409,7 @@ const zhTw: Record<string, string> = {
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {
-  locale = nextLocale || 'en';
+  locale = normalizeLocale(nextLocale);
   if (typeof document !== 'undefined') {
     document.documentElement.lang = locale;
     document.documentElement.dir = direction;
@@ -1374,7 +1419,7 @@ export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'):
 export function getLocale(): string { return locale; }
 
 export function t(message: string, values: MessageValues = {}): string {
-  const template = isTraditionalChinese(locale) ? zhTw[message] ?? message : message;
+  const template = catalogs[locale][message] ?? message;
   return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] === undefined ? match : String(values[key]));
 }
 
@@ -1405,10 +1450,32 @@ export function localizeHumanized(value: string): string {
   return t(value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[._-]/g, ' ').replace(/^./, (char) => char.toUpperCase()));
 }
 
-function isTraditionalChinese(value: string): boolean {
-  const normalized = value.toLowerCase();
-  return normalized === 'zh-tw' || normalized === 'zh-hant' || normalized.startsWith('zh-hant-');
+/** Normalize BCP-47-like input to the finite dictionaries shipped in the Webview. */
+export function normalizeLocale(value: unknown): WebviewLocale {
+  if (typeof value !== 'string') return 'en';
+  const normalized = value.trim().replace(/_/g, '-').toLowerCase();
+  if (!/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(normalized)) return 'en';
+  const parts = normalized.split('-');
+  const language = parts[0] ?? '';
+  const script = parts.slice(1).find((part) => part.length === 4);
+  const region = parts.slice(1).find((part) => part.length === 2 || /^\d{3}$/.test(part));
+  if (language === 'zh') {
+    if (script === 'hant' || ['hk', 'mo', 'tw'].includes(region ?? '')) return 'zh-TW';
+    if (script === 'hans' || ['cn', 'sg'].includes(region ?? '')) return 'en';
+    return 'zh-TW';
+  }
+  if (language === 'ja') return 'ja';
+  if (language === 'ko') return 'ko';
+  if (language === 'en') return 'en';
+  return 'en';
 }
+
+const catalogs: Record<WebviewLocale, Record<string, string>> = {
+  en: {},
+  'zh-TW': zhTw,
+  ja,
+  ko,
+};
 
 function toValidDate(value: number | string | Date): Date | undefined {
   if (value === null || value === undefined) return undefined;

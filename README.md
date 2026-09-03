@@ -55,9 +55,11 @@ renderer and inspector.
   state invariants; a failed assertion can reopen the captured session and
   focus its related Network, Raw Events, or Normalized evidence. Optional
   baseline/candidate comparison, performance budgets, Fault Lab injection,
-  real PNG visual baselines, passive trace/request ID correlation, and
-  sanitized JSON/JUnit/HTML evidence bundles support regression and CI without
-  executing profile code or sending background telemetry.
+  real PNG visual baselines, passive trace/request ID correlation, linked
+  JSONC/CSV suites, and sanitized JSON/JUnit/HTML evidence bundles support
+  regression and CI without executing profile code or sending background
+  telemetry. The Tests UI pages prompt-free summaries and loads one linked
+  case only when it is opened for structured editing.
 - A localhost-only synthetic mock server and three starter profiles, including
   an enterprise first-turn/multi-turn contract example with no real identity or
   credentials.
@@ -107,7 +109,8 @@ renderer and inspector.
 The implementation is intentionally explicit about limitations in the bundled
 `docs/turnstage-architecture.md`, `docs/profile-schema.md`,
 `docs/event-mapping.md`, `docs/security.md`, `docs/performance.md`, and
-`docs/edge-case-hardening.md`, and `docs/adversarial-testing.md`
+`docs/edge-case-hardening.md`, `docs/automated-testing.md`, and
+`docs/adversarial-testing.md`
 documents.
 
 ## Requirements and installation
@@ -165,8 +168,12 @@ does not declare a `browser` entry and therefore does not claim support for
    and therefore require a trusted workspace. **TurnStage: Run Conversation
    Contracts** provides the same deterministic extension-owned entry point for
    automation.
-7. Configure comparison, performance, and report settings from
-   **Configure Profile → Scenarios**, or edit the same fields in JSONC. Run
+7. Open the Profile's **Tests** tab to author and run conversation contracts,
+   inspect functional/comparison/performance results, and manage bounded
+   campaigns. Small cases can stay inline; use **Link suite** for an existing
+   `.tests.jsonc`, `.tests.json`, or CSV file without copying it into the
+   Profile. Report, advisory-review, and visual-regression defaults remain
+   under **Configure Profile → Test settings**. Run
    **TurnStage: Export Contract Test Report** to save the latest sanitized
    results manually.
 8. Add known red-team regressions in the Profile's **Red Team** tab. Link a
@@ -416,17 +423,19 @@ out of the chat surface by default and remain available in Debug data. A
 backend `usage.updated` message part is likewise hidden in Chat unless
 `ui.components.usage.visible` is explicitly enabled.
 
-The test workspace keeps Chat on the left and provides **Debug**, **Red Team**,
-and **Configure** as three modes of the right pane. Configure exposes the same
+The test workspace keeps Chat on the left and provides **Debug**, **Tests**,
+**Red Team**, and **Configure** as four modes of the right pane. Tests separates
+functional contract results and execution from adversarial outcomes, with
+search and 25-row paging for large suites. Configure exposes the same
 eight profile sections as the command-driven configuration flow: General,
-Opening & Flow, Request, Stream & Mapping, Chat UI, Scenarios, History & Errors,
+Opening & Flow, Request, Stream & Mapping, Chat UI, Test settings, History & Errors,
 and Security. Every GUI edit is applied as a
 structured `WorkspaceEdit` to the open `.turnstage.jsonc` document, so the
 profile file remains the source of truth and VS Code Undo/Redo continues to
 work. Configure shows pushed saved/dirty and validation state without polling,
 and keeps Save, Open JSONC, Validate, and first-issue navigation in its compact
 toolbar. **TurnStage: Go to…** provides native Quick Pick navigation to Chat,
-Debug, Red Team, or common Configure destinations.
+Debug, Tests, Red Team, or common Configure destinations.
 
 Debug's **Network** tab presents every Opening, Conversation Stream attempt,
 retry, and Stop request as a compact request list. Selecting a row exposes
@@ -452,7 +461,7 @@ Commands are registered under the `turnstage` namespace:
 | `turnstage.initializeUser` | Initialize reusable user profiles and a user environment |
 | `turnstage.duplicateProfile` / `turnstage.deleteProfile` | Copy a discovered profile or move it to Trash after confirmation |
 | `turnstage.openProfile` | Open a profile in the custom editor |
-| `turnstage.goTo` | Jump to Chat, Debug, Red Team, or Configure with a native Quick Pick |
+| `turnstage.goTo` | Jump to Chat, Debug, Tests, Red Team, or Configure with a native Quick Pick |
 | `turnstage.configureProfile` | Open Profile Configuration for the selected profile |
 | `turnstage.runProfile` | Open/run a selected profile or the built-in Basic demo |
 | `turnstage.startSession` | Explicitly execute a request-backed opening |
@@ -464,7 +473,7 @@ Commands are registered under the `turnstage` namespace:
 | `turnstage.setSecret` / `turnstage.removeSecret` / `turnstage.listSecretNames` | Manage secret names and values |
 | `turnstage.replayRun` / `turnstage.importRun` / `turnstage.exportRun` | Replay the latest run, or import/export versioned local-run files |
 | `turnstage.openOutput` | Show the TurnStage Output Channel |
-| `turnstage.changeDisplayLanguage` | Choose Auto, Traditional Chinese, or English for TurnStage profile editors |
+| `turnstage.changeDisplayLanguage` | Choose Auto, Traditional Chinese, Japanese, Korean, or English for TurnStage profile editors |
 | `turnstage.migrateProfile` | Migrate a version-0 profile after confirmation, backup, and diff review |
 | `turnstage.refreshProfiles` | Refresh discovery and cross-file duplicate-ID diagnostics |
 
@@ -472,7 +481,7 @@ The contributed settings are:
 
 | Setting | Default | Effect |
 | --- | ---: | --- |
-| `turnstage.displayLanguage` | `auto` | Application-wide language for TurnStage profile editors: follow VS Code, Traditional Chinese, or English |
+| `turnstage.displayLanguage` | `auto` | Application-wide language for TurnStage profile editors: follow VS Code, Traditional Chinese, Japanese, Korean, or English |
 | `turnstage.profileGlob` | `.vscode/turnstage/profiles/*.turnstage.jsonc` | Workspace-relative discovery glob |
 | `turnstage.maxBufferedEvents` | `5000` | Maximum raw and normalized events kept in the live session |
 | `turnstage.maxConversationMessages` | `500` | Maximum conversation messages kept in memory (50–5000) |
@@ -600,6 +609,7 @@ scenarios. Observed results and their environment are recorded in
 - Raw-event mapping and normalized events: `docs/event-mapping.md`
 - Security, trust, secrets, and redaction: `docs/security.md`
 - Performance budgets and measurement plan: `docs/performance.md`
+- Functional suites, linked CSV/JSONC, and Copilot selectors: `docs/automated-testing.md`
 - Adversarial suites, repetitions, campaigns, and evidence: `docs/adversarial-testing.md`
 - Required VS Code UI review standard: `docs/vscode-extension-ui-guidelines.md`
 - Current VS Code UI audit: `docs/vscode-ui-audit-2026-08-27.md`

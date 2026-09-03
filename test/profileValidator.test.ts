@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ScenarioAssertionDefinition, TurnStageEnvironment, TurnStageProfile } from '../src/shared/types';
 import { ProfileCodec } from '../src/extension/config/profileCodec';
-import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../src/extension/config/profileValidator';
+import { ProfileValidator, validateAdversarialScenariosAgainstProfile, validateContractScenariosAgainstProfile } from '../src/extension/config/profileValidator';
 
 function validProfile(): TurnStageProfile {
   return {
@@ -114,6 +114,37 @@ describe('ProfileValidator', () => {
       }],
     };
     expect(new ProfileValidator().validate(profile)).toEqual([]);
+  });
+
+  it('accepts safe functional suite links and validates linked cases against Profile controls and environments', () => {
+    const profile = validProfile();
+    profile.controls = [{ id: 'mode', type: 'select', label: 'Mode', persist: 'none', options: [{ label: 'Safe', value: 'safe' }] }];
+    profile.tests = { scenarios: [], contractSuites: ['.vscode/turnstage/tests/regression.tests.jsonc', 'quality.csv'] };
+    const environments: TurnStageEnvironment[] = [{ version: 1, id: 'local', name: 'Local', variables: {} }, { version: 1, id: 'candidate', name: 'Candidate', variables: {} }];
+
+    expect(new ProfileValidator().validate(profile, undefined, environments)).toEqual([]);
+    expect(validateContractScenariosAgainstProfile(profile, [{
+      id: 'linked-case', name: 'Linked case', controls: { mode: 'safe' }, comparison: { baseline: { environment: 'local' }, candidate: { environment: 'candidate' } },
+      steps: [{ id: 'turn-1', input: 'Hello' }],
+    }], environments)).toEqual([]);
+    expect(validateContractScenariosAgainstProfile(profile, [{
+      id: 'invalid-linked-case', name: 'Invalid linked case', controls: { missing: true }, comparison: { baseline: {}, candidate: { environment: 'missing' } },
+      steps: [{ id: 'turn-1', input: 'Hello' }],
+    }], environments).map((issue) => issue.message)).toEqual(expect.arrayContaining([
+      'Scenario references unknown control: missing.',
+      'Environment "missing" was not found.',
+    ]));
+  });
+
+  it('rejects unsafe, duplicate, and oversized functional suite link lists', () => {
+    const profile = validProfile();
+    profile.tests = { scenarios: [], contractSuites: ['../outside.csv', '../outside.csv', ...Array.from({ length: 99 }, (_, index) => `tests/suite-${index}.csv`)] };
+    const messages = new ProfileValidator().validate(profile).map((issue) => issue.message);
+    expect(messages).toEqual(expect.arrayContaining([
+      'Test suite path must be a safe workspace-relative .tests.jsonc, .tests.json, or CSV path.',
+      'Test suite paths must be unique.',
+      'Test suites must contain at most 100 workspace-relative or locally authorized external sources.',
+    ]));
   });
 
   it('rejects unsafe source bindings instead of selecting by traversal-like paths', () => {

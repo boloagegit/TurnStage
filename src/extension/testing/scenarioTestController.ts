@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { findNodeAtLocation } from 'jsonc-parser';
 import type {
   AdversarialResultSummary,
+  AutomationResultSummary,
   CampaignBaselineV1,
   CampaignDashboardV1,
   CampaignRunRecordV1,
@@ -20,7 +21,7 @@ import type {
 import { ProfileCodec } from '../config/profileCodec';
 import { builtInEnvironment } from '../config/defaultEnvironment';
 import { EnvironmentRepository, ProfileRepository } from '../config/profileRepository';
-import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../config/profileValidator';
+import { ProfileValidator, validateAdversarialScenariosAgainstProfile, validateContractScenariosAgainstProfile } from '../config/profileValidator';
 import { LocalRunRepository } from '../history/localRunRepository';
 import { localize } from '../l10n';
 import { SessionController } from '../runtime/sessionController';
@@ -32,6 +33,7 @@ import { ScenarioReportService, type ConfiguredReportGroup, type CopilotArtifact
 import { runScenario } from './scenarioRunner';
 import { MAX_COPILOT_RUN_ATTEMPTS, MAX_COPILOT_RUN_REQUESTS, MAX_RUN_PLAN_ATTEMPTS, MAX_RUN_PLAN_REQUESTS, runScenarioGroup } from './scenarioExecution';
 import { loadAdversarialSuite } from './adversarialSuiteRepository';
+import { loadContractSuite } from './contractSuiteRepository';
 import { ScenarioRunGroupRepository } from './scenarioRunGroupRepository';
 import type { VisualRegressionService } from './visualRegression';
 import { createTrustAwareCancellation } from './trustCancellation';
@@ -46,9 +48,9 @@ import { ExternalAdversarialSuiteRepository } from './externalAdversarialSuite';
 
 type TestData =
   | { type: 'profile'; uri: vscode.Uri; profileId: string }
-  | { type: 'suite'; uri: vscode.Uri; profileId: string; suiteId?: string; suitePath: string }
-  | { type: 'scenario'; uri: vscode.Uri; profileId: string; suiteId?: string; scenarioId: string; suitePath?: string; tags?: string[]; sourceBinding?: ScenarioDefinition['sourceBinding']; adversarial: boolean; repetitions?: number; plannedTurns: number }
-  | { type: 'step'; uri: vscode.Uri; profileId: string; suiteId?: string; scenarioId: string; stepIndex: number; suitePath?: string };
+  | { type: 'suite'; uri: vscode.Uri; profileId: string; suiteId?: string; suitePath: string; suiteKind: 'adversarial' | 'contract' }
+  | { type: 'scenario'; uri: vscode.Uri; profileId: string; suiteId?: string; scenarioId: string; suitePath?: string; suiteKind?: 'adversarial' | 'contract'; tags?: string[]; sourceBinding?: ScenarioDefinition['sourceBinding']; adversarial: boolean; repetitions?: number; plannedTurns: number }
+  | { type: 'step'; uri: vscode.Uri; profileId: string; suiteId?: string; scenarioId: string; stepIndex: number; suitePath?: string; suiteKind?: 'adversarial' | 'contract' };
 
 export interface TestEvidenceReference {
   evidence: ScenarioRunEvidence;
@@ -66,6 +68,7 @@ interface ScenarioJob {
   suiteId?: string;
   stepIndex?: number;
   suitePath?: string;
+  suiteKind?: 'adversarial' | 'contract';
 }
 
 type LoadedScenario = {
@@ -198,13 +201,14 @@ export class ScenarioTestController implements vscode.Disposable {
   private readonly runGroups: ScenarioRunGroupRepository;
   private readonly campaigns: CampaignRepository;
   private readonly externalAdversarialSuites: ExternalAdversarialSuiteRepository;
-  private readonly resultsEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; results: AdversarialResultSummary[] }>();
+  private readonly resultsEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; results: AdversarialResultSummary[]; automationResults: AutomationResultSummary[] }>();
   readonly onDidChangeResults = this.resultsEmitter.event;
   private readonly campaignEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; dashboard: CampaignDashboardV1 }>();
   readonly onDidChangeCampaigns = this.campaignEmitter.event;
   private readonly campaignProgressEmitter = new vscode.EventEmitter<CampaignProgressEvent>();
   readonly onDidChangeCampaignProgress = this.campaignProgressEmitter.event;
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
+  private readonly latestAutomationResults = new Map<string, AutomationResultSummary[]>();
   private latestRunSummaries: ScenarioControllerRunSummary[] = [];
   private refreshing?: Promise<void>;
   private activeManualRun?: vscode.CancellationTokenSource;
@@ -261,6 +265,7 @@ export class ScenarioTestController implements vscode.Disposable {
   }
   exportEvidenceBundle(): Promise<vscode.Uri | undefined> { return this.reports.exportEvidenceBundle(); }
   getLatestResults(uri: vscode.Uri): AdversarialResultSummary[] { return this.latestResults.get(uri.toString()) ?? []; }
+  getLatestAutomationResults(uri: vscode.Uri): AutomationResultSummary[] { return this.latestAutomationResults.get(uri.toString()) ?? []; }
   async getCampaignDashboard(uri: vscode.Uri): Promise<CampaignDashboardV1> {
     const entry = await this.profiles.read(uri);
     if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
@@ -425,15 +430,23 @@ export class ScenarioTestController implements vscode.Disposable {
     return this.runManualSelection(matches.map((item) => item.id), onProgress);
   }
 
-  async runCase(uri: vscode.Uri, scenarioId: string, suiteId?: string, onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
+  async runContracts(uri: vscode.Uri, onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
+    if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
+    const uriKey = uri.toString();
+    const matches = (await this.describeTests(false)).filter((item) => item.kind === 'case' && item.uri === uriKey && item.adversarial !== true);
+    if (!matches.length) throw new Error(localize('No conversation contract scenarios are available for this profile.'));
+    return this.runManualSelection(matches.map((item) => item.id), onProgress);
+  }
+
+  async runCase(uri: vscode.Uri, scenarioId: string, suiteId?: string, onProgress?: (progress: TestOperationProgress) => void, kind: 'adversarial' | 'contract' = 'adversarial'): Promise<'completed' | 'cancelled'> {
     if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
     const uriKey = uri.toString();
     const matches = (await this.describeTests(false)).filter((item) => item.kind === 'case'
       && item.uri === uriKey
       && item.caseId === scenarioId
-      && item.adversarial === true
+      && (kind === 'adversarial' ? item.adversarial === true : item.adversarial !== true)
       && item.suiteId === suiteId);
-    if (!matches.length) throw new Error(localize('This adversarial case is no longer available. Refresh the cases and try again.'));
+    if (!matches.length) throw new Error(localize(kind === 'adversarial' ? 'This adversarial case is no longer available. Refresh the cases and try again.' : 'This conversation contract is no longer available. Refresh the scenarios and try again.'));
     if (matches.length > 1) throw new Error(localize('More than one adversarial case matches this selection. Use Test Explorer to choose the exact case.'));
     return this.runManualSelection([matches[0]!.id], onProgress);
   }
@@ -580,7 +593,7 @@ export class ScenarioTestController implements vscode.Disposable {
     const suites = new Map<string, { id: string; profileId: string; cases: ScenarioDefinition[] }>();
     const cases: Record<string, unknown> = {};
     for (const job of jobs) {
-      const loaded = await this.loadScenario(job.uri, job.scenarioId, job.suitePath);
+      const loaded = await this.loadScenario(job.uri, job.scenarioId, job.suitePath, job.suiteKind);
       profiles.set(loaded.profile.id, structuredClone(loaded.profile));
       const data = this.metadata.get(job.item);
       const suiteId = data && 'suiteId' in data ? data.suiteId : undefined;
@@ -612,7 +625,7 @@ export class ScenarioTestController implements vscode.Disposable {
   }
 
   private async discover(): Promise<void> {
-    const entries = (await this.profiles.discover()).filter((entry) => !entry.overridden && ((entry.profile?.tests?.scenarios?.length ?? 0) > 0 || (entry.profile?.tests?.adversarialSuites?.length ?? 0) > 0));
+    const entries = (await this.profiles.discover()).filter((entry) => !entry.overridden && ((entry.profile?.tests?.scenarios?.length ?? 0) > 0 || (entry.profile?.tests?.contractSuites?.length ?? 0) > 0 || (entry.profile?.tests?.adversarialSuites?.length ?? 0) > 0));
     const roots: vscode.TestItem[] = [];
     for (const entry of entries) {
       if (!entry.profile) continue;
@@ -642,15 +655,15 @@ export class ScenarioTestController implements vscode.Disposable {
           if (compatibilityError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
           const suiteItem = this.controller.createTestItem(`${entry.uri.toString()}::suite::${loaded.suite.id}`, loaded.suite.name, loaded.uri);
           suiteItem.description = `${loaded.scenarios.length} ${localize('adversarial cases')}`;
-          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, suitePath });
+          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, suitePath, suiteKind: 'adversarial' });
           for (const scenario of loaded.scenarios) {
             const scenarioItem = this.controller.createTestItem(`${suiteItem.id}::scenario::${scenario.id}`, scenario.name || scenario.id, loaded.uri);
             scenarioItem.description = scenario.id;
-            this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, suitePath, tags: scenario.tags, sourceBinding: scenario.sourceBinding, adversarial: Boolean(scenario.adversarial), repetitions: scenario.adversarial?.repetitions, plannedTurns: scenario.steps.length });
+            this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, suitePath, suiteKind: 'adversarial', tags: scenario.tags, sourceBinding: scenario.sourceBinding, adversarial: Boolean(scenario.adversarial), repetitions: scenario.adversarial?.repetitions, plannedTurns: scenario.steps.length });
             for (const [stepIndex, step] of scenario.steps.entries()) {
               const stepItem = this.controller.createTestItem(`${scenarioItem.id}::step::${step.id}`, step.name?.trim() || step.id, loaded.uri);
               stepItem.description = step.input.length > 80 ? `${step.input.slice(0, 77)}…` : step.input;
-              this.metadata.set(stepItem, { type: 'step', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, stepIndex, suitePath });
+              this.metadata.set(stepItem, { type: 'step', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, stepIndex, suitePath, suiteKind: 'adversarial' });
               scenarioItem.children.add(stepItem);
             }
             suiteItem.children.add(scenarioItem);
@@ -659,7 +672,35 @@ export class ScenarioTestController implements vscode.Disposable {
         } catch (error) {
           const suiteItem = this.controller.createTestItem(`${entry.uri.toString()}::suite-error::${suitePath}`, suitePath, entry.uri);
           suiteItem.description = error instanceof Error ? error.message.split('\n')[0] : String(error);
-          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, profileId: entry.profile.id, suitePath });
+          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, profileId: entry.profile.id, suitePath, suiteKind: 'adversarial' });
+          profileItem.children.add(suiteItem);
+        }
+      }
+      for (const suitePath of entry.profile.tests?.contractSuites ?? []) {
+        try {
+          const loaded = await loadContractSuite(entry.uri, suitePath, (reference) => this.externalAdversarialSuites.resolve(entry.uri, reference));
+          const compatibilityError = validateContractScenariosAgainstProfile(entry.profile, loaded.scenarios)[0];
+          if (compatibilityError) throw new Error(localize('Test case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
+          const suiteItem = this.controller.createTestItem(`${entry.uri.toString()}::contract-suite::${loaded.suite.id}`, loaded.suite.name, loaded.uri);
+          suiteItem.description = `${loaded.scenarios.length} ${localize('conversation contracts')}`;
+          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, suitePath, suiteKind: 'contract' });
+          for (const scenario of loaded.scenarios) {
+            const scenarioItem = this.controller.createTestItem(`${suiteItem.id}::scenario::${scenario.id}`, scenario.name || scenario.id, loaded.uri);
+            scenarioItem.description = scenario.id;
+            this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, suitePath, suiteKind: 'contract', tags: scenario.tags, sourceBinding: scenario.sourceBinding, adversarial: false, plannedTurns: scenario.steps.length });
+            for (const [stepIndex, step] of scenario.steps.entries()) {
+              const stepItem = this.controller.createTestItem(`${scenarioItem.id}::step::${step.id}`, step.name?.trim() || step.id, loaded.uri);
+              stepItem.description = step.input.length > 80 ? `${step.input.slice(0, 77)}…` : step.input;
+              this.metadata.set(stepItem, { type: 'step', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, stepIndex, suitePath, suiteKind: 'contract' });
+              scenarioItem.children.add(stepItem);
+            }
+            suiteItem.children.add(scenarioItem);
+          }
+          profileItem.children.add(suiteItem);
+        } catch (error) {
+          const suiteItem = this.controller.createTestItem(`${entry.uri.toString()}::contract-suite-error::${suitePath}`, suitePath, entry.uri);
+          suiteItem.description = error instanceof Error ? error.message.split('\n')[0] : String(error);
+          this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, profileId: entry.profile.id, suitePath, suiteKind: 'contract' });
           profileItem.children.add(suiteItem);
         }
       }
@@ -799,8 +840,12 @@ export class ScenarioTestController implements vscode.Disposable {
       }
       for (const uriKey of new Set(jobs.map((job) => job.uri.toString()))) {
         const uri = vscode.Uri.parse(uriKey);
-        this.latestResults.set(uriKey, []);
-        this.resultsEmitter.fire({ uri, results: [] });
+        const profileJobs = jobs.filter((job) => job.uri.toString() === uriKey);
+        const hasAdversarial = profileJobs.some((job) => { const data = this.metadata.get(job.item); return data?.type === 'scenario' && data.adversarial === true; });
+        const hasContracts = profileJobs.some((job) => { const data = this.metadata.get(job.item); return data?.type === 'scenario' && data.adversarial !== true; });
+        if (hasAdversarial) this.latestResults.set(uriKey, []);
+        if (hasContracts) this.latestAutomationResults.set(uriKey, []);
+        this.resultsEmitter.fire({ uri, results: this.latestResults.get(uriKey) ?? [], automationResults: this.latestAutomationResults.get(uriKey) ?? [] });
       }
       if (!vscode.workspace.isTrusted) {
         for (const job of jobs) {
@@ -952,8 +997,30 @@ export class ScenarioTestController implements vscode.Disposable {
         });
         snapshotResults.push(...results);
         const uri = vscode.Uri.parse(uriKey);
-        this.latestResults.set(uriKey, results);
-        this.resultsEmitter.fire({ uri, results });
+        const automationResults = items.flatMap((item): AutomationResultSummary[] => {
+          const result = item.record.result;
+          if (result?.adversarial) return [];
+          const checks = result ? [...result.steps.flatMap((step) => step.checks), ...result.checks] : [];
+          const firstFailure = checks.find((check) => !check.passed);
+          return [{
+            profileId: item.record.profileId,
+            suiteId: item.suiteId,
+            scenarioId: item.record.scenarioId,
+            scenarioName: item.record.scenarioName,
+            outcome: item.record.status === 'passed' ? 'passed' : item.record.status === 'failed' ? 'failed' : 'error',
+            durationMs: result?.durationMs ?? 0,
+            passedChecks: checks.filter((check) => check.passed).length,
+            failedChecks: checks.filter((check) => !check.passed).length,
+            completedSteps: result?.steps.length ?? 0,
+            evidenceId: item.evidenceId,
+            primaryLocation: firstFailure?.location ?? { kind: 'profile', path: 'tests.scenarios' },
+            comparison: Boolean(result?.comparison),
+            performance: checks.some((check) => check.kind === 'performance'),
+          }];
+        });
+        if (results.length) this.latestResults.set(uriKey, results);
+        if (automationResults.length) this.latestAutomationResults.set(uriKey, automationResults);
+        this.resultsEmitter.fire({ uri, results: this.latestResults.get(uriKey) ?? [], automationResults: this.latestAutomationResults.get(uriKey) ?? [] });
       }
       retainCopilotEvidence = Boolean(scope.runId) && !effectiveToken.isCancellationRequested;
       const failures = completed.filter((item) => item.record.status !== 'passed').length;
@@ -990,8 +1057,8 @@ export class ScenarioTestController implements vscode.Disposable {
       const data = this.metadata.get(item);
       if (!data) return;
       if (data.type === 'profile' || data.type === 'suite') { item.children.forEach(visit); return; }
-      if (data.type === 'scenario') { jobs.set(item.id, { item, uri: data.uri, profileId: data.profileId, scenarioId: data.scenarioId, suiteId: data.suiteId, suitePath: data.suitePath }); return; }
-      jobs.set(item.id, { item, uri: data.uri, profileId: data.profileId, scenarioId: data.scenarioId, suiteId: data.suiteId, stepIndex: data.stepIndex, suitePath: data.suitePath });
+      if (data.type === 'scenario') { jobs.set(item.id, { item, uri: data.uri, profileId: data.profileId, scenarioId: data.scenarioId, suiteId: data.suiteId, suitePath: data.suitePath, suiteKind: data.suiteKind }); return; }
+      jobs.set(item.id, { item, uri: data.uri, profileId: data.profileId, scenarioId: data.scenarioId, suiteId: data.suiteId, stepIndex: data.stepIndex, suitePath: data.suitePath, suiteKind: data.suiteKind });
     };
     selected.forEach(visit);
     return [...jobs.values()];
@@ -1141,7 +1208,8 @@ export class ScenarioTestController implements vscode.Disposable {
 
   private async prepareJobs(jobs: readonly ScenarioJob[]): Promise<PreparedScenarioJob[]> {
     const profileLoads = new Map<string, Promise<LoadedProfileContext>>();
-    const suiteLoads = new Map<string, ReturnType<typeof loadAdversarialSuite>>();
+    const adversarialSuiteLoads = new Map<string, ReturnType<typeof loadAdversarialSuite>>();
+    const contractSuiteLoads = new Map<string, ReturnType<typeof loadContractSuite>>();
     const prepared = new Array<PreparedScenarioJob>(jobs.length);
     let cursor = 0;
     const prepare = async (job: ScenarioJob): Promise<LoadedScenario> => {
@@ -1152,15 +1220,20 @@ export class ScenarioTestController implements vscode.Disposable {
       const scenario = job.suitePath
         ? await (async () => {
           const suiteKey = `${profileKey}\u001f${job.suitePath}`;
-          let suiteLoad = suiteLoads.get(suiteKey);
-          if (!suiteLoad) { suiteLoad = loadAdversarialSuite(job.uri, job.suitePath!, (reference) => this.externalAdversarialSuites.resolve(job.uri, reference)); suiteLoads.set(suiteKey, suiteLoad); }
+          if (job.suiteKind === 'contract') {
+            let suiteLoad = contractSuiteLoads.get(suiteKey);
+            if (!suiteLoad) { suiteLoad = loadContractSuite(job.uri, job.suitePath!, (reference) => this.externalAdversarialSuites.resolve(job.uri, reference)); contractSuiteLoads.set(suiteKey, suiteLoad); }
+            return (await suiteLoad).scenarios.find((candidate) => candidate.id === job.scenarioId);
+          }
+          let suiteLoad = adversarialSuiteLoads.get(suiteKey);
+          if (!suiteLoad) { suiteLoad = loadAdversarialSuite(job.uri, job.suitePath!, (reference) => this.externalAdversarialSuites.resolve(job.uri, reference)); adversarialSuiteLoads.set(suiteKey, suiteLoad); }
           return (await suiteLoad).scenarios.find((candidate) => candidate.id === job.scenarioId);
         })()
         : context.profile.tests?.scenarios.find((candidate) => candidate.id === job.scenarioId);
       if (!scenario) throw new Error(localize('Scenario {id} was not found.', { id: job.scenarioId }));
       if (job.suitePath) {
-        const compatibilityError = validateAdversarialScenariosAgainstProfile(context.profile, [scenario], context.environments)[0];
-        if (compatibilityError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
+        const compatibilityError = (job.suiteKind === 'contract' ? validateContractScenariosAgainstProfile : validateAdversarialScenariosAgainstProfile)(context.profile, [scenario], context.environments)[0];
+        if (compatibilityError) throw new Error(localize('{kind} case {id} is incompatible with this Profile: {message}', { kind: job.suiteKind === 'contract' ? 'Test' : 'Adversarial', id: compatibilityError.scenarioId, message: compatibilityError.message }));
       }
       return { ...context, scenario };
     };
@@ -1176,15 +1249,17 @@ export class ScenarioTestController implements vscode.Disposable {
     return prepared;
   }
 
-  private async loadScenario(uri: vscode.Uri, scenarioId: string, suitePath?: string): Promise<LoadedScenario> {
+  private async loadScenario(uri: vscode.Uri, scenarioId: string, suitePath?: string, suiteKind?: 'adversarial' | 'contract'): Promise<LoadedScenario> {
     const context = await this.loadProfileContext(uri);
     const scenario = suitePath
-      ? (await loadAdversarialSuite(uri, suitePath, (reference) => this.externalAdversarialSuites.resolve(uri, reference))).scenarios.find((candidate) => candidate.id === scenarioId)
+      ? (suiteKind === 'contract'
+        ? (await loadContractSuite(uri, suitePath, (reference) => this.externalAdversarialSuites.resolve(uri, reference))).scenarios.find((candidate) => candidate.id === scenarioId)
+        : (await loadAdversarialSuite(uri, suitePath, (reference) => this.externalAdversarialSuites.resolve(uri, reference))).scenarios.find((candidate) => candidate.id === scenarioId))
       : context.profile.tests?.scenarios.find((candidate) => candidate.id === scenarioId);
     if (!scenario) throw new Error(localize('Scenario {id} was not found.', { id: scenarioId }));
     if (suitePath) {
-      const compatibilityError = validateAdversarialScenariosAgainstProfile(context.profile, [scenario], context.environments)[0];
-      if (compatibilityError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
+      const compatibilityError = (suiteKind === 'contract' ? validateContractScenariosAgainstProfile : validateAdversarialScenariosAgainstProfile)(context.profile, [scenario], context.environments)[0];
+      if (compatibilityError) throw new Error(localize('{kind} case {id} is incompatible with this Profile: {message}', { kind: suiteKind === 'contract' ? 'Test' : 'Adversarial', id: compatibilityError.scenarioId, message: compatibilityError.message }));
     }
     return { ...context, scenario };
   }

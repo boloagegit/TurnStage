@@ -2,10 +2,10 @@ import * as vscode from 'vscode';
 import { modify } from 'jsonc-parser';
 import type { HostPayload, InspectorTargetTab, TestOperationAction, TestOperationSnapshot, WebviewMessage, WorkspaceDestination, WorkspaceSection } from '../../shared/protocol';
 import { isWebviewMessage, PROTOCOL_VERSION } from '../../shared/protocol';
-import type { AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, ScenarioRunEvidence, ScenarioRunResult, SessionSnapshot, TurnStageProfile } from '../../shared/types';
+import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, ScenarioRunEvidence, ScenarioRunResult, SessionSnapshot, TurnStageProfile } from '../../shared/types';
 import { EnvironmentRepository, MAX_PROFILE_BYTES } from '../config/profileRepository';
 import { ProfileCodec } from '../config/profileCodec';
-import { ProfileValidator, validateAdversarialScenariosAgainstProfile } from '../config/profileValidator';
+import { ProfileValidator, validateAdversarialScenariosAgainstProfile, validateContractScenariosAgainstProfile } from '../config/profileValidator';
 import { LocalRunRepository, type LocalRunImportResult } from '../history/localRunRepository';
 import { SecretService, UriPolicy } from '../security/security';
 import { isActive, SessionController } from '../runtime/sessionController';
@@ -32,6 +32,11 @@ import { parseAdversarialJsonl, serializeAdversarialJsonl, serializeCampaignResu
 import { ExternalAdversarialSuiteRepository, isExternalAdversarialSuiteReference } from '../testing/externalAdversarialSuite';
 import { loadLinkedAdversarialCaseCatalog } from '../testing/adversarialCatalog';
 import { LinkedAdversarialCaseConflictError, loadEditableLinkedAdversarialCase, saveEditableLinkedAdversarialCase } from '../testing/linkedAdversarialCase';
+import { contractCsvTemplate } from '../testing/contractCsv';
+import { loadLinkedContractCaseCatalog } from '../testing/contractCatalog';
+import { isSafeContractSuitePath } from '../testing/contractSuite';
+import { parseContractSource } from '../testing/contractSource';
+import { LinkedContractCaseConflictError, loadEditableLinkedContractCase, saveEditableLinkedContractCase } from '../testing/linkedContractCase';
 import { SessionDeltaTracker } from '../../shared/sessionDelta';
 import { isBlockedLifecycleCommand } from '../../shared/vscodeCommandPolicy';
 
@@ -53,13 +58,14 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private readonly pendingSections = new Map<string, WorkspaceSection>();
   private readonly pendingDestinations = new Map<string, WorkspaceDestination>();
   private readonly pendingAutoStartSuppressions = new Set<string>();
-  private readonly resultPosters = new Map<string, Set<(results: AdversarialResultSummary[]) => Thenable<boolean>>>();
+  private readonly resultPosters = new Map<string, Set<(results: AdversarialResultSummary[], automationResults: AutomationResultSummary[]) => Thenable<boolean>>>();
   private readonly campaignPosters = new Map<string, Set<(dashboard: CampaignDashboardV1) => Thenable<boolean>>>();
   private readonly activeCampaignRuns = new Map<string, { campaignId: string; cancellation: vscode.CancellationTokenSource }>();
   private readonly pendingCampaignRuns = new Set<Promise<unknown>>();
   private readonly pendingLinkedCaseWrites = new Set<Promise<unknown>>();
   private linkedCaseWriteChain = Promise.resolve();
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
+  private readonly latestAutomationResults = new Map<string, AutomationResultSummary[]>();
   private readonly latestTestOperations = new Map<string, TestOperationSnapshot>();
   constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel, private readonly environments = new EnvironmentRepository(context.globalStorageUri), visualRegression?: VisualRegressionService, private readonly scenarioTests?: ScenarioTestController) { this.runs = new LocalRunRepository(context, output); this.secrets = new SecretService(context); this.visualRegression = visualRegression ?? new VisualRegressionService(context); this.externalAdversarialSuites = new ExternalAdversarialSuiteRepository(context); }
 
@@ -79,6 +85,8 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const artifacts = new Map<string, { uri: vscode.Uri; openUri: vscode.Uri; path: string }>();
     let catalogCache: { version: number; catalog: Extract<HostPayload, { type: 'adversarial.catalog' }>['catalog'] } | undefined;
     let catalogLoad: { version: number; promise: Promise<Extract<HostPayload, { type: 'adversarial.catalog' }>['catalog']> } | undefined;
+    let contractCatalogCache: { version: number; catalog: Extract<HostPayload, { type: 'contract.catalog' }>['catalog'] } | undefined;
+    let contractCatalogLoad: { version: number; promise: Promise<Extract<HostPayload, { type: 'contract.catalog' }>['catalog']> } | undefined;
     const sessionDeltaTracker = new SessionDeltaTracker();
     let sessionPostChain = Promise.resolve();
     const post = async (message: HostPayload, requestId: string = crypto.randomUUID()): Promise<boolean> => {
@@ -115,6 +123,19 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       catalogCache = { version, catalog };
       await post({ type: 'adversarial.catalog', catalog }, requestId);
     };
+    const postContractCatalog = async (force = false, requestId?: string): Promise<void> => {
+      const version = document.version;
+      if (!force && contractCatalogCache?.version === version) { await post({ type: 'contract.catalog', catalog: contractCatalogCache.catalog }, requestId); return; }
+      const profile = this.codec.parse(document.getText()).profile;
+      if (!profile) { await post({ type: 'contract.catalog', catalog: { entries: [], total: 0, truncated: false, issues: [] } }, requestId); return; }
+      if (!contractCatalogLoad || contractCatalogLoad.version !== version) contractCatalogLoad = { version, promise: loadLinkedContractCaseCatalog(document.uri, profile, (reference) => this.externalAdversarialSuites.resolve(document.uri, reference)) };
+      const pending = contractCatalogLoad;
+      let catalog: Extract<HostPayload, { type: 'contract.catalog' }>['catalog'];
+      try { catalog = await pending.promise; } finally { if (contractCatalogLoad === pending) contractCatalogLoad = undefined; }
+      if (disposed || document.version !== version) return;
+      contractCatalogCache = { version, catalog };
+      await post({ type: 'contract.catalog', catalog }, requestId);
+    };
     const documentKey = document.uri.toString();
     const postSection = (section: WorkspaceSection) => post({ type: 'workspace.section', section });
     const posters = this.sectionPosters.get(documentKey) ?? new Set<(section: WorkspaceSection) => Thenable<boolean>>();
@@ -124,7 +145,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const navigationPosters = this.navigationPosters.get(documentKey) ?? new Set<typeof postNavigation>();
     navigationPosters.add(postNavigation);
     this.navigationPosters.set(documentKey, navigationPosters);
-    const postResults = (results: AdversarialResultSummary[]) => post({ type: 'test.results', results });
+    const postResults = (results: AdversarialResultSummary[], automationResults: AutomationResultSummary[]) => post({ type: 'test.results', results, automationResults });
     const resultPosters = this.resultPosters.get(documentKey) ?? new Set<typeof postResults>();
     resultPosters.add(postResults);
     this.resultPosters.set(documentKey, resultPosters);
@@ -275,7 +296,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
             await postNavigation(pendingDestination);
           }
           await rehydrate();
-          await postResults(this.latestResults.get(documentKey) ?? []);
+          await postResults(this.latestResults.get(documentKey) ?? [], this.latestAutomationResults.get(documentKey) ?? []);
           const latestTestOperation = this.latestTestOperations.get(documentKey);
           if (latestTestOperation) await post({ type: 'test.operation', operation: latestTestOperation });
           if (this.scenarioTests) await post({ type: 'campaign.dashboard', dashboard: await this.scenarioTests.getCampaignDashboard(document.uri) });
@@ -302,6 +323,62 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         }
         if (message.type === 'profile.patch') { await this.patchDocument(document, message.path, message.value); return; }
         if (message.type === 'testExplorer.open') { await vscode.commands.executeCommand('workbench.view.testing.focus'); return; }
+        if (message.type === 'contract.catalog.request') { await postContractCatalog(message.force === true, message.requestId); return; }
+        if (message.type === 'contract.case.request') {
+          const profile = this.codec.parse(document.getText()).profile;
+          if (!profile) throw new Error(localize('Profile could not be parsed.'));
+          if (!canOpenLinkedContractSuite(profile, message.sourcePath)) { await post({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Only a safe test suite linked by this Profile can be opened.'), conflict: false }, message.requestId); return; }
+          try {
+            const detail = await loadEditableLinkedContractCase(document.uri, message.sourcePath, message.scenarioId, (reference) => this.externalAdversarialSuites.resolve(document.uri, reference));
+            await post({ type: 'contract.case.loaded', detail }, message.requestId);
+          } catch (error) {
+            await post({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: boundedEditorMessage(error), conflict: error instanceof LinkedContractCaseConflictError }, message.requestId);
+          }
+          return;
+        }
+        if (message.type === 'contract.case.save') {
+          if (!vscode.workspace.isTrusted) { await post({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Saving a linked suite requires a trusted workspace.'), conflict: false }, message.requestId); return; }
+          const profile = this.codec.parse(document.getText()).profile;
+          if (!profile) throw new Error(localize('Profile could not be parsed.'));
+          if (!canOpenLinkedContractSuite(profile, message.sourcePath)) { await post({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Only a safe test suite linked by this Profile can be edited.'), conflict: false }, message.requestId); return; }
+          const environmentEntries = await this.environments.discover(document.uri);
+          const compatibilityError = validateContractScenariosAgainstProfile(profile, [message.scenario], environmentEntries.map((entry) => entry.environment))[0];
+          if (compatibilityError) { await post({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Test case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }), conflict: false }, message.requestId); return; }
+          const execution = this.linkedCaseWriteChain.then(() => saveEditableLinkedContractCase({
+            profileUri: document.uri, sourcePath: message.sourcePath, scenarioId: message.scenarioId,
+            expectedRevision: message.expectedRevision, scenario: message.scenario,
+            resolveExternal: (reference) => this.externalAdversarialSuites.resolve(document.uri, reference),
+          }));
+          this.linkedCaseWriteChain = execution.then(() => undefined, () => undefined);
+          this.pendingLinkedCaseWrites.add(execution);
+          try {
+            const detail = await execution;
+            contractCatalogCache = undefined;
+            await post({ type: 'contract.case.saved', detail }, message.requestId);
+            await postContractCatalog(true);
+          } catch (error) {
+            logAt(this.output, 'error', () => `[linked-contract-case] save type=${error instanceof Error ? error.name : 'Error'}`);
+            await post({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: boundedEditorMessage(error), conflict: error instanceof LinkedContractCaseConflictError }, message.requestId);
+          } finally { this.pendingLinkedCaseWrites.delete(execution); }
+          return;
+        }
+        if (message.type === 'contract.file') {
+          if (!vscode.workspace.isTrusted) throw new Error(localize('This action requires a trusted workspace. Profile editing and fixture replay remain available.'));
+          const operation = await this.handleContractFile(document, message.action);
+          const artifact = message.action === 'csvTemplate' && operation.status === 'completed' && operation.path ? registerArtifact(vscode.Uri.parse(operation.path)) : undefined;
+          await post({ type: 'contract.operation', action: message.action, ...operation, ...(artifact ? { artifactId: artifact.artifactId, path: artifact.path } : {}) }, message.requestId);
+          return;
+        }
+        if (message.type === 'contract.openLinkedSuite') {
+          const profile = this.codec.parse(document.getText()).profile;
+          if (!profile) throw new Error(localize('Profile could not be parsed.'));
+          if (!canOpenLinkedContractSuite(profile, message.path)) throw new Error(localize('Only a safe test suite linked by this Profile can be opened.'));
+          const uri = this.resolveLinkedSuiteUri(document.uri, message.path);
+          if (!uri) throw new Error(localize('This external suite is not authorized on this machine. Link the file again.'));
+          await vscode.workspace.fs.stat(uri);
+          await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
+          return;
+        }
         if (message.type === 'adversarial.catalog.request') { await postAdversarialCatalog(message.force === true, message.requestId); return; }
         if (message.type === 'adversarial.case.request') {
           const profile = this.codec.parse(document.getText()).profile;
@@ -365,11 +442,11 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
           return;
         }
-        if (message.type === 'test.runAll' || message.type === 'test.runCase' || message.type === 'test.rerun') {
+        if (message.type === 'test.runAll' || message.type === 'test.runContracts' || message.type === 'test.runCase' || message.type === 'test.rerun') {
           if (!this.scenarioTests) throw new Error(localize('Test runtime is unavailable.'));
           const current = this.latestTestOperations.get(documentKey);
           if (current?.state === 'running' || current?.state === 'cancelling') throw new Error(localize('A TurnStage test run is already active.'));
-          const action: TestOperationAction = message.type === 'test.runAll' ? 'runAll' : message.type === 'test.runCase' ? 'runCase' : message.status === 'failed' ? 'rerunFailed' : message.status === 'unstable' ? 'rerunUnstable' : 'rerunIncomplete';
+          const action: TestOperationAction = message.type === 'test.runAll' ? 'runAll' : message.type === 'test.runContracts' ? 'runContracts' : message.type === 'test.runCase' ? 'runCase' : message.status === 'failed' ? 'rerunFailed' : message.status === 'unstable' ? 'rerunUnstable' : 'rerunIncomplete';
           const detail = message.type === 'test.runCase' ? message.scenarioId : undefined;
           await postTestOperation({ action, state: 'running', ...(detail ? { detail } : {}) }, message.requestId);
           let progress: TestOperationSnapshot['progress'];
@@ -381,8 +458,10 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           try {
             const state = message.type === 'test.runAll'
               ? await this.scenarioTests.runAdversarial(document.uri, onProgress)
+              : message.type === 'test.runContracts'
+                ? await this.scenarioTests.runContracts(document.uri, onProgress)
               : message.type === 'test.runCase'
-                ? await this.scenarioTests.runCase(document.uri, message.scenarioId, message.suiteId, onProgress)
+                ? await this.scenarioTests.runCase(document.uri, message.scenarioId, message.suiteId, onProgress, message.kind)
                 : await this.scenarioTests.rerunLatest(document.uri, message.status, onProgress);
             await postTestOperation({ action, state, ...(detail ? { detail } : {}), ...(progress ? { progress } : {}) }, message.requestId);
           } catch (error) {
@@ -752,10 +831,11 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const results = await Promise.all(posters.map((poster) => poster(evidence, result, target)));
     return results.some(Boolean);
   }
-  async publishTestResults(uri: vscode.Uri, results: AdversarialResultSummary[]): Promise<void> {
+  async publishTestResults(uri: vscode.Uri, results: AdversarialResultSummary[], automationResults: AutomationResultSummary[] = []): Promise<void> {
     const key = uri.toString();
     this.latestResults.set(key, structuredClone(results));
-    await Promise.all([...(this.resultPosters.get(key) ?? [])].map((poster) => poster(results)));
+    this.latestAutomationResults.set(key, structuredClone(automationResults));
+    await Promise.all([...(this.resultPosters.get(key) ?? [])].map((poster) => poster(results, automationResults)));
   }
   async publishCampaignDashboard(uri: vscode.Uri, dashboard: CampaignDashboardV1): Promise<void> {
     await Promise.all([...(this.campaignPosters.get(uri.toString()) ?? [])].map((poster) => poster(dashboard)));
@@ -763,6 +843,39 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private async patchDocument(document: vscode.TextDocument, path: Array<string | number>, value: unknown): Promise<void> {
     if (!isAllowedPatchPath(path)) throw new Error(localize('This profile setting cannot be edited from the configuration surface.'));
     const edits = modify(document.getText(), path, value, { formattingOptions: { insertSpaces: true, tabSize: 2 } }); const workspaceEdit = new vscode.WorkspaceEdit(); for (const edit of [...edits].sort((a, b) => b.offset - a.offset)) workspaceEdit.replace(document.uri, new vscode.Range(document.positionAt(edit.offset), document.positionAt(edit.offset + edit.length)), edit.content); await vscode.workspace.applyEdit(workspaceEdit);
+  }
+  private resolveLinkedSuiteUri(profileUri: vscode.Uri, path: string): vscode.Uri | undefined {
+    const external: boolean = isExternalAdversarialSuiteReference(path);
+    if (external) return this.externalAdversarialSuites.resolve(profileUri, path);
+    const folder = vscode.workspace.getWorkspaceFolder(profileUri);
+    return folder ? vscode.Uri.joinPath(folder.uri, ...path.split('/')) : undefined;
+  }
+  private async handleContractFile(document: vscode.TextDocument, action: Extract<WebviewMessage, { type: 'contract.file' }>['action']): Promise<{ status: 'completed' | 'cancelled'; detail: string; path?: string }> {
+    const profile = this.codec.parse(document.getText()).profile;
+    if (!profile) throw new Error(localize('Profile could not be parsed.'));
+    if (action === 'csvTemplate') {
+      const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file('turnstage-tests-template.csv'), filters: { CSV: ['csv'] } });
+      if (!uri) return cancelledOperation();
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(contractCsvTemplate()));
+      return completedOperation(localize('Test CSV template exported.'), uri);
+    }
+    const selected = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { [localize('Test Suites')]: ['jsonc', 'json', 'csv'] }, openLabel: localize('Link Test Suite') });
+    const uri = selected?.[0];
+    if (!uri) return cancelledOperation();
+    if (!/(?:\.tests\.(?:jsonc|json)|\.csv)$/iu.test(uri.path)) throw new Error(localize('Linked test suites must be a .tests.jsonc/.tests.json file or a CSV file.'));
+    const parsed = parseContractSource(uri.path, await readBoundedTextFile(uri));
+    if (!parsed.suite || parsed.issues.length) throw new Error(parsed.issues.slice(0, 20).join('\n') || localize('The selected test suite is invalid.'));
+    const environmentEntries = await this.environments.discover(document.uri);
+    const firstError = validateContractScenariosAgainstProfile(profile, parsed.scenarios, environmentEntries.map((entry) => entry.environment))[0];
+    if (firstError) throw new Error(localize('Test case {id} is incompatible with this Profile: {message}', { id: firstError.scenarioId, message: firstError.message }));
+    const profileFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+    const suiteFolder = vscode.workspace.getWorkspaceFolder(uri);
+    const sameFolder = Boolean(profileFolder && profileFolder.uri.toString() === suiteFolder?.uri.toString());
+    const reference = sameFolder ? vscode.workspace.asRelativePath(uri, false).replaceAll('\\', '/') : await this.externalAdversarialSuites.grant(document.uri, uri);
+    if (!isSafeContractSuitePath(reference)) throw new Error(localize('The selected suite reference is invalid.'));
+    const paths = profile.tests?.contractSuites ?? [];
+    if (!paths.includes(reference)) await this.patchDocument(document, ['tests', 'contractSuites'], [...paths, reference]);
+    return completedOperation(localize('Linked {count} conversation contracts.', { count: String(parsed.scenarios.length) }), uri);
   }
   private async handleAdversarialFile(document: vscode.TextDocument, action: Extract<WebviewMessage, { type: 'adversarial.file' }>['action']): Promise<{ status: 'completed' | 'cancelled'; detail: string; path?: string }> {
     const profile = this.codec.parse(document.getText()).profile;
@@ -973,7 +1086,7 @@ function inspectorTarget(location: ScenarioEvidenceLocation, evidence?: Scenario
 export function isAllowedPatchPath(path: unknown): path is Array<string | number> {
   if (!Array.isArray(path) || !path.length || !path.every((part) => (typeof part === 'string' || (typeof part === 'number' && Number.isInteger(part) && part >= 0)) && part !== '__proto__' && part !== 'prototype' && part !== 'constructor')) return false;
   const key = path.join('.');
-  if (key === 'name' || key === 'description' || key === 'environment' || key === 'opening.mode' || key === 'opening.message' || key === 'opening.trigger' || key === 'opening.starters' || key === 'opening.request' || key === 'opening.response' || key === 'opening.fallbacks' || key === 'opening.failurePolicy' || key === 'conversation.send.method' || key === 'conversation.send.url' || key === 'conversation.send.variants' || key === 'conversation.send.timeoutMs' || key === 'conversation.send.idleTimeoutMs' || key === 'conversation.send.headers' || key === 'conversation.send.body' || key === 'conversation.stop.strategy' || key === 'conversation.stop.request' || key === 'conversation.stop.requiredContext' || key === 'stream.transport' || key === 'stream.dataFormat' || key === 'stream.doneValue' || key === 'stream.mappingMode' || key === 'stream.unexpectedEndPolicy' || key === 'stream.mappings' || key === 'history.remoteSessions' || key === 'metrics.enabled' || key === 'metrics.messageEnabled' || key === 'security.allowedUriSchemes' || key === 'security.allowedDomains' || key === 'security.allowedCommands' || key === 'ui.messageActions' || key === 'ui.messageActionVisibility' || key === 'ui.messageTags' || key === 'tests' || key === 'tests.scenarios' || key === 'tests.adversarialSuites' || key === 'tests.reporting' || key === 'tests.visual' || key === 'tests.qualityRubrics' || key === 'tests.campaigns') return true;
+  if (key === 'name' || key === 'description' || key === 'environment' || key === 'opening.mode' || key === 'opening.message' || key === 'opening.trigger' || key === 'opening.starters' || key === 'opening.request' || key === 'opening.response' || key === 'opening.fallbacks' || key === 'opening.failurePolicy' || key === 'conversation.send.method' || key === 'conversation.send.url' || key === 'conversation.send.variants' || key === 'conversation.send.timeoutMs' || key === 'conversation.send.idleTimeoutMs' || key === 'conversation.send.headers' || key === 'conversation.send.body' || key === 'conversation.stop.strategy' || key === 'conversation.stop.request' || key === 'conversation.stop.requiredContext' || key === 'stream.transport' || key === 'stream.dataFormat' || key === 'stream.doneValue' || key === 'stream.mappingMode' || key === 'stream.unexpectedEndPolicy' || key === 'stream.mappings' || key === 'history.remoteSessions' || key === 'metrics.enabled' || key === 'metrics.messageEnabled' || key === 'security.allowedUriSchemes' || key === 'security.allowedDomains' || key === 'security.allowedCommands' || key === 'ui.messageActions' || key === 'ui.messageActionVisibility' || key === 'ui.messageTags' || key === 'tests' || key === 'tests.scenarios' || key === 'tests.contractSuites' || key === 'tests.adversarialSuites' || key === 'tests.reporting' || key === 'tests.visual' || key === 'tests.qualityRubrics' || key === 'tests.campaigns') return true;
   if (/^conversation\.send\.variants\.\d+\.(id|body|headers)$/.test(key)) return true;
   if (/^conversation\.send\.variants\.\d+\.when\.(path|operator|value)$/.test(key)) return true;
   if (/^conversation\.send\.reconnect\.(maxAttempts|baseDelayMs|maxDelayMs|retryOnStatuses)$/.test(key)) return true;
@@ -994,6 +1107,10 @@ export function isAllowedPatchPath(path: unknown): path is Array<string | number
 /** Fail closed before resolving a Webview-supplied path in the Extension Host. */
 export function canOpenLinkedAdversarialSuite(profile: TurnStageProfile, path: unknown): path is string {
   return isSafeAdversarialSuitePath(path) && Boolean(profile.tests?.adversarialSuites?.includes(path));
+}
+
+export function canOpenLinkedContractSuite(profile: TurnStageProfile, path: unknown): path is string {
+  return isSafeContractSuitePath(path) && Boolean(profile.tests?.contractSuites?.includes(path));
 }
 
 function completedOperation(detail: string, uri: vscode.Uri): { status: 'completed'; detail: string; path: string } {

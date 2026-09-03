@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { dateTimeAttribute, formatDateTime, formatNumber, setLocale, t } from '../src/webview/i18n';
+import { dateTimeAttribute, formatDateTime, formatNumber, normalizeLocale, setLocale, t } from '../src/webview/i18n';
 
 const root = resolve(import.meta.dirname, '..');
 
@@ -10,14 +10,16 @@ afterEach(() => setLocale('en'));
 describe('localization catalogs', () => {
   it('keeps package manifest keys in parity', () => {
     const english = json('package.nls.json');
-    const traditionalChinese = json('package.nls.zh-tw.json');
-    expect(Object.keys(traditionalChinese).sort()).toEqual(Object.keys(english).sort());
+    for (const locale of ['zh-tw', 'ja', 'ko']) {
+      expect(Object.keys(json(`package.nls.${locale}.json`)).sort(), locale).toEqual(Object.keys(english).sort());
+    }
   });
 
   it('keeps Extension Host bundle keys in parity', () => {
     const english = json('l10n/bundle.l10n.json');
-    const traditionalChinese = json('l10n/bundle.l10n.zh-tw.json');
-    expect(Object.keys(traditionalChinese).sort()).toEqual(Object.keys(english).sort());
+    for (const locale of ['zh-tw', 'ja', 'ko']) {
+      expect(Object.keys(json(`l10n/bundle.l10n.${locale}.json`)).sort(), locale).toEqual(Object.keys(english).sort());
+    }
   });
 
   it('covers Extension Host localization literals in both bundles', () => {
@@ -51,6 +53,26 @@ describe('localization catalogs', () => {
     expect(formatNumber(12_345)).toBe('12,345');
   });
 
+  it('normalizes and translates the supported CJK Webview locales', () => {
+    expect(normalizeLocale('zh-Hant-HK')).toBe('zh-TW');
+    expect(normalizeLocale('zh-Hans-SG')).toBe('en');
+    expect(normalizeLocale('ja-JP')).toBe('ja');
+    expect(normalizeLocale('ko-KR')).toBe('ko');
+
+    setLocale('ja-JP');
+    expect(t('Run scenario {name}', { name: 'smoke' })).toBe('シナリオ「smoke」を実行');
+    setLocale('ko-KR');
+    expect(t('Run scenario {name}', { name: 'smoke' })).toBe('시나리오 “smoke” 실행');
+  });
+
+  it('keeps Webview locale placeholders intact', () => {
+    for (const path of ['src/webview/i18n.ja.ts', 'src/webview/i18n.ko.ts']) {
+      for (const [message, translation] of sourceCatalog(path)) {
+        expect(placeholders(translation), `${path}: ${message}`).toEqual(placeholders(message));
+      }
+    }
+  });
+
   it('falls back to the source message for unsupported locales', () => {
     setLocale('fr');
     expect(t('Restricted mode.')).toBe('Restricted mode.');
@@ -74,4 +96,13 @@ function sourceFiles(directory: string): string[] {
     const path = resolve(directory, entry.name);
     return entry.isDirectory() ? sourceFiles(path) : entry.isFile() && entry.name.endsWith('.ts') ? [path] : [];
   });
+}
+
+function sourceCatalog(path: string): Map<string, string> {
+  const source = readFileSync(resolve(root, path), 'utf8');
+  return new Map([...source.matchAll(/^\s*(['"])(.*?)\1:\s*(['"])(.*?)\3,?$/gm)].map((match) => [match[2] ?? '', match[4] ?? '']));
+}
+
+function placeholders(value: string): string[] {
+  return [...value.matchAll(/\{(\w+)\}/g)].map((match) => match[1] ?? '').sort();
 }

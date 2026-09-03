@@ -1,13 +1,13 @@
 import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { AdversarialCaseCatalog, HostMessage, MappingTestResult, TestOperationSnapshot, WebviewPayload, WorkspaceSection } from '../shared/protocol';
+import type { AdversarialCaseCatalog, ContractCaseCatalog, HostMessage, MappingTestResult, TestOperationSnapshot, WebviewPayload, WorkspaceSection } from '../shared/protocol';
 import { isHostMessage, isWorkspaceSection, PROTOCOL_VERSION } from '../shared/protocol';
-import type { AdversarialResultSummary, CampaignDashboardV1, ChatMessage, ConnectionDoctorSummary, EvidenceTimelineEntry, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from '../shared/types';
+import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ChatMessage, ConnectionDoctorSummary, EvidenceTimelineEntry, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { mappingDraftFromRawEvent } from './configEditors';
 import { JsonViewer, safeJson } from './JsonViewer';
 import { IconButton, ProductIcon } from './Icon';
 import { CHAT_VIEWPORT_PRESETS, DEFAULT_CHAT_VIEWPORT, MobileChatPreview, type ChatViewportState, type MessageActionFeedback, type VisualFeedback } from './MobileChatPreview';
-import { AdversarialWorkspace, DEFAULT_ADVERSARIAL_CASE_COLLECTION, DEFAULT_ADVERSARIAL_RESULT_COLLECTION, normalizeAdversarialCaseCollectionState, normalizeAdversarialResultCollectionState, RED_TEAM_SECTIONS, SETTINGS_SECTIONS, SettingsWorkspace, type AdversarialCaseCollectionState, type AdversarialResultCollectionState, type LinkedAdversarialCaseEditorState, type RedTeamSectionId, type SettingsSectionId } from './SettingsWorkspace';
+import { AdversarialWorkspace, AUTOMATION_SECTIONS, AutomationWorkspace, DEFAULT_ADVERSARIAL_CASE_COLLECTION, DEFAULT_ADVERSARIAL_RESULT_COLLECTION, normalizeAdversarialCaseCollectionState, normalizeAdversarialResultCollectionState, RED_TEAM_SECTIONS, SETTINGS_SECTIONS, SettingsWorkspace, type AdversarialCaseCollectionState, type AdversarialResultCollectionState, type AutomationSectionId, type LinkedAdversarialCaseEditorState, type LinkedContractCaseEditorState, type RedTeamSectionId, type SettingsSectionId } from './SettingsWorkspace';
 import { dateTimeAttribute, formatDateTime, formatDuration, formatNumber, localizeHumanized, setLocale, t } from './i18n';
 import { resolveUiLayout } from './uiConfig';
 import { applySessionDelta } from '../shared/sessionDelta';
@@ -24,10 +24,10 @@ const MAPPING_FILTERS = new Set<EventMappingFilter>(['all', 'matched', 'unmatche
 const ISSUE_FILTERS = new Set<EventIssueFilter>(['all', 'valid', 'problem', 'parse-error', 'mapping-error']);
 const TERMINAL_FILTERS = new Set<EventTerminalFilter>(['all', 'terminal', 'non-terminal']);
 const eventSearchTextCache = new WeakMap<object, string>();
-const rightPaneModes = ['debug', 'adversarial', 'configure'] as const;
+const rightPaneModes = ['debug', 'tests', 'adversarial', 'configure'] as const;
 type RightPaneMode = typeof rightPaneModes[number];
-const WEBVIEW_STATE_VERSION = 5;
-const scrollPositionKeys = ['chat', 'adversarial.results', 'adversarial.cases', 'adversarial.campaigns', 'adversarial.timeline', 'events.raw', 'events.normalized', ...SETTINGS_SECTIONS.map((section) => `configure.${section.id}`)] as const;
+const WEBVIEW_STATE_VERSION = 6;
+const scrollPositionKeys = ['chat', 'tests.results', 'tests.scenarios', 'tests.campaigns', 'adversarial.results', 'adversarial.cases', 'adversarial.campaigns', 'adversarial.timeline', 'events.raw', 'events.normalized', ...SETTINGS_SECTIONS.map((section) => `configure.${section.id}`)] as const;
 type ScrollPositionKey = typeof scrollPositionKeys[number];
 const networkDetailTabs = ['Headers', 'Payload', 'Response', 'Timing'] as const;
 type NetworkDetailTab = typeof networkDetailTabs[number];
@@ -37,7 +37,7 @@ export const DEFAULT_SPLIT_PERCENT = 64;
 export const ACCESSIBLE_EVENT_WINDOW_SIZE = 200;
 export const DEFAULT_EVENT_FILTERS: EventFilterState = { query: '', turn: 'all', eventType: 'all', mapping: 'all', issue: 'all', terminal: 'all' };
 export interface NetworkInspectorState { query: string; selectedId?: string; detailTab: NetworkDetailTab }
-export interface WebviewState { version?: number; sessionId?: string; section?: WorkspaceSection; configurationSection?: SettingsSectionId; rightPaneMode?: RightPaneMode; redTeamSection?: RedTeamSectionId; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number; selectedNetworkId?: string; activeEvidenceId?: string; selectedCampaignId?: string; chatViewport?: ChatViewportState; eventFilters?: Partial<InspectorEventFilters>; collapsedEventTurns?: Partial<CollapsedEventTurns>; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; expandedAdversarialCaseId?: string; adversarialCaseCollection?: Partial<AdversarialCaseCollectionState>; adversarialResultCollection?: Partial<AdversarialResultCollectionState>; networkInspector?: Partial<NetworkInspectorState>; acceptedForms?: string[] }
+export interface WebviewState { version?: number; sessionId?: string; section?: WorkspaceSection; configurationSection?: SettingsSectionId; rightPaneMode?: RightPaneMode; testsSection?: AutomationSectionId; redTeamSection?: RedTeamSectionId; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number; selectedNetworkId?: string; activeEvidenceId?: string; selectedCampaignId?: string; chatViewport?: ChatViewportState; eventFilters?: Partial<InspectorEventFilters>; collapsedEventTurns?: Partial<CollapsedEventTurns>; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; expandedContractCaseId?: string; expandedAdversarialCaseId?: string; adversarialCaseCollection?: Partial<AdversarialCaseCollectionState>; adversarialResultCollection?: Partial<AdversarialResultCollectionState>; networkInspector?: Partial<NetworkInspectorState>; acceptedForms?: string[] }
 type VsCodeApi = { postMessage(message: unknown): void; getState(): WebviewState | undefined; setState(state: WebviewState): void };
 type OperationNotice = string | { message: string; artifactId: string };
 const rootElement = typeof document === 'undefined' ? undefined : document.getElementById('root');
@@ -55,6 +55,7 @@ function App(): React.JSX.Element {
   const savedSection = isWorkspaceSection(savedState?.section) ? savedState.section : 'test';
   const [configurationSection, setConfigurationSection] = useState<SettingsSectionId>(isSettingsSectionId(savedState?.configurationSection) ? savedState.configurationSection : savedSection === 'test' ? 'general' : savedSection);
   const [rightPaneMode, setRightPaneMode] = useState<RightPaneMode>(isRightPaneMode(savedState?.rightPaneMode) ? savedState.rightPaneMode : savedSection === 'test' ? 'debug' : 'configure');
+  const [testsSection, setTestsSection] = useState<AutomationSectionId>(AUTOMATION_SECTIONS.includes(savedState?.testsSection as AutomationSectionId) ? savedState!.testsSection as AutomationSectionId : 'results');
   const [redTeamSection, setRedTeamSection] = useState<RedTeamSectionId>(RED_TEAM_SECTIONS.includes(savedState?.redTeamSection as RedTeamSectionId) ? savedState!.redTeamSection as RedTeamSectionId : 'results');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(savedInspectorTab === 'Request' ? 'Network' : isInspectorTab(savedInspectorTab) ? savedInspectorTab : DEFAULT_INSPECTOR_TAB); const [draft, setDraft] = useState(savedState?.draft ?? ''); const [splitPercent, setSplitPercent] = useState(initialSplitPercent(savedState?.splitPercent, savedSplitCustomized)); const [splitCustomized, setSplitCustomized] = useState(savedSplitCustomized); const [selectedMessageId, setSelectedMessageId] = useState(savedState?.selectedMessageId); const [selectedRawSequence, setSelectedRawSequence] = useState(savedState?.selectedRawSequence); const [selectedNetworkId, setSelectedNetworkId] = useState(savedState?.selectedNetworkId);
   const [activeEvidenceId, setActiveEvidenceId] = useState(savedState?.activeEvidenceId);
@@ -62,6 +63,7 @@ function App(): React.JSX.Element {
   const [eventFilters, setEventFilters] = useState<InspectorEventFilters>(() => normalizeInspectorEventFilters(savedState?.eventFilters));
   const [collapsedEventTurns, setCollapsedEventTurns] = useState<CollapsedEventTurns>(() => normalizeCollapsedEventTurns(savedState?.collapsedEventTurns));
   const [expandedAdversarialCaseId, setExpandedAdversarialCaseId] = useState(savedState?.expandedAdversarialCaseId);
+  const [expandedContractCaseId, setExpandedContractCaseId] = useState(savedState?.expandedContractCaseId);
   const [adversarialCaseCollection, setAdversarialCaseCollection] = useState<AdversarialCaseCollectionState>(() => normalizeAdversarialCaseCollectionState(savedState?.adversarialCaseCollection));
   const [adversarialResultCollection, setAdversarialResultCollection] = useState<AdversarialResultCollectionState>(() => normalizeAdversarialResultCollectionState(savedState?.adversarialResultCollection));
   const [selectedCampaignId, setSelectedCampaignId] = useState(savedState?.selectedCampaignId);
@@ -74,8 +76,11 @@ function App(): React.JSX.Element {
   const [messageActionFeedback, setMessageActionFeedback] = useState<MessageActionFeedback>();
   const [visualFeedback, setVisualFeedback] = useState<VisualFeedback>();
   const [testResults, setTestResults] = useState<AdversarialResultSummary[]>([]);
+  const [automationResults, setAutomationResults] = useState<AutomationResultSummary[]>([]);
   const [adversarialCaseCatalog, setAdversarialCaseCatalog] = useState<AdversarialCaseCatalog>();
   const [linkedAdversarialCaseEditor, setLinkedAdversarialCaseEditor] = useState<LinkedAdversarialCaseEditorState>();
+  const [contractCaseCatalog, setContractCaseCatalog] = useState<ContractCaseCatalog>();
+  const [linkedContractCaseEditor, setLinkedContractCaseEditor] = useState<LinkedContractCaseEditorState>();
   const [campaignDashboard, setCampaignDashboard] = useState<CampaignDashboardV1>();
   const [activeTimeline, setActiveTimeline] = useState<{ evidenceId: string; timeline: EvidenceTimelineSummary }>();
   const [connectionResult, setConnectionResult] = useState<ConnectionDoctorSummary>();
@@ -91,6 +96,7 @@ function App(): React.JSX.Element {
         const destination = message.destination;
         if (destination.pane === 'chat') focusAfterRender(() => (document.querySelector('.mobile-chat-preview__composer textarea, .mobile-chat-preview__composer input') as HTMLElement | null)?.focus());
         else if (destination.pane === 'debug') { setRightPaneMode('debug'); setInspectorTab(destination.tab); focusAfterRender(() => document.getElementById('right-pane-panel')?.focus()); }
+        else if (destination.pane === 'tests') { setRightPaneMode('tests'); setTestsSection(destination.section); focusAfterRender(() => document.getElementById(`automation-${destination.section}`)?.focus()); }
         else if (destination.pane === 'adversarial') { setRightPaneMode('adversarial'); setRedTeamSection(destination.section); focusAfterRender(() => document.getElementById(`red-team-${destination.section}`)?.focus()); }
         else { const section = destination.section === 'test' ? 'general' : destination.section; setRightPaneMode('configure'); setConfigurationSection(section); focusAfterRender(() => document.getElementById(`settings-panel-${section}`)?.focus()); }
       }
@@ -114,7 +120,12 @@ function App(): React.JSX.Element {
       else if (message.type === 'adversarial.case.loaded') setLinkedAdversarialCaseEditor({ status: 'loaded', detail: message.detail });
       else if (message.type === 'adversarial.case.saved') { setLinkedAdversarialCaseEditor({ status: 'saved', detail: message.detail }); setNotice(t('Linked case saved and verified from disk.')); }
       else if (message.type === 'adversarial.case.error') setLinkedAdversarialCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict });
-      else if (message.type === 'test.results') setTestResults(message.results);
+      else if (message.type === 'contract.operation') setNotice(message.artifactId ? { message: message.detail, artifactId: message.artifactId } : message.detail);
+      else if (message.type === 'contract.catalog') setContractCaseCatalog(message.catalog);
+      else if (message.type === 'contract.case.loaded') setLinkedContractCaseEditor({ status: 'loaded', detail: message.detail });
+      else if (message.type === 'contract.case.saved') { setLinkedContractCaseEditor({ status: 'saved', detail: message.detail }); setNotice(t('Linked test case saved and verified from disk.')); }
+      else if (message.type === 'contract.case.error') setLinkedContractCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict });
+      else if (message.type === 'test.results') { setTestResults(message.results); setAutomationResults(message.automationResults ?? []); }
       else if (message.type === 'test.exported') { const text = t(message.kind === 'evidenceBundle' ? 'Evidence Bundle exported to {path}' : 'Test report exported to {path}', { path: message.path }); setNotice(message.artifactId ? { message: text, artifactId: message.artifactId } : text); }
       else if (message.type === 'campaign.dashboard') setCampaignDashboard(message.dashboard);
       else if (message.type === 'campaign.preview') { const summary = t('{cases} cases · {attempts} attempts · up to {requests} requests', { cases: formatNumber(message.selectedCases), attempts: formatNumber(message.plannedAttempts), requests: formatNumber(message.plannedRequests) }); setNotice(message.warnings.length ? `${summary} · ${message.warnings.join(' ')}` : summary); }
@@ -159,9 +170,9 @@ function App(): React.JSX.Element {
     scheduleStatePersist();
   }, [scheduleStatePersist]);
   useEffect(() => {
-    stateRef.current = { version: WEBVIEW_STATE_VERSION, sessionId: snapshot?.sessionId, section: rightPaneMode === 'configure' ? configurationSection : 'test', configurationSection, rightPaneMode, redTeamSection, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, selectedCampaignId, chatViewport, eventFilters, collapsedEventTurns, expandedAdversarialCaseId, adversarialCaseCollection, adversarialResultCollection, networkInspector, acceptedForms: [...acceptedForms] };
+    stateRef.current = { version: WEBVIEW_STATE_VERSION, sessionId: snapshot?.sessionId, section: rightPaneMode === 'configure' ? configurationSection : 'test', configurationSection, rightPaneMode, testsSection, redTeamSection, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, selectedCampaignId, chatViewport, eventFilters, collapsedEventTurns, expandedContractCaseId, expandedAdversarialCaseId, adversarialCaseCollection, adversarialResultCollection, networkInspector, acceptedForms: [...acceptedForms] };
     scheduleStatePersist();
-  }, [snapshot?.sessionId, configurationSection, rightPaneMode, redTeamSection, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, selectedCampaignId, chatViewport, eventFilters, collapsedEventTurns, expandedAdversarialCaseId, adversarialCaseCollection, adversarialResultCollection, networkInspector, acceptedForms, scheduleStatePersist]);
+  }, [snapshot?.sessionId, configurationSection, rightPaneMode, testsSection, redTeamSection, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, selectedCampaignId, chatViewport, eventFilters, collapsedEventTurns, expandedContractCaseId, expandedAdversarialCaseId, adversarialCaseCollection, adversarialResultCollection, networkInspector, acceptedForms, scheduleStatePersist]);
   useEffect(() => {
     const flushIfHidden = () => { if (document.visibilityState === 'hidden') persistState(); };
     window.addEventListener('pagehide', persistState);
@@ -210,18 +221,51 @@ function App(): React.JSX.Element {
     {diagnostics.length > 0 && <div className="validation-banner" role="alert"><strong>{t(diagnostics.length === 1 ? '{count} configuration issue.' : '{count} configuration issues.', { count: formatNumber(diagnostics.length) })}</strong> {t('Requests are blocked until errors are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></div>}
     {notice && <div className="operation-status" role="status" aria-live="polite" aria-atomic="true"><ProductIcon name="info" /><span>{typeof notice === 'string' ? notice : notice.message}</span>{typeof notice !== 'string' && <div className="operation-status__actions"><button type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'open' })}>{t('Open')}</button><IconButton icon="folder-opened" label={t('Reveal in file explorer')} type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'reveal' })} /><IconButton icon="copy" label={t('Copy path')} type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'copyPath' })} /></div>}<IconButton icon="clear-all" label={t('Dismiss notification')} type="button" onClick={() => setNotice('')} /></div>}
     <section id="main-panel" tabIndex={-1} className="panel" aria-label={t('Test')}>
-      <TestWorkspace profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} testResults={testResults} adversarialCaseCatalog={adversarialCaseCatalog} linkedAdversarialCaseEditor={linkedAdversarialCaseEditor} adversarialCaseCollection={adversarialCaseCollection} setAdversarialCaseCollection={setAdversarialCaseCollection} adversarialResultCollection={adversarialResultCollection} setAdversarialResultCollection={setAdversarialResultCollection} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} activeTimeline={activeTimeline && activeTimeline.evidenceId === activeEvidenceId ? activeTimeline.timeline : undefined} onCloseEvidence={() => { setActiveEvidenceId(undefined); setActiveTimeline(undefined); }} connectionResult={connectionResult} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} inspectorTab={inspectorTab} setInspectorTab={setInspectorTab} requestPreview={requestPreview} splitPercent={splitPercent} setSplitPercent={setSplitPercent} splitCustomized={splitCustomized} setSplitCustomized={setSplitCustomized} chatViewport={chatViewport} setChatViewport={setChatViewport} eventFilters={eventFilters} setEventFilters={setEventFilters} collapsedEventTurns={collapsedEventTurns} setCollapsedEventTurns={setCollapsedEventTurns} selectedMessageId={selectedMessageId} selectedRawSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={setMessageActionFeedback} onSelectMessage={selectMessage} onSelectEvent={selectEvent} onCreateMapping={(event) => { post({ type: 'profile.patch', path: ['stream', 'mappings'], value: [...profile.stream.mappings, mappingDraftFromRawEvent(event, profile)] }); setNotice(t('Created mapping draft from raw event #{sequence}.', { sequence: formatNumber(event.sequence) })); }} rightPaneMode={rightPaneMode} setRightPaneMode={setRightPaneMode} redTeamSection={redTeamSection} setRedTeamSection={setRedTeamSection} selectedCampaignId={selectedCampaignId} setSelectedCampaignId={setSelectedCampaignId} configurationSection={configurationSection} setConfigurationSection={setConfigurationSection} mappingTestResult={mappingTestResult} remoteName={remoteName} profileDirty={profileDirty} diagnostics={diagnostics} scrollPositions={scrollPositionsRef.current} onScrollPositionChange={updateScrollPosition} expandedAdversarialCaseId={expandedAdversarialCaseId} setExpandedAdversarialCaseId={setExpandedAdversarialCaseId} networkInspector={networkInspector} setNetworkInspector={setNetworkInspector} />
+      <TestWorkspace
+        profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries}
+        testResults={testResults} automationResults={automationResults}
+        contractCaseCatalog={contractCaseCatalog} linkedContractCaseEditor={linkedContractCaseEditor}
+        adversarialCaseCatalog={adversarialCaseCatalog} linkedAdversarialCaseEditor={linkedAdversarialCaseEditor}
+        adversarialCaseCollection={adversarialCaseCollection} setAdversarialCaseCollection={setAdversarialCaseCollection}
+        adversarialResultCollection={adversarialResultCollection} setAdversarialResultCollection={setAdversarialResultCollection}
+        campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId}
+        activeTimeline={activeTimeline && activeTimeline.evidenceId === activeEvidenceId ? activeTimeline.timeline : undefined}
+        onCloseEvidence={() => { setActiveEvidenceId(undefined); setActiveTimeline(undefined); }}
+        connectionResult={connectionResult} active={active} continuationBlocked={continuationBlocked}
+        draft={draft} setDraft={setDraft} send={send} inspectorTab={inspectorTab} setInspectorTab={setInspectorTab}
+        requestPreview={requestPreview} splitPercent={splitPercent} setSplitPercent={setSplitPercent}
+        splitCustomized={splitCustomized} setSplitCustomized={setSplitCustomized}
+        chatViewport={chatViewport} setChatViewport={setChatViewport} eventFilters={eventFilters} setEventFilters={setEventFilters}
+        collapsedEventTurns={collapsedEventTurns} setCollapsedEventTurns={setCollapsedEventTurns}
+        selectedMessageId={selectedMessageId} selectedRawSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId}
+        acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback}
+        onMessageActionFeedback={setMessageActionFeedback} onSelectMessage={selectMessage} onSelectEvent={selectEvent}
+        onCreateMapping={(event) => { post({ type: 'profile.patch', path: ['stream', 'mappings'], value: [...profile.stream.mappings, mappingDraftFromRawEvent(event, profile)] }); setNotice(t('Created mapping draft from raw event #{sequence}.', { sequence: formatNumber(event.sequence) })); }}
+        rightPaneMode={rightPaneMode} setRightPaneMode={setRightPaneMode}
+        testsSection={testsSection} setTestsSection={setTestsSection}
+        redTeamSection={redTeamSection} setRedTeamSection={setRedTeamSection}
+        selectedCampaignId={selectedCampaignId} setSelectedCampaignId={setSelectedCampaignId}
+        configurationSection={configurationSection} setConfigurationSection={setConfigurationSection}
+        mappingTestResult={mappingTestResult} remoteName={remoteName} profileDirty={profileDirty} diagnostics={diagnostics}
+        scrollPositions={scrollPositionsRef.current} onScrollPositionChange={updateScrollPosition}
+        expandedContractCaseId={expandedContractCaseId} setExpandedContractCaseId={setExpandedContractCaseId}
+        expandedAdversarialCaseId={expandedAdversarialCaseId} setExpandedAdversarialCaseId={setExpandedAdversarialCaseId}
+        networkInspector={networkInspector} setNetworkInspector={setNetworkInspector}
+      />
     </section>
     <div className="sr-status" role="status" aria-live="polite">{terminalAnnouncement(snapshot?.turnState)}</div>
   </main>;
 }
 
-function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, diagnostics, scrollPositions, onScrollPositionChange, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector }: {
+function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, automationResults, contractCaseCatalog, linkedContractCaseEditor, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, testsSection, setTestsSection, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, diagnostics, scrollPositions, onScrollPositionChange, expandedContractCaseId, setExpandedContractCaseId, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector }: {
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
   runs: LocalRunSummary[];
   networkEntries: NetworkExchange[];
   testResults: AdversarialResultSummary[];
+  automationResults: AutomationResultSummary[];
+  contractCaseCatalog?: ContractCaseCatalog;
+  linkedContractCaseEditor?: LinkedContractCaseEditorState;
   adversarialCaseCatalog?: AdversarialCaseCatalog;
   linkedAdversarialCaseEditor?: LinkedAdversarialCaseEditorState;
   adversarialCaseCollection: AdversarialCaseCollectionState;
@@ -263,6 +307,8 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   onCreateMapping: (event: RawStreamEvent) => void;
   rightPaneMode: RightPaneMode;
   setRightPaneMode: (mode: RightPaneMode) => void;
+  testsSection: AutomationSectionId;
+  setTestsSection: (section: AutomationSectionId) => void;
   redTeamSection: RedTeamSectionId;
   setRedTeamSection: (section: RedTeamSectionId) => void;
   selectedCampaignId?: string;
@@ -275,6 +321,8 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   diagnostics: Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number }>;
   scrollPositions: Partial<Record<ScrollPositionKey, number>>;
   onScrollPositionChange: (key: ScrollPositionKey, value: number) => void;
+  expandedContractCaseId?: string;
+  setExpandedContractCaseId: (id: string | undefined) => void;
   expandedAdversarialCaseId?: string;
   setExpandedAdversarialCaseId: (id: string | undefined) => void;
   networkInspector: NetworkInspectorState;
@@ -373,14 +421,17 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
             selectRightPaneMode(rightPaneModes[nextIndex]!, true);
           }}>
             <button id="right-pane-debug-tab" type="button" role="tab" tabIndex={rightPaneMode === 'debug' ? 0 : -1} aria-selected={rightPaneMode === 'debug'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('debug')}>{t('Debug')}</button>
+            <button id="right-pane-tests-tab" type="button" role="tab" tabIndex={rightPaneMode === 'tests' ? 0 : -1} aria-selected={rightPaneMode === 'tests'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('tests')}>{t('Tests')}</button>
             <button id="right-pane-adversarial-tab" type="button" role="tab" tabIndex={rightPaneMode === 'adversarial' ? 0 : -1} aria-selected={rightPaneMode === 'adversarial'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('adversarial')}>{t('Red Team')}</button>
             <button id="right-pane-configure-tab" type="button" role="tab" tabIndex={rightPaneMode === 'configure' ? 0 : -1} aria-selected={rightPaneMode === 'configure'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('configure')}>{t('Configure')}</button>
           </div>
-          <span>{rightPaneMode === 'debug' ? t('{count} raw events', { count: formatNumber(snapshot?.rawEvents.length ?? 0) }) : rightPaneMode === 'adversarial' ? t('{count} adversarial cases', { count: formatNumber(profile.tests?.scenarios?.filter((scenario) => scenario.adversarial).length ?? 0) }) : t('Edits profile JSONC')}</span>
+          <span>{rightPaneMode === 'debug' ? t('{count} raw events', { count: formatNumber(snapshot?.rawEvents.length ?? 0) }) : rightPaneMode === 'tests' ? t('{count} test scenarios', { count: formatNumber((profile.tests?.scenarios?.filter((scenario) => !scenario.adversarial).length ?? 0) + (contractCaseCatalog?.total ?? 0)) }) : rightPaneMode === 'adversarial' ? t('{count} adversarial cases', { count: formatNumber(profile.tests?.scenarios?.filter((scenario) => scenario.adversarial).length ?? 0) }) : t('Edits profile JSONC')}</span>
         </header>
         <div id="right-pane-panel" className="right-pane-panel" role="tabpanel" aria-labelledby={`right-pane-${rightPaneMode}-tab`} tabIndex={-1}>
           {rightPaneMode === 'debug'
             ? <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} collapsedEventTurns={collapsedEventTurns} onCollapsedEventTurnsChange={setCollapsedEventTurns} onCreateMapping={onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} scrollPositions={scrollPositions} onScrollPositionChange={onScrollPositionChange} networkInspector={networkInspector} onNetworkInspectorChange={setNetworkInspector} />
+            : rightPaneMode === 'tests'
+              ? <AutomationWorkspace profile={profile} automationResults={automationResults} campaignDashboard={campaignDashboard} testOperation={testOperation} trusted={snapshot?.trusted === true} post={post} scrollTop={scrollPositions[`tests.${testsSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`tests.${testsSection}`, value)} activeSection={testsSection} onActiveSectionChange={setTestsSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedContractCaseId} onExpandedCaseIdChange={setExpandedContractCaseId} linkedCaseCatalog={contractCaseCatalog} linkedCaseEditor={linkedContractCaseEditor} />
             : rightPaneMode === 'adversarial'
               ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} trusted={snapshot?.trusted === true} post={post} scrollTop={scrollPositions[`adversarial.${redTeamSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`adversarial.${redTeamSection}`, value)} activeSection={redTeamSection} onActiveSectionChange={setRedTeamSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} linkedCaseCatalog={adversarialCaseCatalog} linkedCaseEditor={linkedAdversarialCaseEditor} caseCollection={adversarialCaseCollection} onCaseCollectionChange={setAdversarialCaseCollection} resultCollection={adversarialResultCollection} onResultCollectionChange={setAdversarialResultCollection} />
               : <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} profileDirty={profileDirty} diagnostics={diagnostics} post={post} scrollStateKey={configurationSection} scrollTop={scrollPositions[`configure.${configurationSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`configure.${configurationSection}`, value)} />}
@@ -1112,6 +1163,7 @@ export function normalizeWebviewState(value: unknown): WebviewState | undefined 
     ...(isWorkspaceSection(candidate.section) ? { section: candidate.section } : {}),
     ...(isSettingsSectionId(candidate.configurationSection) ? { configurationSection: candidate.configurationSection } : {}),
     ...(isRightPaneMode(candidate.rightPaneMode) ? { rightPaneMode: candidate.rightPaneMode } : {}),
+    ...(AUTOMATION_SECTIONS.includes(candidate.testsSection as AutomationSectionId) ? { testsSection: candidate.testsSection as AutomationSectionId } : {}),
     ...(RED_TEAM_SECTIONS.includes(candidate.redTeamSection as RedTeamSectionId) ? { redTeamSection: candidate.redTeamSection as RedTeamSectionId } : {}),
     ...(typeof candidate.draft === 'string' ? { draft: candidate.draft.slice(0, 100_000) } : {}),
     ...(candidateInspectorTab === 'Request' ? { inspectorTab: 'Network' } : isInspectorTab(candidateInspectorTab) ? { inspectorTab: candidateInspectorTab } : {}),
@@ -1126,6 +1178,7 @@ export function normalizeWebviewState(value: unknown): WebviewState | undefined 
     ...(candidate.eventFilters && typeof candidate.eventFilters === 'object' ? { eventFilters: normalizeInspectorEventFilters(candidate.eventFilters) } : {}),
     ...(candidate.collapsedEventTurns && typeof candidate.collapsedEventTurns === 'object' ? { collapsedEventTurns: normalizeCollapsedEventTurns(candidate.collapsedEventTurns) } : {}),
     ...(Object.keys(scrollPositions).length ? { scrollPositions } : {}),
+    ...boundedOptionalString('expandedContractCaseId', candidate.expandedContractCaseId),
     ...boundedOptionalString('expandedAdversarialCaseId', candidate.expandedAdversarialCaseId),
     ...(candidate.adversarialCaseCollection && typeof candidate.adversarialCaseCollection === 'object' ? { adversarialCaseCollection: normalizeAdversarialCaseCollectionState(candidate.adversarialCaseCollection) } : { adversarialCaseCollection: { ...DEFAULT_ADVERSARIAL_CASE_COLLECTION } }),
     ...(candidate.adversarialResultCollection && typeof candidate.adversarialResultCollection === 'object' ? { adversarialResultCollection: normalizeAdversarialResultCollectionState(candidate.adversarialResultCollection) } : { adversarialResultCollection: { ...DEFAULT_ADVERSARIAL_RESULT_COLLECTION } }),
@@ -1134,7 +1187,7 @@ export function normalizeWebviewState(value: unknown): WebviewState | undefined 
   };
 }
 
-function boundedOptionalString<K extends 'sessionId' | 'selectedMessageId' | 'selectedNetworkId' | 'activeEvidenceId' | 'expandedAdversarialCaseId' | 'selectedCampaignId'>(key: K, value: unknown): Partial<Record<K, string>> {
+function boundedOptionalString<K extends 'sessionId' | 'selectedMessageId' | 'selectedNetworkId' | 'activeEvidenceId' | 'expandedContractCaseId' | 'expandedAdversarialCaseId' | 'selectedCampaignId'>(key: K, value: unknown): Partial<Record<K, string>> {
   return typeof value === 'string' && value.length <= 512 ? { [key]: value } as Partial<Record<K, string>> : {};
 }
 
