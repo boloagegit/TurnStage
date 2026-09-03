@@ -38,6 +38,19 @@ describe('Webview DOM behavior', () => {
     expect(within(opening).queryByText('Assistant')).toBeNull();
   });
 
+  it('presents session startup as a compact status row with one explicit action', () => {
+    const openingProfile: TurnStageProfile = { ...profile, opening: { mode: 'request' } };
+    const notStarted: SessionSnapshot = { ...snapshot, sessionState: 'notStarted', turnState: 'idle', messages: [] };
+    const { container } = render(<MobileChatPreview {...mobileProps({ profile: openingProfile, snapshot: notStarted })} />);
+
+    const start = container.querySelector('.mobile-chat-preview__session-start');
+    expect(start).toBeTruthy();
+    expect(within(start as HTMLElement).getByRole('heading', { name: 'Not started' })).toBeTruthy();
+    expect(within(start as HTMLElement).getByText('This profile loads its opening message when a session starts.')).toBeTruthy();
+    expect(within(start as HTMLElement).getAllByRole('button')).toHaveLength(1);
+    expect(within(start as HTMLElement).getByRole('button', { name: 'Start session' })).toBeTruthy();
+  });
+
   it('renders bounded opening response blocks and keeps choice behavior interactive', async () => {
     const user = userEvent.setup();
     const setDraft = vi.fn();

@@ -898,6 +898,37 @@ try {
   await emptyPage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'events-empty-compact-dark.png') });
   await emptyPage.close();
 
+  const startPage = await browser.newPage({ viewport: { width: 960, height: 640 } });
+  await startPage.goto(`${url}?openingBlocks=true`);
+  await startPage.locator('.mobile-chat-preview__app-header strong').waitFor();
+  await startPage.evaluate(() => {
+    const harness = globalThis.__turnstageHarness;
+    const snapshot = { ...harness.snapshot };
+    delete snapshot.opening;
+    harness.dispatch({
+      type: 'session.snapshot',
+      snapshot: { ...snapshot, sessionState: 'notStarted', turnState: 'idle', messages: [], rawEvents: [], normalizedEvents: [], errors: [] },
+      runs: [],
+      networkEntries: []
+    });
+  });
+  const sessionStart = startPage.locator('.mobile-chat-preview__session-start');
+  await sessionStart.getByRole('heading', { name: 'Not started' }).waitFor();
+  const sessionStartBounds = await sessionStart.evaluate((section) => {
+    const button = section.querySelector('button');
+    const sectionBounds = section.getBoundingClientRect();
+    const buttonBounds = button.getBoundingClientRect();
+    return { sectionHeight: sectionBounds.height, buttonWidth: buttonBounds.width, buttonHeight: buttonBounds.height };
+  });
+  assert.ok(sessionStartBounds.sectionHeight < 100, `Session startup row must remain compact; received ${sessionStartBounds.sectionHeight}px`);
+  assert.ok(sessionStartBounds.buttonWidth < 120 && sessionStartBounds.buttonHeight <= 32, `Session startup action must retain normal control dimensions; received ${sessionStartBounds.buttonWidth}x${sessionStartBounds.buttonHeight}`);
+  await startPage.locator('.mobile-chat-preview__device').screenshot({ path: resolve(artifactDirectory, 'session-start-compact-dark.png') });
+  await startPage.setViewportSize({ width: 320, height: 640 });
+  const narrowSessionStartFits = await sessionStart.evaluate((section) => section.scrollWidth <= section.clientWidth + 1);
+  assert.equal(narrowSessionStartFits, true, 'Narrow session startup row must not overflow horizontally');
+  await startPage.locator('.mobile-chat-preview__device').screenshot({ path: resolve(artifactDirectory, 'session-start-compact-narrow-dark.png') });
+  await startPage.close();
+
   await page.keyboard.press('Tab');
   const focus = await page.evaluate(() => {
     const activeElement = document.activeElement;

@@ -223,7 +223,9 @@ export function MobileChatPreview({
     if (previous && changed) {
       const wasNearBottom = previous.nearBottom;
       const prepended = previous.firstMessageId !== undefined && firstMessageId !== undefined && previous.firstMessageId !== firstMessageId && snapshotMessages.length > previous.messageCount;
-      if (prepended && !wasNearBottom) {
+      if (snapshotMessages.length === 0) {
+        setShowJumpToLatest(false);
+      } else if (prepended && !wasNearBottom) {
         const heightDelta = messages.scrollHeight - previous.scrollHeight;
         if (heightDelta > 0) messages.scrollTop = previous.scrollTop + heightDelta;
       } else if (wasNearBottom) {
@@ -476,7 +478,11 @@ function MobileControls({ profile, snapshot, active, trusted, post }: { profile:
 
 function StartSessionCard({ post, trusted, headingId }: { post: PostMessage; trusted: boolean; headingId: string }): React.JSX.Element {
   return <section className="mobile-chat-preview__session-start" aria-labelledby={headingId}>
-    <h3 id={headingId}>{t('Start session')}</h3>
+    <ProductIcon name="debug-start" />
+    <div className="mobile-chat-preview__session-start-copy">
+      <h3 id={headingId}>{t('Not started')}</h3>
+      <p>{t('This profile loads its opening message when a session starts.')}</p>
+    </div>
     <button className="mobile-chat-preview__button mobile-chat-preview__button--primary" type="button" disabled={!trusted} onClick={() => post({ type: 'session.start' })}>{t('Start session')}</button>
   </section>;
 }

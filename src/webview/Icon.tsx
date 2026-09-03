@@ -17,6 +17,7 @@ export type ProductIconName =
   | 'clear-all'
   | 'copy'
   | 'desktop-download'
+  | 'debug-start'
   | 'debug-restart'
   | 'device-camera'
   | 'device-desktop'
@@ -59,6 +60,7 @@ const codicons: Record<ProductIconName, string> = {
   'clear-all': 'clear-all',
   copy: 'copy',
   'desktop-download': 'desktop-download',
+  'debug-start': 'debug-start',
   'debug-restart': 'debug-restart',
   'device-camera': 'device-camera',
   'device-desktop': 'device-desktop',
