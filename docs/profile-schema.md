@@ -140,6 +140,13 @@ Linked discovery adds a Suite level to Test Explorer. JSONC is lossless for
 suite-only metadata. See `docs/adversarial-testing.md` for limits, examples,
 and the bulk workflow.
 
+The Red Team GUI can edit one selected linked case without copying it into the
+Profile. Its case ID is intentionally read-only; ordered turns and supported
+adversarial settings remain editable. Save compares a source revision before a
+targeted JSONC/JSON or CSV update, preserves unrelated content, and verifies the
+file by reading it back. A revision mismatch fails closed and asks the user to
+reload instead of overwriting a newer external change.
+
 ### Baseline comparison and performance budgets
 
 An optional `comparison` runs the same scenario in two isolated sessions. Each

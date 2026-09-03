@@ -18,6 +18,7 @@ import type {
 } from '../shared/types';
 import { formatDuration, formatNumber, t } from './i18n';
 import { IconButton, ProductIcon } from './Icon';
+import { JsonSyntax } from './JsonViewer';
 import { SafeMarkdown } from './SafeMarkdown';
 import { captureChatScreenshot, copyChatScreenshotToClipboard } from './chatScreenshot';
 import { resolveComposer, resolveMessageActions, resolveMessageActionVisibility, resolveStreaming, type ResolvedStreaming } from './uiConfig';
@@ -310,31 +311,14 @@ export function MobileChatPreview({
 
   return <section className={rootClassName} aria-label={t('Responsive chat preview')}>
     <header className="mobile-chat-preview__viewport-toolbar" aria-label={t('Chat preview controls')}>
-      <span className="mobile-chat-preview__viewport-icon" aria-hidden="true"><ProductIcon name={responsive ? 'screen-full' : logicalWidth >= 900 ? 'device-desktop' : 'device-mobile'} /></span>
-      <label className="mobile-chat-preview__preset-control">
-        <span className="mobile-chat-preview__sr-only">{t('Viewport preset')}</span>
-        <select value={presetId} aria-label={t('Viewport preset')} onChange={(event) => selectPreset(event.target.value as ChatViewportPreset)}>
-          <option value="responsive">{t('Responsive')}</option>
-          <optgroup label={t('Devices')}>{CHAT_VIEWPORT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{t(preset.label)} — {preset.width} × {preset.height}</option>)}</optgroup>
-          <option value="custom">{t('Custom')}</option>
-        </select>
-      </label>
-      <div className="mobile-chat-preview__dimensions" role="group" aria-label={t('Viewport dimensions')}>
-        <label><span className="mobile-chat-preview__sr-only">{t('Viewport width')}</span><ViewportDimensionInput value={logicalWidth} minimum={MIN_VIEWPORT_WIDTH} maximum={MAX_VIEWPORT_WIDTH} label={t('Viewport width')} onCommit={(value) => setViewportDimension('width', value)} /></label>
-        <span aria-hidden="true">×</span>
-        <label><span className="mobile-chat-preview__sr-only">{t('Viewport height')}</span><ViewportDimensionInput value={logicalHeight} minimum={MIN_VIEWPORT_HEIGHT} maximum={MAX_VIEWPORT_HEIGHT} label={t('Viewport height')} onCommit={(value) => setViewportDimension('height', value)} /></label>
-      </div>
-      <IconButton className="mobile-chat-preview__rotate" icon="arrow-swap" label={t('Rotate viewport')} type="button" onClick={rotateViewport} />
-      <label className="mobile-chat-preview__zoom-control">
-        <span className="mobile-chat-preview__sr-only">{t('Viewport zoom')}</span>
-        <select value={responsive ? '100' : viewport.zoom} disabled={responsive} aria-label={t('Viewport zoom')} onChange={(event) => updateViewport({ ...viewport, zoom: event.target.value as ChatViewportZoom })}>
-          <option value="fit">{t('Fit')}</option>
-          <option value="100">100%</option>
-          <option value="75">75%</option>
-          <option value="50">50%</option>
-        </select>
-      </label>
-      {!responsive && viewport.zoom === 'fit' && <span className="mobile-chat-preview__fit-scale" aria-label={t('Preview scale')}>{formatNumber(Math.round(previewScale * 100))}%</span>}
+      <details className="mobile-chat-preview__viewport-settings">
+        <summary aria-label={t('Preview size settings')}><ProductIcon name={responsive ? 'screen-full' : logicalWidth >= 900 ? 'device-desktop' : 'device-mobile'} /><span>{t('Preview size')}</span><small>{responsive ? t('Responsive') : `${formatNumber(logicalWidth)} × ${formatNumber(logicalHeight)}`}</small></summary>
+        <div className="mobile-chat-preview__viewport-settings-panel">
+          <label className="mobile-chat-preview__preset-control"><span>{t('Viewport preset')}</span><select value={presetId} aria-label={t('Viewport preset')} onChange={(event) => selectPreset(event.target.value as ChatViewportPreset)}><option value="responsive">{t('Responsive')}</option><optgroup label={t('Devices')}>{CHAT_VIEWPORT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{t(preset.label)} — {preset.width} × {preset.height}</option>)}</optgroup><option value="custom">{t('Custom')}</option></select></label>
+          <div className="mobile-chat-preview__dimensions" role="group" aria-label={t('Viewport dimensions')}><label><span>{t('Width')}</span><ViewportDimensionInput value={logicalWidth} minimum={MIN_VIEWPORT_WIDTH} maximum={MAX_VIEWPORT_WIDTH} label={t('Viewport width')} onCommit={(value) => setViewportDimension('width', value)} /></label><span aria-hidden="true">×</span><label><span>{t('Height')}</span><ViewportDimensionInput value={logicalHeight} minimum={MIN_VIEWPORT_HEIGHT} maximum={MAX_VIEWPORT_HEIGHT} label={t('Viewport height')} onCommit={(value) => setViewportDimension('height', value)} /></label><IconButton className="mobile-chat-preview__rotate" icon="arrow-swap" label={t('Rotate viewport')} type="button" onClick={rotateViewport} /></div>
+          <label className="mobile-chat-preview__zoom-control"><span>{t('Viewport zoom')}</span><select value={responsive ? '100' : viewport.zoom} disabled={responsive} aria-label={t('Viewport zoom')} onChange={(event) => updateViewport({ ...viewport, zoom: event.target.value as ChatViewportZoom })}><option value="fit">{t('Fit')}</option><option value="100">100%</option><option value="75">75%</option><option value="50">50%</option></select>{!responsive && viewport.zoom === 'fit' && <small className="mobile-chat-preview__fit-scale" aria-label={t('Preview scale')}>{formatNumber(Math.round(previewScale * 100))}% {t('actual preview')}</small>}</label>
+        </div>
+      </details>
       <div className="mobile-chat-preview__session-tools" role="group" aria-label={t('Session status and actions')}>
         <span className="mobile-chat-preview__environment">{profile.environment ?? t('No environment')}</span>
         <span aria-hidden="true">·</span>
@@ -811,10 +795,17 @@ function MobileText({ text, streaming, streamingActive }: { text: string; stream
   const blocks = visibleText.split(/```/);
   const trailingBlock = blocks.map((block, index) => index % 2 === 0 && Boolean(block)).lastIndexOf(true);
   return <div className="mobile-chat-preview__text" data-reveal-mode={streaming?.reveal ?? 'instant'}>{blocks.map((block, index) => index % 2
-    ? <pre key={index}><code>{block.replace(/^\w+\n/, '')}</code></pre>
+    ? <LegacyCodeBlock key={index} source={block} />
     : block ? <p key={index}>{block}{index === trailingBlock && streamingActive && streaming ? <StreamingIndicator streaming={streaming} /> : null}</p> : null)}
     {streamingActive && streaming && trailingBlock < 0 ? <StreamingIndicator streaming={streaming} /> : null}
   </div>;
+}
+
+function LegacyCodeBlock({ source }: { source: string }): React.JSX.Element {
+  const match = /^(\w+)\n/u.exec(source);
+  const language = match?.[1]?.toLocaleLowerCase();
+  const code = match ? source.slice(match[0].length) : source;
+  return <pre className={language === 'json' || language === 'jsonc' ? 'json' : undefined}><code>{language === 'json' || language === 'jsonc' ? <JsonSyntax text={code} /> : code}</code></pre>;
 }
 
 function useStreamingRevealText(text: string, active: boolean, streaming?: ResolvedStreaming): string {
@@ -893,7 +884,7 @@ function nowMs(): number {
 }
 
 function JsonPreview({ value }: { value: unknown }): React.JSX.Element {
-  return <pre className="mobile-chat-preview__json"><code>{safeJson(value)}</code></pre>;
+  return <pre className="mobile-chat-preview__json json"><code><JsonSyntax text={safeJson(value)} /></code></pre>;
 }
 
 function CitationList({ profile, citations, post, trusted }: { profile: TurnStageProfile; citations: Citation[]; post: PostMessage; trusted: boolean }): React.JSX.Element {

@@ -93,6 +93,14 @@ The host checks trust even when a command is invoked directly. The
 enforces an allowlist for `vscodeCommand.invoke:<id>`. Treat profile actions and
 allowlisted commands as privileged and review them before running.
 
+Linked adversarial editing is also a privileged write. The Webview supplies a
+case identity and source revision, never an arbitrary filesystem path. The Host
+requires Workspace Trust, resolves the exact linked source through the current
+Profile's portable path or Profile-bound external grant, applies a 5 MiB input
+cap, serializes edits, rejects stale SHA-256 revisions, and verifies the saved
+case by reading it back. JSONC/JSON and CSV updates are targeted so unrelated
+cases, comments, columns, and rows are not intentionally rewritten.
+
 The extension declares limited untrusted-workspace support in `package.json`.
 Workspace paths and localhost URLs are interpreted by the current Extension
 Host, which may be local, remote, WSL, or a development container.

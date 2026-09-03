@@ -30,7 +30,9 @@ export type ProductIconName =
   | 'folder-opened'
   | 'go-to-file'
   | 'info'
+  | 'link'
   | 'list-tree'
+  | 'loading'
   | 'refresh'
   | 'save'
   | 'send'
@@ -70,7 +72,9 @@ const codicons: Record<ProductIconName, string> = {
   'folder-opened': 'folder-opened',
   'go-to-file': 'go-to-file',
   info: 'info',
+  link: 'link',
   'list-tree': 'list-tree',
+  loading: 'loading',
   refresh: 'refresh',
   save: 'save',
   send: 'send',

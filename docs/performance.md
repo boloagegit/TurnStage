@@ -71,6 +71,10 @@ The current UI includes these performance-conscious choices:
   small visible window;
 - event details render in a separate inspector region; tool JSON remains in a
   collapsible element;
+- read-only JSON inspectors share a memoized bounded formatter and tokenized
+  syntax view with local search rather than introducing an editor runtime;
+- linked adversarial discovery sends at most 100 prompt-free case summaries and
+  loads only the selected case body for structured editing;
 - message text/markdown deltas are merged into one part per type by the
   reducer;
 - Chat initially mounts the latest 200 messages and lets the user reveal earlier
@@ -84,6 +88,8 @@ The current UI includes these performance-conscious choices:
 - adaptive Assistant reveal segments even a large single-event response into a
   bounded visual schedule and catches up within `maxVisualLagMs`; it never delays
   canonical events, TTFT, evidence, or terminal state;
+- preview size, orientation, and zoom controls mount in a native disclosure only
+  when requested so narrow toolbars retain their primary actions;
 - CSS uses VS Code theme variables and reduced-motion rules rather than a
   separate visual runtime.
 - Chat screenshot rendering is user-triggered, capped at 8 million output
@@ -206,7 +212,7 @@ microbenchmarks and do not substitute for a VS Code UI trace.
 | Serialize equivalent full snapshot | 1.6936 ms mean; 590.45 runs/s | Node 26.3.1, 2026-09-01 | 5,001 events and 500 messages |
 | Plan one-million-character adaptive reveal | 66.8725 ms mean; 14.9538 runs/s | Node 26.3.1, 2026-09-01 | Segmentation/planning microbenchmark, not elapsed visual reveal time |
 | Abort, timeout, disconnect cleanup | Unit paths passed; UI trace not measured | Vitest, 2026-09-01 | Do not infer browser responsiveness |
-| Production bundle sizes | 623,753 B host; 586,008 B Webview JS; 159,474 B CSS; 179,614 B CLI | esbuild, 2026-09-01 | Minified, `vscode` external; 32,666 B integration bundle excluded from VSIX |
+| Production bundle sizes | 638,593 B host; 601,461 B Webview JS; 166,266 B CSS; 179,614 B CLI | esbuild, 2026-09-03 | Minified, `vscode` external; integration bundle excluded from VSIX |
 
 ## Current performance limitations
 

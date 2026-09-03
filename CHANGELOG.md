@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.22.4
+
+- Added direct structured editing for an individual case in a linked adversarial
+  JSONC, JSON, or CSV suite. TurnStage loads only the selected case, preserves
+  unrelated rows, cases, comments, and CSV columns, and requires an explicit
+  save with stale-revision and read-back verification.
+- Added searchable, copyable, theme-aware syntax highlighting to read-only JSON
+  inspectors and JSON/JSONC Markdown fences while keeping editable JSON fields
+  as plain source inputs.
+- Collapsed Chat preview size, orientation, and zoom controls into an on-demand
+  settings panel so the primary toolbar remains usable at narrow widths.
+- Linked-suite writes remain blocked in Restricted Mode, bounded to the exact
+  Profile-authorized source, serialized per editor, and capped before parsing.
+
 ## 0.22.3
 
 - Added the native **TurnStage: Go to…** picker for direct Chat, Debug, Red Team,

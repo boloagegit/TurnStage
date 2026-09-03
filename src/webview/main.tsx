@@ -4,10 +4,10 @@ import type { AdversarialCaseCatalog, HostMessage, MappingTestResult, TestOperat
 import { isHostMessage, isWorkspaceSection, PROTOCOL_VERSION } from '../shared/protocol';
 import type { AdversarialResultSummary, CampaignDashboardV1, ChatMessage, ConnectionDoctorSummary, EvidenceTimelineEntry, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { mappingDraftFromRawEvent } from './configEditors';
-import { ClipboardButton } from './ClipboardButton';
+import { JsonViewer, safeJson } from './JsonViewer';
 import { IconButton, ProductIcon } from './Icon';
 import { CHAT_VIEWPORT_PRESETS, DEFAULT_CHAT_VIEWPORT, MobileChatPreview, type ChatViewportState, type MessageActionFeedback, type VisualFeedback } from './MobileChatPreview';
-import { AdversarialWorkspace, DEFAULT_ADVERSARIAL_CASE_COLLECTION, DEFAULT_ADVERSARIAL_RESULT_COLLECTION, normalizeAdversarialCaseCollectionState, normalizeAdversarialResultCollectionState, RED_TEAM_SECTIONS, SETTINGS_SECTIONS, SettingsWorkspace, type AdversarialCaseCollectionState, type AdversarialResultCollectionState, type RedTeamSectionId, type SettingsSectionId } from './SettingsWorkspace';
+import { AdversarialWorkspace, DEFAULT_ADVERSARIAL_CASE_COLLECTION, DEFAULT_ADVERSARIAL_RESULT_COLLECTION, normalizeAdversarialCaseCollectionState, normalizeAdversarialResultCollectionState, RED_TEAM_SECTIONS, SETTINGS_SECTIONS, SettingsWorkspace, type AdversarialCaseCollectionState, type AdversarialResultCollectionState, type LinkedAdversarialCaseEditorState, type RedTeamSectionId, type SettingsSectionId } from './SettingsWorkspace';
 import { dateTimeAttribute, formatDateTime, formatDuration, formatNumber, localizeHumanized, setLocale, t } from './i18n';
 import { resolveUiLayout } from './uiConfig';
 import { applySessionDelta } from '../shared/sessionDelta';
@@ -74,6 +74,7 @@ function App(): React.JSX.Element {
   const [visualFeedback, setVisualFeedback] = useState<VisualFeedback>();
   const [testResults, setTestResults] = useState<AdversarialResultSummary[]>([]);
   const [adversarialCaseCatalog, setAdversarialCaseCatalog] = useState<AdversarialCaseCatalog>();
+  const [linkedAdversarialCaseEditor, setLinkedAdversarialCaseEditor] = useState<LinkedAdversarialCaseEditorState>();
   const [campaignDashboard, setCampaignDashboard] = useState<CampaignDashboardV1>();
   const [activeTimeline, setActiveTimeline] = useState<{ evidenceId: string; timeline: EvidenceTimelineSummary }>();
   const [connectionResult, setConnectionResult] = useState<ConnectionDoctorSummary>();
@@ -109,6 +110,9 @@ function App(): React.JSX.Element {
       else if (message.type === 'adversarial.operation') setNotice(message.artifactId ? { message: message.detail, artifactId: message.artifactId } : message.detail);
       else if (message.type === 'adversarial.captured') setNotice(message.detail);
       else if (message.type === 'adversarial.catalog') setAdversarialCaseCatalog(message.catalog);
+      else if (message.type === 'adversarial.case.loaded') setLinkedAdversarialCaseEditor({ status: 'loaded', detail: message.detail });
+      else if (message.type === 'adversarial.case.saved') { setLinkedAdversarialCaseEditor({ status: 'saved', detail: message.detail }); setNotice(t('Linked case saved and verified from disk.')); }
+      else if (message.type === 'adversarial.case.error') setLinkedAdversarialCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict });
       else if (message.type === 'test.results') setTestResults(message.results);
       else if (message.type === 'test.exported') { const text = t(message.kind === 'evidenceBundle' ? 'Evidence Bundle exported to {path}' : 'Test report exported to {path}', { path: message.path }); setNotice(message.artifactId ? { message: text, artifactId: message.artifactId } : text); }
       else if (message.type === 'campaign.dashboard') setCampaignDashboard(message.dashboard);
@@ -204,19 +208,20 @@ function App(): React.JSX.Element {
     {diagnostics.length > 0 && <div className="validation-banner" role="alert"><strong>{t(diagnostics.length === 1 ? '{count} configuration issue.' : '{count} configuration issues.', { count: formatNumber(diagnostics.length) })}</strong> {t('Requests are blocked until errors are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></div>}
     {notice && <div className="operation-status" role="status" aria-live="polite" aria-atomic="true"><ProductIcon name="info" /><span>{typeof notice === 'string' ? notice : notice.message}</span>{typeof notice !== 'string' && <div className="operation-status__actions"><button type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'open' })}>{t('Open')}</button><IconButton icon="folder-opened" label={t('Reveal in file explorer')} type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'reveal' })} /><IconButton icon="copy" label={t('Copy path')} type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'copyPath' })} /></div>}<IconButton icon="clear-all" label={t('Dismiss notification')} type="button" onClick={() => setNotice('')} /></div>}
     <section id="main-panel" tabIndex={-1} className="panel" aria-label={t('Test')}>
-      <TestWorkspace profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} testResults={testResults} adversarialCaseCatalog={adversarialCaseCatalog} adversarialCaseCollection={adversarialCaseCollection} setAdversarialCaseCollection={setAdversarialCaseCollection} adversarialResultCollection={adversarialResultCollection} setAdversarialResultCollection={setAdversarialResultCollection} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} activeTimeline={activeTimeline && activeTimeline.evidenceId === activeEvidenceId ? activeTimeline.timeline : undefined} onCloseEvidence={() => { setActiveEvidenceId(undefined); setActiveTimeline(undefined); }} connectionResult={connectionResult} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} inspectorTab={inspectorTab} setInspectorTab={setInspectorTab} requestPreview={requestPreview} splitPercent={splitPercent} setSplitPercent={setSplitPercent} splitCustomized={splitCustomized} setSplitCustomized={setSplitCustomized} chatViewport={chatViewport} setChatViewport={setChatViewport} eventFilters={eventFilters} setEventFilters={setEventFilters} collapsedEventTurns={collapsedEventTurns} setCollapsedEventTurns={setCollapsedEventTurns} selectedMessageId={selectedMessageId} selectedRawSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={setMessageActionFeedback} onSelectMessage={selectMessage} onSelectEvent={selectEvent} onCreateMapping={(event) => { post({ type: 'profile.patch', path: ['stream', 'mappings'], value: [...profile.stream.mappings, mappingDraftFromRawEvent(event, profile)] }); setNotice(t('Created mapping draft from raw event #{sequence}.', { sequence: formatNumber(event.sequence) })); }} rightPaneMode={rightPaneMode} setRightPaneMode={setRightPaneMode} redTeamSection={redTeamSection} setRedTeamSection={setRedTeamSection} selectedCampaignId={selectedCampaignId} setSelectedCampaignId={setSelectedCampaignId} configurationSection={configurationSection} setConfigurationSection={setConfigurationSection} mappingTestResult={mappingTestResult} remoteName={remoteName} profileDirty={profileDirty} diagnostics={diagnostics} scrollPositions={scrollPositionsRef.current} onScrollPositionChange={updateScrollPosition} expandedAdversarialCaseId={expandedAdversarialCaseId} setExpandedAdversarialCaseId={setExpandedAdversarialCaseId} networkInspector={networkInspector} setNetworkInspector={setNetworkInspector} />
+      <TestWorkspace profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} testResults={testResults} adversarialCaseCatalog={adversarialCaseCatalog} linkedAdversarialCaseEditor={linkedAdversarialCaseEditor} adversarialCaseCollection={adversarialCaseCollection} setAdversarialCaseCollection={setAdversarialCaseCollection} adversarialResultCollection={adversarialResultCollection} setAdversarialResultCollection={setAdversarialResultCollection} campaignDashboard={campaignDashboard} activeEvidenceId={activeEvidenceId} activeTimeline={activeTimeline && activeTimeline.evidenceId === activeEvidenceId ? activeTimeline.timeline : undefined} onCloseEvidence={() => { setActiveEvidenceId(undefined); setActiveTimeline(undefined); }} connectionResult={connectionResult} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} inspectorTab={inspectorTab} setInspectorTab={setInspectorTab} requestPreview={requestPreview} splitPercent={splitPercent} setSplitPercent={setSplitPercent} splitCustomized={splitCustomized} setSplitCustomized={setSplitCustomized} chatViewport={chatViewport} setChatViewport={setChatViewport} eventFilters={eventFilters} setEventFilters={setEventFilters} collapsedEventTurns={collapsedEventTurns} setCollapsedEventTurns={setCollapsedEventTurns} selectedMessageId={selectedMessageId} selectedRawSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={setMessageActionFeedback} onSelectMessage={selectMessage} onSelectEvent={selectEvent} onCreateMapping={(event) => { post({ type: 'profile.patch', path: ['stream', 'mappings'], value: [...profile.stream.mappings, mappingDraftFromRawEvent(event, profile)] }); setNotice(t('Created mapping draft from raw event #{sequence}.', { sequence: formatNumber(event.sequence) })); }} rightPaneMode={rightPaneMode} setRightPaneMode={setRightPaneMode} redTeamSection={redTeamSection} setRedTeamSection={setRedTeamSection} selectedCampaignId={selectedCampaignId} setSelectedCampaignId={setSelectedCampaignId} configurationSection={configurationSection} setConfigurationSection={setConfigurationSection} mappingTestResult={mappingTestResult} remoteName={remoteName} profileDirty={profileDirty} diagnostics={diagnostics} scrollPositions={scrollPositionsRef.current} onScrollPositionChange={updateScrollPosition} expandedAdversarialCaseId={expandedAdversarialCaseId} setExpandedAdversarialCaseId={setExpandedAdversarialCaseId} networkInspector={networkInspector} setNetworkInspector={setNetworkInspector} />
     </section>
     <div className="sr-status" role="status" aria-live="polite">{terminalAnnouncement(snapshot?.turnState)}</div>
   </main>;
 }
 
-function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, adversarialCaseCatalog, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, diagnostics, scrollPositions, onScrollPositionChange, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector }: {
+function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, diagnostics, scrollPositions, onScrollPositionChange, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector }: {
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
   runs: LocalRunSummary[];
   networkEntries: NetworkExchange[];
   testResults: AdversarialResultSummary[];
   adversarialCaseCatalog?: AdversarialCaseCatalog;
+  linkedAdversarialCaseEditor?: LinkedAdversarialCaseEditorState;
   adversarialCaseCollection: AdversarialCaseCollectionState;
   setAdversarialCaseCollection: (state: AdversarialCaseCollectionState) => void;
   adversarialResultCollection: AdversarialResultCollectionState;
@@ -375,7 +380,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
           {rightPaneMode === 'debug'
             ? <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} collapsedEventTurns={collapsedEventTurns} onCollapsedEventTurnsChange={setCollapsedEventTurns} onCreateMapping={onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} scrollPositions={scrollPositions} onScrollPositionChange={onScrollPositionChange} networkInspector={networkInspector} onNetworkInspectorChange={setNetworkInspector} />
             : rightPaneMode === 'adversarial'
-              ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} trusted={snapshot?.trusted === true} post={post} scrollTop={scrollPositions.adversarial} onScrollTopChange={(value) => onScrollPositionChange('adversarial', value)} activeSection={redTeamSection} onActiveSectionChange={setRedTeamSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} linkedCaseCatalog={adversarialCaseCatalog} caseCollection={adversarialCaseCollection} onCaseCollectionChange={setAdversarialCaseCollection} resultCollection={adversarialResultCollection} onResultCollectionChange={setAdversarialResultCollection} />
+              ? <AdversarialWorkspace profile={profile} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} trusted={snapshot?.trusted === true} post={post} scrollTop={scrollPositions.adversarial} onScrollTopChange={(value) => onScrollPositionChange('adversarial', value)} activeSection={redTeamSection} onActiveSectionChange={setRedTeamSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} linkedCaseCatalog={adversarialCaseCatalog} linkedCaseEditor={linkedAdversarialCaseEditor} caseCollection={adversarialCaseCollection} onCaseCollectionChange={setAdversarialCaseCollection} resultCollection={adversarialResultCollection} onResultCollectionChange={setAdversarialResultCollection} />
               : <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} profileDirty={profileDirty} diagnostics={diagnostics} post={post} scrollStateKey={configurationSection} scrollTop={scrollPositions[`configure.${configurationSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`configure.${configurationSection}`, value)} />}
         </div>
       </aside>
@@ -520,76 +525,7 @@ function adversarialStabilityLabel(stability: NonNullable<AdversarialResultSumma
   return 'Inconclusive';
 }
 
-export function JsonBlock({ value }: { value: unknown }): React.JSX.Element {
-  const text = safeJson(value);
-  const [query, setQuery] = useState('');
-  const matches = useMemo(() => countTextMatches(text, query), [query, text]);
-  const tokens = useMemo(() => tokenizeJson(text), [text]);
-  return <div className="json-view">
-    <div className="json-toolbar">
-      <label><span className="sr-only">{t('Search JSON')}</span><input type="search" value={query} placeholder={t('Search JSON')} aria-label={t('Search JSON')} onChange={(event) => setQuery(event.target.value)} /></label>
-      <span role="status" aria-live="polite">{query ? matches ? t('{count} matches', { count: formatNumber(matches) }) : t('No matches') : t('JSON data')}</span>
-    </div>
-    <pre className="json"><code>{tokens.map((token, index) => <span className={token.kind ? `json-token json-token--${token.kind}` : undefined} key={`${token.start}-${index}`}>{highlightText(token.text, query, token.start)}</span>)}</code><ClipboardButton text={text} label={t('Copy JSON')} /></pre>
-  </div>;
-}
-
-type JsonTokenKind = 'key' | 'string' | 'number' | 'boolean' | 'null' | 'punctuation';
-interface JsonToken { start: number; text: string; kind?: JsonTokenKind }
-
-function tokenizeJson(text: string): JsonToken[] {
-  const tokens: JsonToken[] = [];
-  const pattern = /"(?:\\.|[^"\\])*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b|[{}[\],:]/gu;
-  let cursor = 0;
-  for (const match of text.matchAll(pattern)) {
-    const start = match.index;
-    if (start > cursor) tokens.push({ start: cursor, text: text.slice(cursor, start) });
-    const token = match[0];
-    let kind: JsonTokenKind;
-    if (token.startsWith('"')) kind = /^\s*:/u.test(text.slice(start + token.length)) ? 'key' : 'string';
-    else if (/^-?\d/u.test(token)) kind = 'number';
-    else if (token === 'true' || token === 'false') kind = 'boolean';
-    else if (token === 'null') kind = 'null';
-    else kind = 'punctuation';
-    tokens.push({ start, text: token, kind });
-    cursor = start + token.length;
-  }
-  if (cursor < text.length) tokens.push({ start: cursor, text: text.slice(cursor) });
-  return tokens;
-}
-
-function highlightText(text: string, query: string, offset: number): React.ReactNode {
-  const needle = query.trim().toLocaleLowerCase();
-  if (!needle) return text;
-  const lower = text.toLocaleLowerCase();
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  for (let match = lower.indexOf(needle); match >= 0; match = lower.indexOf(needle, cursor)) {
-    if (match > cursor) parts.push(text.slice(cursor, match));
-    parts.push(<mark key={`${offset + match}-${parts.length}`}>{text.slice(match, match + needle.length)}</mark>);
-    cursor = match + needle.length;
-  }
-  if (cursor < text.length) parts.push(text.slice(cursor));
-  return parts;
-}
-
-function countTextMatches(text: string, query: string): number {
-  const needle = query.trim().toLocaleLowerCase();
-  if (!needle) return 0;
-  const lower = text.toLocaleLowerCase();
-  let count = 0;
-  for (let cursor = lower.indexOf(needle); cursor >= 0; cursor = lower.indexOf(needle, cursor + needle.length)) count += 1;
-  return count;
-}
-
-function safeJson(value: unknown): string {
-  try {
-    const result = JSON.stringify(value, null, 2);
-    return result === undefined ? '' : result;
-  } catch {
-    return t('Unable to display this value.');
-  }
-}
+export const JsonBlock = JsonViewer;
 
 export function Inspector({ profile, snapshot, runs = [], networkEntries = [], active = false, tab, setTab, requestPreview, full = false, interactive = true, eventFilters = normalizeInspectorEventFilters(), onEventFiltersChange = () => undefined, collapsedEventTurns = normalizeCollapsedEventTurns(), onCollapsedEventTurnsChange = () => undefined, onCreateMapping, selectedSequence, selectedNetworkId, onSelectEvent, scrollPositions = {}, onScrollPositionChange = () => undefined, networkInspector, onNetworkInspectorChange }: { profile?: TurnStageProfile; snapshot?: SessionSnapshot; runs?: LocalRunSummary[]; networkEntries?: NetworkExchange[]; active?: boolean; tab: InspectorTab; setTab: (tab: InspectorTab) => void; requestPreview: unknown; full?: boolean; interactive?: boolean; eventFilters?: InspectorEventFilters; onEventFiltersChange?: (filters: InspectorEventFilters) => void; collapsedEventTurns?: CollapsedEventTurns; onCollapsedEventTurnsChange?: (turns: CollapsedEventTurns) => void; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; selectedNetworkId?: string; onSelectEvent?: (event: Record<string, unknown>) => void; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; onScrollPositionChange?: (key: ScrollPositionKey, value: number) => void; networkInspector?: NetworkInspectorState; onNetworkInspectorChange?: (state: NetworkInspectorState) => void }): React.JSX.Element {
   const availableTabs: InspectorTab[] = profile && !componentVisible(profile, 'metrics') ? inspectorTabs.filter((item): item is InspectorTab => item !== 'Metrics') : [...inspectorTabs];

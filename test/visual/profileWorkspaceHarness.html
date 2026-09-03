@@ -336,6 +336,17 @@
           setTimeout(() => dispatch({ type: 'adversarial.catalog', catalog: adversarialCatalog }), 0);
           return;
         }
+        if (message.type === 'adversarial.case.request') {
+          const entry = adversarialCatalog.entries.find((candidate) => candidate.sourcePath === message.sourcePath && candidate.scenarioId === message.scenarioId);
+          if (!entry) { setTimeout(() => dispatch({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: 'Case not found.', conflict: false }), 0); return; }
+          const turns = Array.from({ length: entry.turns }, (_, index) => ({ id: `turn-${index + 1}`, name: `Turn ${index + 1}`, input: `Visual linked prompt ${index + 1}` }));
+          setTimeout(() => dispatch({ type: 'adversarial.case.loaded', detail: { sourcePath: entry.sourcePath, sourceFormat: 'csv', revision: 'a'.repeat(64), scenario: { id: entry.scenarioId, name: entry.scenarioName, tags: entry.tags, steps: turns, adversarial: { mode: entry.mode, maxTurns: entry.maxTurns, repetitions: entry.repetitions, timeoutMs: entry.timeoutMs, forbid: { content: ['protected phrase'], urls: entry.prohibit.urls } } } } }), 0);
+          return;
+        }
+        if (message.type === 'adversarial.case.save') {
+          setTimeout(() => dispatch({ type: 'adversarial.case.saved', detail: { sourcePath: message.sourcePath, sourceFormat: 'csv', revision: 'b'.repeat(64), scenario: message.scenario } }), 0);
+          return;
+        }
         if (message.type !== 'webview.ready') return;
         setTimeout(() => {
           dispatch({ type: 'host.ready', trusted: true, locale: 'en', direction: 'ltr' });

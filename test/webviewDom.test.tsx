@@ -47,6 +47,8 @@ describe('Webview DOM behavior', () => {
     expect(document.querySelector('[data-viewport-mode="responsive"]')).toBeTruthy();
     expect(document.querySelector('.mobile-chat-preview__safe-area')).toBeNull();
     expect(screen.getByRole('button', { name: 'Copy chat screenshot' })).toBeTruthy();
+    expect((document.querySelector('.mobile-chat-preview__viewport-settings') as HTMLDetailsElement).open).toBe(false);
+    await user.click(screen.getByText('Preview size'));
 
     const preset = screen.getByRole('combobox', { name: 'Viewport preset' });
     await user.selectOptions(preset, 'mobile-m');
@@ -769,7 +771,7 @@ describe('Webview DOM behavior', () => {
   it('shows bounded Connection Doctor evidence and requests a fresh analysis without exposing payloads', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
-    render(<SettingsWorkspace
+    const { container } = render(<SettingsWorkspace
       section="request"
       onSectionChange={vi.fn()}
       profile={profile}
@@ -787,6 +789,8 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByText('Connection needs attention')).toBeTruthy();
     expect(screen.getByText('Observed, not mapped')).toBeTruthy();
     expect(screen.getByText('Terminal not mapped')).toBeTruthy();
+    expect(container.querySelectorAll('.settings-preview .json-token--key').length).toBeGreaterThan(0);
+    expect(within(container.querySelector('.settings-preview') as HTMLElement).getByRole('searchbox', { name: 'Search JSON' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Analyze latest response' }));
     expect(post).toHaveBeenCalledWith({ type: 'connection.analyze' });
     await user.click(screen.getByRole('button', { name: 'Ask Copilot to diagnose this configuration' }));
@@ -904,9 +908,39 @@ describe('Webview DOM behavior', () => {
     await user.type(screen.getByRole('searchbox', { name: 'Search adversarial cases' }), 'case-100');
     expect(container.querySelectorAll('.adversarial-case-table tbody > tr').length).toBe(1);
     expect(screen.getByText('Case 100')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Open source' }));
+    await user.click(screen.getByRole('button', { name: 'Open linked source Security suite' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.openLinkedSuite', path: 'tests/security.adversarial.csv' });
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.catalog.request' });
+  });
+
+  it('loads and saves one linked Red Team case through the option editor without loading every prompt', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const linkedProfile: TurnStageProfile = { ...profile, tests: { scenarios: [], adversarialSuites: ['tests/security.adversarial.csv'] } };
+    const catalog = { entries: [{ sourcePath: 'tests/security.adversarial.csv', suiteId: 'security', suiteName: 'Security suite', scenarioId: 'case-1', scenarioName: 'Prompt boundary', tags: ['security'], mode: 'multiTurn' as const, turns: 2, maxTurns: 3, repetitions: 2, timeoutMs: 60_000, prohibit: { content: 1, events: 1, urls: true, ctas: false, tools: false } }], total: 1, truncated: false, issues: [] };
+    const detail = { sourcePath: 'tests/security.adversarial.csv', sourceFormat: 'csv' as const, revision: 'a'.repeat(64), scenario: { id: 'case-1', name: 'Prompt boundary', tags: ['security'], steps: [{ id: 'turn-1', input: 'First' }, { id: 'turn-2', input: 'Second' }], adversarial: { mode: 'multiTurn' as const, maxTurns: 3, repetitions: 2, timeoutMs: 60_000, forbid: { content: ['secret'], urls: true, events: ['tool.started'] } } } };
+    const common = { profile: linkedProfile, post, activeSection: 'cases' as const, linkedCaseCatalog: catalog, trusted: true };
+    const { rerender } = render(<AdversarialWorkspace {...common} />);
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.case.request', sourcePath: detail.sourcePath, scenarioId: 'case-1' });
+    expect(screen.getByRole('status').textContent).toContain('Loading this case from disk');
+    rerender(<AdversarialWorkspace {...common} linkedCaseEditor={{ status: 'loaded', detail }} />);
+    expect((screen.getByLabelText('Scenario ID') as HTMLInputElement).readOnly).toBe(true);
+    expect(screen.getByDisplayValue('First')).toBeTruthy();
+    expect(screen.getByDisplayValue('Second')).toBeTruthy();
+    const name = screen.getByLabelText('Scenario name');
+    await user.clear(name);
+    await user.type(name, 'Updated boundary');
+    await user.tab();
+    const save = screen.getByRole('button', { name: 'Save linked case' });
+    expect((save as HTMLButtonElement).disabled).toBe(false);
+    await user.click(save);
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'adversarial.case.save', sourcePath: detail.sourcePath, scenarioId: 'case-1', expectedRevision: 'a'.repeat(64), scenario: expect.objectContaining({ name: 'Updated boundary' }) }));
+    rerender(<AdversarialWorkspace {...common} linkedCaseEditor={{ status: 'error', sourcePath: detail.sourcePath, scenarioId: 'case-1', message: 'stale', conflict: true }} />);
+    expect(screen.getByRole('alert').textContent).toContain('changed outside TurnStage');
+    await user.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(post).toHaveBeenLastCalledWith({ type: 'adversarial.case.request', sourcePath: detail.sourcePath, scenarioId: 'case-1' });
   });
 
   it('bounds 500 Red Team results and keeps its sub-tabs keyboard navigable', async () => {
@@ -1237,6 +1271,15 @@ describe('Webview DOM behavior', () => {
     expect(within(screen.getByRole('heading', { level: 2, name: 'Result' }).parentElement!).getByText('Ready').closest('strong')).toBeTruthy();
     await userEvent.setup().click(screen.getByRole('link', { name: 'Docs' }));
     expect(post).toHaveBeenCalledWith({ type: 'uri.open', uri: 'https://example.test/docs' });
+  });
+
+  it('syntax-highlights JSON and JSONC code fences in assistant content', () => {
+    const message = { ...assistantMessage('markdown-json', ''), parts: [{ type: 'markdown', text: '```json\n{"quota": 100, "enabled": true}\n```' }] };
+    const { container } = render(<MobileChatPreview {...mobileProps({ snapshot: { ...snapshot, messages: [message] } })} />);
+
+    expect(container.querySelectorAll('.safe-markdown__code-block .json-token--key')).toHaveLength(2);
+    expect(container.querySelectorAll('.safe-markdown__code-block .json-token--number')).toHaveLength(1);
+    expect(container.querySelectorAll('.safe-markdown__code-block .json-token--boolean')).toHaveLength(1);
   });
 
   it('uses configured action and follow-up overflow limits and fills the composer locally', async () => {

@@ -38,6 +38,11 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.openLinkedSuite', path: '' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.catalog.request', force: true }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.catalog.request', force: 'yes' }, 'editor-1')).toBe(false);
+    const linkedScenario = { id: 'case-1', name: 'Case 1', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } };
+    expect(isWebviewMessage({ ...envelope, type: 'adversarial.case.request', sourcePath: 'tests/safety.adversarial.csv', scenarioId: 'case-1' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'adversarial.case.request', sourcePath: '', scenarioId: 'case-1' }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'adversarial.case.save', sourcePath: 'tests/safety.adversarial.csv', scenarioId: 'case-1', expectedRevision: 'a'.repeat(64), scenario: linkedScenario }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'adversarial.case.save', sourcePath: 'tests/safety.adversarial.csv', scenarioId: 'case-1', expectedRevision: 'stale', scenario: linkedScenario }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.cancel' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'connection.analyze' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } }, 'editor-1')).toBe(true);
@@ -87,6 +92,10 @@ describe('cross-boundary message validation', () => {
     const catalogEntry = { sourcePath: 'tests/safety.csv', suiteId: 'safety', suiteName: 'Safety', scenarioId: 'case-1', scenarioName: 'Case 1', tags: ['security'], mode: 'singleTurn', turns: 1, maxTurns: 1, repetitions: 1, timeoutMs: 60000, prohibit: { content: 0, events: 0, urls: true, ctas: false, tools: false } };
     expect(isHostMessage({ ...envelope, type: 'adversarial.catalog', catalog: { entries: [catalogEntry], total: 1, truncated: false, issues: [] } }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'adversarial.catalog', catalog: { entries: Array.from({ length: 101 }, () => catalogEntry), total: 101, truncated: true, issues: [] } }, 'editor-1')).toBe(false);
+    const linkedDetail = { sourcePath: 'tests/safety.adversarial.csv', sourceFormat: 'csv', revision: 'a'.repeat(64), scenario: { id: 'case-1', name: 'Case 1', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } } };
+    expect(isHostMessage({ ...envelope, type: 'adversarial.case.loaded', detail: linkedDetail }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'adversarial.case.saved', detail: { ...linkedDetail, revision: 'invalid' } }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'adversarial.case.error', sourcePath: linkedDetail.sourcePath, scenarioId: 'case-1', message: 'changed', conflict: true }, 'editor-1')).toBe(true);
     const boundedResult = { profileId: 'profile', scenarioId: 'case', scenarioName: 'Case', outcome: 'resisted', durationMs: 1, attemptedTurns: 1, completedTurns: 1, plannedTurns: 1, findingCount: 0, issueCount: 0, evidenceId: 'aggregate', primaryLocation: { kind: 'profile', path: 'tests.scenarios' }, availableLocations: [], repetitions: { requestedAttempts: 1, completedAttempts: 1, skippedAttempts: 0, sampleComplete: true, stability: 'stable-pass', counts: { resisted: 1, attackSucceeded: 0, indeterminate: 0, infrastructureError: 0 }, attempts: [{ attempt: 1, outcome: 'resisted', durationMs: 1, attemptedTurns: 1, completedTurns: 1, evidenceId: 'attempt-1', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [] }] } };
     expect(isHostMessage({ ...envelope, type: 'test.results', results: [boundedResult] }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.results', results: [{ ...boundedResult, repetitions: { ...boundedResult.repetitions, attempts: Array.from({ length: 101 }, (_, index) => ({ ...boundedResult.repetitions.attempts[0], attempt: index + 1 })) } }] }, 'editor-1')).toBe(false);

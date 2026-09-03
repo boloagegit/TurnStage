@@ -62,8 +62,10 @@ renderer and inspector.
 - Bounded adversarial regression cases that replay fixed single- or multi-turn
   attack scripts and classify them as Resisted, Attack succeeded,
   Indeterminate, or Infrastructure error. Bulk JSONC suites and one-row-per-
-  turn CSV import/export support large case sets; timeout never counts as a
-  pass, and results link back to Chat, Network, and Events evidence.
+  turn CSV import/export support large case sets; linked CSV/JSONC cases can be
+  edited one at a time through the same structured controls without importing
+  them. Timeout never counts as a pass, and results link back to Chat, Network,
+  and Events evidence.
 - Per-case and suite-default repetitions run in fresh conversations and expose
   stable resistance, stable attack success, unstable, or inconclusive sample
   status without converting timeout or incomplete samples into a pass. Compact
@@ -169,7 +171,9 @@ does not declare a `browser` entry and therefore does not claim support for
    workspace-relative JSONC or CSV source for portable Git-managed cases, or
    explicitly select an external file when the suite must remain elsewhere.
    External links are local, Profile-bound authorizations and are not portable
-   to another machine. Import/export copies remain available for spreadsheet
+   to another machine. Select **Edit** on a linked case to load and change only
+   that case with structured controls, or use **Open source** for unrestricted
+   source editing. Import/export copies remain available for spreadsheet
    exchange; triage the four outcomes in Test Explorer or Red Team results.
 9. From a latest result, choose **Diagnose with Copilot** to explain timeout,
    TTFT, stream, mapping, assertion, comparison, or repeat-stability evidence.

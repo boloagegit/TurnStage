@@ -1,9 +1,10 @@
 import React, { useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { AdversarialCaseCatalog, LinkedAdversarialCaseSummary, MappingTestResult, TestOperationSnapshot, WebviewPayload } from '../shared/protocol';
+import type { AdversarialCaseCatalog, LinkedAdversarialCaseDetail, LinkedAdversarialCaseSummary, MappingTestResult, TestOperationSnapshot, WebviewPayload } from '../shared/protocol';
 import type { AdversarialForbidDefinition, AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TestCampaignDefinition, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
+import { JsonViewer } from './JsonViewer';
 import { formatDuration, formatNumber, localizeHumanized, t } from './i18n';
 import './settingsWorkspace.css';
 
@@ -25,6 +26,9 @@ export interface AdversarialCaseCollectionState {
   pageSize: 25 | 50 | 100;
 }
 export const DEFAULT_ADVERSARIAL_CASE_COLLECTION: AdversarialCaseCollectionState = { query: '', mode: 'all', source: 'all', tag: 'all', sort: 'sourceOrder', page: 0, pageSize: 25 };
+export type LinkedAdversarialCaseEditorState =
+  | { status: 'loaded' | 'saved'; detail: LinkedAdversarialCaseDetail }
+  | { status: 'error'; sourcePath: string; scenarioId: string; message: string; conflict: boolean };
 
 export const RED_TEAM_SECTIONS = ['results', 'cases', 'campaigns', 'timeline'] as const;
 export type RedTeamSectionId = typeof RED_TEAM_SECTIONS[number];
@@ -212,7 +216,7 @@ export function SettingsWorkspace({
   </div>;
 }
 
-export function AdversarialWorkspace({ profile, post, testResults = [], campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, scrollTop, onScrollTopChange, activeSection = 'results', onActiveSectionChange = () => undefined, selectedCampaignId, onSelectedCampaignIdChange, expandedCaseId, onExpandedCaseIdChange, linkedCaseCatalog, caseCollection = DEFAULT_ADVERSARIAL_CASE_COLLECTION, onCaseCollectionChange = () => undefined, resultCollection = DEFAULT_ADVERSARIAL_RESULT_COLLECTION, onResultCollectionChange = () => undefined }: {
+export function AdversarialWorkspace({ profile, post, testResults = [], campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, scrollTop, onScrollTopChange, activeSection = 'results', onActiveSectionChange = () => undefined, selectedCampaignId, onSelectedCampaignIdChange, expandedCaseId, onExpandedCaseIdChange, linkedCaseCatalog, linkedCaseEditor, caseCollection = DEFAULT_ADVERSARIAL_CASE_COLLECTION, onCaseCollectionChange = () => undefined, resultCollection = DEFAULT_ADVERSARIAL_RESULT_COLLECTION, onResultCollectionChange = () => undefined }: {
   profile: TurnStageProfile;
   post: SettingsWorkspacePost;
   testResults?: AdversarialResultSummary[];
@@ -230,6 +234,7 @@ export function AdversarialWorkspace({ profile, post, testResults = [], campaign
   expandedCaseId?: string;
   onExpandedCaseIdChange?: (id: string | undefined) => void;
   linkedCaseCatalog?: AdversarialCaseCatalog;
+  linkedCaseEditor?: LinkedAdversarialCaseEditorState;
   caseCollection?: AdversarialCaseCollectionState;
   onCaseCollectionChange?: (state: AdversarialCaseCollectionState) => void;
   resultCollection?: AdversarialResultCollectionState;
@@ -280,7 +285,7 @@ export function AdversarialWorkspace({ profile, post, testResults = [], campaign
           <button id="red-team-campaigns-tab" type="button" role="tab" tabIndex={activeSection === 'campaigns' ? 0 : -1} aria-controls="red-team-campaigns" aria-label={`${t('Campaigns')}: ${formatNumber(campaignCount)}`} aria-selected={activeSection === 'campaigns'} onClick={() => selectSection('campaigns')} onKeyDown={(event) => handleSectionKeyDown(event, 'campaigns')}><span>{t('Campaigns')}</span><strong>{formatNumber(campaignCount)}</strong></button>
           <button id="red-team-timeline-tab" type="button" role="tab" tabIndex={activeSection === 'timeline' ? 0 : -1} aria-controls="red-team-timeline" aria-label={`${t('Timeline')}: ${activeEvidenceId ? t('Selected') : '—'}`} aria-selected={activeSection === 'timeline'} onClick={() => selectSection('timeline')} onKeyDown={(event) => handleSectionKeyDown(event, 'timeline')}><span>{t('Timeline')}</span><strong>{activeEvidenceId ? t('Selected') : '—'}</strong></button>
         </nav>
-        <ScenarioTestsSection view="adversarial" adversarialSection={activeSection} onAdversarialSectionChange={selectSection} profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={timeline} trusted={trusted} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={onSelectedCampaignIdChange} expandedCaseId={expandedCaseId} onExpandedCaseIdChange={onExpandedCaseIdChange} linkedCaseCatalog={linkedCaseCatalog} caseCollection={caseCollection} onCaseCollectionChange={onCaseCollectionChange} resultCollection={resultCollection} onResultCollectionChange={onResultCollectionChange} />
+        <ScenarioTestsSection view="adversarial" adversarialSection={activeSection} onAdversarialSectionChange={selectSection} profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={timeline} trusted={trusted} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={onSelectedCampaignIdChange} expandedCaseId={expandedCaseId} onExpandedCaseIdChange={onExpandedCaseIdChange} linkedCaseCatalog={linkedCaseCatalog} linkedCaseEditor={linkedCaseEditor} caseCollection={caseCollection} onCaseCollectionChange={onCaseCollectionChange} resultCollection={resultCollection} onResultCollectionChange={onResultCollectionChange} />
       </section>
     </div>
   </div>;
@@ -527,7 +532,7 @@ const performanceMetricOptions: Array<{ id: ScenarioPerformanceMetric; label: st
   { id: 'metrics.maxEventGap', label: 'Maximum event gap' },
 ];
 
-function ScenarioTestsSection({ view, adversarialSection = 'results', onAdversarialSectionChange, profile, patch, post, testResults, campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, selectedCampaignId: controlledSelectedCampaignId, onSelectedCampaignIdChange, expandedCaseId: controlledExpandedCaseId, onExpandedCaseIdChange, linkedCaseCatalog, caseCollection = DEFAULT_ADVERSARIAL_CASE_COLLECTION, onCaseCollectionChange = () => undefined, resultCollection = DEFAULT_ADVERSARIAL_RESULT_COLLECTION, onResultCollectionChange = () => undefined }: { view: 'contracts' | 'adversarial'; adversarialSection?: RedTeamSectionId; onAdversarialSectionChange?: (section: RedTeamSectionId) => void; profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; campaignDashboard?: CampaignDashboardV1; testOperation?: TestOperationSnapshot; activeEvidenceId?: string; timeline?: React.ReactNode; trusted?: boolean; selectedCampaignId?: string; onSelectedCampaignIdChange?: (id: string | undefined) => void; expandedCaseId?: string; onExpandedCaseIdChange?: (id: string | undefined) => void; linkedCaseCatalog?: AdversarialCaseCatalog; caseCollection?: AdversarialCaseCollectionState; onCaseCollectionChange?: (state: AdversarialCaseCollectionState) => void; resultCollection?: AdversarialResultCollectionState; onResultCollectionChange?: (state: AdversarialResultCollectionState) => void }): React.JSX.Element {
+function ScenarioTestsSection({ view, adversarialSection = 'results', onAdversarialSectionChange, profile, patch, post, testResults, campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, selectedCampaignId: controlledSelectedCampaignId, onSelectedCampaignIdChange, expandedCaseId: controlledExpandedCaseId, onExpandedCaseIdChange, linkedCaseCatalog, linkedCaseEditor, caseCollection = DEFAULT_ADVERSARIAL_CASE_COLLECTION, onCaseCollectionChange = () => undefined, resultCollection = DEFAULT_ADVERSARIAL_RESULT_COLLECTION, onResultCollectionChange = () => undefined }: { view: 'contracts' | 'adversarial'; adversarialSection?: RedTeamSectionId; onAdversarialSectionChange?: (section: RedTeamSectionId) => void; profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; campaignDashboard?: CampaignDashboardV1; testOperation?: TestOperationSnapshot; activeEvidenceId?: string; timeline?: React.ReactNode; trusted?: boolean; selectedCampaignId?: string; onSelectedCampaignIdChange?: (id: string | undefined) => void; expandedCaseId?: string; onExpandedCaseIdChange?: (id: string | undefined) => void; linkedCaseCatalog?: AdversarialCaseCatalog; linkedCaseEditor?: LinkedAdversarialCaseEditorState; caseCollection?: AdversarialCaseCollectionState; onCaseCollectionChange?: (state: AdversarialCaseCollectionState) => void; resultCollection?: AdversarialResultCollectionState; onResultCollectionChange?: (state: AdversarialResultCollectionState) => void }): React.JSX.Element {
   const scenarios = profile.tests?.scenarios ?? [];
   const qualityRubrics = profile.tests?.qualityRubrics ?? [];
   const [undo, setUndo] = useState<{ label: string; path: PatchPath; value: unknown }>();
@@ -540,8 +545,14 @@ function ScenarioTestsSection({ view, adversarialSection = 'results', onAdversar
   const adversarialEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => scenario.adversarial);
   const contractEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => !scenario.adversarial);
   useEffect(() => {
-    if (expandedCaseId && !adversarialEntries.some(({ scenario }) => scenario.id === expandedCaseId)) setExpandedCaseId(undefined);
-  }, [adversarialEntries, expandedCaseId]);
+    if (!expandedCaseId) return;
+    if (expandedCaseId.startsWith('linked:')) {
+      if (linkedCaseCatalog && !linkedCaseCatalog.entries.some((entry) => linkedCaseRowKey(entry) === expandedCaseId)) setExpandedCaseId(undefined);
+      return;
+    }
+    const exists = adversarialEntries.some(({ scenario, index }) => scenario.id === expandedCaseId || inlineCaseRowKey(scenario, index) === expandedCaseId);
+    if (!exists) setExpandedCaseId(undefined);
+  }, [adversarialEntries, expandedCaseId, linkedCaseCatalog]);
   const save = (next: ScenarioDefinition[]) => patch(['tests', 'scenarios'], next);
   const saveDestructive = (label: string, next: ScenarioDefinition[]) => {
     setUndo({ label, path: ['tests', 'scenarios'], value: structuredClone(scenarios) });
@@ -665,7 +676,7 @@ function ScenarioTestsSection({ view, adversarialSection = 'results', onAdversar
       </div>
       {undo && <div className="settings-undo" role="status"><span>{undo.label}</span><button type="button" onClick={() => { patch(undo.path, undo.value); setUndo(undefined); }}>{t('Undo')}</button><IconButton type="button" icon="clear-all" label={t('Dismiss undo')} onClick={() => setUndo(undefined)} /></div>}
       {(profile.tests?.adversarialSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.adversarialSuites!.map((path, index) => { const label = linkedSuiteLabel(path); return <li key={`${path}-${index}`}><code title={path}>{label}</code><div className="adversarial-linked-suite-actions"><IconButton type="button" icon="go-to-file" label={t('Open linked suite {path}', { path: label })} onClick={() => post({ type: 'adversarial.openLinkedSuite', path })} /><IconButton type="button" icon="trash" label={t('Unlink suite {path}', { path: label })} onClick={() => unlinkSuite(index, path)} /></div></li>; })}</ul></div>}
-      {!adversarialEntries.length && !(linkedCaseCatalog?.entries.length) ? <div className="settings-empty settings-empty--action"><span>{t(profile.tests?.adversarialSuites?.length && !linkedCaseCatalog ? 'Loading linked adversarial cases…' : 'No adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <AdversarialCaseTable entries={adversarialEntries} linkedEntries={linkedCaseCatalog?.entries ?? []} catalog={linkedCaseCatalog} collection={caseCollection} onCollectionChange={onCaseCollectionChange} onRefresh={() => post({ type: 'adversarial.catalog.request', force: true })} expandedCaseId={expandedCaseId} onToggle={(id) => setExpandedCaseId(expandedCaseId === id ? undefined : id)} onChange={(index, value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(index, value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={(index, scenario) => { if (expandedCaseId === scenario.id) setExpandedCaseId(undefined); saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); }} onOpenSource={(path) => post({ type: 'adversarial.openLinkedSuite', path })} />}
+      {!adversarialEntries.length && !(linkedCaseCatalog?.entries.length) ? <div className="settings-empty settings-empty--action"><span>{t(profile.tests?.adversarialSuites?.length && !linkedCaseCatalog ? 'Loading linked adversarial cases…' : 'No adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <AdversarialCaseTable entries={adversarialEntries} linkedEntries={linkedCaseCatalog?.entries ?? []} catalog={linkedCaseCatalog} linkedCaseEditor={linkedCaseEditor} trusted={trusted} post={post} collection={caseCollection} onCollectionChange={onCaseCollectionChange} onRefresh={() => post({ type: 'adversarial.catalog.request', force: true })} expandedCaseId={expandedCaseId} onToggle={(id) => setExpandedCaseId(expandedCaseId === id ? undefined : id)} onChange={(index, value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(index, value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={(index, scenario) => { if (expandedCaseId === scenario.id || expandedCaseId === inlineCaseRowKey(scenario, index)) setExpandedCaseId(undefined); saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); }} onOpenSource={(path) => post({ type: 'adversarial.openLinkedSuite', path })} />}
       <p className="settings-footnote">{t('Linked CSV stays the source of truth and uses one row per turn. JSONC remains the lossless format for suite-level defaults and metadata.')}</p>
     </section>}
     {view === 'adversarial' && adversarialSection === 'results' && <section id="red-team-results" className="settings-card red-team-section" role="tabpanel" aria-labelledby="red-team-results-tab adversarial-results-heading" tabIndex={-1}>
@@ -785,10 +796,17 @@ interface AdversarialCaseRow {
   sourcePath?: string;
 }
 
-function AdversarialCaseTable({ entries, linkedEntries, catalog, collection, onCollectionChange, onRefresh, expandedCaseId, onToggle, onChange, onDestructiveChange, onDelete, onOpenSource }: {
+function inlineCaseRowKey(scenario: ScenarioDefinition, index: number): string { return `inline:${scenario.id}:${index}`; }
+function linkedCaseRowKey(entry: Pick<LinkedAdversarialCaseSummary, 'sourcePath' | 'scenarioId'>): string { return `linked:${entry.sourcePath}:${entry.scenarioId}`; }
+function cloneScenario(scenario: ScenarioDefinition): ScenarioDefinition { return JSON.parse(JSON.stringify(scenario)) as ScenarioDefinition; }
+
+function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEditor, trusted, post, collection, onCollectionChange, onRefresh, expandedCaseId, onToggle, onChange, onDestructiveChange, onDelete, onOpenSource }: {
   entries: Array<{ scenario: ScenarioDefinition; index: number }>;
   linkedEntries: LinkedAdversarialCaseSummary[];
   catalog?: AdversarialCaseCatalog;
+  linkedCaseEditor?: LinkedAdversarialCaseEditorState;
+  trusted: boolean;
+  post: SettingsWorkspacePost;
   collection: AdversarialCaseCollectionState;
   onCollectionChange: (state: AdversarialCaseCollectionState) => void;
   onRefresh: () => void;
@@ -799,11 +817,55 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, collection, onC
   onDelete: (index: number, scenario: ScenarioDefinition) => void;
   onOpenSource: (path: string) => void;
 }): React.JSX.Element {
+  const [linkedTarget, setLinkedTarget] = useState<{ sourcePath: string; scenarioId: string }>();
+  const [linkedDraft, setLinkedDraft] = useState<ScenarioDefinition>();
+  const [linkedOriginal, setLinkedOriginal] = useState<ScenarioDefinition>();
+  const [linkedRevision, setLinkedRevision] = useState<string>();
+  const [linkedPending, setLinkedPending] = useState<'load' | 'save'>();
+  const [linkedMessage, setLinkedMessage] = useState<{ tone: 'info' | 'success' | 'error'; text: string }>();
+  const linkedResponseBaseline = useRef<LinkedAdversarialCaseEditorState | undefined>(undefined);
+  const linkedDirty = Boolean(linkedDraft && linkedOriginal && JSON.stringify(linkedDraft) !== JSON.stringify(linkedOriginal));
+  useEffect(() => {
+    if (!linkedTarget || !linkedCaseEditor || linkedCaseEditor === linkedResponseBaseline.current) return;
+    linkedResponseBaseline.current = linkedCaseEditor;
+    if (linkedCaseEditor.status === 'error') {
+      if (linkedCaseEditor.sourcePath !== linkedTarget.sourcePath || linkedCaseEditor.scenarioId !== linkedTarget.scenarioId) return;
+      setLinkedPending(undefined);
+      setLinkedMessage({ tone: 'error', text: linkedCaseEditor.conflict ? t('The linked file changed outside TurnStage. Reload this case before saving again.') : linkedCaseEditor.message });
+      return;
+    }
+    if (linkedCaseEditor.detail.sourcePath !== linkedTarget.sourcePath) return;
+    if (linkedPending !== 'save' && linkedCaseEditor.detail.scenario.id !== linkedTarget.scenarioId) return;
+    const next = cloneScenario(linkedCaseEditor.detail.scenario);
+    setLinkedDraft(next);
+    setLinkedOriginal(cloneScenario(next));
+    setLinkedRevision(linkedCaseEditor.detail.revision);
+    setLinkedPending(undefined);
+    setLinkedMessage(linkedCaseEditor.status === 'saved' ? { tone: 'success', text: t('Linked case saved and verified from disk.') } : undefined);
+  }, [linkedCaseEditor, linkedPending, linkedTarget]);
+  const requestLinkedCase = (row: AdversarialCaseRow, force = false): void => {
+    if (!row.sourcePath) return;
+    if (!force && linkedDirty && expandedCaseId && expandedCaseId !== row.key) { setLinkedMessage({ tone: 'error', text: t('Save or discard the current linked case changes before opening another case.') }); return; }
+    if (!force && expandedCaseId === row.key) {
+      if (linkedDirty) { setLinkedMessage({ tone: 'error', text: t('Save or discard the current linked case changes before closing the editor.') }); return; }
+      onToggle(row.key);
+      return;
+    }
+    setLinkedTarget({ sourcePath: row.sourcePath, scenarioId: row.scenarioId });
+    setLinkedDraft(undefined);
+    setLinkedOriginal(undefined);
+    setLinkedRevision(undefined);
+    setLinkedMessage(undefined);
+    setLinkedPending('load');
+    linkedResponseBaseline.current = linkedCaseEditor;
+    if (expandedCaseId !== row.key) onToggle(row.key);
+    post({ type: 'adversarial.case.request', sourcePath: row.sourcePath, scenarioId: row.scenarioId });
+  };
   const rows = useMemo<AdversarialCaseRow[]>(() => [
     ...entries.map(({ scenario, index }) => {
       const definition = scenario.adversarial!;
       return {
-        key: `inline:${scenario.id}:${index}`,
+        key: inlineCaseRowKey(scenario, index),
         source: 'inline' as const,
         sourceKey: 'inline',
         sourceLabel: t('Inline'),
@@ -821,7 +883,7 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, collection, onC
       };
     }),
     ...linkedEntries.map((entry) => ({
-      key: `linked:${entry.sourcePath}:${entry.scenarioId}`,
+      key: linkedCaseRowKey(entry),
       source: 'linked' as const,
       sourceKey: `linked:${entry.sourcePath}`,
       sourceLabel: entry.suiteName || linkedSuiteLabel(entry.sourcePath),
@@ -877,7 +939,7 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, collection, onC
       <tbody>{visible.map((row) => {
         const scenario = row.scenario;
         const index = row.index;
-        const expanded = row.source === 'inline' && expandedCaseId === row.scenarioId;
+        const expanded = expandedCaseId === row.key || (row.source === 'inline' && expandedCaseId === row.scenarioId);
         const editorId = `adversarial-case-detail-${row.key.replace(/[^a-z0-9-]/giu, '-')}`;
         return <React.Fragment key={row.key}>
           <tr className={expanded ? 'is-expanded' : undefined}>
@@ -888,9 +950,21 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, collection, onC
             <td>{formatNumber(row.repetitions)}</td>
             <td>{formatDuration(row.timeoutMs)}</td>
             <td><span className="adversarial-case-table__rules">{row.rules}</span></td>
-            <td><div className="adversarial-case-table__actions">{scenario && index !== undefined ? <><button type="button" aria-expanded={expanded} aria-controls={editorId} onClick={() => onToggle(scenario.id)}>{t(expanded ? 'Close editor' : 'Edit')}</button><IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={() => onDelete(index, scenario)} /></> : row.sourcePath ? <button type="button" onClick={() => onOpenSource(row.sourcePath!)}>{t('Open source')}</button> : null}</div></td>
+            <td><div className="adversarial-case-table__actions">{scenario && index !== undefined ? <><button type="button" aria-expanded={expanded} aria-controls={editorId} onClick={() => onToggle(row.key)}>{t(expanded ? 'Close editor' : 'Edit')}</button><IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={() => onDelete(index, scenario)} /></> : row.sourcePath ? <><button type="button" aria-expanded={expanded} aria-controls={editorId} onClick={() => requestLinkedCase(row)}>{t(expanded ? 'Close editor' : 'Edit')}</button><IconButton type="button" icon="go-to-file" label={t('Open linked source {name}', { name: row.sourceLabel })} onClick={() => onOpenSource(row.sourcePath!)} /></> : null}</div></td>
           </tr>
           {expanded && scenario && index !== undefined && <tr className="adversarial-case-table__editor-row"><td colSpan={8}><div id={editorId}><ScenarioEditor scenario={scenario} index={index} onChange={(value) => onChange(index, value)} onDestructiveChange={(value, label) => onDestructiveChange(index, value, label)} onDelete={() => onDelete(index, scenario)} /></div></td></tr>}
+          {expanded && row.source === 'linked' && row.sourcePath && <tr className="adversarial-case-table__editor-row"><td colSpan={8}><div id={editorId} className="linked-case-editor">
+            <div className="linked-case-editor__notice"><ProductIcon name="link" /><div><strong>{t('Linked {format} case', { format: row.sourcePath.toLocaleLowerCase().endsWith('.csv') ? 'CSV' : 'JSONC' })}</strong><span>{t('Edits are written to this case in {source}. Suite defaults still apply.', { source: linkedSuiteLabel(row.sourcePath) })}</span></div><button type="button" onClick={() => onOpenSource(row.sourcePath!)}>{t('Open source')}</button></div>
+            {linkedPending === 'load' && <div className="linked-case-editor__status" role="status"><ProductIcon name="loading" />{t('Loading this case from disk…')}</div>}
+            {linkedMessage && <div className={`linked-case-editor__status is-${linkedMessage.tone}`} role={linkedMessage.tone === 'error' ? 'alert' : 'status'}><ProductIcon name={linkedMessage.tone === 'error' ? 'error' : linkedMessage.tone === 'success' ? 'check' : 'info'} /><span>{linkedMessage.text}</span>{linkedMessage.tone === 'error' && <button type="button" onClick={() => requestLinkedCase(row, true)}>{t('Reload')}</button>}</div>}
+            {linkedDraft && linkedRevision && <>
+              <ScenarioEditor scenario={linkedDraft} index={10_000 + visible.indexOf(row)} identityReadOnly onChange={setLinkedDraft} onDestructiveChange={(value) => setLinkedDraft(value)} />
+              <div className="linked-case-editor__footer">
+                <span>{trusted ? t(linkedDirty ? 'Unsaved changes in the linked source.' : 'No unsaved linked-source changes.') : t('Trust this workspace to save linked-source changes.')}</span>
+                <div><button type="button" disabled={!linkedDirty || linkedPending === 'save'} onClick={() => { setLinkedDraft(linkedOriginal ? cloneScenario(linkedOriginal) : linkedDraft); setLinkedMessage(undefined); }}>{t('Discard changes')}</button><button type="button" className="primary" disabled={!trusted || !linkedDirty || linkedPending === 'save'} onClick={() => { if (!linkedTarget) return; setLinkedPending('save'); linkedResponseBaseline.current = linkedCaseEditor; setLinkedMessage({ tone: 'info', text: t('Saving and verifying the linked case…') }); post({ type: 'adversarial.case.save', sourcePath: linkedTarget.sourcePath, scenarioId: linkedTarget.scenarioId, expectedRevision: linkedRevision, scenario: linkedDraft }); }}>{linkedPending === 'save' ? t('Saving…') : t('Save linked case')}</button></div>
+              </div>
+            </>}
+          </div></td></tr>}
         </React.Fragment>;
       })}</tbody>
     </table></div>
@@ -998,17 +1072,17 @@ function QualityRubricEditor({ rubric, index, onChange, onDelete }: { rubric: Qu
   </article>;
 }
 
-function ScenarioEditor({ scenario, index, onChange, onDestructiveChange, onDelete }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void; onDestructiveChange: (value: ScenarioDefinition, label: string) => void; onDelete: () => void }): React.JSX.Element {
+function ScenarioEditor({ scenario, index, onChange, onDestructiveChange, onDelete, identityReadOnly = false }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void; onDestructiveChange: (value: ScenarioDefinition, label: string) => void; onDelete?: () => void; identityReadOnly?: boolean }): React.JSX.Element {
   const addStep = () => {
     const ordinal = scenario.steps.length + 1;
     const id = uniqueId(new Set(scenario.steps.map((step) => step.id)), `step-${ordinal}`);
     onChange({ ...scenario, steps: [...scenario.steps, { id, name: t('Message {number}', { number: formatNumber(ordinal) }), input: '', ...(scenario.adversarial ? {} : { assertions: [{ path: 'turn.state', operator: 'equals' as const, value: 'completed' }] }) }], ...(scenario.adversarial ? { adversarial: { ...scenario.adversarial, mode: 'multiTurn', maxTurns: Math.max(scenario.adversarial.maxTurns ?? 1, ordinal) } } : {}) });
   };
   return <article className="scenario-editor" aria-labelledby={`scenario-editor-title-${index}`}>
-    <header className="scenario-editor__header"><div><strong id={`scenario-editor-title-${index}`}>{scenario.name || scenario.id}</strong><code>{scenario.id}</code></div><div><IconButton type="button" icon="add" label={t('Add step to {name}', { name: scenario.name || scenario.id })} onClick={addStep} /><IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={onDelete} /></div></header>
+    <header className="scenario-editor__header"><div><strong id={`scenario-editor-title-${index}`}>{scenario.name || scenario.id}</strong><code>{scenario.id}</code></div><div><IconButton type="button" icon="add" label={t('Add step to {name}', { name: scenario.name || scenario.id })} onClick={addStep} />{onDelete && <IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={onDelete} />}</div></header>
     <div className="settings-form-grid scenario-editor__identity">
       <SettingField label={t('Scenario name')} id={`scenario-name-${index}`}><PatchInput id={`scenario-name-${index}`} value={scenario.name} onCommit={(value) => onChange({ ...scenario, name: value })} required /></SettingField>
-      <SettingField label={t('Scenario ID')} id={`scenario-id-${index}`} hint={t('Lowercase letters, numbers, and hyphens.')}><PatchInput id={`scenario-id-${index}`} value={scenario.id} onCommit={(value) => onChange({ ...scenario, id: value })} required spellCheck={false} /></SettingField>
+      <SettingField label={t('Scenario ID')} id={`scenario-id-${index}`} hint={t(identityReadOnly ? 'The linked case ID remains stable; edit it in the source file if needed.' : 'Lowercase letters, numbers, and hyphens.')}><PatchInput id={`scenario-id-${index}`} value={scenario.id} onCommit={(value) => onChange({ ...scenario, id: value })} required readOnly={identityReadOnly} spellCheck={false} /></SettingField>
       <SettingField label={t('Description')} id={`scenario-description-${index}`} wide><PatchInput id={`scenario-description-${index}`} value={scenario.description ?? ''} onCommit={(value) => onChange({ ...scenario, description: value || undefined })} multiline rows={2} /></SettingField>
       {scenario.adversarial && <ListPatchField label={t('Tags')} id={`scenario-tags-${index}`} value={scenario.tags ?? []} placeholder={t('One tag per line')} onCommit={(tags) => onChange({ ...scenario, tags: tags.length ? tags : undefined })} wide />}
       <JsonPatchField label={t('Scenario controls (JSON)')} id={`scenario-controls-${index}`} value={scenario.controls ?? {}} hint={t('Applied only to this test run. Secret controls are not accepted.')} onCommit={(value) => onChange({ ...scenario, controls: isRecord(value) && Object.keys(value).length ? value : undefined })} />
@@ -1220,7 +1294,7 @@ function SettingCheckbox({ id, label, checked, onChange }: { id: string; label: 
   return <label className="settings-checkbox" htmlFor={id}><input id={id} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>;
 }
 
-function PatchInput({ id, value, onCommit, multiline = false, rows = 3, ...props }: { id: string; value: string; onCommit: (value: string) => void; multiline?: boolean; rows?: number; disabled?: boolean; placeholder?: string; required?: boolean; spellCheck?: boolean; autoComplete?: string; type?: React.HTMLInputTypeAttribute; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'] }): React.JSX.Element {
+function PatchInput({ id, value, onCommit, multiline = false, rows = 3, ...props }: { id: string; value: string; onCommit: (value: string) => void; multiline?: boolean; rows?: number; disabled?: boolean; readOnly?: boolean; placeholder?: string; required?: boolean; spellCheck?: boolean; autoComplete?: string; type?: React.HTMLInputTypeAttribute; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'] }): React.JSX.Element {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const commit = () => { if (draft !== value) onCommit(draft); };
@@ -1264,8 +1338,7 @@ function ListPatchInput({ id, value, placeholder, onCommit }: { id: string; valu
 }
 
 function JsonPreview({ value, label }: { value: unknown; label: string }): React.JSX.Element {
-  const text = stringifyJson(value);
-  return <div className="settings-preview"><div className="settings-preview-heading"><span>{label}</span><ClipboardButton text={text} label={t('Copy')} /></div><pre><code>{text}</code></pre></div>;
+  return <div className="settings-preview"><div className="settings-preview-heading"><span>{label}</span></div><JsonViewer value={value} copyLabel={t('Copy')} /></div>;
 }
 
 function StatusItem({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'warning' }): React.JSX.Element {

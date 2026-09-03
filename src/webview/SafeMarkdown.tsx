@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { IconButton } from './Icon';
+import { JsonSyntax } from './JsonViewer';
 import './safeMarkdown.css';
 
 /**
@@ -257,13 +258,14 @@ function SafeCodeBlock({ code, language, onCopyCode, copyLabel }: { code: string
     }
   };
   const languageClass = language ? ` language-${language}` : '';
+  const jsonLanguage = language?.toLocaleLowerCase() === 'json' || language?.toLocaleLowerCase() === 'jsonc';
   const label = state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed. Try again.' : copyLabel;
   return <div className="safe-markdown__code-block">
     <div className="safe-markdown__code-toolbar">
       {language && <span className="safe-markdown__language">{language}</span>}
       <IconButton icon={state === 'copied' ? 'check' : state === 'failed' ? 'warning' : 'copy'} label={label} type="button" onClick={() => { void copy(); }} />
     </div>
-    <pre><code className={languageClass.trim() || undefined}>{code}</code></pre>
+    <pre className={jsonLanguage ? 'json' : undefined}><code className={languageClass.trim() || undefined}>{jsonLanguage ? <JsonSyntax text={code} /> : code}</code></pre>
     <span className={state === 'failed' ? 'safe-markdown__copy-feedback' : 'safe-markdown__copy-status'} role="status" aria-live="polite" aria-atomic="true">{state === 'idle' ? '' : label}</span>
   </div>;
 }

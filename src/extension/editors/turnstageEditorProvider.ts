@@ -29,6 +29,7 @@ import type { ScenarioTestController } from '../testing/scenarioTestController';
 import { parseAdversarialJsonl, serializeAdversarialJsonl, serializeCampaignResultsJsonl } from '../testing/adversarialJsonl';
 import { ExternalAdversarialSuiteRepository, isExternalAdversarialSuiteReference } from '../testing/externalAdversarialSuite';
 import { loadLinkedAdversarialCaseCatalog } from '../testing/adversarialCatalog';
+import { LinkedAdversarialCaseConflictError, loadEditableLinkedAdversarialCase, saveEditableLinkedAdversarialCase } from '../testing/linkedAdversarialCase';
 import { SessionDeltaTracker } from '../../shared/sessionDelta';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
@@ -52,6 +53,8 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private readonly campaignPosters = new Map<string, Set<(dashboard: CampaignDashboardV1) => Thenable<boolean>>>();
   private readonly activeCampaignRuns = new Map<string, { campaignId: string; cancellation: vscode.CancellationTokenSource }>();
   private readonly pendingCampaignRuns = new Set<Promise<unknown>>();
+  private readonly pendingLinkedCaseWrites = new Set<Promise<unknown>>();
+  private linkedCaseWriteChain = Promise.resolve();
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
   private readonly latestTestOperations = new Map<string, TestOperationSnapshot>();
   constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel, private readonly environments = new EnvironmentRepository(context.globalStorageUri), visualRegression?: VisualRegressionService, private readonly scenarioTests?: ScenarioTestController) { this.runs = new LocalRunRepository(context, output); this.secrets = new SecretService(context); this.visualRegression = visualRegression ?? new VisualRegressionService(context); this.externalAdversarialSuites = new ExternalAdversarialSuiteRepository(context); }
@@ -275,6 +278,46 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         if (message.type === 'profile.patch') { await this.patchDocument(document, message.path, message.value); return; }
         if (message.type === 'testExplorer.open') { await vscode.commands.executeCommand('workbench.view.testing.focus'); return; }
         if (message.type === 'adversarial.catalog.request') { await postAdversarialCatalog(message.force === true, message.requestId); return; }
+        if (message.type === 'adversarial.case.request') {
+          const profile = this.codec.parse(document.getText()).profile;
+          if (!profile) throw new Error(localize('Profile could not be parsed.'));
+          if (!canOpenLinkedAdversarialSuite(profile, message.sourcePath)) { await post({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Only a safe suite linked by this Profile can be opened.'), conflict: false }, message.requestId); return; }
+          try {
+            const detail = await loadEditableLinkedAdversarialCase(document.uri, message.sourcePath, message.scenarioId, (reference) => this.externalAdversarialSuites.resolve(document.uri, reference));
+            await post({ type: 'adversarial.case.loaded', detail }, message.requestId);
+          } catch (error) {
+            await post({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: boundedEditorMessage(error), conflict: error instanceof LinkedAdversarialCaseConflictError }, message.requestId);
+          }
+          return;
+        }
+        if (message.type === 'adversarial.case.save') {
+          if (!vscode.workspace.isTrusted) { await post({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Saving a linked suite requires a trusted workspace.'), conflict: false }, message.requestId); return; }
+          const profile = this.codec.parse(document.getText()).profile;
+          if (!profile) throw new Error(localize('Profile could not be parsed.'));
+          if (!canOpenLinkedAdversarialSuite(profile, message.sourcePath)) { await post({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Only a safe suite linked by this Profile can be edited.'), conflict: false }, message.requestId); return; }
+          const execution = this.linkedCaseWriteChain.then(() => saveEditableLinkedAdversarialCase({
+            profileUri: document.uri,
+            sourcePath: message.sourcePath,
+            scenarioId: message.scenarioId,
+            expectedRevision: message.expectedRevision,
+            scenario: message.scenario,
+            resolveExternal: (reference) => this.externalAdversarialSuites.resolve(document.uri, reference),
+          }));
+          this.linkedCaseWriteChain = execution.then(() => undefined, () => undefined);
+          this.pendingLinkedCaseWrites.add(execution);
+          try {
+            const detail = await execution;
+            catalogCache = undefined;
+            await post({ type: 'adversarial.case.saved', detail }, message.requestId);
+            await postAdversarialCatalog(true);
+          } catch (error) {
+            logAt(this.output, 'error', () => `[linked-case] save type=${error instanceof Error ? error.name : 'Error'}`);
+            await post({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: boundedEditorMessage(error), conflict: error instanceof LinkedAdversarialCaseConflictError }, message.requestId);
+          } finally {
+            this.pendingLinkedCaseWrites.delete(execution);
+          }
+          return;
+        }
         if (message.type === 'adversarial.file') {
           if (!vscode.workspace.isTrusted) throw new Error(localize('This action requires a trusted workspace. Profile editing and fixture replay remain available.'));
           const operation = await this.handleAdversarialFile(document, message.action);
@@ -602,7 +645,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   getController(uri?: vscode.Uri): SessionController | undefined { return uri ? this.controllers.get(uri.toString()) : [...this.controllers.values()].at(-1); }
   async drainPending(): Promise<void> {
     for (const active of this.activeCampaignRuns.values()) active.cancellation.cancel();
-    await Promise.allSettled([...this.pendingCampaignRuns, ...this.pendingDisposals, ...[...this.controllers.values()].map((controller) => controller.disposeAndWait())]);
+    await Promise.allSettled([...this.pendingCampaignRuns, ...this.pendingLinkedCaseWrites, ...this.pendingDisposals, ...[...this.controllers.values()].map((controller) => controller.disposeAndWait())]);
   }
   async waitForController(uri: vscode.Uri, timeoutMs = 5000): Promise<SessionController | undefined> {
     const deadline = Date.now() + timeoutMs;
@@ -954,6 +997,10 @@ function formatStorageBytes(value: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 }
 function isDisposedWebviewError(error: unknown): boolean { return error instanceof Error && error.message.includes('Webview is disposed'); }
+function boundedEditorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return Array.from(message, (character) => { const code = character.charCodeAt(0); return code <= 31 || code === 127 ? ' ' : character; }).join('').slice(0, 4096);
+}
 async function readBoundedTextFile(uri: vscode.Uri): Promise<string> {
   if ((await vscode.workspace.fs.stat(uri)).size > 5 * 1024 * 1024) throw new Error(localize('Adversarial import files cannot exceed 5 MB.'));
   const bytes = await vscode.workspace.fs.readFile(uri);

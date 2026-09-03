@@ -79,6 +79,7 @@ describe('Extension host editor lifecycle', () => {
     expect(activateSource).toContain('await editor?.drainPending()');
     expect(editorSource).toContain('controller.disposeAndWait()');
     expect(editorSource).toContain('async drainPending(): Promise<void>');
+    expect(editorSource).toContain('...this.pendingLinkedCaseWrites');
   });
 
   it('opens the native VS Code walkthrough from the usage-guide command', () => {

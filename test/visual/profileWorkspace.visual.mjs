@@ -132,6 +132,15 @@ try {
 
   await page.goto(url);
   await waitForProfile();
+  const viewportToolbar = page.locator('.mobile-chat-preview__viewport-toolbar');
+  const viewportSettings = page.locator('.mobile-chat-preview__viewport-settings');
+  assert.equal(await viewportSettings.getAttribute('open'), null, 'Preview size controls must start collapsed to preserve toolbar space');
+  assert.equal(await viewportToolbar.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'Collapsed preview controls must keep every toolbar action visible without horizontal scrolling');
+  await viewportSettings.locator('summary').click();
+  assert.equal(await viewportSettings.getAttribute('open'), '', 'Preview size settings must expand on demand');
+  assert.equal(await viewportSettings.getByRole('combobox', { name: 'Viewport preset' }).count(), 1, 'Expanded preview settings must retain preset selection');
+  await viewportToolbar.screenshot({ path: resolve(artifactDirectory, 'preview-size-settings-dark.png') });
+  await viewportSettings.locator('summary').click();
   const iconButtons = page.locator('.icon-button');
   for (let index = 0; index < await iconButtons.count(); index += 1) {
     const button = iconButtons.nth(index);
@@ -386,7 +395,20 @@ try {
   await page.getByText('1 of 31 cases', { exact: true }).waitFor();
   assert.equal(await page.getByText('1 of 31 cases', { exact: true }).count(), 1, 'Case search must narrow the full unified catalog');
   assert.equal(await adversarialCaseTable.locator('tbody > tr').count(), 1, 'A filtered catalog must mount only matching rows');
-  await adversarialCaseTable.getByRole('button', { name: 'Open source' }).click();
+  await adversarialCaseTable.getByRole('button', { name: 'Edit', exact: true }).click();
+  const linkedCaseEditor = page.locator('.linked-case-editor');
+  await linkedCaseEditor.getByLabel('Scenario name').waitFor();
+  assert.equal(await linkedCaseEditor.getByLabel('Scenario ID').isEditable(), false, 'Linked case identity must remain stable in the bounded UI editor');
+  assert.equal(await linkedCaseEditor.locator('.scenario-step').count(), 1, 'Linked case editor must load only the selected case from disk');
+  await linkedCaseEditor.getByLabel('Scenario name').fill('Linked case 30 edited');
+  await linkedCaseEditor.getByLabel('Scenario name').press('Tab');
+  await linkedCaseEditor.getByRole('button', { name: 'Save linked case' }).waitFor({ state: 'visible' });
+  assert.equal(await linkedCaseEditor.getByRole('button', { name: 'Save linked case' }).isEnabled(), true, 'Linked case save must become available after a structured edit');
+  await linkedCaseEditor.getByRole('button', { name: 'Save linked case' }).click();
+  await linkedCaseEditor.getByText('Linked case saved and verified from disk.').waitFor();
+  assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'adversarial.case.save'))).scenario.name, 'Linked case 30 edited', 'Linked editor must save the structured case with its source revision');
+  await linkedCaseEditor.screenshot({ path: resolve(artifactDirectory, 'linked-case-editor-dark.png') });
+  await linkedCaseEditor.getByRole('button', { name: 'Open source' }).click();
   assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'adversarial.openLinkedSuite'))).path, '.vscode/turnstage/tests/security-regression.adversarial.csv', 'Linked catalog rows must open their exact source');
   await page.locator('.adversarial-case-collection').screenshot({ path: resolve(artifactDirectory, 'adversarial-case-catalog-search-dark.png') });
   await page.getByRole('searchbox', { name: 'Search adversarial cases' }).fill('');
@@ -402,7 +424,7 @@ try {
   await runningCampaign.screenshot({ path: resolve(artifactDirectory, 'campaign-running-dark.png') });
   await runningPage.close();
   assert.equal(await page.getByRole('table').count(), 1, 'Red Team must present case settings in a compact table');
-  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).first().click();
   assert.equal(await page.locator('.adversarial-case-editor').count(), 1, 'Adversarial configuration must expose its bounded case editor');
   assert.equal(await page.locator('.scenario-step').count(), 2, 'The expanded adversarial row must expose both configured turns');
   assert.equal(await page.getByRole('spinbutton', { name: 'Repetitions', exact: true }).inputValue(), '5', 'Adversarial configuration must expose the case repetition count');
@@ -534,7 +556,7 @@ try {
   const wideChatWidth = await page.locator('.preview-pane').evaluate((element) => element.getBoundingClientRect().width);
   assert.ok(wideChatWidth > 700, 'Wide Chat must use the available pane width');
   assert.equal(await page.locator('.mobile-chat-preview__device').evaluate((element) => getComputedStyle(element).transform), 'none', 'Responsive Chat must never scale the rendered UI');
-  assert.equal(await page.getByRole('combobox', { name: 'Viewport preset' }).inputValue(), 'responsive', 'Device toolbar defaults to Responsive');
+  assert.equal(await page.locator('[aria-label="Viewport preset"]').inputValue(), 'responsive', 'Device toolbar defaults to Responsive');
   assert.equal(await page.locator('[data-viewport-mode="responsive"]').count(), 1, 'Responsive mode must fill the Chat pane');
   assert.ok((await page.getByRole('group', { name: 'Session status and actions' }).innerText()).includes('Ready'), 'Wide Chat keeps session context in the preview toolbar');
   await page.screenshot({ path: resolve(artifactDirectory, 'responsive-wide-chat-dark.png'), fullPage: true });
@@ -543,22 +565,24 @@ try {
   await waitForProfile();
   const narrowChatWidth = await page.locator('.preview-pane').evaluate((element) => element.getBoundingClientRect().width);
   assert.ok(narrowChatWidth <= 430, 'Narrow Chat must be driven by pane width');
-  assert.ok((await page.getByRole('group', { name: 'Session status and actions' }).innerText()).includes('Ready'), 'Narrow Chat keeps session context available in the horizontally scrollable toolbar');
+  assert.ok((await page.getByRole('group', { name: 'Session status and actions' }).innerText()).includes('Ready'), 'Narrow Chat keeps session context available beside the collapsed preview settings');
+  assert.equal(await page.locator('.mobile-chat-preview__viewport-toolbar').evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'Narrow Chat toolbar must not require horizontal scrolling');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, 'Narrow Chat and Debug split must not overflow horizontally');
   await page.screenshot({ path: resolve(artifactDirectory, 'responsive-narrow-chat-dark.png'), fullPage: true });
 
   await page.goto(`${url}?device=mobile-m`);
   await waitForProfile();
-  assert.equal(await page.getByRole('combobox', { name: 'Viewport preset' }).inputValue(), 'mobile-m');
-  assert.equal(await page.getByRole('spinbutton', { name: 'Viewport width' }).inputValue(), '375');
-  assert.equal(await page.getByRole('spinbutton', { name: 'Viewport height' }).inputValue(), '667');
+  assert.equal(await page.locator('[aria-label="Viewport preset"]').inputValue(), 'mobile-m');
+  assert.equal(await page.locator('[aria-label="Viewport width"]').inputValue(), '375');
+  assert.equal(await page.locator('[aria-label="Viewport height"]').inputValue(), '667');
   assert.equal(await page.locator('[data-viewport-mode="fixed"]').count(), 1, 'A device preset uses a fixed logical viewport');
   assert.equal(await page.locator('[data-viewport-width="375"]').count(), 1, 'The Chat container receives the preset CSS width');
   assert.equal(await page.locator('.mobile-chat-preview__safe-area').count(), 0, 'Device emulation does not add fake phone chrome');
+  await page.locator('.mobile-chat-preview__viewport-settings > summary').click();
   await page.getByRole('button', { name: 'Rotate viewport' }).click();
-  assert.equal(await page.getByRole('combobox', { name: 'Viewport preset' }).inputValue(), 'custom');
-  assert.equal(await page.getByRole('spinbutton', { name: 'Viewport width' }).inputValue(), '667');
-  assert.equal(await page.getByRole('spinbutton', { name: 'Viewport height' }).inputValue(), '375');
+  assert.equal(await page.locator('[aria-label="Viewport preset"]').inputValue(), 'custom');
+  assert.equal(await page.locator('[aria-label="Viewport width"]').inputValue(), '667');
+  assert.equal(await page.locator('[aria-label="Viewport height"]').inputValue(), '375');
   await page.screenshot({ path: resolve(artifactDirectory, 'device-toolbar-mobile-landscape-dark.png'), fullPage: true });
 
   await page.selectOption('[aria-label="Viewport preset"]', 'laptop-l');
@@ -651,7 +675,7 @@ try {
   await page.getByRole('tab', { name: 'Red Team' }).click();
   await page.getByRole('tab', { name: /Cases:/ }).click();
   const adversarialTable = page.locator('.adversarial-case-table');
-  await adversarialTable.getByRole('button', { name: 'Edit', exact: true }).click();
+  await adversarialTable.getByRole('button', { name: 'Edit', exact: true }).first().click();
   await adversarialTable.getByRole('button', { name: 'Close editor', exact: true }).waitFor();
   const appliedRedTeamScroll = await page.locator('.red-team-workspace .settings-main').evaluate((element) => { element.scrollTop = Math.min(560, element.scrollHeight - element.clientHeight); element.dispatchEvent(new globalThis.Event('scroll', { bubbles: true })); return element.scrollTop; });
   assert.ok(appliedRedTeamScroll > 0, 'The representative Red Team viewport must have a real reading position to restore');

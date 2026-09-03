@@ -4,6 +4,7 @@ import type { MappingRule, MessageTagRule, RawStreamEvent, RequestVariant, TurnS
 import { formatNumber, localizeHumanized, t } from './i18n';
 import { IconButton } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
+import { JsonSyntax } from './JsonViewer';
 import { DEFAULT_MESSAGE_ACTIONS, resolveMessageActionVisibility, resolveStreaming, type MessageActionId } from './uiConfig';
 
 type Post = (message: WebviewPayload) => void;
@@ -458,7 +459,7 @@ function JsonPatchEditor({ ariaLabel, value, onCommit, disabled = false }: { ari
     {error && <p id={errorId} className="field-error" role="alert">{error}</p>}
   </div>;
 }
-function JsonPreview({ value }: { value: unknown }): React.JSX.Element { const text = JSON.stringify(value, null, 2); return <pre className="json sample-json"><code>{text}</code><ClipboardButton text={text} label={t('Copy normalized JSON')} /></pre>; }
+function JsonPreview({ value }: { value: unknown }): React.JSX.Element { const text = JSON.stringify(value, null, 2) ?? ''; return <pre className="json sample-json"><code><JsonSyntax text={text} /></code><ClipboardButton text={text} label={t('Copy normalized JSON')} /></pre>; }
 function parseList(value: string): string[] { return [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))]; }
 function formatValue(value: unknown): string { if (value === undefined) return ''; return typeof value === 'string' ? value : JSON.stringify(value); }
 function parseLooseValue(value: string): unknown { if (!value.trim()) return undefined; try { return JSON.parse(value); } catch { return value; } }

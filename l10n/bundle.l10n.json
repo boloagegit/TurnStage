@@ -605,6 +605,8 @@
   "A TurnStage test run is already active.": "A TurnStage test run is already active.",
   "No active TurnStage test run is available to stop.": "No active TurnStage test run is available to stop.",
   "Only a safe suite linked by this Profile can be opened.": "Only a safe suite linked by this Profile can be opened.",
+  "Only a safe suite linked by this Profile can be edited.": "Only a safe suite linked by this Profile can be edited.",
+  "Saving a linked suite requires a trusted workspace.": "Saving a linked suite requires a trusted workspace.",
   "Test runtime is unavailable.": "Test runtime is unavailable.",
   "The linked suite cannot be resolved because this Profile is not inside a workspace folder.": "The linked suite cannot be resolved because this Profile is not inside a workspace folder.",
   "Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .adversarial.json, or .csv path.": "Adversarial suite path must be a safe workspace-relative .adversarial.jsonc, .adversarial.json, or .csv path.",

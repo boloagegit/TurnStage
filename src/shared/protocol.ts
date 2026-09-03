@@ -1,4 +1,4 @@
-import type { AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioEvidenceLocation, SessionDelta, SessionSnapshot, TurnStageProfile } from './types';
+import type { AdversarialResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, SessionDelta, SessionSnapshot, TurnStageProfile } from './types';
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -74,6 +74,12 @@ export interface AdversarialCaseCatalog {
   truncated: boolean;
   issues: Array<{ sourcePath: string; message: string }>;
 }
+export interface LinkedAdversarialCaseDetail {
+  sourcePath: string;
+  sourceFormat: 'csv' | 'jsonc';
+  revision: string;
+  scenario: ScenarioDefinition;
+}
 
 export type WebviewMessage = Envelope & (
   | { type: 'webview.ready' }
@@ -113,6 +119,8 @@ export type WebviewMessage = Envelope & (
   | { type: 'adversarial.file'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkSuite' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate' }
   | { type: 'adversarial.openLinkedSuite'; path: string }
   | { type: 'adversarial.catalog.request'; force?: boolean }
+  | { type: 'adversarial.case.request'; sourcePath: string; scenarioId: string }
+  | { type: 'adversarial.case.save'; sourcePath: string; scenarioId: string; expectedRevision: string; scenario: ScenarioDefinition }
   | { type: 'test.runAll' }
   | { type: 'test.rerun'; status: 'failed' | 'unstable' | 'incomplete' }
   | { type: 'test.cancel' }
@@ -156,6 +164,9 @@ export type HostMessage = Envelope & (
   | { type: 'run.history.changed'; deletedCount: number; deletedBytes: number }
   | { type: 'adversarial.operation'; action: 'importCsv' | 'importJsonc' | 'importJsonl' | 'linkSuite' | 'linkJsonc' | 'exportCsv' | 'exportJsonc' | 'exportJsonl' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string; artifactId?: string }
   | { type: 'adversarial.catalog'; catalog: AdversarialCaseCatalog }
+  | { type: 'adversarial.case.loaded'; detail: LinkedAdversarialCaseDetail }
+  | { type: 'adversarial.case.saved'; detail: LinkedAdversarialCaseDetail }
+  | { type: 'adversarial.case.error'; sourcePath: string; scenarioId: string; message: string; conflict: boolean }
   | { type: 'test.operation'; operation: TestOperationSnapshot }
   | { type: 'test.results'; results: AdversarialResultSummary[] }
   | { type: 'campaign.dashboard'; dashboard: CampaignDashboardV1 }
@@ -247,6 +258,8 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
     case 'adversarial.catalog.request': return message.force === undefined || typeof message.force === 'boolean';
     case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
     case 'adversarial.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
+    case 'adversarial.case.request': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId);
+    case 'adversarial.case.save': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId) && isRevision(message.expectedRevision) && isRecord(message.scenario) && isStructuredValue(message.scenario, MAX_HOST_VALUE_NODES);
     case 'test.rerun': return ['failed', 'unstable', 'incomplete'].includes(String(message.status));
     case 'test.timeline.open': return isBoundedString(message.evidenceId);
     case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
@@ -299,6 +312,8 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'run.history.changed': return Number.isInteger(message.deletedCount) && Number(message.deletedCount) >= 0 && Number(message.deletedCount) <= 100 && Number.isSafeInteger(message.deletedBytes) && Number(message.deletedBytes) >= 0 && Number(message.deletedBytes) <= 100 * 1024 * 1024;
     case 'adversarial.operation': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path) && optionalBoundedString(message.artifactId);
     case 'adversarial.catalog': return isAdversarialCaseCatalog(message.catalog);
+    case 'adversarial.case.loaded': case 'adversarial.case.saved': return isLinkedAdversarialCaseDetail(message.detail);
+    case 'adversarial.case.error': return isBoundedString(message.sourcePath, 4096) && isBoundedId(message.scenarioId) && isBoundedString(message.message, 4096) && typeof message.conflict === 'boolean';
     case 'test.operation': return isRecord(message.operation)
       && ['runAll', 'rerunFailed', 'rerunUnstable', 'rerunIncomplete'].includes(String(message.operation.action))
       && ['running', 'cancelling', 'completed', 'cancelled', 'failed'].includes(String(message.operation.state))
@@ -331,6 +346,16 @@ function isAdversarialCaseCatalog(value: unknown): boolean {
     && boundedNonNegativeInteger(entry.timeoutMs, 300_000) && Number(entry.timeoutMs) >= 1_000
     && isAdversarialProhibitSummary(entry.prohibit));
 }
+
+function isLinkedAdversarialCaseDetail(value: unknown): boolean {
+  return isRecord(value)
+    && isBoundedString(value.sourcePath, 4096) && Boolean(value.sourcePath.trim())
+    && (value.sourceFormat === 'csv' || value.sourceFormat === 'jsonc')
+    && isRevision(value.revision)
+    && isRecord(value.scenario) && isStructuredValue(value.scenario, MAX_HOST_VALUE_NODES);
+}
+
+function isRevision(value: unknown): value is string { return typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value); }
 
 function isSessionDelta(value: unknown): boolean {
   if (!isRecord(value) || !isBoundedId(value.baseSessionId) || !isRecord(value.core) || value.core.sessionId !== value.baseSessionId || !isStructuredValue(value.core, MAX_HOST_VALUE_NODES)) return false;
