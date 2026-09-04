@@ -44,6 +44,10 @@ describe('Profile Configuration surface', () => {
     expect(workspaceStyles).toContain('grid-template-columns: 1fr');
   });
 
+  it('keeps restored section positions stable while asynchronous case detail mounts', () => {
+    expect(workspaceStyles).toContain('.settings-main { min-height: 0; overflow-x: clip; overflow-y: auto; overflow-anchor: none; }');
+  });
+
   it('provides a bounded scenario builder through one supported JSONC patch path', () => {
     expect(workspaceSource).toContain("active.id === 'scenario-tests'");
     expect(workspaceSource).toContain("patch(['tests', 'scenarios'], next)");

@@ -12,6 +12,8 @@
   Marketplace publishing credential.
 - Reduced the published VSIX surface by excluding design sources and internal
   review documents that are not required at runtime.
+- Stabilized restored Tests, Red Team, and Configure reading positions while
+  asynchronous case details mount across supported browser platforms.
 
 ## 0.23.3
 
