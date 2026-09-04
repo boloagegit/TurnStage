@@ -1610,13 +1610,13 @@
     "vscode:prepublish": "npm run compile"
   },
   "dependencies": {
-    "@vscode/codicons": "^0.0.36",
+    "@vscode/codicons": "^0.0.45",
     "html-to-image": "1.11.13",
     "jsonc-parser": "^3.3.1",
     "pngjs": "^7.0.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "undici": "^7.29.0"
+    "undici": "^8.10.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",
