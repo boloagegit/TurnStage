@@ -87,10 +87,12 @@ describe('Marketplace and GitHub readiness', () => {
       expect(gitIgnore).toContain(pattern);
     }
 
-    const sourceFiles = [
-      ...read('test/copilotQuality.test.ts').matchAll(/(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]{20,}/gu),
+    const secretShapedFixtures = [
+      ...read('test/copilotQuality.test.ts').matchAll(
+        /(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AIzaSy[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{16,})/gu,
+      ),
     ];
-    expect(sourceFiles).toHaveLength(0);
+    expect(secretShapedFixtures).toHaveLength(0);
   });
 
   it('uses pinned GitHub Actions with least-privilege default permissions', () => {

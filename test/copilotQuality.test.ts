@@ -24,10 +24,10 @@ describe('Copilot advisory quality policy', () => {
       'See https://example.com/help for details.',
       'token=abcd',
       ['github', 'pat', '11abcdefghijklmnopqrstuv'].join('_'),
-      'AIzaSyAbcdefghijklmnopqrstuvwx',
+      ['AIzaSy', 'Abcdefghijklmnopqrstuvwx'].join(''),
       ['ghp', '123456789012345678901234'].join('_'),
-      'sk-1234567890abcdefghijkl',
-      'xoxb-1234567890abcdef',
+      ['sk', '1234567890abcdefghijkl'].join('-'),
+      ['xoxb', '1234567890abcdef'].join('-'),
     ];
     for (const response of unsafeResponses) {
       expect(() => createQualityDisclosureGrant({ evidenceIds: ['e'], attempts: [{ attemptId: 'a', response }] })).toThrow();
