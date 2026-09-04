@@ -4,7 +4,7 @@ import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '..');
-const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
+const read = (path: string) => readFileSync(resolve(root, path), 'utf8').replace(/\r\n?/gu, '\n');
 const manifest = JSON.parse(read('package.json')) as Record<string, unknown>;
 
 describe('Marketplace and GitHub readiness', () => {

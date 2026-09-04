@@ -6,8 +6,8 @@ import { ACCESSIBLE_EVENT_WINDOW_SIZE, accessibleEventWindowStart, getRovingInde
 const root = resolve(import.meta.dirname, '..');
 const mainSource = readFileSync(resolve(root, 'src/webview/main.tsx'), 'utf8');
 const mobileSource = readFileSync(resolve(root, 'src/webview/MobileChatPreview.tsx'), 'utf8');
-const mobileStyles = readFileSync(resolve(root, 'src/webview/mobileChatPreview.css'), 'utf8');
-const baseStyles = readFileSync(resolve(root, 'src/webview/styles.css'), 'utf8');
+const mobileStyles = readFileSync(resolve(root, 'src/webview/mobileChatPreview.css'), 'utf8').replace(/\r\n?/gu, '\n');
+const baseStyles = readFileSync(resolve(root, 'src/webview/styles.css'), 'utf8').replace(/\r\n?/gu, '\n');
 const iconSource = readFileSync(resolve(root, 'src/webview/Icon.tsx'), 'utf8');
 
 describe('Inspector keyboard helpers', () => {
