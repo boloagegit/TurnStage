@@ -37,6 +37,23 @@ export const RED_TEAM_SECTIONS = ['results', 'cases', 'campaigns', 'timeline'] a
 export type RedTeamSectionId = typeof RED_TEAM_SECTIONS[number];
 export const AUTOMATION_SECTIONS = ['results', 'scenarios', 'campaigns'] as const;
 export type AutomationSectionId = typeof AUTOMATION_SECTIONS[number];
+interface EvaluationSectionTab<Section extends string> { id: Section; label: string; value: string }
+
+function EvaluationSectionTabs<Section extends string>({ label, className = '', idPrefix, sections, activeSection, onSelect }: { label: string; className?: string; idPrefix: string; sections: readonly EvaluationSectionTab<Section>[]; activeSection: Section; onSelect: (section: Section) => void }): React.JSX.Element {
+  const selectFromKeyboard = (event: React.KeyboardEvent<HTMLButtonElement>, section: Section) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const currentIndex = sections.findIndex((item) => item.id === section);
+    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? sections.length - 1 : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + sections.length) % sections.length;
+    const next = sections[nextIndex];
+    if (!next) return;
+    onSelect(next.id);
+    requestAnimationFrame(() => document.getElementById(`${idPrefix}-${next.id}-tab`)?.focus());
+  };
+  return <nav className={`red-team-section-nav ${className}`.trim()} aria-label={label} role="tablist">
+    {sections.map((section) => <button id={`${idPrefix}-${section.id}-tab`} key={section.id} type="button" role="tab" tabIndex={activeSection === section.id ? 0 : -1} aria-controls={`${idPrefix}-${section.id}`} aria-label={`${section.label}: ${section.value}`} aria-selected={activeSection === section.id} onClick={() => onSelect(section.id)} onKeyDown={(event) => selectFromKeyboard(event, section.id)}><span>{section.label}</span><strong>{section.value}</strong></button>)}
+  </nav>;
+}
 export type AdversarialResultOutcomeFilter = 'all' | AdversarialResultSummary['outcome'];
 export type AdversarialResultStabilityFilter = 'all' | 'stable-pass' | 'stable-fail' | 'unstable' | 'inconclusive' | 'single-run';
 export interface AdversarialResultCollectionState {
@@ -253,15 +270,11 @@ export function AutomationWorkspace({ profile, post, automationResults = [], cam
     onActiveSectionChange(section);
     requestAnimationFrame(() => document.getElementById(`automation-${section}`)?.focus());
   };
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, section: AutomationSectionId) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    const currentIndex = AUTOMATION_SECTIONS.indexOf(section);
-    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? AUTOMATION_SECTIONS.length - 1 : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + AUTOMATION_SECTIONS.length) % AUTOMATION_SECTIONS.length;
-    const next = AUTOMATION_SECTIONS[nextIndex]!;
-    selectSection(next);
-    requestAnimationFrame(() => document.getElementById(`automation-${next}-tab`)?.focus());
-  };
+  const sections: EvaluationSectionTab<AutomationSectionId>[] = [
+    { id: 'results', label: t('Results'), value: formatNumber(automationResults.length) },
+    { id: 'scenarios', label: t('Cases'), value: formatNumber(scenarioCount) },
+    { id: 'campaigns', label: t('Campaigns'), value: formatNumber(campaignCount) },
+  ];
   return <div className="settings-workspace settings-workspace--embedded red-team-workspace automation-workspace">
     <header className="settings-header settings-header--embedded" aria-label={t('Tests toolbar')}>
       <div className="red-team-title"><strong>{t('Tests')}</strong><span>{t('Functional, regression, comparison, and performance automation.')}</span></div>
@@ -270,9 +283,7 @@ export function AutomationWorkspace({ profile, post, automationResults = [], cam
     <div ref={scrollRef} className="settings-main" onScroll={(event) => onScrollTopChange?.(event.currentTarget.scrollTop)}>
       <section className="settings-panel red-team-panel" aria-labelledby="automation-panel-title" tabIndex={-1}>
         <div className="settings-panel-heading"><div className="settings-panel-title"><h1 id="automation-panel-title">{t('Automated testing')}</h1><p className="settings-section-description">{t('Run deterministic conversation contracts and inspect bounded evidence without mixing them with adversarial outcomes.')}</p></div><span className="settings-section-count">{t('{count} cases', { count: formatNumber(scenarioCount) })}</span></div>
-        <nav className="red-team-section-nav automation-section-nav" aria-label={t('Test sections')} role="tablist">
-          {AUTOMATION_SECTIONS.map((section) => { const label = t(section === 'results' ? 'Results' : section === 'scenarios' ? 'Cases' : 'Campaigns'); const count = section === 'results' ? automationResults.length : section === 'scenarios' ? scenarioCount : campaignCount; return <button id={`automation-${section}-tab`} key={section} type="button" role="tab" tabIndex={activeSection === section ? 0 : -1} aria-controls={`automation-${section}`} aria-label={`${label}: ${formatNumber(count)}`} aria-selected={activeSection === section} onClick={() => selectSection(section)} onKeyDown={(event) => handleKeyDown(event, section)}><span>{label}</span><strong>{formatNumber(count)}</strong></button>; })}
-        </nav>
+        <EvaluationSectionTabs label={t('Test sections')} className="automation-section-nav" idPrefix="automation" sections={sections} activeSection={activeSection} onSelect={selectSection} />
         <ScenarioTestsSection view="contracts" automationSection={activeSection} profile={profile} patch={patch} post={post} testResults={[]} automationResults={automationResults} campaignDashboard={campaignDashboard} testOperation={testOperation} trusted={trusted} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={onSelectedCampaignIdChange} expandedContractCaseId={expandedCaseId} onExpandedContractCaseIdChange={onExpandedCaseIdChange} selectedAutomationResultKey={selectedResultKey} onSelectedAutomationResultKeyChange={onSelectedResultKeyChange} linkedContractCatalog={linkedCaseCatalog} linkedContractEditor={linkedCaseEditor} />
       </section>
     </div>
@@ -314,19 +325,12 @@ export function AdversarialWorkspace({ profile, post, testResults = [], campaign
     onActiveSectionChange(section);
     requestAnimationFrame(() => document.getElementById(`red-team-${section}`)?.focus());
   };
-  const handleSectionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, section: RedTeamSectionId) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    const currentIndex = RED_TEAM_SECTIONS.indexOf(section);
-    const nextIndex = event.key === 'Home'
-      ? 0
-      : event.key === 'End'
-        ? RED_TEAM_SECTIONS.length - 1
-        : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + RED_TEAM_SECTIONS.length) % RED_TEAM_SECTIONS.length;
-    const nextSection = RED_TEAM_SECTIONS[nextIndex]!;
-    selectSection(nextSection);
-    requestAnimationFrame(() => document.getElementById(`red-team-${nextSection}-tab`)?.focus());
-  };
+  const sections: EvaluationSectionTab<RedTeamSectionId>[] = [
+    { id: 'results', label: t('Results'), value: formatNumber(testResults.length) },
+    { id: 'cases', label: t('Cases'), value: formatNumber(inlineCaseCount) },
+    { id: 'campaigns', label: t('Campaigns'), value: formatNumber(campaignCount) },
+    { id: 'timeline', label: t('Timeline'), value: activeEvidenceId ? t('Selected') : '—' },
+  ];
   return <div className="settings-workspace settings-workspace--embedded red-team-workspace">
     <header className="settings-header settings-header--embedded" aria-label={t('Red Team toolbar')}>
       <div className="red-team-title"><strong>{t('Red Team')}</strong><span>{t('Bounded adversarial cases, results, and causal evidence.')}</span></div>
@@ -341,12 +345,7 @@ export function AdversarialWorkspace({ profile, post, testResults = [], campaign
           <div className="settings-panel-title"><h1 id="red-team-panel-title">{t('Adversarial testing')}</h1><p className="settings-section-description">{t('Author known attacks, run bounded samples, and inspect causal evidence without changing formal outcomes.')}</p></div>
           <span className="settings-section-count">{t('{count} inline cases', { count: formatNumber(inlineCaseCount) })}</span>
         </div>
-        <nav className="red-team-section-nav" aria-label={t('Red Team sections')} role="tablist">
-          <button id="red-team-results-tab" type="button" role="tab" tabIndex={activeSection === 'results' ? 0 : -1} aria-controls="red-team-results" aria-label={`${t('Results')}: ${formatNumber(testResults.length)}`} aria-selected={activeSection === 'results'} onClick={() => selectSection('results')} onKeyDown={(event) => handleSectionKeyDown(event, 'results')}><span>{t('Results')}</span><strong>{formatNumber(testResults.length)}</strong></button>
-          <button id="red-team-cases-tab" type="button" role="tab" tabIndex={activeSection === 'cases' ? 0 : -1} aria-controls="red-team-cases" aria-label={`${t('Cases')}: ${formatNumber(inlineCaseCount)}`} aria-selected={activeSection === 'cases'} onClick={() => selectSection('cases')} onKeyDown={(event) => handleSectionKeyDown(event, 'cases')}><span>{t('Cases')}</span><strong>{formatNumber(inlineCaseCount)}</strong></button>
-          <button id="red-team-campaigns-tab" type="button" role="tab" tabIndex={activeSection === 'campaigns' ? 0 : -1} aria-controls="red-team-campaigns" aria-label={`${t('Campaigns')}: ${formatNumber(campaignCount)}`} aria-selected={activeSection === 'campaigns'} onClick={() => selectSection('campaigns')} onKeyDown={(event) => handleSectionKeyDown(event, 'campaigns')}><span>{t('Campaigns')}</span><strong>{formatNumber(campaignCount)}</strong></button>
-          <button id="red-team-timeline-tab" type="button" role="tab" tabIndex={activeSection === 'timeline' ? 0 : -1} aria-controls="red-team-timeline" aria-label={`${t('Timeline')}: ${activeEvidenceId ? t('Selected') : '—'}`} aria-selected={activeSection === 'timeline'} onClick={() => selectSection('timeline')} onKeyDown={(event) => handleSectionKeyDown(event, 'timeline')}><span>{t('Timeline')}</span><strong>{activeEvidenceId ? t('Selected') : '—'}</strong></button>
-        </nav>
+        <EvaluationSectionTabs label={t('Red Team sections')} idPrefix="red-team" sections={sections} activeSection={activeSection} onSelect={selectSection} />
         <ScenarioTestsSection view="adversarial" adversarialSection={activeSection} onAdversarialSectionChange={selectSection} profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={timeline} trusted={trusted} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={onSelectedCampaignIdChange} expandedCaseId={expandedCaseId} onExpandedCaseIdChange={onExpandedCaseIdChange} linkedCaseCatalog={linkedCaseCatalog} linkedCaseEditor={linkedCaseEditor} caseCollection={caseCollection} onCaseCollectionChange={onCaseCollectionChange} resultCollection={resultCollection} onResultCollectionChange={onResultCollectionChange} />
       </section>
     </div>
@@ -730,12 +729,6 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
   }, [automationResults, deferredAutomationResultQuery]);
   const automationResultEntries = useMemo(() => automationResults.map((result, index) => ({ key: automationResultKey(result, index), result })), [automationResults]);
   const selectedAutomationResultEntry = automationResultEntries.find((entry) => entry.key === selectedAutomationResultKey) ?? automationResultEntries[0];
-  const selectedAutomationResult = selectedAutomationResultEntry?.result;
-  const selectedAutomationResultIndex = selectedAutomationResultEntry ? automationResultEntries.indexOf(selectedAutomationResultEntry) : -1;
-  const selectAutomationResultAt = (index: number) => {
-    const entry = automationResultEntries[index];
-    if (entry) setSelectedAutomationResultKey(entry.key);
-  };
   const automationResultPageCount = Math.max(1, Math.ceil(matchingAutomationResults.length / 25));
   const boundedAutomationResultPage = Math.min(automationResultPage, automationResultPageCount - 1);
   const visibleAutomationResults = matchingAutomationResults.slice(boundedAutomationResultPage * 25, (boundedAutomationResultPage + 1) * 25);
@@ -763,26 +756,8 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
   };
   return <div className="settings-section-stack">
     {view === 'contracts' && automationSection === 'results' && <section id="automation-results" className="settings-card red-team-section" role="tabpanel" aria-labelledby="automation-results-tab automation-results-heading" tabIndex={-1}>
-      <div className="settings-card-heading"><div><h2 id="automation-results-heading">{t('Latest test results')}</h2><p className="settings-card-description">{t('Deterministic contract, comparison, and performance outcomes from this Extension Host session.')}</p></div></div>
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="automation-results-heading">{t('Latest test results')}</h2><p className="settings-card-description">{t('Deterministic contract, comparison, and performance outcomes from this Extension Host session.')}</p></div>{automationResults.length > 0 && <details className="adversarial-export-actions"><summary aria-label={t('Export test results')} title={t('Export test results')}><ProductIcon name="export" /></summary><div><button type="button" onClick={() => post({ type: 'test.report.export', format: 'html' })}>{t('HTML report')}</button><button type="button" disabled={!trusted} onClick={() => post({ type: 'test.evidenceBundle.export' })}>{t('Evidence Bundle')}</button><button type="button" onClick={() => post({ type: 'test.report.export', format: 'json' })}>{t('JSON report')}</button><button type="button" onClick={() => post({ type: 'test.report.export', format: 'junit' })}>{t('JUnit XML')}</button></div></details>}</div>
       <TestOperationStatus operation={testOperation} />
-      {selectedAutomationResultEntry && selectedAutomationResult && <section className="automation-result-review" aria-label={t('Review test result')}>
-        <div className="automation-result-review__navigator" role="group" aria-label={t('Test result navigation')}>
-          <IconButton type="button" icon="arrow-left" label={t('Previous test result')} disabled={selectedAutomationResultIndex <= 0} onClick={() => selectAutomationResultAt(selectedAutomationResultIndex - 1)} />
-          <label><span>{t('Review test result')}</span><select aria-label={t('Review test result')} value={selectedAutomationResultEntry.key} onChange={(event) => setSelectedAutomationResultKey(event.target.value)}>{automationResultEntries.map((entry, index) => <option key={entry.key} value={entry.key}>{formatNumber(index + 1)} / {formatNumber(automationResultEntries.length)} · {entry.result.scenarioName} · {t(localizeHumanized(entry.result.outcome))}</option>)}</select></label>
-          <IconButton type="button" icon="arrow-right" label={t('Next test result')} disabled={selectedAutomationResultIndex >= automationResultEntries.length - 1} onClick={() => selectAutomationResultAt(selectedAutomationResultIndex + 1)} />
-          <div className="automation-result-review__actions" role="group" aria-label={t('Selected test result actions')}>
-            <button type="button" className="primary" disabled={!selectedAutomationResult.evidenceId} onClick={() => selectedAutomationResult.evidenceId && post({ type: 'test.evidence.open', evidenceId: selectedAutomationResult.evidenceId, location: selectedAutomationResult.primaryLocation })}>{selectedAutomationResult.evidenceId ? t('Open evidence') : t('Evidence unavailable')}</button>
-            <button type="button" disabled={!trusted || !selectedAutomationResult.evidenceId} onClick={() => selectedAutomationResult.evidenceId && post({ type: 'test.capture', source: { kind: 'evidence', evidenceId: selectedAutomationResult.evidenceId }, suggestedKind: 'contract' })}>{t('Save as test…')}</button>
-            <IconButton type="button" icon="debug-rerun" label={t('Run selected scenario again')} disabled={testRunActive} onClick={() => post({ type: 'test.runCase', scenarioId: selectedAutomationResult.scenarioId, suiteId: selectedAutomationResult.suiteId, kind: 'contract' })} />
-            <details className="adversarial-export-actions"><summary aria-label={t('Export test results')} title={t('Export test results')}><ProductIcon name="export" /></summary><div><button type="button" onClick={() => post({ type: 'test.report.export', format: 'html' })}>{t('HTML report')}</button><button type="button" disabled={!trusted} onClick={() => post({ type: 'test.evidenceBundle.export' })}>{t('Evidence Bundle')}</button><button type="button" onClick={() => post({ type: 'test.report.export', format: 'json' })}>{t('JSON report')}</button><button type="button" onClick={() => post({ type: 'test.report.export', format: 'junit' })}>{t('JUnit XML')}</button></div></details>
-          </div>
-        </div>
-        <div className="automation-result-review__summary" aria-label={t('Selected test result summary')}>
-          <span className={`automation-outcome automation-outcome--${selectedAutomationResult.outcome}`}><ProductIcon name={selectedAutomationResult.outcome === 'passed' ? 'check' : selectedAutomationResult.outcome === 'failed' ? 'warning' : 'error'} />{t(localizeHumanized(selectedAutomationResult.outcome))}</span>
-          <span>{t('{passed} passed · {failed} failed', { passed: formatNumber(selectedAutomationResult.passedChecks), failed: formatNumber(selectedAutomationResult.failedChecks) })}</span>
-          <span>{formatDuration(selectedAutomationResult.durationMs)}</span>
-        </div>
-      </section>}
       {automationResults.length > 0 && <label className="automation-search"><span>{t('Search results')}</span><input type="search" value={automationResultQuery} placeholder={t('Scenario name or ID')} onChange={(event) => { setAutomationResultQuery(event.target.value); setAutomationResultPage(0); }} /></label>}
       {!automationResults.length ? <div className="settings-empty settings-empty--action"><span>{t('No automation results in this Extension Host session.')}</span><button type="button" onClick={() => post({ type: 'testExplorer.open' })}>{t('Open Test Explorer')}</button></div> : !matchingAutomationResults.length ? <p className="settings-empty">{t('No results match the current search.')}</p> : <>
         <div className="adversarial-result-table-wrap"><table className="adversarial-result-table automation-result-table"><thead><tr><th scope="col">{t('Scenario')}</th><th scope="col">{t('Outcome')}</th><th scope="col">{t('Checks')}</th><th scope="col">{t('Duration')}</th><th scope="col" className="adversarial-result-table__actions-heading">{t('Actions')}</th></tr></thead><tbody>{visibleAutomationResults.map((result) => { const resultKey = automationResultKey(result, automationResults.indexOf(result)); const selected = resultKey === selectedAutomationResultEntry?.key; return <tr className={selected ? 'is-result-selected' : undefined} key={resultKey}><td><button type="button" className="automation-result-select" aria-label={t('Select test result {name}', { name: result.scenarioName })} aria-pressed={selected} onClick={() => setSelectedAutomationResultKey(resultKey)}><strong>{result.scenarioName}</strong><code>{result.scenarioId}</code></button></td><td><span className={`automation-outcome automation-outcome--${result.outcome}`}><ProductIcon name={result.outcome === 'passed' ? 'check' : result.outcome === 'failed' ? 'warning' : 'error'} />{t(localizeHumanized(result.outcome))}</span></td><td><span>{t('{passed} passed · {failed} failed', { passed: formatNumber(result.passedChecks), failed: formatNumber(result.failedChecks) })}</span>{(result.comparison || result.performance) && <small>{[result.comparison ? t('Comparison') : '', result.performance ? t('Performance') : ''].filter(Boolean).join(' · ')}</small>}</td><td className="adversarial-result-table__duration">{formatDuration(result.durationMs)}</td><td><div className="adversarial-result-actions">{result.evidenceId ? <button type="button" className="primary" onClick={() => { setSelectedAutomationResultKey(resultKey); post({ type: 'test.evidence.open', evidenceId: result.evidenceId!, location: result.primaryLocation }); }}>{t('Open evidence')}</button> : <button type="button" disabled>{t('Evidence unavailable')}</button>}<IconButton type="button" icon="debug-rerun" label={t('Run scenario again')} disabled={testRunActive} onClick={() => { setSelectedAutomationResultKey(resultKey); post({ type: 'test.runCase', scenarioId: result.scenarioId, suiteId: result.suiteId, kind: 'contract' }); }} /></div></td></tr>; })}</tbody></table></div>

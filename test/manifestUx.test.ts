@@ -87,6 +87,25 @@ describe('VS Code contribution UX', () => {
     expect(icon).not.toMatch(/#[0-9a-f]{3,8}/iu);
   });
 
+  it('keeps the Marketplace icon on the exact Activity Bar mark geometry', () => {
+    const activityIcon = readFileSync(resolve(import.meta.dirname, '..', 'media', 'activity.svg'), 'utf8');
+    const marketplaceIcon = readFileSync(resolve(import.meta.dirname, '..', 'media', 'icon.svg'), 'utf8');
+    const sharedGeometry = [
+      'x="2.5" y="2.5" width="19" height="19" rx="3.25"',
+      'd="M12 6.4v4.9m0 0-4.25 4.5m4.25-4.5 4.25 4.5"',
+      'cx="12" cy="6.4" r="1.3"',
+      'cx="7.75" cy="15.8" r="1.3"',
+      'x="14.95" y="14.5" width="2.6" height="2.6" rx="0.58"',
+    ];
+
+    for (const geometry of sharedGeometry) {
+      expect(activityIcon).toContain(geometry);
+      expect(marketplaceIcon).toContain(geometry);
+    }
+    expect(marketplaceIcon).toContain('transform="scale(10.6666666667)"');
+    expect(manifest).toMatchObject({ icon: 'media/icon.png' });
+  });
+
   it('uses one native VS Code walkthrough with a persistent sidebar entry', () => {
     expect(manifest.contributes.walkthroughs).toHaveLength(1);
     const walkthrough = manifest.contributes.walkthroughs[0]!;

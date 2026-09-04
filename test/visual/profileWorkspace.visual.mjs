@@ -409,33 +409,12 @@ try {
   assert.equal(await page.getByRole('heading', { name: 'Latest test results' }).count(), 1, 'Tests opens on functional automation results');
   assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 0, 'Results must remain an inspection surface, not the main execution surface');
   assert.equal(await page.locator('.automation-result-table tbody > tr').count(), 2, 'Automation results must remain distinct from adversarial outcomes');
-  const automationReview = page.getByRole('region', { name: 'Review test result' });
-  const automationResultSelector = automationReview.getByRole('combobox', { name: 'Review test result' });
-  assert.equal(await automationResultSelector.locator('option').count(), 2, 'Automation results must expose every result in the top review selector');
-  assert.ok((await automationResultSelector.inputValue()).includes('visual-contract-evidence'), 'The first automation result must be selected initially');
-  await automationReview.getByRole('button', { name: 'Next test result' }).click();
-  assert.equal(await automationResultSelector.inputValue(), 'visual-contract-evidence-2', 'Next result must switch the selected automation evidence without paging the table');
-  assert.equal(await automationReview.getByText('4 passed · 0 failed', { exact: true }).count(), 1, 'The top review summary must update with the selected test result');
-  const exportTestResults = automationReview.locator('summary[aria-label="Export test results"]');
-  const reviewAlignment = await automationReview.evaluate((element) => {
-    const actions = element.querySelector('.automation-result-review__actions');
-    const exportSummary = element.querySelector('.adversarial-export-actions > summary');
-    if (!actions || !exportSummary) return null;
-    const actionBounds = [...actions.children].map((action) => action.getBoundingClientRect());
-    const exportBounds = exportSummary.getBoundingClientRect();
-    return {
-      actionBottoms: actionBounds.map((bounds) => bounds.bottom),
-      exportWidth: exportBounds.width,
-      exportHeight: exportBounds.height,
-      overflowFree: element.scrollWidth <= element.clientWidth + 1,
-    };
-  });
-  assert.ok(reviewAlignment, 'Automation result alignment check requires the selector and export action');
-  assert.ok(reviewAlignment.actionBottoms.every((bottom) => Math.abs(bottom - reviewAlignment.actionBottoms[0]) <= 1), 'Every selected-result action, including export, must share the same bottom alignment');
-  assert.ok(Math.abs(reviewAlignment.exportWidth - reviewAlignment.exportHeight) <= 1, 'The export action must render as one compact square icon button');
-  assert.equal(reviewAlignment.overflowFree, true, 'The automation result review must not overflow at the desktop width');
+  assert.equal(await page.getByRole('region', { name: 'Review test result' }).count(), 0, 'Tests must not duplicate the result navigator inside the tab');
+  const exportTestResults = page.locator('#automation-results summary[aria-label="Export test results"]');
+  const exportBounds = await exportTestResults.boundingBox();
+  assert.ok(exportBounds && Math.abs(exportBounds.width - exportBounds.height) <= 1, 'The batch export action must remain one compact square icon button');
   await exportTestResults.click();
-  const automationExportMenu = automationReview.locator('.adversarial-export-actions > div');
+  const automationExportMenu = page.locator('#automation-results .adversarial-export-actions > div');
   await automationExportMenu.waitFor();
   assert.equal(await automationExportMenu.getByRole('button').count(), 4, 'The export menu must expose HTML, evidence, JSON, and JUnit formats');
   assert.equal(await automationExportMenu.evaluate((menu) => {
@@ -445,6 +424,29 @@ try {
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-export-dark.png') });
   await exportTestResults.click();
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-dark.png') });
+  await page.locator('.automation-result-table').getByRole('button', { name: 'Open evidence' }).first().click();
+  const automationReview = page.getByRole('region', { name: 'Review test result' });
+  await automationReview.waitFor();
+  const automationResultSelector = automationReview.getByRole('combobox', { name: 'Review test result' });
+  assert.equal(await automationResultSelector.locator('option').count(), 2, 'Automation evidence must expose every available result in the shared top selector');
+  assert.ok((await automationResultSelector.inputValue()).includes('visual-contract-evidence'), 'The first automation result must be selected initially');
+  await automationReview.getByRole('button', { name: 'Next test result' }).click();
+  await page.waitForFunction(() => document.querySelector('.evidence-review select')?.value === 'visual-contract-evidence-2');
+  assert.equal(await automationResultSelector.inputValue(), 'visual-contract-evidence-2', 'Next result must switch the selected automation evidence without paging the table');
+  assert.equal(await automationReview.getByText(/4 passed · 0 failed/).count(), 1, 'The shared top review summary must update with the selected test result');
+  const reviewAlignment = await automationReview.evaluate((element) => {
+    const actions = element.querySelector('.evidence-review__heading-actions');
+    if (!actions) return null;
+    const actionBounds = [...actions.children].map((action) => action.getBoundingClientRect());
+    return {
+      actionBottoms: actionBounds.map((bounds) => bounds.bottom),
+      overflowFree: element.scrollWidth <= element.clientWidth + 1,
+    };
+  });
+  assert.ok(reviewAlignment, 'Automation result alignment check requires the shared top actions');
+  assert.ok(reviewAlignment.actionBottoms.every((bottom) => Math.abs(bottom - reviewAlignment.actionBottoms[0]) <= 1), 'Every shared selected-result action must share the same bottom alignment');
+  assert.equal(reviewAlignment.overflowFree, true, 'The shared automation result review must not overflow at the desktop width');
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-evidence-review-dark.png'), fullPage: true });
   await page.setViewportSize({ width: 520, height: 720 });
   await automationReview.scrollIntoViewIfNeeded();
   const narrowAutomationReview = await automationReview.evaluate((element) => {
@@ -461,8 +463,11 @@ try {
   });
   assert.equal(narrowAutomationReview.overflowFree, true, 'The automation result navigator must not require horizontal scrolling at a narrow width');
   assert.equal(narrowAutomationReview.overlaps, false, 'Automation result controls must not overlap at a narrow width');
-  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-narrow-dark.png') });
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-results-narrow-dark.png'), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 900 });
+  await automationReview.getByRole('button', { name: 'Close evidence review' }).click();
+  await page.getByRole('tab', { name: 'Tests' }).click();
+  await page.getByRole('heading', { level: 1, name: 'Automated testing' }).waitFor();
   await automationNavigation.getByRole('tab', { name: /Cases/ }).click();
   assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 1, 'Scenario execution must live beside the authored contracts');
   await page.getByText('Linked multi-turn contract', { exact: true }).waitFor();
@@ -883,16 +888,15 @@ try {
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'Runs' }).getAttribute('aria-selected'), 'true', 'A saved inspector tab must win over the Profile initial Metrics tab after Webview recreation');
   await page.getByRole('tab', { name: 'Tests' }).click();
-  const persistedAutomationSelector = page.getByRole('combobox', { name: 'Review test result' });
-  await persistedAutomationSelector.selectOption('visual-contract-evidence-2');
+  await page.getByRole('button', { name: 'Select test result Steady response contract' }).click();
   await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').selectedAutomationResultKey === 'visual-contract-evidence-2');
   await page.getByRole('tab', { name: 'Debug' }).click();
   await page.getByRole('tab', { name: 'Tests' }).click();
-  assert.equal(await page.getByRole('combobox', { name: 'Review test result' }).inputValue(), 'visual-contract-evidence-2', 'The selected test result must survive switching away from Tests');
+  assert.equal(await page.getByRole('button', { name: 'Select test result Steady response contract' }).getAttribute('aria-pressed'), 'true', 'The selected test result must survive switching away from Tests');
   await page.reload();
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'Tests' }).getAttribute('aria-selected'), 'true', 'The saved Tests workspace must survive Webview recreation');
-  assert.equal(await page.getByRole('combobox', { name: 'Review test result' }).inputValue(), 'visual-contract-evidence-2', 'The selected test result must survive Webview recreation');
+  assert.equal(await page.getByRole('button', { name: 'Select test result Steady response contract' }).getAttribute('aria-pressed'), 'true', 'The selected test result must survive Webview recreation');
   await page.setViewportSize({ width: 1000, height: 600 });
   await page.getByRole('tab', { name: 'Red Team' }).click();
   await page.getByRole('tab', { name: /Cases:/ }).click();
@@ -1019,10 +1023,13 @@ try {
   await page.getByRole('heading', { name: 'Latest test results' }).waitFor();
   await assertRedTeamTabVisual(page.getByRole('tablist', { name: 'Test sections' }), 'Automation light theme');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-light.png') });
+  await page.locator('.automation-result-table').getByRole('button', { name: 'Open evidence' }).first().click();
+  await page.getByRole('region', { name: 'Review test result' }).waitFor();
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-evidence-review-light.png'), fullPage: true });
   await page.emulateMedia({ forcedColors: 'active' });
-  await assertRedTeamTabVisual(page.getByRole('tablist', { name: 'Test sections' }), 'Automation high contrast theme');
-  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-high-contrast.png') });
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-evidence-review-high-contrast.png'), fullPage: true });
   await page.emulateMedia({ forcedColors: 'none' });
+  await page.getByRole('region', { name: 'Review test result' }).getByRole('button', { name: 'Close evidence review' }).click();
 
   await page.getByRole('tab', { name: 'Red Team' }).click();
   await page.getByRole('tab', { name: /Results:/ }).click();
@@ -1179,9 +1186,9 @@ try {
   await capturePage.close();
 
   for (const localeCase of [
-    { locale: 'zh-TW', tabs: ['除錯', '測試', '紅隊測試', '設定'], results: '最新測試結果', review: '檢視測試結果', cases: '測試案例', contracts: '對話契約', campaigns: '測試活動', addCampaign: '新增測試活動', artifact: 'automation-results-zh-tw-dark.png' },
-    { locale: 'ja-JP', tabs: ['デバッグ', 'テスト', 'レッドチーム', '設定'], results: '最新のテスト結果', review: 'テスト結果を確認', cases: 'ケース', contracts: '会話コントラクト', campaigns: 'キャンペーン', addCampaign: 'キャンペーンを追加', artifact: 'automation-results-ja-dark.png' },
-    { locale: 'ko-KR', tabs: ['디버그', '테스트', '레드 팀', '설정'], results: '최신 테스트 결과', review: '테스트 결과 검토', cases: '케이스', contracts: '대화 계약', campaigns: '캠페인', addCampaign: '캠페인 추가', artifact: 'automation-results-ko-dark.png' },
+    { locale: 'zh-TW', tabs: ['除錯', '測試', '紅隊測試', '設定'], results: '最新測試結果', review: '檢視測試結果', openEvidence: '開啟證據', cases: '測試案例', contracts: '對話契約', campaigns: '測試活動', addCampaign: '新增測試活動', artifact: 'automation-results-zh-tw-dark.png' },
+    { locale: 'ja-JP', tabs: ['デバッグ', 'テスト', 'レッドチーム', '設定'], results: '最新のテスト結果', review: 'テスト結果を確認', openEvidence: '証拠を開く', cases: 'ケース', contracts: '会話コントラクト', campaigns: 'キャンペーン', addCampaign: 'キャンペーンを追加', artifact: 'automation-results-ja-dark.png' },
+    { locale: 'ko-KR', tabs: ['디버그', '테스트', '레드 팀', '설정'], results: '최신 테스트 결과', review: '테스트 결과 검토', openEvidence: '증거 열기', cases: '케이스', contracts: '대화 계약', campaigns: '캠페인', addCampaign: '캠페인 추가', artifact: 'automation-results-ko-dark.png' },
   ]) {
     const localePage = await browser.newPage({ viewport: { width: 720, height: 900 } });
     await localePage.goto(`${url}?locale=${encodeURIComponent(localeCase.locale)}`);
@@ -1191,9 +1198,13 @@ try {
     assert.equal(await localeTabs.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, `${localeCase.locale}: primary right-pane tabs must fit without horizontal scrolling at 720px`);
     await localeTabs.getByRole('tab', { name: localeCase.tabs[1], exact: true }).click();
     await localePage.getByRole('heading', { name: localeCase.results }).waitFor();
+    await localePage.locator('.automation-result-table').getByRole('button', { name: localeCase.openEvidence }).first().click();
+    await localePage.getByRole('combobox', { name: localeCase.review }).waitFor();
     assert.equal(await localePage.getByRole('combobox', { name: localeCase.review }).count(), 1, `${localeCase.locale}: the top result selector must be translated`);
     assert.equal(await localePage.getByText('Latest test results', { exact: true }).count(), 0, `${localeCase.locale}: the Results heading must not fall back to English`);
-    await localePage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, localeCase.artifact) });
+    await localePage.screenshot({ path: resolve(artifactDirectory, localeCase.artifact), fullPage: true });
+    await localePage.locator('.evidence-review__heading-actions .codicon-close').locator('xpath=..').click();
+    await localeTabs.getByRole('tab', { name: localeCase.tabs[1], exact: true }).click();
     const localizedTestNavigation = localePage.getByRole('tablist', { name: localeCase.locale === 'zh-TW' ? '測試區段' : localeCase.locale === 'ja-JP' ? 'テストセクション' : '테스트 섹션' });
     await localizedTestNavigation.getByRole('tab', { name: new RegExp(localeCase.cases) }).click();
     await localePage.getByRole('heading', { name: localeCase.contracts }).waitFor();

@@ -1,41 +1,40 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="TurnStage conversation testing icon">
   <defs>
-    <linearGradient id="turnstage-bg" x1="28" y1="18" x2="226" y2="238" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#070a10"/>
-      <stop offset="0.55" stop-color="#0c1322"/>
-      <stop offset="1" stop-color="#121d33"/>
+    <linearGradient id="turnstage-bg" x1="30" y1="18" x2="226" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#080c14"/>
+      <stop offset="0.58" stop-color="#101a2d"/>
+      <stop offset="1" stop-color="#17243d"/>
     </linearGradient>
-    <radialGradient id="turnstage-light" cx="0" cy="0" r="1" gradientTransform="translate(75 42) rotate(48) scale(190)" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#233655" stop-opacity="0.72"/>
-      <stop offset="0.52" stop-color="#14213a" stop-opacity="0.2"/>
-      <stop offset="1" stop-color="#0b101a" stop-opacity="0"/>
+    <radialGradient id="turnstage-light" cx="0" cy="0" r="1" gradientTransform="translate(72 40) rotate(48) scale(198)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#304b72" stop-opacity="0.62"/>
+      <stop offset="0.5" stop-color="#172a48" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#0a101c" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="turnstage-silver" x1="47" y1="48" x2="211" y2="208" gradientUnits="userSpaceOnUse">
+    <linearGradient id="turnstage-frame" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
       <stop stop-color="#ffffff"/>
-      <stop offset="0.48" stop-color="#e4eaf3"/>
+      <stop offset="0.5" stop-color="#edf2f9"/>
       <stop offset="1" stop-color="#aebbd0"/>
     </linearGradient>
-    <linearGradient id="turnstage-signal" x1="105" y1="57" x2="168" y2="173" gradientUnits="userSpaceOnUse">
+    <linearGradient id="turnstage-flow" x1="10" y1="5" x2="16" y2="17" gradientUnits="userSpaceOnUse">
       <stop stop-color="#7ef2e7"/>
-      <stop offset="0.52" stop-color="#5cc8ff"/>
-      <stop offset="1" stop-color="#7887ff"/>
+      <stop offset="0.5" stop-color="#53c7ff"/>
+      <stop offset="1" stop-color="#7787ff"/>
     </linearGradient>
-    <filter id="turnstage-depth" x="30" y="30" width="196" height="202" filterUnits="userSpaceOnUse">
-      <feDropShadow dx="0" dy="6" stdDeviation="7" flood-color="#02050a" flood-opacity="0.5"/>
-    </filter>
   </defs>
 
   <rect width="256" height="256" rx="52" fill="url(#turnstage-bg)"/>
   <rect width="256" height="256" rx="52" fill="url(#turnstage-light)"/>
 
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round" filter="url(#turnstage-depth)">
-    <path d="M91 48H65c-10.5 0-19 8.5-19 19v122c0 10.5 8.5 19 19 19h26" stroke="url(#turnstage-silver)" stroke-width="11"/>
-    <path d="M165 48h26c10.5 0 19 8.5 19 19v122c0 10.5-8.5 19-19 19h-26" stroke="url(#turnstage-silver)" stroke-width="11"/>
-    <path d="M128 70v49m0 0-38 37m38-37 38 37" stroke="url(#turnstage-signal)" stroke-width="12"/>
-  </g>
-  <g fill="url(#turnstage-signal)" filter="url(#turnstage-depth)">
-    <rect x="119" y="51" width="18" height="18" rx="5"/>
-    <rect x="78" y="152" width="24" height="15" rx="5"/>
-    <rect x="154" y="152" width="24" height="15" rx="5"/>
+  <!-- The product mark uses the exact Activity Bar geometry, scaled from its 24px viewBox. -->
+  <g transform="scale(10.6666666667)">
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <rect stroke="url(#turnstage-frame)" stroke-width="1.8" x="2.5" y="2.5" width="19" height="19" rx="3.25"/>
+      <path stroke="url(#turnstage-flow)" stroke-width="1.8" d="M12 6.4v4.9m0 0-4.25 4.5m4.25-4.5 4.25 4.5"/>
+    </g>
+    <g fill="url(#turnstage-flow)">
+      <circle cx="12" cy="6.4" r="1.3"/>
+      <circle cx="7.75" cy="15.8" r="1.3"/>
+      <rect x="14.95" y="14.5" width="2.6" height="2.6" rx="0.58"/>
+    </g>
   </g>
 </svg>

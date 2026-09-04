@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.23.3
+
+- Unified functional and adversarial result review around the same top-level
+  evidence selector, section navigation, keyboard behavior, and export layout
+  while preserving their domain-specific result details.
+- Rebuilt the Marketplace artwork from the exact Activity Bar mark geometry so
+  the frame, branching path, and node shapes remain recognizably identical at
+  full and compact sizes.
+- Added Japanese and Korean result-review labels plus DOM, visual, manifest,
+  accessibility, and packaging regression coverage for the shared experience.
+
 ## 0.23.1
 
 - Refined the Chat preview with clearer action and follow-up hierarchy, native

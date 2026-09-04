@@ -407,9 +407,20 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
     if (focus) focusAfterRender(() => document.getElementById(`right-pane-${mode}-tab`)?.focus());
   };
   const activeEvidence = resolveActiveEvidence(testResults, activeEvidenceId);
+  const activeAutomationEvidence = resolveActiveAutomationEvidence(automationResults, activeEvidenceId);
+  useEffect(() => {
+    if (activeAutomationEvidence?.result.evidenceId) setSelectedAutomationResultKey(activeAutomationEvidence.result.evidenceId);
+  }, [activeAutomationEvidence?.result.evidenceId, setSelectedAutomationResultKey]);
   const replayActive = snapshot?.replay && (snapshot.replay.status === 'playing' || snapshot.replay.status === 'paused') ? snapshot.replay : undefined;
   return <div className="test-surface">
-    <div className="test-surface__header">{replayActive && <ReplayOperationStatus replay={replayActive} onOpenControls={() => { setRightPaneMode('debug'); setInspectorTab('Runs'); }} />}{activeEvidence && <EvidenceReviewBar results={testResults} selection={activeEvidence} inspectorTab={inspectorTab} onReviewTimeline={() => { setRightPaneMode('adversarial'); setRedTeamSection('timeline'); post({ type: 'test.timeline.open', evidenceId: activeEvidence.evidenceId }); }} onClose={onCloseEvidence} />}</div>
+    <div className="test-surface__header">
+      {replayActive && <ReplayOperationStatus replay={replayActive} onOpenControls={() => { setRightPaneMode('debug'); setInspectorTab('Runs'); }} />}
+      {activeEvidence
+        ? <EvidenceReviewBar results={testResults} selection={activeEvidence} inspectorTab={inspectorTab} onReviewTimeline={() => { setRightPaneMode('adversarial'); setRedTeamSection('timeline'); post({ type: 'test.timeline.open', evidenceId: activeEvidence.evidenceId }); }} onClose={onCloseEvidence} />
+        : activeAutomationEvidence
+          ? <AutomationEvidenceReviewBar results={automationResults} selection={activeAutomationEvidence} testRunActive={testOperation?.state === 'running' || testOperation?.state === 'cancelling'} trusted={snapshot?.trusted === true} onSelect={(result) => { if (result.evidenceId) { setSelectedAutomationResultKey(result.evidenceId); post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location: result.primaryLocation }); } }} onClose={onCloseEvidence} />
+          : null}
+    </div>
     <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
     <section ref={previewRef} className="preview-pane">
       <MobileChatPreview profile={profile} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} viewport={chatViewport} onViewportChange={setChatViewport} onConfigure={() => setRightPaneMode('configure')} selectedMessageId={rightPaneMode === 'debug' ? selectedMessageId : undefined} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={onMessageActionFeedback} initialMessageScrollTop={scrollPositions.chat} onMessageScrollTopChange={(value) => onScrollPositionChange('chat', value)} />
@@ -453,6 +464,40 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
 
 type AdversarialAttemptNavigation = NonNullable<NonNullable<AdversarialResultSummary['repetitions']>['attempts']>[number];
 export interface ActiveEvidenceSelection { result: AdversarialResultSummary; attempt?: AdversarialAttemptNavigation; evidenceId: string }
+export interface ActiveAutomationEvidenceSelection { result: AutomationResultSummary; evidenceId: string }
+
+interface ResultReviewNavigationItem { key: string; label: string; title?: string }
+
+function ResultReviewShell({ ariaLabel, heading, navigationLabel, selectLabel, previousLabel, nextLabel, items, selectedKey, onSelect, actions, secondaryControl, summary }: {
+  ariaLabel: string;
+  heading: string;
+  navigationLabel: string;
+  selectLabel: string;
+  previousLabel: string;
+  nextLabel: string;
+  items: readonly ResultReviewNavigationItem[];
+  selectedKey: string;
+  onSelect: (key: string) => void;
+  actions: React.ReactNode;
+  secondaryControl?: React.ReactNode;
+  summary: React.ReactNode;
+}): React.JSX.Element {
+  const selectedIndex = Math.max(0, items.findIndex((item) => item.key === selectedKey));
+  const selectAt = (index: number) => { const item = items[index]; if (item) onSelect(item.key); };
+  return <section className="evidence-review" aria-label={ariaLabel}>
+    <header className="evidence-review__heading">
+      <strong>{heading}</strong>
+      <div className="evidence-review__heading-actions">{actions}</div>
+    </header>
+    <div className={`evidence-review__navigator${secondaryControl ? '' : ' evidence-review__navigator--single'}`} role="group" aria-label={navigationLabel}>
+      <IconButton type="button" icon="arrow-left" label={previousLabel} disabled={selectedIndex <= 0} onClick={() => selectAt(selectedIndex - 1)} />
+      <label className="evidence-review__case"><span className="sr-only">{selectLabel}</span><select aria-label={selectLabel} title={items[selectedIndex]?.title} value={selectedKey} onChange={(event) => onSelect(event.target.value)}>{items.map((item) => <option value={item.key} key={item.key}>{item.label}</option>)}</select></label>
+      <IconButton type="button" icon="arrow-right" label={nextLabel} disabled={selectedIndex >= items.length - 1} onClick={() => selectAt(selectedIndex + 1)} />
+      {secondaryControl}
+    </div>
+    {summary}
+  </section>;
+}
 
 export function resolveActiveEvidence(results: readonly AdversarialResultSummary[], evidenceId: string | undefined): ActiveEvidenceSelection | undefined {
   if (!evidenceId) return undefined;
@@ -462,6 +507,12 @@ export function resolveActiveEvidence(results: readonly AdversarialResultSummary
     if (attempt) return { result, attempt, evidenceId };
   }
   return undefined;
+}
+
+export function resolveActiveAutomationEvidence(results: readonly AutomationResultSummary[], evidenceId: string | undefined): ActiveAutomationEvidenceSelection | undefined {
+  if (!evidenceId) return undefined;
+  const result = results.find((candidate) => candidate.evidenceId === evidenceId);
+  return result ? { result, evidenceId } : undefined;
 }
 
 export interface MessageInspectionTarget { tab: 'Network' | 'Raw Events'; turnId?: string; networkId?: string; sequence?: number }
@@ -480,7 +531,6 @@ export function resolveMessageInspectionTarget(message: ChatMessage | undefined,
 }
 
 export function EvidenceReviewBar({ results, selection, inspectorTab, onReviewTimeline, onClose }: { results: readonly AdversarialResultSummary[]; selection: ActiveEvidenceSelection; inspectorTab: InspectorTab; onReviewTimeline: () => void; onClose: () => void }): React.JSX.Element {
-  const caseIndex = Math.max(0, results.indexOf(selection.result));
   const attempts = selection.result.repetitions?.attempts ?? [];
   const open = (result: AdversarialResultSummary, attempt?: AdversarialAttemptNavigation) => {
     const evidenceId = attempt?.evidenceId ?? result.evidenceId;
@@ -488,26 +538,57 @@ export function EvidenceReviewBar({ results, selection, inspectorTab, onReviewTi
     const locations = evidenceLocations(result, attempt);
     post({ type: 'test.evidence.open', evidenceId, location: preferredEvidenceLocation(locations, inspectorTab) ?? { kind: 'profile', path: 'tests.scenarios' } });
   };
-  const selectCase = (index: number) => { const result = results[index]; if (result) open(result); };
   const attemptValue = selection.attempt ? `attempt:${selection.attempt.attempt}` : 'aggregate';
-  return <section className="evidence-review" aria-label={t('Evidence review')}>
-    <header className="evidence-review__heading">
-      <strong>{t('Evidence review')}</strong>
-      <div className="evidence-review__heading-actions">
+  return <ResultReviewShell
+    ariaLabel={t('Evidence review')}
+    heading={t('Evidence review')}
+    navigationLabel={t('Evidence result navigation')}
+    selectLabel={t('Test case')}
+    previousLabel={t('Previous test case')}
+    nextLabel={t('Next test case')}
+    items={results.map((result, index) => ({ key: result.evidenceId, label: `${formatNumber(index + 1)} / ${formatNumber(results.length)} · ${result.scenarioName}`, title: `${result.scenarioName} · ${t(adversarialOutcomeLabel(result.outcome))}` }))}
+    selectedKey={selection.result.evidenceId}
+    onSelect={(key) => { const result = results.find((candidate) => candidate.evidenceId === key); if (result) open(result); }}
+    actions={<>
         <button type="button" onClick={() => post({ type: 'test.capture', source: { kind: 'evidence', evidenceId: selection.evidenceId }, suggestedKind: 'adversarial' })}>{t('Save as test…')}</button>
         <button type="button" onClick={onReviewTimeline}>{t('Timeline')}</button>
         <IconButton type="button" icon="export" label={t('Export this case as HTML')} onClick={() => post({ type: 'test.report.export', format: 'html', evidenceId: selection.evidenceId })} />
         <IconButton type="button" icon="close" label={t('Close evidence review')} onClick={onClose} />
+      </>}
+    secondaryControl={attempts.length > 0 ? <label className="evidence-review__attempt"><span className="sr-only">{t('Test attempt')}</span><select aria-label={t('Test attempt')} value={attemptValue} onChange={(event) => { if (event.target.value === 'aggregate') open(selection.result); else { const attempt = attempts.find((candidate) => `attempt:${candidate.attempt}` === event.target.value); if (attempt?.evidenceId) open(selection.result, attempt); } }}><option value="aggregate">{t('Aggregate result')}</option>{attempts.map((attempt) => <option key={attempt.attempt} value={`attempt:${attempt.attempt}`} disabled={!attempt.evidenceId}>{t('Attempt {attempt}: {outcome}', { attempt: formatNumber(attempt.attempt), outcome: t(adversarialOutcomeLabel(attempt.outcome)) })}{attempt.evidenceId ? '' : ` · ${t('Evidence unavailable')}`}</option>)}</select></label> : undefined}
+    summary={<EvidenceSummary result={selection.result} attempt={selection.attempt} evidenceId={selection.evidenceId} />}
+  />;
+}
+
+export function AutomationEvidenceReviewBar({ results, selection, trusted, testRunActive, onSelect, onClose }: { results: readonly AutomationResultSummary[]; selection: ActiveAutomationEvidenceSelection; trusted: boolean; testRunActive: boolean; onSelect: (result: AutomationResultSummary) => void; onClose: () => void }): React.JSX.Element {
+  const availableResults = results.filter((result): result is AutomationResultSummary & { evidenceId: string } => Boolean(result.evidenceId));
+  const result = selection.result;
+  const outcomeIcon = result.outcome === 'passed' ? 'check' : result.outcome === 'failed' ? 'warning' : 'error';
+  return <ResultReviewShell
+    ariaLabel={t('Review test result')}
+    heading={t('Review test result')}
+    navigationLabel={t('Test result navigation')}
+    selectLabel={t('Review test result')}
+    previousLabel={t('Previous test result')}
+    nextLabel={t('Next test result')}
+    items={availableResults.map((candidate, index) => ({ key: candidate.evidenceId, label: `${formatNumber(index + 1)} / ${formatNumber(availableResults.length)} · ${candidate.scenarioName} · ${t(localizeHumanized(candidate.outcome))}`, title: `${candidate.scenarioName} · ${t(localizeHumanized(candidate.outcome))}` }))}
+    selectedKey={selection.evidenceId}
+    onSelect={(key) => { const candidate = availableResults.find((item) => item.evidenceId === key); if (candidate) onSelect(candidate); }}
+    actions={<>
+      <button type="button" disabled={!trusted} onClick={() => post({ type: 'test.capture', source: { kind: 'evidence', evidenceId: selection.evidenceId }, suggestedKind: 'contract' })}>{t('Save as test…')}</button>
+      <IconButton type="button" icon="debug-rerun" label={t('Run selected scenario again')} disabled={testRunActive} onClick={() => post({ type: 'test.runCase', scenarioId: result.scenarioId, suiteId: result.suiteId, kind: 'contract' })} />
+      <IconButton type="button" icon="export" label={t('Export this case as HTML')} onClick={() => post({ type: 'test.report.export', format: 'html', evidenceId: selection.evidenceId })} />
+      <IconButton type="button" icon="close" label={t('Close evidence review')} onClick={onClose} />
+    </>}
+    summary={<section className={`evidence-summary evidence-summary--automation evidence-summary--automation-${result.outcome}`} aria-labelledby="active-automation-evidence-heading">
+      <ProductIcon name={outcomeIcon} />
+      <div className="evidence-summary__body">
+        <h2 id="active-automation-evidence-heading" className="evidence-summary__heading"><span className={`automation-outcome automation-outcome--${result.outcome}`}>{t(localizeHumanized(result.outcome))}</span><span aria-hidden="true">·</span><span>{result.scenarioName}</span></h2>
+        <p>{t('{passed} passed · {failed} failed', { passed: formatNumber(result.passedChecks), failed: formatNumber(result.failedChecks) })} · {formatDuration(result.durationMs)}</p>
+        {(result.comparison || result.performance) && <span>{[result.comparison ? t('Comparison') : '', result.performance ? t('Performance') : ''].filter(Boolean).join(' · ')}</span>}
       </div>
-    </header>
-    <div className="evidence-review__navigator" role="group" aria-label={t('Evidence result navigation')}>
-      <IconButton type="button" icon="arrow-left" label={t('Previous test case')} disabled={caseIndex <= 0} onClick={() => selectCase(caseIndex - 1)} />
-      <label className="evidence-review__case"><span className="sr-only">{t('Test case')}</span><select aria-label={t('Test case')} title={`${selection.result.scenarioName} · ${t(adversarialOutcomeLabel(selection.result.outcome))}`} value={selection.result.evidenceId} onChange={(event) => { const result = results.find((candidate) => candidate.evidenceId === event.target.value); if (result) open(result); }}>{results.map((result, index) => <option value={result.evidenceId} key={result.evidenceId}>{formatNumber(index + 1)} / {formatNumber(results.length)} · {result.scenarioName}</option>)}</select></label>
-      <IconButton type="button" icon="arrow-right" label={t('Next test case')} disabled={caseIndex >= results.length - 1} onClick={() => selectCase(caseIndex + 1)} />
-      {attempts.length > 0 && <label className="evidence-review__attempt"><span className="sr-only">{t('Test attempt')}</span><select aria-label={t('Test attempt')} value={attemptValue} onChange={(event) => { if (event.target.value === 'aggregate') open(selection.result); else { const attempt = attempts.find((candidate) => `attempt:${candidate.attempt}` === event.target.value); if (attempt?.evidenceId) open(selection.result, attempt); } }}><option value="aggregate">{t('Aggregate result')}</option>{attempts.map((attempt) => <option key={attempt.attempt} value={`attempt:${attempt.attempt}`} disabled={!attempt.evidenceId}>{t('Attempt {attempt}: {outcome}', { attempt: formatNumber(attempt.attempt), outcome: t(adversarialOutcomeLabel(attempt.outcome)) })}{attempt.evidenceId ? '' : ` · ${t('Evidence unavailable')}`}</option>)}</select></label>}
-    </div>
-    <EvidenceSummary result={selection.result} attempt={selection.attempt} evidenceId={selection.evidenceId} />
-  </section>;
+    </section>}
+  />;
 }
 
 export function EvidenceSummary({ result, attempt, evidenceId = result.evidenceId }: { result: AdversarialResultSummary; attempt?: AdversarialAttemptNavigation; evidenceId?: string }): React.JSX.Element {

@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AdversarialResultSummary, AutomationResultSummary, ChatMessage, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 import { isPreviewOnlyResponseAction, MobileChatPreview, resizeComposerTextarea, resolveResponseActivity } from '../src/webview/MobileChatPreview';
-import { ACCESSIBLE_EVENT_WINDOW_SIZE, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, eventTimeDeltas, EvidenceReviewBar, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, resolveActiveEvidence, resolveMessageInspectionTarget, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
+import { ACCESSIBLE_EVENT_WINDOW_SIZE, AutomationEvidenceReviewBar, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, eventTimeDeltas, EvidenceReviewBar, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, resolveActiveAutomationEvidence, resolveActiveEvidence, resolveMessageInspectionTarget, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
 import { AdversarialWorkspace, AutomationWorkspace, SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
 
@@ -1122,34 +1122,25 @@ describe('Webview DOM behavior', () => {
     const { rerender } = render(<AutomationWorkspace activeSection="results" profile={configured} post={post} trusted automationResults={automationResults} />);
 
     expect(screen.queryByRole('button', { name: 'Run all' })).toBeNull();
-    expect(screen.getAllByText('3 passed · 1 failed')).toHaveLength(2);
-    const review = screen.getByRole('region', { name: 'Review test result' });
-    const selector = within(review).getByRole('combobox', { name: 'Review test result' }) as HTMLSelectElement;
-    expect(selector.value).toBe('contract-evidence');
-    expect((within(review).getByRole('button', { name: 'Previous test result' }) as HTMLButtonElement).disabled).toBe(true);
-    await user.click(within(review).getByRole('button', { name: 'Open evidence' }));
+    expect(screen.getAllByText('3 passed · 1 failed')).toHaveLength(1);
+    expect(screen.queryByRole('region', { name: 'Review test result' })).toBeNull();
+    await user.click(screen.getAllByRole('button', { name: 'Open evidence' })[0]!);
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'contract-evidence', location: { kind: 'message', messageId: 'assistant-1' } });
-    await user.click(within(review).getByRole('button', { name: 'Run selected scenario again' }));
+    await user.click(screen.getAllByRole('button', { name: 'Run scenario again' })[0]!);
     expect(post).toHaveBeenCalledWith({ type: 'test.runCase', scenarioId: 'contract-1', suiteId: undefined, kind: 'contract' });
-    await user.click(within(review).getByRole('button', { name: 'Save as test…' }));
-    expect(post).toHaveBeenCalledWith({ type: 'test.capture', source: { kind: 'evidence', evidenceId: 'contract-evidence' }, suggestedKind: 'contract' });
-    await user.click(within(review).getByRole('button', { name: 'Next test result' }));
-    expect(selector.value).toBe('contract-evidence-2');
-    expect(within(review).getByText('4 passed · 0 failed')).toBeTruthy();
-    await user.click(within(review).getByRole('button', { name: 'Open evidence' }));
+    await user.click(screen.getAllByRole('button', { name: 'Open evidence' })[1]!);
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'contract-evidence-2', location: { kind: 'network', networkId: 'network-2' } });
     await user.click(screen.getByRole('button', { name: 'Select test result Contract 1' }));
-    expect(selector.value).toBe('contract-evidence');
-    await user.click(review.querySelector('.adversarial-export-actions > summary')!);
-    await user.click(within(review).getByRole('button', { name: 'JSON report' }));
+    expect(screen.getByRole('button', { name: 'Select test result Contract 1' }).getAttribute('aria-pressed')).toBe('true');
+    await user.click(screen.getByLabelText('Export test results'));
+    await user.click(screen.getByRole('button', { name: 'JSON report' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.report.export', format: 'json' });
     await user.type(screen.getByRole('searchbox'), 'missing result');
     rerender(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} trusted automationResults={automationResults} />);
     expect(screen.getByText('Contract 1')).toBeTruthy();
   });
 
-  it('keeps 100 automation results paged while every result remains selectable', async () => {
-    const user = userEvent.setup();
+  it('keeps 100 automation results paged without mounting an extra result navigator inside the tab', () => {
     const automationResults: AutomationResultSummary[] = Array.from({ length: 100 }, (_, index) => ({
       profileId: profile.id,
       scenarioId: `contract-${index + 1}`,
@@ -1168,10 +1159,7 @@ describe('Webview DOM behavior', () => {
 
     expect(container.querySelectorAll('.automation-result-table tbody > tr')).toHaveLength(25);
     expect(screen.getByText('Page 1 of 4')).toBeTruthy();
-    const selector = screen.getByRole('combobox', { name: 'Review test result' }) as HTMLSelectElement;
-    expect(selector.options).toHaveLength(100);
-    await user.selectOptions(selector, 'evidence-100');
-    expect(within(screen.getByRole('region', { name: 'Review test result' })).getByText('2 passed · 1 failed')).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: 'Review test result' })).toBeNull();
   });
 
   it('authors, bulk-transfers, and opens evidence for adversarial cases', async () => {
@@ -1497,6 +1485,35 @@ describe('Webview DOM behavior', () => {
     await user.click(screen.getByRole('button', { name: 'Timeline' }));
     await user.click(screen.getByRole('button', { name: 'Close evidence review' }));
     expect(onReviewTimeline).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('uses the shared top evidence navigator for functional test results', async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    const results: AutomationResultSummary[] = [{
+      profileId: profile.id, scenarioId: 'contract-1', scenarioName: 'Contract 1', outcome: 'failed', durationMs: 120,
+      passedChecks: 3, failedChecks: 1, completedSteps: 2, evidenceId: 'contract-evidence-1', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, comparison: true, performance: true,
+    }, {
+      profileId: profile.id, scenarioId: 'contract-2', scenarioName: 'Contract 2', outcome: 'passed', durationMs: 80,
+      passedChecks: 4, failedChecks: 0, completedSteps: 1, evidenceId: 'contract-evidence-2', primaryLocation: { kind: 'network', networkId: 'network-2' }, comparison: false, performance: false,
+    }, {
+      profileId: profile.id, scenarioId: 'contract-3', scenarioName: 'No evidence', outcome: 'error', durationMs: 10,
+      passedChecks: 0, failedChecks: 0, completedSteps: 0, primaryLocation: { kind: 'profile', path: 'tests.scenarios' }, comparison: false, performance: false,
+    }];
+    const selection = resolveActiveAutomationEvidence(results, 'contract-evidence-1');
+    expect(selection?.result.scenarioId).toBe('contract-1');
+    render(<AutomationEvidenceReviewBar results={results} selection={selection!} trusted testRunActive={false} onSelect={onSelect} onClose={onClose} />);
+
+    const selector = screen.getByRole('combobox', { name: 'Review test result' }) as HTMLSelectElement;
+    expect(selector.value).toBe('contract-evidence-1');
+    expect(selector.options).toHaveLength(2);
+    expect(screen.getByText('3 passed · 1 failed · 120 ms')).toBeTruthy();
+    expect(screen.getByText('Comparison · Performance')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Next test result' }));
+    expect(onSelect).toHaveBeenCalledWith(results[1]);
+    await user.click(screen.getByRole('button', { name: 'Close evidence review' }));
     expect(onClose).toHaveBeenCalledOnce();
   });
 
