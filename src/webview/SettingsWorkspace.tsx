@@ -267,9 +267,9 @@ export function AutomationWorkspace({ profile, post, automationResults = [], cam
     </header>
     <div ref={scrollRef} className="settings-main" onScroll={(event) => onScrollTopChange?.(event.currentTarget.scrollTop)}>
       <section className="settings-panel red-team-panel" aria-labelledby="automation-panel-title" tabIndex={-1}>
-        <div className="settings-panel-heading"><div className="settings-panel-title"><h1 id="automation-panel-title">{t('Automated testing')}</h1><p className="settings-section-description">{t('Run deterministic conversation contracts and inspect bounded evidence without mixing them with adversarial outcomes.')}</p></div><span className="settings-section-count">{t('{count} scenarios', { count: formatNumber(scenarioCount) })}</span></div>
+        <div className="settings-panel-heading"><div className="settings-panel-title"><h1 id="automation-panel-title">{t('Automated testing')}</h1><p className="settings-section-description">{t('Run deterministic conversation contracts and inspect bounded evidence without mixing them with adversarial outcomes.')}</p></div><span className="settings-section-count">{t('{count} cases', { count: formatNumber(scenarioCount) })}</span></div>
         <nav className="red-team-section-nav automation-section-nav" aria-label={t('Test sections')} role="tablist">
-          {AUTOMATION_SECTIONS.map((section) => <button id={`automation-${section}-tab`} key={section} type="button" role="tab" tabIndex={activeSection === section ? 0 : -1} aria-controls={`automation-${section}`} aria-selected={activeSection === section} onClick={() => selectSection(section)} onKeyDown={(event) => handleKeyDown(event, section)}><span>{t(section === 'results' ? 'Results' : section === 'scenarios' ? 'Scenarios' : 'Campaigns')}</span><strong>{formatNumber(section === 'results' ? automationResults.length : section === 'scenarios' ? scenarioCount : campaignCount)}</strong></button>)}
+          {AUTOMATION_SECTIONS.map((section) => <button id={`automation-${section}-tab`} key={section} type="button" role="tab" tabIndex={activeSection === section ? 0 : -1} aria-controls={`automation-${section}`} aria-selected={activeSection === section} onClick={() => selectSection(section)} onKeyDown={(event) => handleKeyDown(event, section)}><span>{t(section === 'results' ? 'Results' : section === 'scenarios' ? 'Cases' : 'Campaigns')}</span><strong>{formatNumber(section === 'results' ? automationResults.length : section === 'scenarios' ? scenarioCount : campaignCount)}</strong></button>)}
         </nav>
         <ScenarioTestsSection view="contracts" automationSection={activeSection} profile={profile} patch={patch} post={post} testResults={[]} automationResults={automationResults} campaignDashboard={campaignDashboard} testOperation={testOperation} trusted={trusted} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={onSelectedCampaignIdChange} expandedContractCaseId={expandedCaseId} onExpandedContractCaseIdChange={onExpandedCaseIdChange} linkedContractCatalog={linkedCaseCatalog} linkedContractEditor={linkedCaseEditor} />
       </section>
@@ -634,6 +634,7 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
   const [uncontrolledSelectedCampaignId, setUncontrolledSelectedCampaignId] = useState<string>();
   const [automationResultQuery, setAutomationResultQuery] = useState('');
   const [automationResultPage, setAutomationResultPage] = useState(0);
+  const [automationCaptureEvidenceId, setAutomationCaptureEvidenceId] = useState<string>();
   const [automationScenarioQuery, setAutomationScenarioQuery] = useState('');
   const [automationScenarioPage, setAutomationScenarioPage] = useState(0);
   const [uncontrolledExpandedContractCaseId, setUncontrolledExpandedContractCaseId] = useState<string>();
@@ -646,8 +647,8 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
   const adversarialEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => scenario.adversarial);
   const contractEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => !scenario.adversarial);
   const contractRows = useMemo<ContractCaseRow[]>(() => [
-    ...contractEntries.map(({ scenario, index }) => ({ key: `inline:${index}:${scenario.id}`, source: 'inline' as const, sourceLabel: t('Inline'), scenarioId: scenario.id, scenarioName: scenario.name || scenario.id, tags: scenario.tags ?? [], turns: scenario.steps.length, assertions: contractAssertionCount(scenario), comparison: Boolean(scenario.comparison), performance: Boolean(scenario.performance), faults: Boolean(scenario.faults), scenario, index })),
-    ...(linkedContractCatalog?.entries ?? []).map((entry) => ({ key: linkedContractCaseRowKey(entry), source: 'linked' as const, sourceLabel: entry.suiteName || linkedSuiteLabel(entry.sourcePath), scenarioId: entry.scenarioId, scenarioName: entry.scenarioName || entry.scenarioId, tags: entry.tags, turns: entry.turns, assertions: entry.assertions, comparison: entry.comparison, performance: entry.performance, faults: entry.faults, sourcePath: entry.sourcePath, suiteId: entry.suiteId })),
+    ...contractEntries.map(({ scenario, index }) => ({ key: `inline:${index}:${scenario.id}`, source: 'inline' as const, sourceLabel: t('Inline'), scenarioId: scenario.id, scenarioName: scenario.name || scenario.id, tags: scenario.tags ?? [], turns: scenario.steps.length, assertions: contractAssertionCount(scenario), comparison: Boolean(scenario.comparison), performance: Boolean(scenario.performance), faults: Boolean(scenario.faults), capture: scenario.capture, scenario, index })),
+    ...(linkedContractCatalog?.entries ?? []).map((entry) => ({ key: linkedContractCaseRowKey(entry), source: 'linked' as const, sourceLabel: entry.suiteName || linkedSuiteLabel(entry.sourcePath), scenarioId: entry.scenarioId, scenarioName: entry.scenarioName || entry.scenarioId, tags: entry.tags, turns: entry.turns, assertions: entry.assertions, comparison: entry.comparison, performance: entry.performance, faults: entry.faults, capture: entry.capture, sourcePath: entry.sourcePath, suiteId: entry.suiteId })),
   ], [contractEntries, linkedContractCatalog]);
   useEffect(() => {
     if (!expandedCaseId) return;
@@ -708,8 +709,8 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
   const selectedCampaignIndex = Math.max(0, campaigns.findIndex((campaign) => campaign.id === selectedCampaignId));
   const selectedCampaign = campaigns[selectedCampaignIndex];
   const testRunActive = testOperation?.state === 'running' || testOperation?.state === 'cancelling';
-  const hasRunnableContracts = contractRows.length > 0 || (profile.tests?.contractSuites?.length ?? 0) > 0;
-  const hasRunnableAdversarialCases = adversarialEntries.length > 0 || (profile.tests?.adversarialSuites?.length ?? 0) > 0;
+  const hasRunnableContracts = contractRows.some((row) => !captureNeedsReview(row.capture, row.tags));
+  const hasRunnableAdversarialCases = adversarialEntries.some(({ scenario }) => !captureNeedsReview(scenario.capture, scenario.tags)) || Boolean(linkedCaseCatalog?.entries.some((entry) => !captureNeedsReview(entry.capture, entry.tags)));
   const deferredAutomationScenarioQuery = useDeferredValue(automationScenarioQuery);
   const matchingContracts = useMemo(() => {
     const query = deferredAutomationScenarioQuery.trim().toLocaleLowerCase();
@@ -723,6 +724,8 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
     const query = deferredAutomationResultQuery.trim().toLocaleLowerCase();
     return query ? automationResults.filter((result) => `${result.scenarioName}\u001f${result.scenarioId}`.toLocaleLowerCase().includes(query)) : automationResults;
   }, [automationResults, deferredAutomationResultQuery]);
+  const capturableAutomationResults = useMemo(() => automationResults.filter((result) => Boolean(result.evidenceId)), [automationResults]);
+  const selectedAutomationCaptureEvidenceId = capturableAutomationResults.some((result) => result.evidenceId === automationCaptureEvidenceId) ? automationCaptureEvidenceId : capturableAutomationResults[0]?.evidenceId;
   const automationResultPageCount = Math.max(1, Math.ceil(matchingAutomationResults.length / 25));
   const boundedAutomationResultPage = Math.min(automationResultPage, automationResultPageCount - 1);
   const visibleAutomationResults = matchingAutomationResults.slice(boundedAutomationResultPage * 25, (boundedAutomationResultPage + 1) * 25);
@@ -752,6 +755,7 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
     {view === 'contracts' && automationSection === 'results' && <section id="automation-results" className="settings-card red-team-section" role="tabpanel" aria-labelledby="automation-results-tab automation-results-heading" tabIndex={-1}>
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="automation-results-heading">{t('Latest test results')}</h2><p className="settings-card-description">{t('Deterministic contract, comparison, and performance outcomes from this Extension Host session.')}</p></div><details className="adversarial-export-actions"><summary aria-label={t('Export test results')} title={t('Export test results')}><ProductIcon name="export" /></summary><div><button type="button" disabled={!automationResults.length} onClick={() => post({ type: 'test.report.export', format: 'html' })}>{t('HTML report')}</button><button type="button" disabled={!automationResults.length || !trusted} onClick={() => post({ type: 'test.evidenceBundle.export' })}>{t('Evidence Bundle')}</button><button type="button" disabled={!automationResults.length} onClick={() => post({ type: 'test.report.export', format: 'json' })}>{t('JSON report')}</button><button type="button" disabled={!automationResults.length} onClick={() => post({ type: 'test.report.export', format: 'junit' })}>{t('JUnit XML')}</button></div></details></div>
       <TestOperationStatus operation={testOperation} />
+      {capturableAutomationResults.length > 0 && <div className="test-capture-bar"><label><span>{t('Create draft from result')}</span><select aria-label={t('Test result to capture')} value={selectedAutomationCaptureEvidenceId} onChange={(event) => setAutomationCaptureEvidenceId(event.target.value)}>{capturableAutomationResults.map((result) => <option key={result.evidenceId} value={result.evidenceId}>{result.scenarioName} · {t(localizeHumanized(result.outcome))}</option>)}</select></label><button type="button" disabled={!trusted || !selectedAutomationCaptureEvidenceId} onClick={() => selectedAutomationCaptureEvidenceId && post({ type: 'test.capture', source: { kind: 'evidence', evidenceId: selectedAutomationCaptureEvidenceId }, suggestedKind: 'contract' })}>{t('Save as test…')}</button></div>}
       {automationResults.length > 0 && <label className="automation-search"><span>{t('Search results')}</span><input type="search" value={automationResultQuery} placeholder={t('Scenario name or ID')} onChange={(event) => { setAutomationResultQuery(event.target.value); setAutomationResultPage(0); }} /></label>}
       {!automationResults.length ? <div className="settings-empty settings-empty--action"><span>{t('No automation results in this Extension Host session.')}</span><button type="button" onClick={() => post({ type: 'testExplorer.open' })}>{t('Open Test Explorer')}</button></div> : !matchingAutomationResults.length ? <p className="settings-empty">{t('No results match the current search.')}</p> : <>
         <div className="adversarial-result-table-wrap"><table className="adversarial-result-table automation-result-table"><thead><tr><th scope="col">{t('Scenario')}</th><th scope="col">{t('Outcome')}</th><th scope="col">{t('Checks')}</th><th scope="col">{t('Duration')}</th><th scope="col" className="adversarial-result-table__actions-heading">{t('Actions')}</th></tr></thead><tbody>{visibleAutomationResults.map((result) => <tr key={`${result.scenarioId}-${result.evidenceId ?? result.durationMs}`}><td><div className="adversarial-result-cell-stack"><strong>{result.scenarioName}</strong><code>{result.scenarioId}</code></div></td><td><span className={`automation-outcome automation-outcome--${result.outcome}`}><ProductIcon name={result.outcome === 'passed' ? 'check' : result.outcome === 'failed' ? 'warning' : 'error'} />{t(localizeHumanized(result.outcome))}</span></td><td><span>{t('{passed} passed · {failed} failed', { passed: formatNumber(result.passedChecks), failed: formatNumber(result.failedChecks) })}</span>{(result.comparison || result.performance) && <small>{[result.comparison ? t('Comparison') : '', result.performance ? t('Performance') : ''].filter(Boolean).join(' · ')}</small>}</td><td className="adversarial-result-table__duration">{formatNumber(result.durationMs)} ms</td><td><div className="adversarial-result-actions">{result.evidenceId ? <button type="button" className="primary" onClick={() => post({ type: 'test.evidence.open', evidenceId: result.evidenceId!, location: result.primaryLocation })}>{t('Open evidence')}</button> : <button type="button" disabled>{t('Evidence unavailable')}</button>}<IconButton type="button" icon="debug-rerun" label={t('Run scenario again')} disabled={testRunActive} onClick={() => post({ type: 'test.runCase', scenarioId: result.scenarioId, suiteId: result.suiteId, kind: 'contract' })} /></div></td></tr>)}</tbody></table></div>
@@ -942,6 +946,7 @@ interface AdversarialCaseRow {
   repetitions: number;
   timeoutMs: number;
   rules: string;
+  capture?: ScenarioDefinition['capture'];
   scenario?: ScenarioDefinition;
   index?: number;
   sourcePath?: string;
@@ -951,6 +956,14 @@ interface AdversarialCaseRow {
 function inlineCaseRowKey(scenario: ScenarioDefinition, index: number): string { return `inline:${scenario.id}:${index}`; }
 function linkedCaseRowKey(entry: Pick<LinkedAdversarialCaseSummary, 'sourcePath' | 'scenarioId'>): string { return `linked:${entry.sourcePath}:${entry.scenarioId}`; }
 function cloneScenario(scenario: ScenarioDefinition): ScenarioDefinition { return JSON.parse(JSON.stringify(scenario)) as ScenarioDefinition; }
+function captureNeedsReview(capture: ScenarioDefinition['capture'], tags: readonly string[] = []): boolean { return capture?.status === 'needsReview' || tags.includes('needs-review'); }
+function markCaptureReady(scenario: ScenarioDefinition): ScenarioDefinition {
+  return {
+    ...scenario,
+    tags: (scenario.tags ?? []).filter((tag) => tag !== 'needs-review'),
+    ...(scenario.capture ? { capture: { ...scenario.capture, status: 'ready' } } : {}),
+  };
+}
 
 function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEditor, trusted, post, testOperation, collection, onCollectionChange, onRefresh, expandedCaseId, onToggle, onChange, onDestructiveChange, onDelete, onOpenSource }: {
   entries: Array<{ scenario: ScenarioDefinition; index: number }>;
@@ -1031,6 +1044,7 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEdito
         repetitions: definition.repetitions ?? 1,
         timeoutMs: definition.timeoutMs ?? 60_000,
         rules: adversarialRuleSummary(definition.forbid),
+        capture: scenario.capture,
         scenario,
         index,
       };
@@ -1049,6 +1063,7 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEdito
       repetitions: entry.repetitions,
       timeoutMs: entry.timeoutMs,
       rules: linkedAdversarialRuleSummary(entry),
+      capture: entry.capture,
       sourcePath: entry.sourcePath,
       suiteId: entry.suiteId,
     })),
@@ -1098,8 +1113,8 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEdito
         const editorId = `adversarial-case-detail-${row.key.replace(/[^a-z0-9-]/giu, '-')}`;
         return <React.Fragment key={row.key}>
           <tr className={expanded ? 'is-expanded' : undefined}>
-            <th scope="row"><span>{row.scenarioName}</span><code>{row.scenarioId}</code>{row.tags.length ? <small>{row.tags.join(', ')}</small> : null}</th>
-            <td className="adversarial-case-table__run"><button type="button" className="primary" aria-label={t('Run case {name}', { name: row.scenarioName })} disabled={testRunActive} aria-busy={testOperation?.action === 'runCase' && testRunActive && testOperation.detail === row.scenarioId} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}) })}>{t(testOperation?.action === 'runCase' && testRunActive && testOperation.detail === row.scenarioId ? 'Running…' : 'Run')}</button></td>
+            <th scope="row"><span>{row.scenarioName}</span><code>{row.scenarioId}</code>{captureNeedsReview(row.capture, row.tags) && <small className="capture-review-badge">{t('Needs review')}</small>}{row.tags.length ? <small>{row.tags.join(', ')}</small> : null}</th>
+            <td className="adversarial-case-table__run"><button type="button" className="primary" aria-label={captureNeedsReview(row.capture, row.tags) ? t('Review case {name} before running', { name: row.scenarioName }) : t('Run case {name}', { name: row.scenarioName })} disabled={testRunActive || captureNeedsReview(row.capture, row.tags)} aria-busy={testOperation?.action === 'runCase' && testRunActive && testOperation.detail === row.scenarioId} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}) })}>{t(testOperation?.action === 'runCase' && testRunActive && testOperation.detail === row.scenarioId ? 'Running…' : 'Run')}</button></td>
             <td><span className={`adversarial-case-source adversarial-case-source--${row.source}`} title={row.sourcePath ? linkedSuiteLabel(row.sourcePath) : undefined}>{row.sourceLabel}</span></td>
             <td>{t(row.mode === 'multiTurn' ? 'Multi-turn' : 'Single turn')}</td>
             <td>{t('{current} / {maximum}', { current: formatNumber(row.turns), maximum: formatNumber(row.maxTurns) })}</td>
@@ -1151,6 +1166,7 @@ interface ContractCaseRow {
   comparison: boolean;
   performance: boolean;
   faults: boolean;
+  capture?: ScenarioDefinition['capture'];
   scenario?: ScenarioDefinition;
   index?: number;
   sourcePath?: string;
@@ -1216,8 +1232,8 @@ function ContractCaseList({ rows, expandedCaseId, onExpandedCaseIdChange, linked
     const expanded = expandedCaseId === row.key || (row.source === 'inline' && expandedCaseId === row.scenarioId);
     const flags = [row.comparison ? t('Comparison') : '', row.performance ? t('Performance') : '', row.faults ? t('Fault Lab') : ''].filter(Boolean);
     return <div className={`automation-scenario-row ${expanded ? 'is-expanded' : ''}`} role="listitem" key={row.key}>
-      <button type="button" className="automation-scenario-row__main" aria-label={row.scenarioName} aria-expanded={expanded} onClick={() => toggle(row)}><span><strong>{row.scenarioName}</strong><code>{row.scenarioId}</code></span><span className="automation-scenario-row__summary"><small className={`adversarial-case-source adversarial-case-source--${row.source}`}>{row.sourceLabel}</small><small>{t('{steps} steps · {assertions} assertions', { steps: formatNumber(row.turns), assertions: formatNumber(row.assertions) })}{flags.length ? ` · ${flags.join(' · ')}` : ''}</small></span></button>
-      <IconButton type="button" icon="debug-start" label={t('Run scenario {name}', { name: row.scenarioName })} disabled={testRunActive} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}), kind: 'contract' })} />
+      <button type="button" className="automation-scenario-row__main" aria-label={row.scenarioName} aria-expanded={expanded} onClick={() => toggle(row)}><span><strong>{row.scenarioName}</strong><code>{row.scenarioId}</code>{captureNeedsReview(row.capture, row.tags) && <small className="capture-review-badge">{t('Needs review')}</small>}</span><span className="automation-scenario-row__summary"><small className={`adversarial-case-source adversarial-case-source--${row.source}`}>{row.sourceLabel}</small><small>{t('{steps} steps · {assertions} assertions', { steps: formatNumber(row.turns), assertions: formatNumber(row.assertions) })}{flags.length ? ` · ${flags.join(' · ')}` : ''}</small></span></button>
+      <IconButton type="button" icon="debug-start" label={captureNeedsReview(row.capture, row.tags) ? t('Review scenario {name} before running', { name: row.scenarioName }) : t('Run scenario {name}', { name: row.scenarioName })} disabled={testRunActive || captureNeedsReview(row.capture, row.tags)} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}), kind: 'contract' })} />
       {expanded && row.scenario && row.index !== undefined && <div className="automation-scenario-editor"><ScenarioEditor scenario={row.scenario} index={row.index} onChange={(value) => onInlineChange(row.index!, value)} onDestructiveChange={(value, label) => onInlineDestructiveChange(row.index!, value, label)} onDelete={() => onInlineDelete(row.index!, row.scenario!)} /></div>}
       {expanded && row.source === 'linked' && row.sourcePath && <div className="automation-scenario-editor linked-case-editor">
         <div className="linked-case-editor__notice"><ProductIcon name="link" /><div><strong>{t('Linked {format} test case', { format: row.sourcePath.toLocaleLowerCase().endsWith('.csv') ? 'CSV' : 'JSONC' })}</strong><span>{t('Edits are written to {source}; the Profile keeps only a safe reference.', { source: linkedSuiteLabel(row.sourcePath) })}</span></div><button type="button" onClick={() => post({ type: 'contract.openLinkedSuite', path: row.sourcePath! })}>{t('Open source')}</button></div>
@@ -1329,6 +1345,7 @@ function ScenarioEditor({ scenario, index, onChange, onDestructiveChange, onDele
   };
   return <article className="scenario-editor" aria-labelledby={`scenario-editor-title-${index}`}>
     <header className="scenario-editor__header"><div><strong id={`scenario-editor-title-${index}`}>{scenario.name || scenario.id}</strong><code>{scenario.id}</code></div><div><IconButton type="button" icon="add" label={t('Add step to {name}', { name: scenario.name || scenario.id })} onClick={addStep} />{onDelete && <IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={onDelete} />}</div></header>
+    {captureNeedsReview(scenario.capture, scenario.tags) && <div className="capture-review-callout" role="status"><ProductIcon name="warning" /><div><strong>{t('Review required')}</strong><span>{t('This draft was captured from {source}. Check every user message and test condition before enabling it.', { source: scenario.capture ? t(localizeHumanized(scenario.capture.source)) : t('captured source') })}</span></div><button type="button" className="primary" onClick={() => onChange(markCaptureReady(scenario))}>{t('Mark ready')}</button></div>}
     <div className="settings-form-grid scenario-editor__identity">
       <SettingField label={t('Scenario name')} id={`scenario-name-${index}`}><PatchInput id={`scenario-name-${index}`} value={scenario.name} onCommit={(value) => onChange({ ...scenario, name: value })} required /></SettingField>
       <SettingField label={t('Scenario ID')} id={`scenario-id-${index}`} hint={t(identityReadOnly ? 'The linked case ID remains stable; edit it in the source file if needed.' : 'Lowercase letters, numbers, and hyphens.')}><PatchInput id={`scenario-id-${index}`} value={scenario.id} onCommit={(value) => onChange({ ...scenario, id: value })} required readOnly={identityReadOnly} spellCheck={false} /></SettingField>

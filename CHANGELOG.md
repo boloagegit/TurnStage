@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.23.0
+
+- Added a unified **Save as test…** flow for active conversations, recorded-run
+  snapshots, functional results, and adversarial evidence. Captures can become
+  functional or adversarial drafts stored inline, appended to linked CSV/JSONC
+  suites, or written to a new linked JSONC suite.
+- Made captured cases fail closed until explicitly reviewed and marked ready in
+  the Tests or Red Team case editor. Test Explorer and the headless CLI exclude
+  review drafts, while metadata-only provenance records the source, Profile
+  digest, capture time, and applicable run or evidence identifier.
+- Bounded capture to 10 ordered user turns with per-turn and total size limits,
+  excluded assistant output and transport payloads, and added serialized,
+  conflict-checked linked-suite writes with read-back verification.
+- Moved response activity to a reduced-motion-aware composer border beam and
+  kept the compact text state explicit, with responsive and visual regression
+  coverage for captured-case review on narrow and desktop layouts.
+- Updated the schema, CSV round trips, documentation, and Traditional Chinese,
+  Japanese, and Korean primary-workflow localization for the new workflow.
+
 ## 0.22.8
 
 - Moved adversarial execution controls into the Cases workspace, added bounded

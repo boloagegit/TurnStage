@@ -1,5 +1,15 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Save as test…': '테스트로 저장…',
+  'captured source': '캡처 소스',
+  'Needs review': '검토 필요',
+  'Review required': '검토 필요',
+  'This draft was captured from {source}. Check every user message and test condition before enabling it.': '이 초안은 {source}에서 캡처되었습니다. 활성화하기 전에 모든 사용자 메시지와 테스트 조건을 확인하세요.',
+  'Mark ready': '실행 가능으로 표시',
+  'Review scenario {name} before running': '실행 전에 시나리오 "{name}" 검토',
+  'Review case {name} before running': '실행 전에 케이스 "{name}" 검토',
+  'Create draft from result': '결과에서 초안 만들기',
+  'Test result to capture': '캡처할 테스트 결과',
   'Chat': '채팅',
   'Debug': '디버그',
   'Tests': '테스트',
@@ -134,7 +144,9 @@ export const ko: Record<string, string> = {
   'Disabled': '사용 안 함',
   'Page {page} of {pages}': '{pages}페이지 중 {page}페이지',
   '{count} scenarios': '시나리오 {count}개',
+  '{count} cases': '케이스 {count}개',
   '{count} test scenarios': '테스트 시나리오 {count}개',
+  '{count} test cases': '테스트 케이스 {count}개',
   '{passed} passed · {failed} failed': '통과 {passed} · 실패 {failed}',
   '{steps} steps · {assertions} assertions': '{steps}단계 · 어서션 {assertions}개',
 };

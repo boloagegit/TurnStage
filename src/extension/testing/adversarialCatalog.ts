@@ -45,6 +45,7 @@ function summarizeLinkedCase(sourcePath: string, suiteId: string, suiteName: str
     scenarioId: scenario.id,
     scenarioName: scenario.name || scenario.id,
     tags: (scenario.tags ?? []).slice(0, 100),
+    capture: scenario.capture ? structuredClone(scenario.capture) : undefined,
     mode: adversarial.mode ?? (scenario.steps.length > 1 ? 'multiTurn' : 'singleTurn'),
     turns: scenario.steps.length,
     maxTurns: adversarial.maxTurns ?? Math.max(1, scenario.steps.length),

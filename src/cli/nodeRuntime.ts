@@ -13,6 +13,7 @@ import { mapChangedFilesToTests } from '../extension/testing/impactMapping';
 import { createProvenanceManifest, verifyProvenanceManifest, type ProvenanceFileInput, type ProvenanceManifest } from '../extension/testing/provenance';
 import { runScenarioGroup } from '../extension/testing/scenarioExecution';
 import { runScenario } from '../extension/testing/scenarioRunner';
+import { isScenarioReady } from '../extension/testing/scenarioCapture';
 import { NodeScenarioSession } from './nodeSession';
 
 interface LoadedCase {
@@ -112,6 +113,7 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
     const issues = new ProfileValidator().validate(profile, tree, uniqueEnvironments);
     if (issues.some((issue) => issue.severity === 'error')) throw new Error('Profile validation failed.');
     for (const scenario of profile.tests?.scenarios ?? []) {
+      if (!isScenarioReady(scenario)) continue;
       if (result.length >= MAX_CLI_CASES) throw new Error('The selected profiles contain too many test cases.');
       result.push({ key: `${profile.id}/inline/${scenario.id}`, profile, scenario, environments: uniqueEnvironments });
     }
@@ -122,6 +124,7 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
       const scenarios = parsed.scenarios;
       if (validateContractScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new Error('Test suite is incompatible with its profile.');
       for (const scenario of scenarios) {
+        if (!isScenarioReady(scenario)) continue;
         if (result.length >= MAX_CLI_CASES) throw new Error('The selected profiles contain too many test cases.');
         result.push({ key: `${profile.id}/${parsed.suite.id}/${scenario.id}`, profile, scenario, suiteId: parsed.suite.id, suite: parsed.suite, environments: uniqueEnvironments });
       }
@@ -133,6 +136,7 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
       const scenarios = parsed.scenarios;
       if (validateAdversarialScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new Error('Adversarial suite is incompatible with its profile.');
       for (const scenario of scenarios) {
+        if (!isScenarioReady(scenario)) continue;
         if (result.length >= MAX_CLI_CASES) throw new Error('The selected profiles contain too many test cases.');
         result.push({ key: `${profile.id}/${parsed.suite.id}/${scenario.id}`, profile, scenario, suiteId: parsed.suite.id, suite: parsed.suite, environments: uniqueEnvironments });
       }

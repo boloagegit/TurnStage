@@ -1,4 +1,4 @@
-import type { AdversarialContentRule, AdversarialForbidDefinition, ScenarioDefinition } from '../../shared/types';
+import type { AdversarialContentRule, AdversarialForbidDefinition, ScenarioCaptureDefinition, ScenarioDefinition } from '../../shared/types';
 import { createAdversarialSuite, MAX_ADVERSARIAL_CASES_PER_SUITE, MAX_ADVERSARIAL_REPETITIONS, MAX_ADVERSARIAL_TURNS_PER_CASE, MAX_ADVERSARIAL_TURNS_PER_SUITE, validateAdversarialSuite } from './adversarialSuite';
 
 export const ADVERSARIAL_CSV_COLUMNS = [
@@ -7,7 +7,7 @@ export const ADVERSARIAL_CSV_COLUMNS = [
   'additional_forbidden_content_json', 'additional_forbid_urls', 'additional_forbid_ctas', 'additional_forbid_tools', 'additional_forbidden_events_json',
   'max_turns', 'timeout_ms', 'stop_on_attack_succeeded',
 ] as const;
-export const ADVERSARIAL_CSV_OPTIONAL_COLUMNS = ['repetitions', 'fail_fast'] as const;
+export const ADVERSARIAL_CSV_OPTIONAL_COLUMNS = ['repetitions', 'fail_fast', 'capture_json'] as const;
 
 export interface AdversarialCsvIssue { row: number; column?: string; message: string }
 export interface ParsedAdversarialCsv { scenarios: ScenarioDefinition[]; issues: AdversarialCsvIssue[]; rowCount: number }
@@ -34,7 +34,7 @@ export function parseAdversarialCsv(text: string): ParsedAdversarialCsv {
   if (groups.size > MAX_ADVERSARIAL_CASES_PER_SUITE) return { scenarios: [], issues: [{ row: 1, message: `CSV can contain at most ${MAX_ADVERSARIAL_CASES_PER_SUITE} cases.` }], rowCount: records.length };
   for (const [caseId, entries] of groups) {
     const first = entries[0]!;
-    validateConsistent(entries, ['case_name', 'description', 'tags', 'enabled', 'forbidden_content_json', 'forbid_urls', 'forbid_ctas', 'forbid_tools', 'forbidden_events_json', 'max_turns', 'timeout_ms', 'stop_on_attack_succeeded', 'repetitions', 'fail_fast'], issues);
+    validateConsistent(entries, ['case_name', 'description', 'tags', 'enabled', 'forbidden_content_json', 'forbid_urls', 'forbid_ctas', 'forbid_tools', 'forbidden_events_json', 'max_turns', 'timeout_ms', 'stop_on_attack_succeeded', 'repetitions', 'fail_fast', 'capture_json'], issues);
     const name = field(first.value, 'case_name').trim();
     const enabled = boolean(field(first.value, 'enabled'), true, first.row, 'enabled', issues);
     if (!/^[a-z0-9][a-z0-9-]*$/.test(caseId)) issues.push({ row: first.row, column: 'case_id', message: 'case_id must use lowercase letters, numbers, and hyphens.' });
@@ -71,6 +71,7 @@ export function parseAdversarialCsv(text: string): ParsedAdversarialCsv {
       name,
       description: field(first.value, 'description').trim() || undefined,
       tags: jsonStringArray(field(first.value, 'tags'), first.row, 'tags', issues),
+      capture: jsonValue(field(first.value, 'capture_json'), first.row, 'capture_json', issues),
       steps: turns.map((turn) => ({ ...turn.step, additionalForbid: hasForbid(turn.step.additionalForbid ?? {}) ? turn.step.additionalForbid : undefined })),
       adversarial: {
         mode: turns.length > 1 ? 'multiTurn' : 'singleTurn',
@@ -116,6 +117,7 @@ export function serializeAdversarialCsv(scenarios: readonly ScenarioDefinition[]
       String(definition.stopOnAttackSucceeded !== false),
       String(definition.repetitions ?? ''),
       String(definition.failFast ?? false),
+      scenario.capture ? JSON.stringify(scenario.capture) : '',
     ]));
   }
   return `\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}\r\n`;
@@ -180,6 +182,16 @@ function jsonStringArrayOrRules(value: string, row: number, column: string, issu
     if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'string' || Boolean(item) && typeof item === 'object' && !Array.isArray(item) && ['contains', 'regex'].includes(String((item as Record<string, unknown>).match)) && typeof (item as Record<string, unknown>).value === 'string')) return parsed as Array<string | AdversarialContentRule>;
   } catch { /* reported below */ }
   issues.push({ row, column, message: `${column} must be a JSON array of strings or content rules.` }); return [];
+}
+
+function jsonValue(value: string, row: number, column: string, issues: AdversarialCsvIssue[]): ScenarioCaptureDefinition | undefined {
+  if (!value.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as ScenarioCaptureDefinition;
+  } catch { /* reported below */ }
+  issues.push({ row, column, message: `${column} must be a JSON object.` });
+  return undefined;
 }
 
 function validateConsistent(entries: Array<{ row: number; value: Record<string, string> }>, columns: string[], issues: AdversarialCsvIssue[]): void {

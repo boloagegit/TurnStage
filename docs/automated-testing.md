@@ -7,10 +7,20 @@ its four outcomes and repeated-sample rules answer a different question.
 ## Inline and linked cases
 
 Keep a few cases in `tests.scenarios`. For a larger collection, use **Tests →
-Scenarios → More actions → Link suite** and select a `.tests.jsonc`,
+Cases → More actions → Link suite** and select a `.tests.jsonc`,
 `.tests.json`, or CSV file. The Profile stores the references in
 `tests.contractSuites`; linked files remain the source of truth and are not
 copied into Profile JSONC.
+
+Use **Save as test…** from Chat, a recorded run with a snapshot, or a test
+result with evidence to create a functional or adversarial draft. The capture
+flow copies at most 10 ordered user messages, never assistant responses,
+headers, bodies, or credentials. It can write inline, append to an existing
+linked CSV/JSONC suite, or create a new JSONC suite. Every captured case starts
+as **Needs review**, stays out of Test Explorer, CLI runs, campaigns, and Run
+all, and becomes executable only after **Mark ready** is saved. Capture
+provenance contains identifiers, timestamp, and a redacted Profile digest;
+conversation text remains only in the normal case steps.
 
 Workspace-relative links are portable and work in VS Code and the TurnStage
 CLI. An explicitly selected file outside the workspace receives an opaque,

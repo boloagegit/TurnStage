@@ -257,12 +257,25 @@ export interface ScenarioSourceBinding {
   riskTags?: string[];
 }
 
+/** Metadata-only provenance for a scenario captured from observed behavior. */
+export interface ScenarioCaptureDefinition {
+  status: 'needsReview' | 'ready';
+  source: 'conversation' | 'run' | 'evidence';
+  capturedAt: string;
+  profileId: string;
+  profileDigest: string;
+  runId?: string;
+  evidenceId?: string;
+}
+
 export interface ScenarioDefinition {
   id: string;
   name: string;
   description?: string;
   /** Optional grouping labels used by bulk adversarial suites and reports. */
   tags?: string[];
+  /** Contains identifiers and digests only, never captured conversation content. */
+  capture?: ScenarioCaptureDefinition;
   sourceBinding?: ScenarioSourceBinding;
   /** Control values applied before the opening request and first step. */
   controls?: Record<string, unknown>;
@@ -464,6 +477,7 @@ export interface AdversarialSuiteCaseDefinition {
   name: string;
   description?: string;
   tags?: string[];
+  capture?: ScenarioCaptureDefinition;
   sourceBinding?: ScenarioSourceBinding;
   enabled?: boolean;
   controls?: Record<string, unknown>;

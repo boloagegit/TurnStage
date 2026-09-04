@@ -37,7 +37,7 @@ export function validateContractSuite(suite: ContractSuiteDefinition): ContractS
   suite.cases.forEach((testCase, caseIndex) => {
     const path = `cases[${caseIndex}]`;
     if (!isRecord(testCase)) { issues.push(issue(path, 'Case must be an object.')); return; }
-    rejectUnknown(testCase, ['id', 'name', 'description', 'tags', 'sourceBinding', 'enabled', 'controls', 'steps', 'assertions', 'comparison', 'performance', 'faults'], path, issues);
+    rejectUnknown(testCase, ['id', 'name', 'description', 'tags', 'capture', 'sourceBinding', 'enabled', 'controls', 'steps', 'assertions', 'comparison', 'performance', 'faults'], path, issues);
     if (!slug(testCase.id)) issues.push(issue(`${path}.id`, 'Case id must use lowercase letters, numbers, and hyphens.'));
     else if (caseIds.has(testCase.id)) issues.push(issue(`${path}.id`, `Duplicate case id: ${testCase.id}.`));
     else caseIds.add(testCase.id);
@@ -45,6 +45,7 @@ export function validateContractSuite(suite: ContractSuiteDefinition): ContractS
     if (testCase.description !== undefined && (typeof testCase.description !== 'string' || testCase.description.length > 10_000)) issues.push(issue(`${path}.description`, 'Case description must be a string of at most 10000 characters.'));
     if (testCase.enabled !== undefined && typeof testCase.enabled !== 'boolean') issues.push(issue(`${path}.enabled`, 'enabled must be boolean.'));
     if (testCase.tags !== undefined && (!Array.isArray(testCase.tags) || testCase.tags.length > 20 || testCase.tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.length > 64) || new Set(testCase.tags).size !== testCase.tags.length)) issues.push(issue(`${path}.tags`, 'Tags must contain at most 20 unique non-empty values of up to 64 characters.'));
+    validateCapture(testCase.capture, `${path}.capture`, issues);
     validateBinding(testCase.sourceBinding, `${path}.sourceBinding`, issues);
     if (testCase.controls !== undefined && !isRecord(testCase.controls)) issues.push(issue(`${path}.controls`, 'Case controls must be an object.'));
     if (!Array.isArray(testCase.steps) || !testCase.steps.length) { issues.push(issue(`${path}.steps`, 'Case requires at least one step.')); return; }
@@ -108,6 +109,22 @@ function validateAssertions(value: unknown, path: string, issues: ContractSuiteI
 function validateBinding(value: ScenarioSourceBinding | undefined, path: string, issues: ContractSuiteIssue[]): void {
   if (value === undefined) return;
   issues.push(...validateSourceBinding(value).map((entry) => issue(`${path}.${entry.scope.replace(/^sourceBinding\.?/u, '')}`, entry.message)));
+}
+
+function validateCapture(value: unknown, path: string, issues: ContractSuiteIssue[]): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) { issues.push(issue(path, 'Capture metadata must be an object.')); return; }
+  const allowed = new Set(['status', 'source', 'capturedAt', 'profileId', 'profileDigest', 'runId', 'evidenceId']);
+  for (const key of Object.keys(value)) if (!allowed.has(key)) issues.push(issue(`${path}.${key}`, `Unsupported capture field: ${key}.`));
+  if (!['needsReview', 'ready'].includes(String(value.status))) issues.push(issue(`${path}.status`, 'Capture status must be needsReview or ready.'));
+  if (!['conversation', 'run', 'evidence'].includes(String(value.source))) issues.push(issue(`${path}.source`, 'Capture source must be conversation, run, or evidence.'));
+  if (typeof value.capturedAt !== 'string' || value.capturedAt.length > 64 || Number.isNaN(Date.parse(value.capturedAt))) issues.push(issue(`${path}.capturedAt`, 'Capture time must be a valid bounded timestamp.'));
+  if (typeof value.profileId !== 'string' || !value.profileId.trim() || value.profileId.length > 256) issues.push(issue(`${path}.profileId`, 'Capture profileId must contain 1 to 256 characters.'));
+  if (typeof value.profileDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.profileDigest)) issues.push(issue(`${path}.profileDigest`, 'Capture profileDigest must be a SHA-256 digest.'));
+  if (value.source === 'run' && (typeof value.runId !== 'string' || !value.runId.trim() || value.runId.length > 256)) issues.push(issue(`${path}.runId`, 'A run capture requires a bounded runId.'));
+  if (value.source === 'evidence' && (typeof value.evidenceId !== 'string' || !value.evidenceId.trim() || value.evidenceId.length > 256)) issues.push(issue(`${path}.evidenceId`, 'An evidence capture requires a bounded evidenceId.'));
+  if (value.source !== 'run' && value.runId !== undefined) issues.push(issue(`${path}.runId`, 'Only a run capture can define runId.'));
+  if (value.source !== 'evidence' && value.evidenceId !== undefined) issues.push(issue(`${path}.evidenceId`, 'Only an evidence capture can define evidenceId.'));
 }
 
 function mergeSourceBindings(suite: ScenarioSourceBinding | undefined, local: ScenarioSourceBinding | undefined): ScenarioSourceBinding | undefined {

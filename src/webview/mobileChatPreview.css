@@ -876,27 +876,17 @@
   background: transparent;
 }
 
-.mobile-chat-preview__part--progress[data-status='running']::after {
-  display: block;
-  width: 42%;
-  height: 2px;
-  margin-top: var(--mcp-space-1);
-  background: var(--vscode-progressBar-background, var(--mcp-focus));
-  content: '';
-}
-
 @media (prefers-reduced-motion: no-preference) {
-  .mobile-chat-preview__part--progress[data-status='running']::after {
-    animation: mobile-chat-preview-progress 1.4s cubic-bezier(.16, 1, .3, 1) infinite;
+  .mobile-chat-preview__composer-control[data-beam-state='active']::after {
+    animation: mobile-chat-preview-border-beam 2.8s linear infinite;
   }
 
   .mobile-chat-preview__message-toolbar {
     transition: opacity 80ms linear;
   }
 
-  @keyframes mobile-chat-preview-progress {
-    from { transform: translateX(-110%); }
-    to { transform: translateX(250%); }
+  @keyframes mobile-chat-preview-border-beam {
+    to { offset-distance: 100%; }
   }
 }
 
@@ -1177,9 +1167,26 @@
 
 .mobile-chat-preview__composer-control {
   position: relative;
+  overflow: hidden;
   border: 1px solid var(--vscode-input-border, var(--mcp-border));
   border-radius: 9px;
   background: var(--vscode-input-background, var(--mcp-background));
+}
+
+.mobile-chat-preview__composer-control[data-beam-state='active']::after {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto auto 0;
+  width: 28px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--mcp-accent) 55%, transparent), var(--mcp-accent));
+  content: '';
+  offset-anchor: center;
+  offset-distance: 0%;
+  offset-path: inset(0 round 8px);
+  offset-rotate: auto;
+  pointer-events: none;
 }
 
 .mobile-chat-preview__composer textarea,
@@ -1311,6 +1318,14 @@
     border-inline-start-color: Highlight;
   }
 
+  .mobile-chat-preview__composer-control[data-beam-state='active'] {
+    border-color: Highlight;
+  }
+
+  .mobile-chat-preview__composer-control[data-beam-state='active']::after {
+    display: none;
+  }
+
   .mobile-chat-preview__button--primary,
   .mobile-chat-preview__button--danger {
     forced-color-adjust: none;
@@ -1325,9 +1340,12 @@
     scroll-behavior: auto;
   }
 
-  .mobile-chat-preview__part--progress[data-status='running']::after {
-    animation: none;
-    transform: none;
+  .mobile-chat-preview__composer-control[data-beam-state='active'] {
+    border-color: var(--mcp-accent);
+  }
+
+  .mobile-chat-preview__composer-control[data-beam-state='active']::after {
+    display: none;
   }
 
   .mobile-chat-preview__message-toolbar {
@@ -1361,9 +1379,12 @@
   scroll-behavior: auto;
 }
 
-.vscode-reduce-motion .mobile-chat-preview__part--progress[data-status='running']::after {
-  animation: none;
-  transform: none;
+.vscode-reduce-motion .mobile-chat-preview__composer-control[data-beam-state='active'] {
+  border-color: var(--mcp-accent);
+}
+
+.vscode-reduce-motion .mobile-chat-preview__composer-control[data-beam-state='active']::after {
+  display: none;
 }
 
 .vscode-reduce-motion .mobile-chat-preview__message-toolbar {

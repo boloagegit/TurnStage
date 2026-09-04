@@ -81,7 +81,14 @@ Use **Red Team → Cases** for individual cases. Each case reuses the Scenario r
 
 The Profile must have mappings capable of exposing the prohibited behavior. TurnStage rejects rules it cannot observe instead of silently passing them.
 
-To turn a useful manual probe into a regression quickly, use **Save conversation as adversarial test** in the chat preview toolbar. TurnStage copies up to 10 ordered user turns into a new inline case, asks which observable effects must be prohibited, and warns before writing the messages to Profile JSONC. Review the conversation for secrets or private data before confirming.
+To turn a useful manual probe into a regression quickly, use **Save as test…**
+from Chat, a recorded run with a snapshot, or Evidence. Choose **Adversarial
+test**, review the copied user turns, select observable prohibited effects, and
+choose a bounded attempt/timeout policy. Save inline, append to an existing
+linked CSV/JSONC suite, or create a new JSONC suite. The new case is always a
+**Needs review** draft and cannot run through the GUI, Test Explorer, campaigns,
+or CLI until its prompts and rules are reviewed and **Mark ready** is saved.
+Assistant output, headers, response bodies, and credentials are not copied.
 
 ## Bulk JSONC and CSV
 

@@ -9,7 +9,7 @@ import * as vscode from 'vscode';
 import { serializeContractCsv } from '../src/extension/testing/contractCsv';
 import { parseContractSource } from '../src/extension/testing/contractSource';
 import { createContractSuite, serializeContractSuite } from '../src/extension/testing/contractSuite';
-import { LinkedContractCaseConflictError, loadEditableLinkedContractCase, saveEditableLinkedContractCase, updateLinkedContractCaseSource } from '../src/extension/testing/linkedContractCase';
+import { appendLinkedContractCaseSource, LinkedContractCaseConflictError, loadEditableLinkedContractCase, saveEditableLinkedContractCase, updateLinkedContractCaseSource } from '../src/extension/testing/linkedContractCase';
 import type { ScenarioDefinition } from '../src/shared/types';
 
 const first: ScenarioDefinition = { id: 'case-one', name: 'Case one', steps: [{ id: 'turn-one', input: 'Prompt one', assertions: [{ path: 'assistant.text', operator: 'exists' }] }] };
@@ -30,6 +30,17 @@ describe('linked functional case editing', () => {
       expect.objectContaining({ id: first.id, name: 'Updated functional case' }),
       expect.objectContaining({ id: second.id, name: second.name }),
     ]));
+  });
+
+  it('appends a captured draft to JSONC and CSV without replacing existing cases', () => {
+    const captured: ScenarioDefinition = { ...second, id: 'captured', capture: { status: 'needsReview', source: 'conversation', capturedAt: '2026-09-04T00:00:00.000Z', profileId: 'profile', profileDigest: 'c'.repeat(64) } };
+    const jsonc = appendLinkedContractCaseSource('tests/functional.tests.jsonc', serializeContractSuite(createContractSuite('suite', 'Suite', [first])), captured);
+    const csv = appendLinkedContractCaseSource('tests/functional.csv', serializeContractCsv([first]), captured);
+    for (const result of [jsonc, csv]) {
+      const parsed = parseContractSource(result === jsonc ? 'tests/functional.tests.jsonc' : 'tests/functional.csv', result.text);
+      expect(parsed.scenarios.map((scenario) => scenario.id)).toEqual(['case-one', 'captured']);
+      expect(parsed.scenarios[1]?.capture?.status).toBe('needsReview');
+    }
   });
 
   it('updates one case in a 100-case CSV while preserving unrelated cases', () => {

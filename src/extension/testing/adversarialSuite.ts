@@ -83,13 +83,14 @@ export function validateAdversarialSuite(suite: AdversarialSuiteDefinition): Adv
   suite.cases.forEach((testCase, caseIndex) => {
     const path = `cases[${caseIndex}]`;
     if (!testCase || typeof testCase !== 'object' || Array.isArray(testCase)) { issues.push(issue(path, 'Case must be an object.')); return; }
-    for (const key of Object.keys(testCase)) if (!new Set(['id', 'name', 'description', 'tags', 'sourceBinding', 'enabled', 'controls', 'mode', 'maxTurns', 'timeoutMs', 'stopOnAttackSucceeded', 'repetitions', 'failFast', 'runPolicy', 'forbid', 'turns']).has(key)) issues.push(issue(`${path}.${key}`, `Unsupported case field: ${key}.`));
+    for (const key of Object.keys(testCase)) if (!new Set(['id', 'name', 'description', 'tags', 'capture', 'sourceBinding', 'enabled', 'controls', 'mode', 'maxTurns', 'timeoutMs', 'stopOnAttackSucceeded', 'repetitions', 'failFast', 'runPolicy', 'forbid', 'turns']).has(key)) issues.push(issue(`${path}.${key}`, `Unsupported case field: ${key}.`));
     if (!slug(testCase.id)) issues.push(issue(`${path}.id`, 'Case id must use lowercase letters, numbers, and hyphens.'));
     else if (caseIds.has(testCase.id)) issues.push(issue(`${path}.id`, `Duplicate case id: ${testCase.id}.`));
     else caseIds.add(testCase.id);
     if (typeof testCase.name !== 'string' || !testCase.name.trim()) issues.push(issue(`${path}.name`, 'Case name is required.'));
     if (testCase.enabled !== undefined && typeof testCase.enabled !== 'boolean') issues.push(issue(`${path}.enabled`, 'enabled must be boolean.'));
     if (testCase.tags !== undefined && (!Array.isArray(testCase.tags) || testCase.tags.length > 20 || testCase.tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.length > 64) || new Set(testCase.tags).size !== testCase.tags.length)) issues.push(issue(`${path}.tags`, 'Tags must contain at most 20 unique non-empty values of up to 64 characters.'));
+    validateCapture(testCase.capture, `${path}.capture`, issues);
     if (testCase.sourceBinding !== undefined) issues.push(...validateSourceBinding(testCase.sourceBinding).map((value) => issue(`${path}.sourceBinding.${value.scope.replace(/^sourceBinding\.?/, '')}`, value.message)));
     if (testCase.controls !== undefined && (!testCase.controls || typeof testCase.controls !== 'object' || Array.isArray(testCase.controls))) issues.push(issue(`${path}.controls`, 'Case controls must be an object.'));
     if (testCase.stopOnAttackSucceeded !== undefined && typeof testCase.stopOnAttackSucceeded !== 'boolean') issues.push(issue(`${path}.stopOnAttackSucceeded`, 'stopOnAttackSucceeded must be boolean.'));
@@ -162,6 +163,7 @@ export function createAdversarialSuite(id: string, name: string, scenarios: read
       name: scenario.name,
       description: scenario.description,
       tags: scenario.tags,
+      capture: structuredClone(scenario.capture),
       sourceBinding: structuredClone(scenario.sourceBinding),
       controls: scenario.controls,
       mode: scenario.adversarial!.mode ?? (scenario.steps.length > 1 ? 'multiTurn' : 'singleTurn'),
@@ -195,7 +197,25 @@ function normalizeCase(suite: AdversarialSuiteDefinition, testCase: AdversarialS
     failFast: testCase.runPolicy?.failFast ?? testCase.failFast ?? suite.runPolicy?.failFast ?? suite.defaults?.failFast,
     forbid: mergeSuiteForbid(suite.defaults?.forbid, testCase.forbid),
   };
-  return { id: testCase.id, name: testCase.name, description: testCase.description, tags: structuredClone(testCase.tags), sourceBinding: mergeSourceBindings(suite.sourceBinding, testCase.sourceBinding), controls: structuredClone(testCase.controls), steps: structuredClone(testCase.turns), adversarial };
+  return { id: testCase.id, name: testCase.name, description: testCase.description, tags: structuredClone(testCase.tags), capture: structuredClone(testCase.capture), sourceBinding: mergeSourceBindings(suite.sourceBinding, testCase.sourceBinding), controls: structuredClone(testCase.controls), steps: structuredClone(testCase.turns), adversarial };
+}
+
+function validateCapture(value: unknown, path: string, issues: AdversarialSuiteIssue[]): void {
+  if (value === undefined) return;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) { issues.push(issue(path, 'Capture metadata must be an object.')); return; }
+  const capture = value as Record<string, unknown>;
+  const allowed = new Set(['status', 'source', 'capturedAt', 'profileId', 'profileDigest', 'runId', 'evidenceId']);
+  for (const key of Object.keys(capture)) if (!allowed.has(key)) issues.push(issue(`${path}.${key}`, `Unsupported capture field: ${key}.`));
+  if (!['needsReview', 'ready'].includes(String(capture.status))) issues.push(issue(`${path}.status`, 'Capture status must be needsReview or ready.'));
+  if (!['conversation', 'run', 'evidence'].includes(String(capture.source))) issues.push(issue(`${path}.source`, 'Capture source must be conversation, run, or evidence.'));
+  if (typeof capture.capturedAt !== 'string' || capture.capturedAt.length > 64 || Number.isNaN(Date.parse(capture.capturedAt))) issues.push(issue(`${path}.capturedAt`, 'Capture time must be a valid bounded timestamp.'));
+  if (typeof capture.profileId !== 'string' || !capture.profileId.trim() || capture.profileId.length > 256) issues.push(issue(`${path}.profileId`, 'Capture profileId must contain 1 to 256 characters.'));
+  if (typeof capture.profileDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(capture.profileDigest)) issues.push(issue(`${path}.profileDigest`, 'Capture profileDigest must be a SHA-256 digest.'));
+  for (const key of ['runId', 'evidenceId'] as const) if (capture[key] !== undefined && (typeof capture[key] !== 'string' || !capture[key].trim() || capture[key].length > 256)) issues.push(issue(`${path}.${key}`, `Capture ${key} must contain 1 to 256 characters.`));
+  if (capture.source === 'run' && capture.runId === undefined) issues.push(issue(`${path}.runId`, 'A run capture requires runId.'));
+  if (capture.source === 'evidence' && capture.evidenceId === undefined) issues.push(issue(`${path}.evidenceId`, 'An evidence capture requires evidenceId.'));
+  if (capture.source !== 'run' && capture.runId !== undefined) issues.push(issue(`${path}.runId`, 'Only a run capture can define runId.'));
+  if (capture.source !== 'evidence' && capture.evidenceId !== undefined) issues.push(issue(`${path}.evidenceId`, 'Only an evidence capture can define evidenceId.'));
 }
 
 function mergeSourceBindings(suite: AdversarialSuiteDefinition['sourceBinding'], local: AdversarialSuiteCaseDefinition['sourceBinding']): AdversarialSuiteCaseDefinition['sourceBinding'] {

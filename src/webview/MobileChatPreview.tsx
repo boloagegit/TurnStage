@@ -359,7 +359,7 @@ export function MobileChatPreview({
       <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
       {onConfigure && <IconButton icon="settings-gear" label={t('Configure profile')} type="button" onClick={onConfigure} />}
       <ToolbarOverflow>
-        <button role="menuitem" type="button" disabled={!trusted || active || !snapshot?.messages.some((message) => message.role === 'user')} onClick={() => post({ type: 'adversarial.capture' })}><ProductIcon name="beaker" /><span>{t('Save conversation as adversarial test')}</span></button>
+        <button role="menuitem" type="button" disabled={!trusted || active || !snapshot?.messages.some((message) => message.role === 'user')} onClick={() => post({ type: 'test.capture', source: { kind: 'conversation' } })}><ProductIcon name="beaker" /><span>{t('Save as test…')}</span></button>
         <button role="menuitem" type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'baseline'} onClick={() => void runVisual('baseline')}><ProductIcon name="save" /><span>{t(capturingVisual === 'baseline' ? 'Capturing visual baseline…' : 'Save visual baseline')}</span></button>
         <button role="menuitem" type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'compare'} onClick={() => void runVisual('compare')}><ProductIcon name="diff" /><span>{t(capturingVisual === 'compare' ? 'Comparing visual baseline…' : 'Compare visual baseline')}</span></button>
       </ToolbarOverflow>
@@ -378,7 +378,7 @@ export function MobileChatPreview({
             {snapshot?.sessionState === 'failed' && profile.opening?.mode === 'request' && <OpeningError profile={profile} snapshot={snapshot} post={post} trusted={trusted} headingId={`${previewId}-opening-error-heading`} />}
             {opening && componentVisible(profile, 'opening') && <OpeningCard profile={profile} opening={opening} active={active} trusted={trusted} setDraft={setDraft} send={send} post={post} headingId={`${previewId}-opening-heading`} />}
       {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} snapshot={snapshot} messageTagEventIndex={messageTagEventIndex} post={post} send={send} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback} onActionFeedback={onMessageActionFeedback} />)}
-            {responseActivityPhase && responseActivityPhase !== 'receiving' && !activeAssistant && <ResponseActivity profile={profile} phase={responseActivityPhase} elapsedMs={responseActivityElapsedMs} animated={resolveStreaming(profile.ui).indicator !== 'none'} />}
+            {responseActivityPhase && responseActivityPhase !== 'receiving' && !activeAssistant && <ResponseActivity profile={profile} phase={responseActivityPhase} elapsedMs={responseActivityElapsedMs} />}
             {!snapshot && <p className="mobile-chat-preview__empty" role="status">{t('Loading conversation…')}</p>}
             {snapshot && snapshotMessages.length === 0 && !opening && snapshot.sessionState === 'ready' && <p className="mobile-chat-preview__empty">{t('No messages yet. Send a message to begin.')}</p>}
             {continuationBlocked && <p className="mobile-chat-preview__continuation" role="status">{t('Continuation is disabled after this error. Start a new conversation to send another message.')}</p>}
@@ -584,6 +584,7 @@ function MobileComposer({ profile, active, sessionReady, turnState, continuation
   const placeholder = composer.placeholder || t('Message TurnStage…');
   const composerLocked = interactionLocked(profile, 'composer', active);
   const stopping = turnState === 'stopping';
+  const composerBeamActive = active && resolveStreaming(profile.ui).indicator !== 'none' && (turnState === 'submitting' || turnState === 'waitingStart' || turnState === 'streaming');
   const actionLabel = active ? stopActionLabel(turnState) : t('Send message');
   const canSend = trusted && sessionReady && !active && !continuationBlocked && !composerLocked;
   const showAction = !active || composer.showStopWhileStreaming;
@@ -622,7 +623,7 @@ function MobileComposer({ profile, active, sessionReady, turnState, continuation
     return () => observer.disconnect();
   }, [composer.multiline]);
   return <form className="mobile-chat-preview__composer" onSubmit={submit}>
-    <div className={`mobile-chat-preview__composer-control ${showAction ? '' : 'mobile-chat-preview__composer-control--without-action'}`.trim()}>
+    <div className={`mobile-chat-preview__composer-control ${showAction ? '' : 'mobile-chat-preview__composer-control--without-action'}`.trim()} data-beam-state={composerBeamActive ? 'active' : 'off'}>
       <label className="mobile-chat-preview__sr-only" htmlFor={inputId}>{t('Message')}</label>
       {composer.multiline
         ? <textarea ref={textareaRef} id={inputId} rows={1} value={draft} placeholder={placeholder} disabled={inputDisabled} aria-describedby={continuationBlocked ? `${inputId}-blocked` : undefined} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={onKeyDown} />
@@ -695,7 +696,7 @@ function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post,
     <span className="mobile-chat-preview__message-heading"><strong>{roleLabel}</strong><MessageStatus state={message.status} />{messageTags.length > 0 && <span className="mobile-chat-preview__message-tags" aria-label={t('Message tags')}>{messageTags.map((tag) => <span className={`mobile-chat-preview__message-tag mobile-chat-preview__message-tag--${tag.tone}`} key={tag.id}>{tag.label}</span>)}</span>}</span>
     <div className="mobile-chat-preview__message-body">
       {parts.map((part, index) => <MobileMessagePart key={`${part.type}-${index}`} profile={profile} part={part} messageId={message.id} citations={citations} post={post} trusted={trusted} accepted={acceptedForms?.has(formInstanceKey(message.id, part) ?? '')} streaming={message.role === 'assistant' ? streaming : undefined} streamingActive={streamingAssistant && index === trailingTextPartIndex} />)}
-      {streamingAssistant && !hasVisibleResponseContent && <ResponseActivity phase="receiving" inline animated={streaming.indicator !== 'none'} />}
+      {streamingAssistant && !hasVisibleResponseContent && <ResponseActivity phase="receiving" inline />}
       {componentVisible(profile, 'citations') && citations.length > 0 && <CitationList profile={profile} citations={citations} post={post} trusted={trusted} />}
       {componentVisible(profile, 'responseActions') && message.status === 'completed' && actions.length > 0 && <div className="mobile-chat-preview__action-row" role="group" aria-label={t('Response actions')}>{primaryActions.map((action) => <ResponseActionButton key={action.id} action={action} messageId={message.id} trusted={trusted} setDraft={setDraft} post={post} onSelectMessage={onSelectMessage} />)}{overflowActions.length > 0 && <details className="mobile-chat-preview__overflow"><summary>{t('More actions')}</summary><div>{overflowActions.map((action) => <ResponseActionButton key={action.id} action={action} messageId={message.id} trusted={trusted} setDraft={setDraft} post={post} onSelectMessage={onSelectMessage} />)}</div></details>}</div>}
       {componentVisible(profile, 'followups') && message.status === 'completed' && followups.length > 0 && <div className="mobile-chat-preview__followups" role="group" aria-label={t('Follow-up questions')}>{primaryFollowups.map((followup) => <button className="mobile-chat-preview__chip" type="button" title={followup.tooltip} key={followup.id} disabled={!trusted} onClick={() => invokeFollowup(followup, message.id, setDraft, send, post)}>{followup.label}</button>)}{overflowFollowups.length > 0 && <details className="mobile-chat-preview__overflow"><summary>{t('More suggestions')}</summary><div>{overflowFollowups.map((followup) => <button className="mobile-chat-preview__chip" type="button" title={followup.tooltip} key={followup.id} disabled={!trusted} onClick={() => invokeFollowup(followup, message.id, setDraft, send, post)}>{followup.label}</button>)}</div></details>}</div>}
@@ -815,10 +816,10 @@ function StreamingIndicator({ streaming }: { streaming: ResolvedStreaming }): Re
   </span>;
 }
 
-function ResponseActivity({ profile, phase, elapsedMs = 0, inline = false, animated = true }: { profile?: TurnStageProfile; phase: ResponseActivityPhase; elapsedMs?: number; inline?: boolean; animated?: boolean }): React.JSX.Element {
+function ResponseActivity({ profile, phase, elapsedMs = 0, inline = false }: { profile?: TurnStageProfile; phase: ResponseActivityPhase; elapsedMs?: number; inline?: boolean }): React.JSX.Element {
   const delayedSeconds = Math.max(3, Math.floor(elapsedMs / 1_000));
   const accessibleLabel = phase === 'sending' ? t('Sending message…') : phase === 'waiting' ? t('Waiting for response…') : phase === 'delayed' ? t('Still waiting for response…') : t('Receiving response…');
-  const content = <div className={`mobile-chat-preview__response-activity-content mobile-chat-preview__response-activity-content--${phase}`} data-animated={animated ? 'true' : 'false'}>
+  const content = <div className={`mobile-chat-preview__response-activity-content mobile-chat-preview__response-activity-content--${phase}`} data-animated="false">
     {phase === 'sending' ? <ProductIcon name="loading" /> : phase === 'delayed' ? <ProductIcon name="watch" /> : <span className="mobile-chat-preview__response-dots" aria-hidden="true"><span /><span /><span /></span>}
     {phase === 'delayed' ? <><span aria-hidden="true">{t('Still waiting · {seconds} s', { seconds: formatNumber(delayedSeconds) })}</span><span className="mobile-chat-preview__sr-only">{accessibleLabel}</span></> : <span>{accessibleLabel}</span>}
   </div>;

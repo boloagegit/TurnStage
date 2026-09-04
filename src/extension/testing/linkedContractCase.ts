@@ -5,7 +5,7 @@ import type { ContractSuiteCaseDefinition, ContractSuiteDefinition, ScenarioDefi
 import { parseCsvRows } from './adversarialCsv';
 import { CONTRACT_CSV_COLUMNS, parseContractCsv, serializeContractCsv } from './contractCsv';
 import { isExternalAdversarialSuiteReference } from './externalAdversarialSuiteReference';
-import { isSafeContractSuitePath, validateContractSuite } from './contractSuite';
+import { createContractSuite, isSafeContractSuitePath, validateContractSuite } from './contractSuite';
 import { MAX_CONTRACT_SUITE_BYTES } from './contractSuiteRepository';
 import { parseContractSource } from './contractSource';
 
@@ -13,6 +13,7 @@ const REVISION_PATTERN = /^[0-9a-f]{64}$/u;
 export type LinkedContractSourceFormat = 'csv' | 'jsonc';
 export interface EditableLinkedContractCase { sourcePath: string; sourceFormat: LinkedContractSourceFormat; revision: string; scenario: ScenarioDefinition }
 export interface SaveLinkedContractCaseInput { profileUri: vscode.Uri; sourcePath: string; scenarioId: string; expectedRevision: string; scenario: ScenarioDefinition; resolveExternal?: (reference: string) => vscode.Uri | undefined }
+export type AppendLinkedContractCaseInput = Omit<SaveLinkedContractCaseInput, 'scenarioId' | 'expectedRevision'>;
 
 export class LinkedContractCaseConflictError extends Error {
   constructor() { super('The linked test suite changed after this editor loaded it. Reload the case before saving.'); this.name = 'LinkedContractCaseConflictError'; }
@@ -37,6 +38,31 @@ export async function saveEditableLinkedContractCase(input: SaveLinkedContractCa
   const saved = editableCaseFromText(input.sourcePath, persisted, input.scenario.id);
   if (saved.revision !== updated.revision) throw new LinkedContractCaseConflictError();
   return saved;
+}
+
+export async function appendLinkedContractCase(input: AppendLinkedContractCaseInput): Promise<EditableLinkedContractCase> {
+  if (input.scenario.adversarial) throw new Error('Functional test suites cannot contain adversarial settings.');
+  const uri = resolveSuiteUri(input.profileUri, input.sourcePath, input.resolveExternal);
+  const source = await readBoundedSource(uri, input.sourcePath);
+  const updated = appendLinkedContractCaseSource(input.sourcePath, source, input.scenario);
+  const bytes = new TextEncoder().encode(updated.text);
+  if (bytes.byteLength > MAX_CONTRACT_SUITE_BYTES) throw new Error(`Test suite ${input.sourcePath} exceeds the 5 MB limit after appending.`);
+  if (digest(await readBoundedSource(uri, input.sourcePath)) !== digest(source)) throw new LinkedContractCaseConflictError();
+  await vscode.workspace.fs.writeFile(uri, bytes);
+  const saved = editableCaseFromText(input.sourcePath, await readBoundedSource(uri, input.sourcePath), input.scenario.id);
+  if (saved.revision !== updated.revision) throw new LinkedContractCaseConflictError();
+  return saved;
+}
+
+export function appendLinkedContractCaseSource(path: string, text: string, scenario: ScenarioDefinition): { text: string; revision: string } {
+  if (scenario.adversarial) throw new Error('Functional test suites cannot contain adversarial settings.');
+  const parsed = parseContractSource(path, text);
+  if (!parsed.suite || parsed.issues.length) throw new Error(parsed.issues.join('\n') || `Test suite ${path} is empty.`);
+  if (parsed.suite.cases.some((candidate) => candidate.id === scenario.id)) throw new Error(`Test case ${scenario.id} already exists in ${path}.`);
+  const updatedText = /\.csv$/iu.test(path) ? appendCsvCase(text, scenario) : appendJsoncCase(text, parsed.suite, scenario);
+  const verified = parseContractSource(path, updatedText);
+  if (!verified.suite || verified.issues.length || !verified.scenarios.some((candidate) => candidate.id === scenario.id)) throw new Error(verified.issues.join('\n') || `The appended case ${scenario.id} could not be verified.`);
+  return { text: updatedText, revision: digest(updatedText) };
 }
 
 export function updateLinkedContractCaseSource(path: string, text: string, scenarioId: string, scenario: ScenarioDefinition): { text: string; revision: string } {
@@ -80,10 +106,19 @@ function updateJsoncCase(text: string, suite: ContractSuiteDefinition, scenarioI
   if (issues.length) throw new Error(issues.map((entry) => `${entry.path}: ${entry.message}`).join('\n'));
   const formattingOptions = { insertSpaces: true, tabSize: 2, eol: text.includes('\r\n') ? '\r\n' : '\n' };
   let result = text;
-  for (const key of ['id', 'name', 'description', 'tags', 'sourceBinding', 'controls', 'steps', 'assertions', 'comparison', 'performance', 'faults'] as const) {
+  for (const key of ['id', 'name', 'description', 'tags', 'capture', 'sourceBinding', 'controls', 'steps', 'assertions', 'comparison', 'performance', 'faults'] as const) {
     if (JSON.stringify(existing[key]) !== JSON.stringify(updated[key])) result = applyEdits(result, modify(result, ['cases', caseIndex, key], updated[key], { formattingOptions }));
   }
   return result;
+}
+
+function appendJsoncCase(text: string, suite: ContractSuiteDefinition, scenario: ScenarioDefinition): string {
+  const appended = createContractSuite('captured-case', 'Captured case', [scenario]).cases[0];
+  if (!appended) throw new Error('The captured test case could not be serialized.');
+  const nextSuite = { ...suite, cases: [...suite.cases, appended] };
+  const issues = validateContractSuite(nextSuite);
+  if (issues.length) throw new Error(issues.map((entry) => `${entry.path}: ${entry.message}`).join('\n'));
+  return applyEdits(text, modify(text, ['cases', suite.cases.length], appended, { formattingOptions: { insertSpaces: true, tabSize: 2, eol: text.includes('\r\n') ? '\r\n' : '\n' } }));
 }
 
 function updateCsvCase(text: string, scenarioId: string, scenario: ScenarioDefinition): string {
@@ -112,6 +147,25 @@ function updateCsvCase(text: string, scenarioId: string, scenario: ScenarioDefin
   for (let index = 1; index < rows.length; index++) { if (index === matching[0]!.index) output.push(...replacement); if (!matchingIndexes.has(index)) output.push(rows[index]!); }
   const updated = `${hasBom ? '\uFEFF' : ''}${output.map((row) => row.map(csvCell).join(',')).join(newline)}${newline}`;
   if (parseContractCsv(updated).issues.length) throw new Error('The edited CSV test suite is invalid.');
+  return updated;
+}
+
+function appendCsvCase(text: string, scenario: ScenarioDefinition): string {
+  const hasBom = text.startsWith('\uFEFF');
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  const rows = parseCsvRows(hasBom ? text.slice(1) : text);
+  const header = rows[0];
+  if (!header) throw new Error('CSV is empty.');
+  const normalizedHeader = header.map((cell) => cell.trim().toLocaleLowerCase());
+  const generated = parseCsvRows(serializeContractCsv([scenario]).slice(1));
+  const generatedHeader = generated[0]!.map((cell) => cell.trim().toLocaleLowerCase());
+  for (const column of generatedHeader) if (!normalizedHeader.includes(column)) { header.push(column); normalizedHeader.push(column); for (const row of rows.slice(1)) row.push(''); }
+  const additions = generated.slice(1).map((generatedRow) => normalizedHeader.map((column) => {
+    const index = generatedHeader.indexOf(column);
+    return index >= 0 ? generatedRow[index] ?? '' : '';
+  }));
+  const updated = `${hasBom ? '\uFEFF' : ''}${[...rows, ...additions].map((row) => row.map(csvCell).join(',')).join(newline)}${newline}`;
+  if (parseContractCsv(updated).issues.length) throw new Error('The appended CSV test suite is invalid.');
   return updated;
 }
 

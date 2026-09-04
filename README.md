@@ -59,7 +59,10 @@ renderer and inspector.
   JSONC/CSV suites, and sanitized JSON/JUnit/HTML evidence bundles support
   regression and CI without executing profile code or sending background
   telemetry. The Tests UI pages prompt-free summaries and loads one linked
-  case only when it is opened for structured editing.
+  case only when it is opened for structured editing. Chat, recorded runs, and
+  evidence can create a review-gated functional or adversarial draft inline or
+  in a linked CSV/JSONC suite; captured drafts cannot execute until explicitly
+  marked ready.
 - A localhost-only synthetic mock server and three starter profiles, including
   an enterprise first-turn/multi-turn contract example with no real identity or
   credentials.

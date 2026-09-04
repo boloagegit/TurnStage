@@ -20,7 +20,7 @@ import * as vscode from 'vscode';
 import { serializeAdversarialCsv } from '../src/extension/testing/adversarialCsv';
 import { parseAdversarialSource } from '../src/extension/testing/adversarialSource';
 import { serializeAdversarialSuite } from '../src/extension/testing/adversarialSuite';
-import { LinkedAdversarialCaseConflictError, loadEditableLinkedAdversarialCase, saveEditableLinkedAdversarialCase, updateLinkedAdversarialCaseSource } from '../src/extension/testing/linkedAdversarialCase';
+import { appendLinkedAdversarialCaseSource, LinkedAdversarialCaseConflictError, loadEditableLinkedAdversarialCase, saveEditableLinkedAdversarialCase, updateLinkedAdversarialCaseSource } from '../src/extension/testing/linkedAdversarialCase';
 import type { AdversarialSuiteDefinition, ScenarioDefinition } from '../src/shared/types';
 
 const first: ScenarioDefinition = {
@@ -58,6 +58,18 @@ describe('linked adversarial case editing', () => {
       expect.objectContaining({ id: 'case-one', name: 'Updated case', adversarial: expect.objectContaining({ forbid: expect.objectContaining({ urls: true, ctas: true }) }) }),
       expect.objectContaining({ id: 'case-two', name: 'Case two', adversarial: expect.objectContaining({ forbid: expect.objectContaining({ tools: true }) }) }),
     ]));
+  });
+
+  it('appends a captured draft to JSONC and CSV without replacing existing cases', () => {
+    const captured: ScenarioDefinition = { ...second, id: 'captured', capture: { status: 'needsReview', source: 'conversation', capturedAt: '2026-09-04T00:00:00.000Z', profileId: 'profile', profileDigest: 'd'.repeat(64) } };
+    const suite: AdversarialSuiteDefinition = { format: 'turnstage-adversarial-suite', version: 1, id: 'suite', name: 'Suite', cases: [{ id: first.id, name: first.name, turns: first.steps, forbid: first.adversarial!.forbid }] };
+    const jsonc = appendLinkedAdversarialCaseSource('tests/security.adversarial.jsonc', serializeAdversarialSuite(suite), captured);
+    const csv = appendLinkedAdversarialCaseSource('tests/security.adversarial.csv', serializeAdversarialCsv([first]), captured);
+    for (const [path, result] of [['tests/security.adversarial.jsonc', jsonc], ['tests/security.adversarial.csv', csv]] as const) {
+      const parsed = parseAdversarialSource(path, result.text);
+      expect(parsed.scenarios.map((scenario) => scenario.id)).toEqual(['case-one', 'captured']);
+      expect(parsed.scenarios[1]?.capture?.status).toBe('needsReview');
+    }
   });
 
   it('updates only matching CSV rows and preserves column order, extra cells, and other cases', () => {

@@ -178,6 +178,39 @@ describe('headless CLI contract', () => {
     }
   });
 
+  it('keeps captured drafts out of headless execution until review is complete', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'turnstage-cli-captured-draft-'));
+    const profile: TurnStageProfile = {
+      version: 1,
+      id: 'captured-draft-profile',
+      name: 'Captured draft profile',
+      conversation: { send: { method: 'POST', url: 'https://example.test/stream', timeoutMs: 1_000, variants: [{ id: 'default', body: { message: { $value: 'input.text' } } }] } },
+      stream: { transport: 'sse', doneValue: '[DONE]', mappings: [{ id: 'text', match: {}, emit: { type: 'content.text.delta', text: { path: '$.text' } } }] },
+      tests: { scenarios: [{
+        id: 'captured-draft', name: 'Captured draft', tags: ['captured', 'needs-review'],
+        capture: { status: 'needsReview', source: 'conversation', capturedAt: '2026-09-04T00:00:00.000Z', profileId: 'captured-draft-profile', profileDigest: 'a'.repeat(64) },
+        steps: [{ id: 'turn-1', input: 'Do not execute this draft', assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }] }],
+      }] },
+    };
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await writeFile(join(directory, 'profile.turnstage.jsonc'), JSON.stringify(profile));
+      const result = await new NodeCliRuntime('test', directory).execute({
+        command: 'run', configFiles: ['profile.turnstage.jsonc'],
+        selectors: { profiles: [], suites: [], cases: [], tags: [], changedFiles: [] },
+        policy: { failFast: false, concurrency: 1, maxRequests: 10 },
+        impact: { workspaceRoot: directory, includeUnbound: true },
+      });
+
+      expect(result.records).toEqual([{ id: 'selection', outcome: 'policy' }]);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('executes request-backed openings in the Node runtime and records bounded network evidence', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ welcome: 'Ready for CI.', choices: [{ id: 'start', label: 'Start', prompt: 'Hello', behavior: 'send' }] }), {
       status: 200,

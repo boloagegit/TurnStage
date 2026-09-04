@@ -7,6 +7,16 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Save as test…': '另存為測試…',
+  'captured source': '擷取來源',
+  'Needs review': '需要審閱',
+  'Review required': '需要審閱',
+  'This draft was captured from {source}. Check every user message and test condition before enabling it.': '此草稿擷取自{source}。啟用前請檢查每則使用者訊息與測試條件。',
+  'Mark ready': '標記為可執行',
+  'Review scenario {name} before running': '執行前先審閱情境「{name}」',
+  'Review case {name} before running': '執行前先審閱案例「{name}」',
+  'Create draft from result': '從測試結果建立草稿',
+  'Test result to capture': '要擷取的測試結果',
   'Automated testing': '自動化測試',
   'Keep small cases inline or link a JSONC/CSV suite. Full prompts load only when you edit a case.': '少量案例可直接放在 Profile；大量案例可連結 JSONC／CSV 套件。只有編輯個別案例時才會載入完整提示。',
   'More test suite actions': '更多測試套件動作',
@@ -43,7 +53,9 @@ const zhTw: Record<string, string> = {
   'Tests': '測試',
   'Tests toolbar': '測試工具列',
   '{count} scenarios': '{count} 個情境',
+  '{count} cases': '{count} 個案例',
   '{count} test scenarios': '{count} 個測試情境',
+  '{count} test cases': '{count} 個測試案例',
   '{passed} passed · {failed} failed': '{passed} 項通過 · {failed} 項失敗',
   '{steps} steps · {assertions} assertions': '{steps} 個步驟 · {assertions} 個斷言',
   'Campaign results exported to {path}': 'Campaign 結果已匯出至 {path}',

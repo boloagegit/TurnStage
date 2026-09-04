@@ -371,13 +371,13 @@ try {
   await page.getByRole('tab', { name: 'Tests' }).click();
   await page.getByRole('heading', { level: 1, name: 'Automated testing' }).waitFor();
   const automationNavigation = page.getByRole('tablist', { name: 'Test sections' });
-  assert.equal(await automationNavigation.getByRole('tab').count(), 3, 'Tests must expose Results, Scenarios, and Campaigns');
+  assert.equal(await automationNavigation.getByRole('tab').count(), 3, 'Tests must expose Results, Cases, and Campaigns');
   await assertRedTeamTabVisual(automationNavigation, 'Automation dark theme');
   assert.equal(await page.getByRole('heading', { name: 'Latest test results' }).count(), 1, 'Tests opens on functional automation results');
   assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 0, 'Results must remain an inspection surface, not the main execution surface');
   assert.equal(await page.locator('.automation-result-table tbody > tr').count(), 1, 'Automation results must remain distinct from adversarial outcomes');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-dark.png') });
-  await automationNavigation.getByRole('tab', { name: /Scenarios/ }).click();
+  await automationNavigation.getByRole('tab', { name: /Cases/ }).click();
   assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 1, 'Scenario execution must live beside the authored contracts');
   await page.getByText('Linked multi-turn contract', { exact: true }).waitFor();
   assert.equal(await page.locator('.automation-scenario-row').count(), 2, 'Inline and linked non-adversarial conversation contracts belong in Tests');
@@ -589,7 +589,7 @@ try {
   assert.equal(await page.locator('#right-pane-debug-tab').getAttribute('aria-selected'), 'true', 'Closing Evidence Review must preserve the current Debug context');
   await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-closed-dark.png'), fullPage: true });
   await page.getByRole('tab', { name: 'Tests' }).click();
-  await page.getByRole('tab', { name: /Scenarios/ }).click();
+  await page.getByRole('tab', { name: /Cases/ }).click();
   if ((await page.getByRole('button', { name: 'Slow stream contract', exact: true }).getAttribute('aria-expanded')) !== 'true') await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
   await page.locator('.scenario-advanced').filter({ hasText: 'Compare & performance' }).scrollIntoViewIfNeeded();
   assert.equal(await page.locator('.scenario-target-grid fieldset').count(), 2, 'Baseline and candidate targets must both render in the GUI');
@@ -677,30 +677,42 @@ try {
   await waitForProfile();
   assert.equal(await page.getByText('Sending message…').count(), 1, 'Submitting must show one compact sending state');
   assert.equal(await page.locator('.mobile-chat-preview__response-activity .codicon-loading').count(), 1, 'Submitting uses the loading product icon');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').getAttribute('data-beam-state'), 'active', 'The composer border beam starts as soon as the request is submitted');
 
   await page.goto(`${url}?active=true&responseActivity=waiting`);
   await waitForProfile();
   assert.equal(await page.getByText('Waiting for response…').count(), 1, 'Waiting for the first response event must remain explicit');
   assert.equal(await page.locator('.mobile-chat-preview__response-dots > span').count(), 3, 'Waiting uses three bounded activity dots');
   assert.equal(await page.locator('.mobile-chat-preview__part--progress').count(), 0, 'Waiting feedback must not invent server progress');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').getAttribute('data-beam-state'), 'active', 'Waiting uses the composer border beam as activity feedback');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').evaluate((element) => getComputedStyle(element, '::after').animationName), 'mobile-chat-preview-border-beam', 'The composer border beam must use the lightweight CSS motion path');
+  assert.equal(await page.locator('.mobile-chat-preview__response-dots > span').first().evaluate((element) => getComputedStyle(element).animationName), 'none', 'The border beam must remain the only active waiting animation');
+  assert.equal(await page.locator('.mobile-chat-preview__response-activity > div').evaluate((element) => getComputedStyle(element).borderStyle), 'none', 'The Assistant waiting status must remain unframed');
+  const initialBeamDistance = await page.locator('.mobile-chat-preview__composer-control').evaluate((element) => getComputedStyle(element, '::after').offsetDistance);
+  await page.waitForTimeout(120);
+  const advancedBeamDistance = await page.locator('.mobile-chat-preview__composer-control').evaluate((element) => getComputedStyle(element, '::after').offsetDistance);
+  assert.notEqual(advancedBeamDistance, initialBeamDistance, 'The composer border beam must advance around the input instead of remaining a static accent');
   await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'response-waiting-dark.png') });
 
   await page.goto(`${url}?active=true&responseActivity=delayed`);
   await waitForProfile();
   assert.match(await page.locator('.mobile-chat-preview__response-activity').innerText(), /Still waiting · [4-9] s/, 'A long wait must expose elapsed seconds without fake completion');
   assert.equal(await page.locator('.mobile-chat-preview__response-activity .codicon-watch').count(), 1, 'A delayed response has a distinct, recognizable state');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').getAttribute('data-beam-state'), 'active', 'The composer border beam remains active throughout a delayed request');
   await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'response-delayed-dark.png') });
 
   await page.goto(`${url}?active=true&responseActivity=receiving`);
   await waitForProfile();
   assert.equal(await page.getByText('Receiving response…').count(), 1, 'An empty Assistant stream must show receiving feedback');
   assert.equal(await page.locator('.mobile-chat-preview__part--progress').count(), 0, 'Receiving feedback must remain distinct from real progress events');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').getAttribute('data-beam-state'), 'active', 'The composer border beam remains active while Assistant content is streaming');
   await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'response-receiving-dark.png') });
 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto(`${url}?active=true&responseActivity=waiting`);
   await waitForProfile();
   assert.equal(await page.locator('.mobile-chat-preview__response-dots > span').first().evaluate((element) => getComputedStyle(element).animationName), 'none', 'Reduced motion must disable response activity animation');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').evaluate((element) => getComputedStyle(element, '::after').display), 'none', 'Reduced motion must replace the composer border beam with a static themed border');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
 
   await page.goto(`${url}?draft=First%20line%0ASecond%20line%20wraps%20inside%20the%20composer%0AThird%20line`);
@@ -1050,6 +1062,24 @@ try {
   assert.equal(await startPage.getByRole('button', { name: 'Restart session' }).isDisabled(), true, 'Restart must remain disabled while the opening request is active');
   await startPage.locator('.mobile-chat-preview__device').screenshot({ path: resolve(artifactDirectory, 'session-auto-start-loading-dark.png') });
   await startPage.close();
+
+  const capturePage = await browser.newPage({ viewport: { width: 960, height: 720 } });
+  await capturePage.goto(`${url}?capturedDraft=true`);
+  await capturePage.getByRole('tab', { name: 'Tests' }).click();
+  await capturePage.getByRole('tab', { name: /Cases/ }).click();
+  const capturedDraft = capturePage.getByRole('button', { name: 'Captured release probe', exact: true });
+  await capturedDraft.waitFor();
+  assert.equal(await capturePage.getByRole('button', { name: 'Review scenario Captured release probe before running' }).isDisabled(), true, 'Captured drafts must not be executable before review');
+  await capturedDraft.click();
+  await capturePage.getByRole('button', { name: 'Mark ready' }).waitFor();
+  assert.equal(await capturePage.getByText('Needs review', { exact: true }).count(), 1, 'Captured drafts must have a visible review status');
+  await capturePage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'captured-test-review-dark.png') });
+  await capturePage.setViewportSize({ width: 520, height: 720 });
+  const capturedReviewCallout = capturePage.locator('.capture-review-callout');
+  await capturedReviewCallout.scrollIntoViewIfNeeded();
+  assert.equal(await capturedReviewCallout.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'Captured-draft review controls must not overflow at narrow widths');
+  await capturePage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'captured-test-review-narrow-dark.png') });
+  await capturePage.close();
 
   for (const localeCase of [
     { locale: 'ja-JP', tabs: ['デバッグ', 'テスト', 'レッドチーム', '設定'], artifact: 'locale-ja-dark.png' },

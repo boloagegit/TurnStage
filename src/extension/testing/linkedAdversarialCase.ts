@@ -5,7 +5,7 @@ import type { AdversarialSuiteCaseDefinition, AdversarialSuiteDefinition, Scenar
 import { ADVERSARIAL_CSV_OPTIONAL_COLUMNS, parseCsvRows, serializeAdversarialCsv } from './adversarialCsv';
 import { parseAdversarialSource } from './adversarialSource';
 import { isExternalAdversarialSuiteReference } from './externalAdversarialSuiteReference';
-import { isSafeAdversarialSuitePath, validateAdversarialSuite } from './adversarialSuite';
+import { createAdversarialSuite, isSafeAdversarialSuitePath, validateAdversarialSuite } from './adversarialSuite';
 
 const MAX_SUITE_BYTES = 5 * 1024 * 1024;
 const REVISION_PATTERN = /^[a-f0-9]{64}$/u;
@@ -27,6 +27,8 @@ export interface SaveLinkedAdversarialCaseInput {
   scenario: ScenarioDefinition;
   resolveExternal?: (reference: string) => vscode.Uri | undefined;
 }
+
+export type AppendLinkedAdversarialCaseInput = Omit<SaveLinkedAdversarialCaseInput, 'scenarioId' | 'expectedRevision'>;
 
 export class LinkedAdversarialCaseConflictError extends Error {
   constructor() {
@@ -59,6 +61,33 @@ export async function saveEditableLinkedAdversarialCase(input: SaveLinkedAdversa
   const saved = editableCaseFromText(input.sourcePath, persisted, input.scenario.id);
   if (saved.revision !== updated.revision) throw new LinkedAdversarialCaseConflictError();
   return saved;
+}
+
+export async function appendLinkedAdversarialCase(input: AppendLinkedAdversarialCaseInput): Promise<EditableLinkedAdversarialCase> {
+  if (!input.scenario.adversarial) throw new Error('The linked case must contain an adversarial definition.');
+  const uri = resolveSuiteUri(input.profileUri, input.sourcePath, input.resolveExternal);
+  const source = await readBoundedSource(uri, input.sourcePath);
+  const updated = appendLinkedAdversarialCaseSource(input.sourcePath, source, input.scenario);
+  const bytes = new TextEncoder().encode(updated.text);
+  if (bytes.byteLength > MAX_SUITE_BYTES) throw new Error(`Adversarial suite ${input.sourcePath} exceeds the 5 MB limit after appending.`);
+  if (digest(await readBoundedSource(uri, input.sourcePath)) !== digest(source)) throw new LinkedAdversarialCaseConflictError();
+  await vscode.workspace.fs.writeFile(uri, bytes);
+  const saved = editableCaseFromText(input.sourcePath, await readBoundedSource(uri, input.sourcePath), input.scenario.id);
+  if (saved.revision !== updated.revision) throw new LinkedAdversarialCaseConflictError();
+  return saved;
+}
+
+export function appendLinkedAdversarialCaseSource(path: string, text: string, scenario: ScenarioDefinition): { text: string; revision: string } {
+  if (!scenario.adversarial) throw new Error('The linked case must contain an adversarial definition.');
+  const parsed = parseAdversarialSource(path, text);
+  if (!parsed.suite || parsed.issues.length) throw new Error(parsed.issues.join('\n') || `Adversarial suite ${path} is empty.`);
+  if (parsed.suite.cases.some((candidate) => candidate.id === scenario.id)) throw new Error(`Adversarial case ${scenario.id} already exists in ${path}.`);
+  const updatedText = /\.csv$/iu.test(path)
+    ? appendCsvCase(text, scenario)
+    : appendJsoncCase(text, parsed.suite, scenario);
+  const verified = parseAdversarialSource(path, updatedText);
+  if (!verified.suite || verified.issues.length || !verified.scenarios.some((candidate) => candidate.id === scenario.id)) throw new Error(verified.issues.join('\n') || `The appended case ${scenario.id} could not be verified.`);
+  return { text: updatedText, revision: digest(updatedText) };
 }
 
 export function updateLinkedAdversarialCaseSource(path: string, text: string, scenarioId: string, scenario: ScenarioDefinition): { text: string; revision: string } {
@@ -95,6 +124,7 @@ function caseToEditableScenario(testCase: AdversarialSuiteCaseDefinition): Scena
     name: testCase.name,
     description: testCase.description,
     tags: structuredClone(testCase.tags),
+    capture: structuredClone(testCase.capture),
     controls: structuredClone(testCase.controls),
     steps: structuredClone(testCase.turns),
     adversarial: {
@@ -124,6 +154,7 @@ function scenarioToCase(existing: AdversarialSuiteCaseDefinition, scenario: Scen
     name: scenario.name,
     description: scenario.description,
     tags: structuredClone(scenario.tags),
+    capture: structuredClone(scenario.capture),
     controls: structuredClone(scenario.controls),
     mode: definition.mode,
     maxTurns: definition.maxTurns,
@@ -147,7 +178,7 @@ function updateJsoncCase(text: string, suite: AdversarialSuiteDefinition, scenar
   if (issues.length) throw new Error(issues.map((issue) => `${issue.path}: ${issue.message}`).join('\n'));
   const formattingOptions = { insertSpaces: true, tabSize: 2, eol: text.includes('\r\n') ? '\r\n' : '\n' };
   let result = text;
-  const scalarKeys: Array<keyof AdversarialSuiteCaseDefinition> = ['id', 'name', 'description', 'tags', 'controls', 'mode', 'maxTurns', 'timeoutMs', 'stopOnAttackSucceeded', 'repetitions', 'failFast', 'runPolicy'];
+  const scalarKeys: Array<keyof AdversarialSuiteCaseDefinition> = ['id', 'name', 'description', 'tags', 'capture', 'controls', 'mode', 'maxTurns', 'timeoutMs', 'stopOnAttackSucceeded', 'repetitions', 'failFast', 'runPolicy'];
   for (const key of scalarKeys) if (!sameValue(existing[key], updated[key])) result = setJsoncValue(result, ['cases', caseIndex, key], updated[key], formattingOptions);
   for (const key of ['content', 'urls', 'ctas', 'tools', 'events'] as const) if (!sameValue(existing.forbid?.[key], updated.forbid?.[key])) result = setJsoncValue(result, ['cases', caseIndex, 'forbid', key], updated.forbid?.[key], formattingOptions);
   const sameTurnShape = existing.turns.length === updated.turns.length && existing.turns.every((turn, index) => turn.id === updated.turns[index]?.id);
@@ -159,6 +190,15 @@ function updateJsoncCase(text: string, suite: AdversarialSuiteDefinition, scenar
     for (const key of ['content', 'urls', 'ctas', 'tools', 'events'] as const) if (!sameValue(previous.additionalForbid?.[key], turn.additionalForbid?.[key])) result = setJsoncValue(result, ['cases', caseIndex, 'turns', turnIndex, 'additionalForbid', key], turn.additionalForbid?.[key], formattingOptions);
   }
   return result;
+}
+
+function appendJsoncCase(text: string, suite: AdversarialSuiteDefinition, scenario: ScenarioDefinition): string {
+  const appended = createAdversarialSuite('captured-case', 'Captured case', [scenario]).cases[0];
+  if (!appended) throw new Error('The captured adversarial case could not be serialized.');
+  const nextSuite = { ...suite, cases: [...suite.cases, appended] };
+  const issues = validateAdversarialSuite(nextSuite);
+  if (issues.length) throw new Error(issues.map((entry) => `${entry.path}: ${entry.message}`).join('\n'));
+  return setJsoncValue(text, ['cases', suite.cases.length], appended, { insertSpaces: true, tabSize: 2, eol: text.includes('\r\n') ? '\r\n' : '\n' });
 }
 
 function setJsoncValue(text: string, path: Array<string | number>, value: unknown, formattingOptions: { insertSpaces: boolean; tabSize: number; eol: string }): string {
@@ -198,6 +238,26 @@ function updateCsvCase(text: string, scenarioId: string, scenario: ScenarioDefin
     if (!matchingIndexes.has(index)) output.push(rows[index]!);
   }
   return `${hasBom ? '\uFEFF' : ''}${output.map((row) => row.map(csvCell).join(',')).join(newline)}${newline}`;
+}
+
+function appendCsvCase(text: string, scenario: ScenarioDefinition): string {
+  const hasBom = text.startsWith('\uFEFF');
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  const rows = parseCsvRows(hasBom ? text.slice(1) : text);
+  const header = rows[0];
+  if (!header) throw new Error('CSV is empty.');
+  const normalizedHeader = header.map((cell) => cell.trim().toLocaleLowerCase());
+  const generated = parseCsvRows(serializeAdversarialCsv([scenario]).slice(1));
+  const generatedHeader = generated[0]!.map((cell) => cell.trim().toLocaleLowerCase());
+  for (const column of generatedHeader) if (!normalizedHeader.includes(column)) { header.push(column); normalizedHeader.push(column); for (const row of rows.slice(1)) row.push(''); }
+  const additions = generated.slice(1).map((generatedRow) => normalizedHeader.map((column) => {
+    const index = generatedHeader.indexOf(column);
+    return index >= 0 ? generatedRow[index] ?? '' : '';
+  }));
+  const updated = `${hasBom ? '\uFEFF' : ''}${[...rows, ...additions].map((row) => row.map(csvCell).join(',')).join(newline)}${newline}`;
+  const verified = parseAdversarialSource('captured.adversarial.csv', updated);
+  if (!verified.suite || verified.issues.length) throw new Error(verified.issues.join('\n') || 'The appended CSV is invalid.');
+  return updated;
 }
 
 function resolveSuiteUri(profileUri: vscode.Uri, path: string, resolveExternal?: (reference: string) => vscode.Uri | undefined): vscode.Uri {

@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { modify } from 'jsonc-parser';
-import type { HostPayload, InspectorTargetTab, TestOperationAction, TestOperationSnapshot, WebviewMessage, WorkspaceDestination, WorkspaceSection } from '../../shared/protocol';
+import type { HostPayload, InspectorTargetTab, TestCaptureSource, TestOperationAction, TestOperationSnapshot, WebviewMessage, WorkspaceDestination, WorkspaceSection } from '../../shared/protocol';
 import { isWebviewMessage, PROTOCOL_VERSION } from '../../shared/protocol';
-import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, ScenarioRunEvidence, ScenarioRunResult, SessionSnapshot, TurnStageProfile } from '../../shared/types';
+import type { AdversarialForbidDefinition, AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, ScenarioRunEvidence, ScenarioRunResult, TurnStageProfile } from '../../shared/types';
 import { EnvironmentRepository, MAX_PROFILE_BYTES } from '../config/profileRepository';
 import { ProfileCodec } from '../config/profileCodec';
 import { ProfileValidator, validateAdversarialScenariosAgainstProfile, validateContractScenariosAgainstProfile } from '../config/profileValidator';
@@ -31,14 +31,15 @@ import type { ScenarioTestController } from '../testing/scenarioTestController';
 import { parseAdversarialJsonl, serializeAdversarialJsonl, serializeCampaignResultsJsonl } from '../testing/adversarialJsonl';
 import { ExternalAdversarialSuiteRepository, isExternalAdversarialSuiteReference } from '../testing/externalAdversarialSuite';
 import { loadLinkedAdversarialCaseCatalog } from '../testing/adversarialCatalog';
-import { LinkedAdversarialCaseConflictError, loadEditableLinkedAdversarialCase, saveEditableLinkedAdversarialCase } from '../testing/linkedAdversarialCase';
+import { appendLinkedAdversarialCase, LinkedAdversarialCaseConflictError, loadEditableLinkedAdversarialCase, saveEditableLinkedAdversarialCase } from '../testing/linkedAdversarialCase';
 import { contractCsvTemplate } from '../testing/contractCsv';
 import { loadLinkedContractCaseCatalog } from '../testing/contractCatalog';
-import { isSafeContractSuitePath } from '../testing/contractSuite';
+import { createContractSuite, isSafeContractSuitePath, serializeContractSuite } from '../testing/contractSuite';
 import { parseContractSource } from '../testing/contractSource';
-import { LinkedContractCaseConflictError, loadEditableLinkedContractCase, saveEditableLinkedContractCase } from '../testing/linkedContractCase';
+import { appendLinkedContractCase, LinkedContractCaseConflictError, loadEditableLinkedContractCase, saveEditableLinkedContractCase } from '../testing/linkedContractCase';
 import { SessionDeltaTracker } from '../../shared/sessionDelta';
 import { isBlockedLifecycleCommand } from '../../shared/vscodeCommandPolicy';
+import { buildCapturedScenario, captureEffectOptions, type CaptureKind } from '../testing/scenarioCapture';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -323,6 +324,19 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         }
         if (message.type === 'profile.patch') { await this.patchDocument(document, message.path, message.value); return; }
         if (message.type === 'testExplorer.open') { await vscode.commands.executeCommand('workbench.view.testing.focus'); return; }
+        if (message.type === 'test.capture') {
+          if (!controller) throw new Error(localize('The active TurnStage session is unavailable.'));
+          const captured = await this.captureTestCase(document, controller, message.source, message.suggestedKind);
+          if (!captured) return;
+          catalogCache = undefined;
+          contractCatalogCache = undefined;
+          await post({ type: 'test.captured', ...captured }, message.requestId);
+          await post({ type: 'workspace.navigate', destination: captured.kind === 'adversarial' ? { pane: 'adversarial', section: 'cases' } : { pane: 'tests', section: 'scenarios' } });
+          if (captured.kind === 'adversarial') await postAdversarialCatalog(true);
+          else await postContractCatalog(true);
+          await this.scenarioTests?.refresh();
+          return;
+        }
         if (message.type === 'contract.catalog.request') { await postContractCatalog(message.force === true, message.requestId); return; }
         if (message.type === 'contract.case.request') {
           const profile = this.codec.parse(document.getText()).profile;
@@ -751,8 +765,14 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
             break;
           }
           case 'adversarial.capture': {
-            const detail = await this.captureAdversarialConversation(document, controller.snapshot, controller.profile);
-            if (detail) await post({ type: 'adversarial.captured', detail }, message.requestId);
+            const captured = await this.captureTestCase(document, controller, { kind: 'conversation' }, 'adversarial');
+            if (captured) {
+              catalogCache = undefined;
+              contractCatalogCache = undefined;
+              await post({ type: 'adversarial.captured', detail: captured.detail }, message.requestId);
+              await postAdversarialCatalog(true);
+              await this.scenarioTests?.refresh();
+            }
             break;
           }
           case 'form.cancel': break;
@@ -948,41 +968,142 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     await this.patchDocument(document, ['tests', 'scenarios'], merged);
     return completedOperation(localize('Imported {count} adversarial cases.', { count: String(imported.length) }), uri);
   }
-  private async captureAdversarialConversation(document: vscode.TextDocument, snapshot: SessionSnapshot, profile: TurnStageProfile): Promise<string | undefined> {
-    const userMessages = snapshot.messages.filter((message) => message.role === 'user').map((message) => message.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text ?? '').join('')).filter((text) => text.trim());
-    if (!userMessages.length) throw new Error(localize('There are no user messages to save as an adversarial test.'));
-    if (userMessages.length > 10) throw new Error(localize('This conversation has more than 10 user turns. Start a shorter conversation before saving it as one adversarial case.'));
-    const saveLabel = localize('Continue');
-    const confirmed = await vscode.window.showWarningMessage(localize('Save this conversation as an adversarial test?'), { modal: true, detail: localize('The user messages will be written to the Profile JSONC. Review them for secrets or private data first.') }, saveLabel);
-    if (confirmed !== saveLabel) return undefined;
-    const name = await vscode.window.showInputBox({ title: localize('Adversarial Case Name'), value: localize('Captured adversarial conversation'), validateInput: (value) => value.trim() ? undefined : localize('Case name is required.') });
+  private async captureTestCase(
+    document: vscode.TextDocument,
+    controller: SessionController,
+    source: TestCaptureSource,
+    suggestedKind?: CaptureKind,
+  ): Promise<{ detail: string; kind: CaptureKind; scenarioId: string; sourcePath?: string } | undefined> {
+    if (!vscode.workspace.isTrusted) throw new Error(localize('Saving a captured test requires a trusted workspace.'));
+    const profile = this.codec.parse(document.getText()).profile;
+    if (!profile) throw new Error(localize('Profile could not be parsed.'));
+    const evidenceReference = source.kind === 'evidence' ? this.scenarioTests?.getEvidence(source.evidenceId) : undefined;
+    if (evidenceReference && evidenceReference.evidence.profileId !== profile.id) throw new Error(localize('The selected test evidence belongs to a different Profile.'));
+    const snapshot = source.kind === 'conversation'
+      ? controller.snapshot
+      : source.kind === 'run'
+        ? controller.getRuns().find((run) => run.id === source.runId)?.snapshot
+        : evidenceReference?.evidence.snapshot;
+    if (!snapshot) throw new Error(localize(source.kind === 'run' ? 'The selected run is no longer available or has no chat snapshot.' : source.kind === 'evidence' ? 'The selected test evidence is no longer available.' : 'The active conversation is unavailable.'));
+
+    const baseKindChoices = [
+      { label: localize('Functional test'), description: localize('Re-run the conversation and review deterministic assertions.'), captureKind: 'contract' as const },
+      { label: localize('Adversarial test'), description: localize('Verify that prohibited observable effects do not occur.'), captureKind: 'adversarial' as const },
+    ];
+    const kindChoices = suggestedKind ? [...baseKindChoices].sort((left, right) => Number(right.captureKind === suggestedKind) - Number(left.captureKind === suggestedKind)) : baseKindChoices;
+    const kindChoice = await vscode.window.showQuickPick(kindChoices, { title: localize('Save as test'), placeHolder: localize('Choose the kind of draft to create') });
+    if (!kindChoice) return undefined;
+    const kind = kindChoice.captureKind;
+    const confirmLabel = localize('Continue');
+    const confirmed = await vscode.window.showWarningMessage(localize('Review captured conversation content before saving.'), {
+      modal: true,
+      detail: localize('Up to 10 ordered user messages will be written to the selected test source. Assistant responses, headers, response bodies, and credentials are not copied.'),
+    }, confirmLabel);
+    if (confirmed !== confirmLabel) return undefined;
+    const defaultName = kind === 'adversarial' ? localize('Captured adversarial conversation') : localize('Captured conversation regression');
+    const name = await vscode.window.showInputBox({ title: localize('Test Case Name'), value: defaultName, validateInput: (value) => value.trim() && value.trim().length <= 120 ? undefined : localize('Case name must contain 1 to 120 characters.') });
     if (!name?.trim()) return undefined;
-    const emitted = new Set(profile.stream.mappings.map((mapping) => String(mapping.emit.type)));
-    const visible = [...emitted].some((type) => ['content.text.delta', 'content.markdown.delta', 'citation.upsert', 'citation.attach', 'action.upsert', 'followup.upsert', 'form.upsert'].includes(type));
-    const content = visible ? await vscode.window.showInputBox({ title: localize('Forbidden Content'), prompt: localize('Optional literal phrase that must not appear in the assistant response.') }) : undefined;
-    const availableChoices: Array<{ label: string; key: 'urls' | 'ctas' | 'tools' }> = [];
-    if (visible) availableChoices.push({ label: localize('Forbid URLs'), key: 'urls' });
-    if ([...emitted].some((type) => ['action.upsert', 'followup.upsert', 'form.upsert'].includes(type))) availableChoices.push({ label: localize('Forbid calls to action'), key: 'ctas' });
-    if ([...emitted].some((type) => type.startsWith('tool.'))) availableChoices.push({ label: localize('Forbid tool interactions'), key: 'tools' });
-    if (!visible && !availableChoices.length) throw new Error(localize('This Profile has no observable mapping available for an adversarial prohibition.'));
-    const choices = await vscode.window.showQuickPick(availableChoices, { title: localize('Additional Prohibited Effects'), canPickMany: true, placeHolder: localize('Choose any additional observable effects to prohibit') });
-    if (!choices) return undefined;
-    const forbid = {
-      ...(content?.trim() ? { content: [content.trim()] } : {}),
-      ...(choices.some((choice) => choice.key === 'urls') ? { urls: true } : {}),
-      ...(choices.some((choice) => choice.key === 'ctas') ? { ctas: true } : {}),
-      ...(choices.some((choice) => choice.key === 'tools') ? { tools: true } : {}),
+
+    let forbid: AdversarialForbidDefinition | undefined;
+    let repetitions = 1;
+    let timeoutMs = 60_000;
+    if (kind === 'adversarial') {
+      const emitted = new Set(profile.stream.mappings.map((mapping) => String(mapping.emit.type)));
+      const visible = [...emitted].some((type) => ['content.text.delta', 'content.markdown.delta', 'citation.upsert', 'citation.attach', 'action.upsert', 'followup.upsert', 'form.upsert'].includes(type));
+      const content = visible ? await vscode.window.showInputBox({ title: localize('Forbidden Content'), prompt: localize('Optional literal phrase that must not appear in the assistant response.') }) : undefined;
+      const effectChoices = captureEffectOptions(profile, snapshot).map((option) => ({
+        label: option.kind === 'urls' ? localize('Forbid URLs') : option.kind === 'ctas' ? localize('Forbid calls to action') : option.kind === 'tools' ? localize('Forbid tool interactions') : localize('Forbid event {event}', { event: option.event ?? '' }),
+        description: option.observed ? localize('Observed in the captured evidence; review before selecting.') : undefined,
+        option,
+        picked: false,
+      }));
+      if (!visible && !effectChoices.length) throw new Error(localize('This Profile has no observable mapping available for an adversarial prohibition.'));
+      const selectedEffects = await vscode.window.showQuickPick(effectChoices, { title: localize('Prohibited Effects'), canPickMany: true, placeHolder: localize('Choose effects that must not occur') });
+      if (!selectedEffects) return undefined;
+      forbid = {
+        ...(content?.trim() ? { content: [content.trim()] } : {}),
+        ...(selectedEffects.some((choice) => choice.option.kind === 'urls') ? { urls: true } : {}),
+        ...(selectedEffects.some((choice) => choice.option.kind === 'ctas') ? { ctas: true } : {}),
+        ...(selectedEffects.some((choice) => choice.option.kind === 'tools') ? { tools: true } : {}),
+        ...(selectedEffects.some((choice) => choice.option.kind === 'event') ? { events: selectedEffects.flatMap((choice) => choice.option.kind === 'event' && choice.option.event ? [choice.option.event] : []) } : {}),
+      };
+      if (!forbid.content?.length && !forbid.urls && !forbid.ctas && !forbid.tools && !forbid.events?.length) throw new Error(localize('Choose at least one prohibited effect before saving the case.'));
+      const policy = await vscode.window.showQuickPick([
+        { label: localize('Quick check'), description: localize('1 attempt · 60 second timeout'), repetitions: 1, timeoutMs: 60_000 },
+        { label: localize('Reliability sample'), description: localize('5 attempts · 60 second timeout'), repetitions: 5, timeoutMs: 60_000 },
+        { label: localize('Custom policy'), description: localize('Choose attempts and timeout'), repetitions: 0, timeoutMs: 0 },
+      ], { title: localize('Adversarial Execution Policy'), placeHolder: localize('Choose a bounded execution policy') });
+      if (!policy) return undefined;
+      repetitions = policy.repetitions;
+      timeoutMs = policy.timeoutMs;
+      if (!repetitions) {
+        const repetitionsInput = await vscode.window.showInputBox({ title: localize('Test Attempts'), value: '5', validateInput: boundedIntegerInput(1, 50) });
+        if (repetitionsInput === undefined) return undefined;
+        repetitions = Number(repetitionsInput);
+        const timeoutInput = await vscode.window.showInputBox({ title: localize('Case Timeout (ms)'), value: '60000', validateInput: boundedIntegerInput(1_000, 300_000) });
+        if (timeoutInput === undefined) return undefined;
+        timeoutMs = Number(timeoutInput);
+      }
+    }
+
+    const suites = kind === 'adversarial' ? profile.tests?.adversarialSuites ?? [] : profile.tests?.contractSuites ?? [];
+    const destinations = [
+      ...((profile.tests?.scenarios?.length ?? 0) < 100 ? [{ label: localize('Profile (inline draft)'), description: localize('Best for a small number of cases.'), value: 'inline' as const }] : []),
+      ...suites.map((path) => ({ label: linkedSuiteDisplayLabel(path), description: localize('Append to this linked suite.'), value: path })),
+      ...(suites.length < 100 ? [{ label: localize('New JSONC suite…'), description: localize('Create and link a Git-friendly suite.'), value: 'new' as const }] : []),
+    ];
+    const destination = await vscode.window.showQuickPick(destinations, { title: localize('Save Draft To'), placeHolder: localize('Choose where the captured case should be stored') });
+    if (!destination) return undefined;
+    const knownIds = new Set(profile.tests?.scenarios?.map((scenario) => scenario.id) ?? []);
+    const scenario = buildCapturedScenario({ kind, name, snapshot, profile, source, existingIds: knownIds, forbid, repetitions, timeoutMs });
+    if (kind === 'adversarial') this.assertAdversarialScenariosCompatible(profile, [scenario]);
+    else {
+      const environmentEntries = await this.environments.discover(document.uri);
+      const compatibilityError = validateContractScenariosAgainstProfile(profile, [scenario], environmentEntries.map((entry) => entry.environment))[0];
+      if (compatibilityError) throw new Error(localize('Test case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
+    }
+
+    let sourcePath: string | undefined;
+    if (destination.value === 'inline') {
+      const scenarios = profile.tests?.scenarios ?? [];
+      if (profile.tests) await this.patchDocument(document, ['tests', 'scenarios'], [...scenarios, scenario]);
+      else await this.patchDocument(document, ['tests'], { scenarios: [scenario] });
+    } else if (destination.value === 'new') {
+      const suffix = kind === 'adversarial' ? 'adversarial.jsonc' : 'tests.jsonc';
+      const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`${scenario.id}.${suffix}`), filters: { JSONC: ['jsonc'] }, saveLabel: localize('Create Test Suite') });
+      if (!uri) return undefined;
+      const contents = kind === 'adversarial'
+        ? serializeAdversarialSuite(createAdversarialSuite(`${scenario.id}-suite`, `${scenario.name} suite`, [scenario]))
+        : serializeContractSuite(createContractSuite(`${scenario.id}-suite`, `${scenario.name} suite`, [scenario]));
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(contents));
+      const profileFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+      const suiteFolder = vscode.workspace.getWorkspaceFolder(uri);
+      const sameFolder = Boolean(profileFolder && profileFolder.uri.toString() === suiteFolder?.uri.toString());
+      sourcePath = sameFolder ? vscode.workspace.asRelativePath(uri, false).replaceAll('\\', '/') : await this.externalAdversarialSuites.grant(document.uri, uri);
+      const safeSourcePath = kind === 'adversarial' ? isSafeAdversarialSuitePath(sourcePath) : isSafeContractSuitePath(sourcePath);
+      if (!safeSourcePath) throw new Error(localize('The selected suite path is not safe to link.'));
+      const field = kind === 'adversarial' ? 'adversarialSuites' : 'contractSuites';
+      if (profile.tests) await this.patchDocument(document, ['tests', field], [...suites, sourcePath]);
+      else await this.patchDocument(document, ['tests'], { scenarios: [], [field]: [sourcePath] });
+    } else {
+      sourcePath = destination.value;
+      const execution = this.linkedCaseWriteChain.then(() => kind === 'adversarial'
+        ? appendLinkedAdversarialCase({ profileUri: document.uri, sourcePath: sourcePath!, scenario, resolveExternal: (reference) => this.externalAdversarialSuites.resolve(document.uri, reference) })
+        : appendLinkedContractCase({ profileUri: document.uri, sourcePath: sourcePath!, scenario, resolveExternal: (reference) => this.externalAdversarialSuites.resolve(document.uri, reference) }));
+      this.linkedCaseWriteChain = execution.then(() => undefined, () => undefined);
+      this.pendingLinkedCaseWrites.add(execution);
+      try { await execution; }
+      finally { this.pendingLinkedCaseWrites.delete(execution); }
+    }
+    logAt(this.output, 'info', () => `[capture] kind=${kind} source=${source.kind} destination=${sourcePath ? 'linked' : 'inline'} case=${scenario.id}`);
+    return {
+      detail: localize('Saved {count} user turns as draft case {id}. Review and mark it ready before running.', { count: String(scenario.steps.length), id: scenario.id }),
+      kind,
+      scenarioId: scenario.id,
+      ...(sourcePath ? { sourcePath } : {}),
     };
-    if (!Object.keys(forbid).length) throw new Error(localize('Choose at least one prohibited effect before saving the case.'));
-    const scenarios = profile.tests?.scenarios ?? [];
-    const baseId = slugScenarioId(name) || 'captured-adversarial';
-    const id = nextScenarioId(new Set(scenarios.map((scenario) => scenario.id)), baseId);
-    const steps = userMessages.map((input, index) => ({ id: `turn-${index + 1}`, name: localize('Turn {number}', { number: String(index + 1) }), input }));
-    const scenario: ScenarioDefinition = { id, name: name.trim(), tags: ['captured'], steps, adversarial: { mode: steps.length > 1 ? 'multiTurn' : 'singleTurn', maxTurns: steps.length, timeoutMs: 60_000, stopOnAttackSucceeded: true, forbid } };
-    this.assertAdversarialScenariosCompatible(profile, [scenario]);
-    await this.patchDocument(document, ['tests', 'scenarios'], [...scenarios, scenario]);
-    return localize('Saved {count} user turns as adversarial case {id}.', { count: String(steps.length), id });
   }
+
   private assertAdversarialScenariosCompatible(profile: TurnStageProfile, scenarios: readonly ScenarioDefinition[]): void {
     const firstError = validateAdversarialScenariosAgainstProfile(profile, scenarios)[0];
     if (firstError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: firstError.scenarioId, message: firstError.message }));
@@ -1124,6 +1245,20 @@ function displayExportPath(uri: vscode.Uri): string {
 
 function cancelledOperation(): { status: 'cancelled'; detail: string } { return { status: 'cancelled', detail: localize('Operation cancelled.') }; }
 
+function boundedIntegerInput(minimum: number, maximum: number): (value: string) => string | undefined {
+  return (value) => {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum
+      ? undefined
+      : localize('Enter a whole number from {minimum} to {maximum}.', { minimum: String(minimum), maximum: String(maximum) });
+  };
+}
+
+function linkedSuiteDisplayLabel(path: string): string {
+  if (path.startsWith('external:')) return path.split(':').at(-1) || localize('External suite');
+  return path.split('/').filter(Boolean).at(-1) ?? path;
+}
+
 async function mergeImportedScenarios(profile: TurnStageProfile, imported: readonly ScenarioDefinition[]): Promise<ScenarioDefinition[] | undefined> {
   const existing = profile.tests?.scenarios ?? [];
   const collisions = imported.filter((scenario) => existing.some((candidate) => candidate.id === scenario.id));
@@ -1157,7 +1292,6 @@ function nextScenarioId(ids: ReadonlySet<string>, preferred: string): string {
   for (let index = 2; index <= 10_000; index++) if (!ids.has(`${preferred}-${index}`)) return `${preferred}-${index}`;
   throw new Error(localize('Could not create a unique imported case ID.'));
 }
-function slugScenarioId(value: string): string { return value.toLocaleLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80); }
 function boundedNumber(value: unknown, minimum: number, maximum: number, fallback: number): number { return typeof value === 'number' && Number.isFinite(value) ? Math.min(maximum, Math.max(minimum, Math.trunc(value))) : fallback; }
 function formatStorageBytes(value: number): string {
   const bytes = Math.max(0, Number.isFinite(value) ? value : 0);

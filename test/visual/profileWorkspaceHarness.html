@@ -183,6 +183,14 @@
       },
       errorPolicy: { allowContinuation: true }
     };
+    if (query.get('capturedDraft') === 'true') profile.tests.scenarios.push({
+      id: 'captured-release-probe',
+      name: 'Captured release probe',
+      tags: ['captured', 'needs-review'],
+      capture: { status: 'needsReview', source: 'conversation', capturedAt: '2026-09-04T00:00:00.000Z', profileId: profile.id, profileDigest: 'a'.repeat(64) },
+      steps: [{ id: 'turn-1', name: 'Turn 1', input: 'Confirm the release boundary.' }],
+      assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }]
+    });
     const rawEvents = ['start', 'status', 'message', 'message', 'title', 'done'].map((type, index) => {
       const turnIndex = index < 3 ? 0 : 1;
       return { sequence: index + 1, turnId: `visual-turn-${turnIndex + 1}`, turnIndex, turnSequence: (index % 3) + 1, receivedAt: 1000 + index * 600, elapsedMs: 606 + index * 601, protocol: 'sse', sse: { event: type }, raw: `event: ${type}`, data: { type, text: index === 2 ? 'Here is ' : index === 3 ? 'the sample result.' : undefined } };

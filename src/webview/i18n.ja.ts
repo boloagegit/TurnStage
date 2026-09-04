@@ -1,5 +1,15 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Save as test…': 'テストとして保存…',
+  'captured source': 'キャプチャ元',
+  'Needs review': 'レビューが必要',
+  'Review required': 'レビューが必要',
+  'This draft was captured from {source}. Check every user message and test condition before enabling it.': 'この下書きは{source}から取得されました。有効にする前に、各ユーザーメッセージとテスト条件を確認してください。',
+  'Mark ready': '実行可能にする',
+  'Review scenario {name} before running': '実行前にシナリオ「{name}」をレビュー',
+  'Review case {name} before running': '実行前にケース「{name}」をレビュー',
+  'Create draft from result': '結果から下書きを作成',
+  'Test result to capture': '取得するテスト結果',
   'Chat': 'チャット',
   'Debug': 'デバッグ',
   'Tests': 'テスト',
@@ -134,7 +144,9 @@ export const ja: Record<string, string> = {
   'Disabled': '無効',
   'Page {page} of {pages}': '{pages} ページ中 {page} ページ',
   '{count} scenarios': '{count} 件のシナリオ',
+  '{count} cases': '{count} 件のケース',
   '{count} test scenarios': '{count} 件のテストシナリオ',
+  '{count} test cases': '{count} 件のテストケース',
   '{passed} passed · {failed} failed': '合格 {passed} · 失敗 {failed}',
   '{steps} steps · {assertions} assertions': '{steps} ステップ · {assertions} アサーション',
 };

@@ -116,6 +116,17 @@ describe('ProfileValidator', () => {
     expect(new ProfileValidator().validate(profile)).toEqual([]);
   });
 
+  it('validates bounded capture provenance and rejects mismatched source identifiers', () => {
+    const profile = validProfile();
+    profile.tests = { scenarios: [{
+      id: 'captured', name: 'Captured', steps: [{ id: 'turn-1', input: 'Probe' }],
+      capture: { status: 'needsReview', source: 'run', capturedAt: '2026-09-04T00:00:00.000Z', profileId: profile.id, profileDigest: 'a'.repeat(64), runId: 'run-1' },
+    }] };
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
+    profile.tests.scenarios[0]!.capture = { ...profile.tests.scenarios[0]!.capture!, source: 'conversation', runId: 'run-1' };
+    expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain('Only a run capture can define runId.');
+  });
+
   it('accepts safe functional suite links and validates linked cases against Profile controls and environments', () => {
     const profile = validProfile();
     profile.controls = [{ id: 'mode', type: 'select', label: 'Mode', persist: 'none', options: [{ label: 'Safe', value: 'safe' }] }];

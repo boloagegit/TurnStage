@@ -45,6 +45,7 @@ import { digestValue } from './provenance';
 import { logAt, startLogOperation } from '../logging';
 import type { TestOperationProgress } from '../../shared/protocol';
 import { ExternalAdversarialSuiteRepository } from './externalAdversarialSuite';
+import { isScenarioReady } from './scenarioCapture';
 
 type TestData =
   | { type: 'profile'; uri: vscode.Uri; profileId: string }
@@ -635,6 +636,7 @@ export class ScenarioTestController implements vscode.Disposable {
       profileItem.description = entry.scope === 'workspace' ? localize('Workspace profile') : localize('User profile');
       this.metadata.set(profileItem, { type: 'profile', uri: entry.uri, profileId: entry.profile.id });
       for (const [scenarioIndex, scenario] of (entry.profile.tests?.scenarios ?? []).entries()) {
+        if (!isScenarioReady(scenario)) continue;
         const scenarioItem = this.controller.createTestItem(`${entry.uri.toString()}::scenario::${scenario.id}`, scenario.name || scenario.id, entry.uri);
         scenarioItem.description = scenario.id;
         scenarioItem.range = nodeRange(document, parsed.tree, ['tests', 'scenarios', scenarioIndex]);
@@ -653,10 +655,11 @@ export class ScenarioTestController implements vscode.Disposable {
           const loaded = await loadAdversarialSuite(entry.uri, suitePath, (reference) => this.externalAdversarialSuites.resolve(entry.uri, reference));
           const compatibilityError = validateAdversarialScenariosAgainstProfile(entry.profile, loaded.scenarios)[0];
           if (compatibilityError) throw new Error(localize('Adversarial case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
+          const readyScenarios = loaded.scenarios.filter(isScenarioReady);
           const suiteItem = this.controller.createTestItem(`${entry.uri.toString()}::suite::${loaded.suite.id}`, loaded.suite.name, loaded.uri);
-          suiteItem.description = `${loaded.scenarios.length} ${localize('adversarial cases')}`;
+          suiteItem.description = `${readyScenarios.length} ${localize('adversarial cases')}`;
           this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, suitePath, suiteKind: 'adversarial' });
-          for (const scenario of loaded.scenarios) {
+          for (const scenario of readyScenarios) {
             const scenarioItem = this.controller.createTestItem(`${suiteItem.id}::scenario::${scenario.id}`, scenario.name || scenario.id, loaded.uri);
             scenarioItem.description = scenario.id;
             this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, suitePath, suiteKind: 'adversarial', tags: scenario.tags, sourceBinding: scenario.sourceBinding, adversarial: Boolean(scenario.adversarial), repetitions: scenario.adversarial?.repetitions, plannedTurns: scenario.steps.length });
@@ -681,10 +684,11 @@ export class ScenarioTestController implements vscode.Disposable {
           const loaded = await loadContractSuite(entry.uri, suitePath, (reference) => this.externalAdversarialSuites.resolve(entry.uri, reference));
           const compatibilityError = validateContractScenariosAgainstProfile(entry.profile, loaded.scenarios)[0];
           if (compatibilityError) throw new Error(localize('Test case {id} is incompatible with this Profile: {message}', { id: compatibilityError.scenarioId, message: compatibilityError.message }));
+          const readyScenarios = loaded.scenarios.filter(isScenarioReady);
           const suiteItem = this.controller.createTestItem(`${entry.uri.toString()}::contract-suite::${loaded.suite.id}`, loaded.suite.name, loaded.uri);
-          suiteItem.description = `${loaded.scenarios.length} ${localize('conversation contracts')}`;
+          suiteItem.description = `${readyScenarios.length} ${localize('conversation contracts')}`;
           this.metadata.set(suiteItem, { type: 'suite', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, suitePath, suiteKind: 'contract' });
-          for (const scenario of loaded.scenarios) {
+          for (const scenario of readyScenarios) {
             const scenarioItem = this.controller.createTestItem(`${suiteItem.id}::scenario::${scenario.id}`, scenario.name || scenario.id, loaded.uri);
             scenarioItem.description = scenario.id;
             this.metadata.set(scenarioItem, { type: 'scenario', uri: entry.uri, profileId: entry.profile.id, suiteId: loaded.suite.id, scenarioId: scenario.id, suitePath, suiteKind: 'contract', tags: scenario.tags, sourceBinding: scenario.sourceBinding, adversarial: false, plannedTurns: scenario.steps.length });

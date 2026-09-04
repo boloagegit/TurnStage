@@ -115,7 +115,7 @@ function App(): React.JSX.Element {
       else if (message.type === 'run.exported') setNotice(message.artifactId ? { message: t('Run exported to {path}', { path: message.path }), artifactId: message.artifactId } : t('Run exported to {path}', { path: message.path }));
       else if (message.type === 'run.history.changed') setNotice(t(message.deletedCount === 1 ? 'Deleted {count} recorded run.' : 'Deleted {count} recorded runs.', { count: formatNumber(message.deletedCount) }));
       else if (message.type === 'adversarial.operation') setNotice(message.artifactId ? { message: message.detail, artifactId: message.artifactId } : message.detail);
-      else if (message.type === 'adversarial.captured') setNotice(message.detail);
+      else if (message.type === 'test.captured' || message.type === 'adversarial.captured') setNotice(message.detail);
       else if (message.type === 'adversarial.catalog') setAdversarialCaseCatalog(message.catalog);
       else if (message.type === 'adversarial.case.loaded') setLinkedAdversarialCaseEditor({ status: 'loaded', detail: message.detail });
       else if (message.type === 'adversarial.case.saved') { setLinkedAdversarialCaseEditor({ status: 'saved', detail: message.detail }); setNotice(t('Linked case saved and verified from disk.')); }
@@ -425,7 +425,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
             <button id="right-pane-adversarial-tab" type="button" role="tab" tabIndex={rightPaneMode === 'adversarial' ? 0 : -1} aria-selected={rightPaneMode === 'adversarial'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('adversarial')}>{t('Red Team')}</button>
             <button id="right-pane-configure-tab" type="button" role="tab" tabIndex={rightPaneMode === 'configure' ? 0 : -1} aria-selected={rightPaneMode === 'configure'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('configure')}>{t('Configure')}</button>
           </div>
-          <span>{rightPaneMode === 'debug' ? t('{count} raw events', { count: formatNumber(snapshot?.rawEvents.length ?? 0) }) : rightPaneMode === 'tests' ? t('{count} test scenarios', { count: formatNumber((profile.tests?.scenarios?.filter((scenario) => !scenario.adversarial).length ?? 0) + (contractCaseCatalog?.total ?? 0)) }) : rightPaneMode === 'adversarial' ? t('{count} adversarial cases', { count: formatNumber(profile.tests?.scenarios?.filter((scenario) => scenario.adversarial).length ?? 0) }) : t('Edits profile JSONC')}</span>
+          <span>{rightPaneMode === 'debug' ? t('{count} raw events', { count: formatNumber(snapshot?.rawEvents.length ?? 0) }) : rightPaneMode === 'tests' ? t('{count} test cases', { count: formatNumber((profile.tests?.scenarios?.filter((scenario) => !scenario.adversarial).length ?? 0) + (contractCaseCatalog?.total ?? 0)) }) : rightPaneMode === 'adversarial' ? t('{count} adversarial cases', { count: formatNumber(profile.tests?.scenarios?.filter((scenario) => scenario.adversarial).length ?? 0) }) : t('Edits profile JSONC')}</span>
         </header>
         <div id="right-pane-panel" className="right-pane-panel" role="tabpanel" aria-labelledby={`right-pane-${rightPaneMode}-tab`} tabIndex={-1}>
           {rightPaneMode === 'debug'
@@ -485,6 +485,7 @@ export function EvidenceReviewBar({ results, selection, inspectorTab, onReviewTi
     <header className="evidence-review__heading">
       <strong>{t('Evidence review')}</strong>
       <div className="evidence-review__heading-actions">
+        <button type="button" onClick={() => post({ type: 'test.capture', source: { kind: 'evidence', evidenceId: selection.evidenceId }, suggestedKind: 'adversarial' })}>{t('Save as test…')}</button>
         <button type="button" onClick={onReviewTimeline}>{t('Timeline')}</button>
         <IconButton type="button" icon="export" label={t('Export this case as HTML')} onClick={() => post({ type: 'test.report.export', format: 'html', evidenceId: selection.evidenceId })} />
         <IconButton type="button" icon="close" label={t('Close evidence review')} onClick={onClose} />
@@ -1041,7 +1042,7 @@ function RunSummaryDetails({ run }: { run: LocalRunSummary }): React.JSX.Element
     <div><dt>{t('Messages')}</dt><dd>{formatNumber(run.messageCount ?? 0)}</dd></div>
     <div><dt>{t('Errors')}</dt><dd>{formatNumber(run.errorCount ?? (run.result.type === 'failed' ? 1 : 0))}</dd></div>
     <div><dt>{t('Reconnects')}</dt><dd>{formatNumber(run.metrics.reconnectCount ?? 0)}</dd></div>
-  </dl></details>;
+  </dl>{run.hasSnapshot && <button type="button" onClick={() => post({ type: 'test.capture', source: { kind: 'run', runId: run.id } })}>{t('Save as test…')}</button>}</details>;
 }
 
 export type RovingOrientation = 'horizontal' | 'vertical';

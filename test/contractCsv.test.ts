@@ -4,7 +4,7 @@ import type { ScenarioDefinition } from '../src/shared/types';
 
 describe('functional contract CSV', () => {
   it('round-trips multi-turn prompts, assertions, controls, comparison, performance, and faults', () => {
-    const scenario: ScenarioDefinition = { id: 'formula-case', name: '=Formula', description: 'CSV, quoted', tags: ['multi-turn'], sourceBinding: { components: ['chat'] }, controls: { locale: 'zh-TW' }, steps: [{ id: 'turn-1', input: '=SUM(1,2)', assertions: [{ path: 'assistant.text', operator: 'exists' }] }, { id: 'turn-2', input: 'line one\nline two' }], assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }], comparison: { baseline: { label: 'A' }, candidate: { label: 'B' } }, performance: { thresholds: { 'metrics.ttft': 1500 } }, faults: { disconnectAfterEvents: 3 } };
+    const scenario: ScenarioDefinition = { id: 'formula-case', name: '=Formula', description: 'CSV, quoted', tags: ['multi-turn'], capture: { status: 'needsReview', source: 'conversation', capturedAt: '2026-09-04T00:00:00.000Z', profileId: 'profile', profileDigest: 'a'.repeat(64) }, sourceBinding: { components: ['chat'] }, controls: { locale: 'zh-TW' }, steps: [{ id: 'turn-1', input: '=SUM(1,2)', assertions: [{ path: 'assistant.text', operator: 'exists' }] }, { id: 'turn-2', input: 'line one\nline two' }], assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }], comparison: { baseline: { label: 'A' }, candidate: { label: 'B' } }, performance: { thresholds: { 'metrics.ttft': 1500 } }, faults: { disconnectAfterEvents: 3 } };
     const csv = serializeContractCsv([scenario]);
     expect(csv).toContain("'=SUM(1,2)");
     const parsed = parseContractCsv(csv);

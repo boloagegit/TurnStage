@@ -52,6 +52,11 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'test.runCase', scenarioId: 'case-1', kind: 'unknown' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.runCase', scenarioId: '', suiteId: 'safety' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.runCase', scenarioId: 'case-1', suiteId: '' }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'conversation' } }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'run', runId: 'run-1' }, suggestedKind: 'contract' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'run', runId: 'run-1', evidenceId: 'smuggled' } }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'evidence', evidenceId: '' } }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'conversation', runId: 'smuggled' } }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.cancel' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'connection.analyze' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } }, 'editor-1')).toBe(true);
@@ -100,6 +105,8 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'form.accepted', formId: 'form-1', sourceMessageId: 'message-1' }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'workspaceTrust.changed', trusted: 'yes' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'test.results', results: [] }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'test.captured', detail: 'Saved draft.', kind: 'adversarial', scenarioId: 'case-1' }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'test.captured', detail: 'Saved draft.', kind: 'unknown', scenarioId: 'case-1' }, 'editor-1')).toBe(false);
     const catalogEntry = { sourcePath: 'tests/safety.csv', suiteId: 'safety', suiteName: 'Safety', scenarioId: 'case-1', scenarioName: 'Case 1', tags: ['security'], mode: 'singleTurn', turns: 1, maxTurns: 1, repetitions: 1, timeoutMs: 60000, prohibit: { content: 0, events: 0, urls: true, ctas: false, tools: false } };
     expect(isHostMessage({ ...envelope, type: 'adversarial.catalog', catalog: { entries: [catalogEntry], total: 1, truncated: false, issues: [] } }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'adversarial.catalog', catalog: { entries: Array.from({ length: 101 }, () => catalogEntry), total: 101, truncated: true, issues: [] } }, 'editor-1')).toBe(false);

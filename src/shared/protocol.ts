@@ -1,4 +1,4 @@
-import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioDefinition, ScenarioEvidenceLocation, SessionDelta, SessionSnapshot, TurnStageProfile } from './types';
+import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioCaptureDefinition, ScenarioDefinition, ScenarioEvidenceLocation, SessionDelta, SessionSnapshot, TurnStageProfile } from './types';
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -40,6 +40,11 @@ export interface MappingTestResult {
   parseError?: string;
 }
 
+export type TestCaptureSource =
+  | { kind: 'conversation' }
+  | { kind: 'run'; runId: string }
+  | { kind: 'evidence'; evidenceId: string };
+
 export type TestOperationAction = 'runAll' | 'runContracts' | 'runCase' | 'rerunFailed' | 'rerunUnstable' | 'rerunIncomplete';
 export type TestOperationState = 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
 export interface TestOperationProgress {
@@ -61,6 +66,7 @@ export interface LinkedAdversarialCaseSummary {
   scenarioId: string;
   scenarioName: string;
   tags: string[];
+  capture?: ScenarioCaptureDefinition;
   mode: 'singleTurn' | 'multiTurn';
   turns: number;
   maxTurns: number;
@@ -90,6 +96,7 @@ export interface LinkedContractCaseSummary {
   scenarioId: string;
   scenarioName: string;
   tags: string[];
+  capture?: ScenarioCaptureDefinition;
   turns: number;
   assertions: number;
   comparison: boolean;
@@ -163,6 +170,7 @@ export type WebviewMessage = Envelope & (
   | { type: 'test.evidence.open'; evidenceId: string; location: ScenarioEvidenceLocation }
   | { type: 'test.report.export'; format: 'json' | 'junit' | 'html'; evidenceId?: string }
   | { type: 'test.evidenceBundle.export' }
+  | { type: 'test.capture'; source: TestCaptureSource; suggestedKind?: 'contract' | 'adversarial' }
   | { type: 'campaign.preview'; campaignId: string }
   | { type: 'campaign.run'; campaignId: string }
   | { type: 'campaign.cancel'; campaignId: string }
@@ -215,6 +223,7 @@ export type HostMessage = Envelope & (
   | { type: 'test.timeline'; evidenceId: string; timeline: EvidenceTimelineSummary }
   | { type: 'test.exported'; kind: 'report' | 'evidenceBundle'; path: string; artifactId?: string }
   | { type: 'connection.result'; result: ConnectionDoctorSummary }
+  | { type: 'test.captured'; detail: string; kind: 'contract' | 'adversarial'; scenarioId: string; sourcePath?: string }
   | { type: 'adversarial.captured'; detail: string }
   | { type: 'visual.result'; operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselinePath: string; diffPath?: string }
   | { type: 'workspaceTrust.changed'; trusted: boolean }
@@ -324,6 +333,7 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
     case 'test.timeline.open': return isBoundedString(message.evidenceId);
     case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
     case 'test.report.export': return ['json', 'junit', 'html'].includes(String(message.format)) && optionalBoundedString(message.evidenceId);
+    case 'test.capture': return isTestCaptureSource(message.source) && (message.suggestedKind === undefined || message.suggestedKind === 'contract' || message.suggestedKind === 'adversarial');
     case 'campaign.preview': case 'campaign.run': case 'campaign.cancel': return isBoundedId(message.campaignId);
     case 'campaign.resume': case 'campaign.acceptBaseline': case 'campaign.exportResults': case 'campaign.copilotSummary': return isBoundedId(message.campaignId) && isBoundedId(message.runId);
     case 'copilot.diagnose': return isBoundedString(message.evidenceId) && ['failure', 'performance', 'stability', 'comparison'].includes(String(message.mode));
@@ -391,11 +401,20 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'test.timeline': return isBoundedString(message.evidenceId) && isRecord(message.timeline) && isStructuredValue(message.timeline, MAX_HOST_VALUE_NODES);
     case 'test.exported': return (message.kind === 'report' || message.kind === 'evidenceBundle') && isBoundedString(message.path, MAX_TEXT_LENGTH) && optionalBoundedString(message.artifactId);
     case 'connection.result': return isConnectionDoctorResult(message.result) && isStructuredValue(message.result, MAX_HOST_VALUE_NODES);
+    case 'test.captured': return isBoundedString(message.detail, MAX_TEXT_LENGTH) && ['contract', 'adversarial'].includes(String(message.kind)) && isBoundedId(message.scenarioId) && optionalBoundedString(message.sourcePath);
     case 'adversarial.captured': return isBoundedString(message.detail, MAX_TEXT_LENGTH);
     case 'visual.result': return (message.operation === 'baseline' || message.operation === 'compare') && ['saved', 'passed', 'failed'].includes(String(message.status)) && optionalBoundedString(message.baselinePath) && optionalBoundedString(message.diffPath) && (message.differencePercent === undefined || (typeof message.differencePercent === 'number' && Number.isFinite(message.differencePercent) && message.differencePercent >= 0 && message.differencePercent <= 100));
     case 'workspaceTrust.changed': return typeof message.trusted === 'boolean';
     default: return false;
   }
+}
+
+function isTestCaptureSource(value: unknown): value is TestCaptureSource {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'conversation') return Object.keys(value).length === 1;
+  if (value.kind === 'run') return Object.keys(value).length === 2 && isBoundedString(value.runId) && Boolean(value.runId.trim());
+  if (value.kind === 'evidence') return Object.keys(value).length === 2 && isBoundedString(value.evidenceId) && Boolean(value.evidenceId.trim());
+  return false;
 }
 
 function isAdversarialCaseCatalog(value: unknown): boolean {
@@ -404,6 +423,7 @@ function isAdversarialCaseCatalog(value: unknown): boolean {
   return value.entries.every((entry) => isRecord(entry)
     && [entry.sourcePath, entry.suiteId, entry.suiteName, entry.scenarioId, entry.scenarioName].every((item) => isBoundedString(item, 4096))
     && Array.isArray(entry.tags) && entry.tags.length <= 20 && entry.tags.every((tag) => isBoundedString(tag, 64))
+    && (entry.capture === undefined || isScenarioCapture(entry.capture))
     && (entry.mode === 'singleTurn' || entry.mode === 'multiTurn')
     && boundedNonNegativeInteger(entry.turns, 10) && Number(entry.turns) >= 1
     && boundedNonNegativeInteger(entry.maxTurns, 10) && Number(entry.maxTurns) >= Number(entry.turns)
@@ -426,6 +446,7 @@ function isContractCaseCatalog(value: unknown): boolean {
   return value.entries.every((entry) => isRecord(entry)
     && [entry.sourcePath, entry.suiteId, entry.suiteName, entry.scenarioId, entry.scenarioName].every((item) => isBoundedString(item, 4096))
     && Array.isArray(entry.tags) && entry.tags.length <= 20 && entry.tags.every((tag) => isBoundedString(tag, 64))
+    && (entry.capture === undefined || isScenarioCapture(entry.capture))
     && boundedNonNegativeInteger(entry.turns, 100)
     && boundedNonNegativeInteger(entry.assertions, 10_100)
     && ['comparison', 'performance', 'faults'].every((key) => typeof entry[key] === 'boolean'));
@@ -440,6 +461,20 @@ function isLinkedContractCaseDetail(value: unknown): boolean {
 }
 
 function isRevision(value: unknown): value is string { return typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value); }
+
+function isScenarioCapture(value: unknown): boolean {
+  if (!isRecord(value) || !['needsReview', 'ready'].includes(String(value.status)) || !['conversation', 'run', 'evidence'].includes(String(value.source))) return false;
+  if (!Object.keys(value).every((key) => ['status', 'source', 'capturedAt', 'profileId', 'profileDigest', 'runId', 'evidenceId'].includes(key))) return false;
+  if (!isBoundedString(value.capturedAt, 64) || Number.isNaN(Date.parse(value.capturedAt))) return false;
+  if (!isBoundedString(value.profileId, 256) || !value.profileId.trim() || !isRevision(value.profileDigest)) return false;
+  if (value.runId !== undefined && (!isBoundedString(value.runId, 256) || !value.runId.trim())) return false;
+  if (value.evidenceId !== undefined && (!isBoundedString(value.evidenceId, 256) || !value.evidenceId.trim())) return false;
+  if (value.source === 'run' && typeof value.runId !== 'string') return false;
+  if (value.source === 'evidence' && typeof value.evidenceId !== 'string') return false;
+  if (value.source !== 'run' && value.runId !== undefined) return false;
+  if (value.source !== 'evidence' && value.evidenceId !== undefined) return false;
+  return true;
+}
 
 function isSessionDelta(value: unknown): boolean {
   if (!isRecord(value) || !isBoundedId(value.baseSessionId) || !isRecord(value.core) || value.core.sessionId !== value.baseSessionId || !isStructuredValue(value.core, MAX_HOST_VALUE_NODES)) return false;

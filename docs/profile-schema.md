@@ -115,6 +115,15 @@ Event row. Evidence is held in memory for the current Extension Host only; it
 is not added to Recorded Runs or exports. Network scenarios are skipped in
 Restricted Mode.
 
+A scenario captured from Chat, Replay, or Evidence may include a `capture`
+object with `status`, `source`, `capturedAt`, `profileId`, and a canonical
+`profileDigest`; run/evidence sources also require their matching identifier.
+`needsReview` scenarios are intentionally undiscoverable by Test Explorer and
+the CLI. The GUI removes the `needs-review` tag and changes the status to
+`ready` only when the user selects **Mark ready**. Capture metadata is
+identifier-only and does not duplicate prompts, responses, payloads, or
+credentials.
+
 ### Adversarial regression cases
 
 An inline scenario becomes an adversarial case when it declares

@@ -126,6 +126,24 @@ function validateAdversarialForbid(value: unknown, tree: Node | undefined, path:
 
 function hasAdversarialForbid(value: AdversarialForbidDefinition): boolean { return Boolean(value.urls || value.ctas || value.tools || value.content?.length || value.events?.length); }
 
+function validateScenarioCapture(value: unknown, tree: Node | undefined, path: Array<string | number>, out: ValidationIssue[]): void {
+  if (value === undefined) return;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) { out.push(issue(tree, path, localize('Scenario capture metadata must be an object.'))); return; }
+  const capture = value as Record<string, unknown>;
+  const allowed = new Set(['status', 'source', 'capturedAt', 'profileId', 'profileDigest', 'runId', 'evidenceId']);
+  for (const key of Object.keys(capture)) if (!allowed.has(key)) out.push(issue(tree, [...path, key], localize('Unsupported scenario capture field: {field}.', { field: key })));
+  if (!['needsReview', 'ready'].includes(String(capture.status))) out.push(issue(tree, [...path, 'status'], localize('Scenario capture status must be needsReview or ready.')));
+  if (!['conversation', 'run', 'evidence'].includes(String(capture.source))) out.push(issue(tree, [...path, 'source'], localize('Scenario capture source must be conversation, run, or evidence.')));
+  if (typeof capture.capturedAt !== 'string' || capture.capturedAt.length > 64 || Number.isNaN(Date.parse(capture.capturedAt))) out.push(issue(tree, [...path, 'capturedAt'], localize('Scenario capture time must be a valid bounded timestamp.')));
+  if (typeof capture.profileId !== 'string' || !capture.profileId.trim() || capture.profileId.length > 256) out.push(issue(tree, [...path, 'profileId'], localize('Scenario capture profileId must contain 1 to 256 characters.')));
+  if (typeof capture.profileDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(capture.profileDigest)) out.push(issue(tree, [...path, 'profileDigest'], localize('Scenario capture profileDigest must be a SHA-256 digest.')));
+  for (const key of ['runId', 'evidenceId'] as const) if (capture[key] !== undefined && (typeof capture[key] !== 'string' || !capture[key].trim() || capture[key].length > 256)) out.push(issue(tree, [...path, key], localize('Scenario capture {field} must contain 1 to 256 characters.', { field: key })));
+  if (capture.source === 'run' && capture.runId === undefined) out.push(issue(tree, [...path, 'runId'], localize('A run capture requires runId.')));
+  if (capture.source === 'evidence' && capture.evidenceId === undefined) out.push(issue(tree, [...path, 'evidenceId'], localize('An evidence capture requires evidenceId.')));
+  if (capture.source !== 'run' && capture.runId !== undefined) out.push(issue(tree, [...path, 'runId'], localize('Only a run capture can define runId.')));
+  if (capture.source !== 'evidence' && capture.evidenceId !== undefined) out.push(issue(tree, [...path, 'evidenceId'], localize('Only an evidence capture can define evidenceId.')));
+}
+
 function validateOpeningBlocks(value: unknown, startersPath: unknown, tree: Node | undefined, out: ValidationIssue[]): void {
   const basePath = ['opening', 'response', 'blocks'];
   if (value === undefined) return;
@@ -330,6 +348,7 @@ export class ProfileValidator {
         if (!Array.isArray(scenario.tags) || scenario.tags.length > 20 || scenario.tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.length > 64)) out.push(issue(tree, [...scenarioPath, 'tags'], localize('Scenario tags must contain at most 20 non-empty values of up to 64 characters.')));
         else if (duplicates(scenario.tags).length) out.push(issue(tree, [...scenarioPath, 'tags'], localize('Scenario tags must be unique.')));
       }
+      validateScenarioCapture(scenario.capture, tree, [...scenarioPath, 'capture'], out);
       if (scenario.sourceBinding !== undefined) {
         for (const bindingIssue of validateSourceBinding(scenario.sourceBinding)) out.push(issue(tree, [...scenarioPath, 'sourceBinding'], localize('Invalid source binding: {message}', { message: bindingIssue.message })));
       }

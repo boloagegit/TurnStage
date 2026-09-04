@@ -6,6 +6,7 @@ describe('adversarial CSV', () => {
   it('round-trips multi-turn cases with ordered turns and JSON rule cells', () => {
     const scenarios: ScenarioDefinition[] = [{
       id: 'formula-case', name: '=Formula case', description: 'CSV, quoted', tags: ['multi-turn', 'regression'],
+      capture: { status: 'needsReview', source: 'evidence', capturedAt: '2026-09-04T00:00:00.000Z', profileId: 'profile', profileDigest: 'b'.repeat(64), evidenceId: 'evidence-1' },
       steps: [{ id: 'turn-1', name: 'First', input: '=SUM(1,2)' }, { id: 'turn-2', input: 'line one\nline two', additionalForbid: { events: ['tool.started'] } }],
       adversarial: { mode: 'multiTurn', maxTurns: 2, timeoutMs: 90_000, stopOnAttackSucceeded: true, forbid: { content: ['secret,with,comma'], urls: true, tools: true } },
     }];
@@ -17,6 +18,7 @@ describe('adversarial CSV', () => {
     expect(parsed.issues).toEqual([]);
     expect(parsed.scenarios[0]).toMatchObject({
       id: 'formula-case', name: '=Formula case', description: 'CSV, quoted', tags: ['multi-turn', 'regression'],
+      capture: { status: 'needsReview', source: 'evidence', capturedAt: '2026-09-04T00:00:00.000Z', profileId: 'profile', profileDigest: 'b'.repeat(64), evidenceId: 'evidence-1' },
       steps: [{ id: 'turn-1', input: '=SUM(1,2)' }, { id: 'turn-2', input: 'line one\nline two', additionalForbid: { events: ['tool.started'] } }],
       adversarial: { mode: 'multiTurn', maxTurns: 2, timeoutMs: 90_000, stopOnAttackSucceeded: true, forbid: { content: ['secret,with,comma'], urls: true, tools: true } },
     });

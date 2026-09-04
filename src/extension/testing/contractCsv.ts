@@ -2,7 +2,7 @@ import type { ScenarioDefinition } from '../../shared/types';
 import { parseCsvRows } from './adversarialCsv';
 import { createContractSuite, MAX_CONTRACT_CASES_PER_SUITE, MAX_CONTRACT_STEPS_PER_SUITE, validateContractSuite } from './contractSuite';
 
-export const CONTRACT_CSV_COLUMNS = ['case_id', 'case_name', 'description', 'tags', 'enabled', 'turn_index', 'turn_id', 'turn_name', 'user_message', 'step_assertions_json', 'case_assertions_json', 'source_binding_json', 'controls_json', 'comparison_json', 'performance_json', 'faults_json'] as const;
+export const CONTRACT_CSV_COLUMNS = ['case_id', 'case_name', 'description', 'tags', 'enabled', 'turn_index', 'turn_id', 'turn_name', 'user_message', 'step_assertions_json', 'case_assertions_json', 'source_binding_json', 'controls_json', 'comparison_json', 'performance_json', 'faults_json', 'capture_json'] as const;
 const REQUIRED = ['case_id', 'case_name', 'enabled', 'turn_index', 'turn_id', 'user_message'] as const;
 export interface ContractCsvIssue { row: number; column?: string; message: string }
 export interface ParsedContractCsv { scenarios: ScenarioDefinition[]; issues: ContractCsvIssue[]; rowCount: number }
@@ -29,7 +29,7 @@ export function parseContractCsv(text: string): ParsedContractCsv {
   const scenarios: ScenarioDefinition[] = [];
   for (const [caseId, entries] of groups) {
     const first = entries[0]!;
-    validateConsistent(entries, ['case_name', 'description', 'tags', 'enabled', 'case_assertions_json', 'source_binding_json', 'controls_json', 'comparison_json', 'performance_json', 'faults_json'], issues);
+    validateConsistent(entries, ['case_name', 'description', 'tags', 'enabled', 'case_assertions_json', 'source_binding_json', 'controls_json', 'comparison_json', 'performance_json', 'faults_json', 'capture_json'], issues);
     const turns = entries.map(({ row, value }) => ({
       row,
       index: integer(field(value, 'turn_index'), row, 'turn_index', issues),
@@ -50,6 +50,7 @@ export function parseContractCsv(text: string): ParsedContractCsv {
       name,
       description: field(first.value, 'description').trim() || undefined,
       tags: json(first.value, 'tags', first.row, issues, undefined),
+      capture: json(first.value, 'capture_json', first.row, issues, undefined),
       sourceBinding: json(first.value, 'source_binding_json', first.row, issues, undefined),
       controls: json(first.value, 'controls_json', first.row, issues, undefined),
       steps: turns.map((turn) => compact(turn.step)),
@@ -67,7 +68,7 @@ export function serializeContractCsv(scenarios: readonly ScenarioDefinition[]): 
   const rows: string[][] = [[...CONTRACT_CSV_COLUMNS]];
   for (const scenario of scenarios.filter((value) => !value.adversarial)) scenario.steps.forEach((step, index) => rows.push([
     scenario.id, scenario.name, scenario.description ?? '', JSON.stringify(scenario.tags ?? []), 'true', String(index + 1), step.id, step.name ?? '', step.input,
-    optionalJson(step.assertions), optionalJson(scenario.assertions), optionalJson(scenario.sourceBinding), optionalJson(scenario.controls), optionalJson(scenario.comparison), optionalJson(scenario.performance), optionalJson(scenario.faults),
+    optionalJson(step.assertions), optionalJson(scenario.assertions), optionalJson(scenario.sourceBinding), optionalJson(scenario.controls), optionalJson(scenario.comparison), optionalJson(scenario.performance), optionalJson(scenario.faults), optionalJson(scenario.capture),
   ]));
   return `\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}\r\n`;
 }

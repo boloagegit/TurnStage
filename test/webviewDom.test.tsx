@@ -184,21 +184,21 @@ describe('Webview DOM behavior', () => {
     }
   });
 
-  it('captures a conversation as an adversarial test from the preview toolbar', async () => {
+  it('starts the generic test capture flow from the preview toolbar', async () => {
     const post = vi.fn();
     const userMessage: ChatMessage = { id: 'user-1', role: 'user', status: 'completed', createdAt: 0, completedAt: 1, parts: [{ type: 'text', text: 'Probe' }], citations: [], actions: [], followups: [] };
     render(<MobileChatPreview {...mobileProps({ post, snapshot: { ...snapshot, messages: [userMessage, ...snapshot.messages] } })} />);
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'More actions' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Save conversation as adversarial test' }));
-    expect(post).toHaveBeenCalledWith({ type: 'adversarial.capture' });
+    await user.click(screen.getByRole('menuitem', { name: 'Save as test…' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.capture', source: { kind: 'conversation' } });
   });
 
-  it('uses distinct visual symbols for adversarial capture and visual baselines', async () => {
+  it('uses distinct visual symbols for test capture and visual baselines', async () => {
     render(<MobileChatPreview {...mobileProps()} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'More actions' }));
-    expect(screen.getByRole('menuitem', { name: 'Save conversation as adversarial test' }).querySelector('.codicon-beaker')).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Save as test…' }).querySelector('.codicon-beaker')).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: 'Save visual baseline' }).querySelector('.codicon-save')).toBeTruthy();
   });
 
@@ -512,15 +512,22 @@ describe('Webview DOM behavior', () => {
     const { rerender } = render(<MobileChatPreview {...mobileProps({ snapshot: { ...base, turnState: 'submitting' }, active: true })} />);
 
     expect(screen.getByText('Sending message…')).toBeTruthy();
+    expect(document.querySelector('.mobile-chat-preview__composer-control')?.getAttribute('data-beam-state')).toBe('active');
     rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...base, turnState: 'waitingStart' }, active: true })} />);
     expect(screen.getByText('Waiting for response…')).toBeTruthy();
+    expect(document.querySelector('.mobile-chat-preview__composer-control')?.getAttribute('data-beam-state')).toBe('active');
     rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...base, turnState: 'waitingStart', metrics: { ...base.metrics, requestStartedAt: 5_500 } }, active: true })} />);
     expect(screen.getByText('Still waiting · 4 s')).toBeTruthy();
+    expect(document.querySelector('.mobile-chat-preview__composer-control')?.getAttribute('data-beam-state')).toBe('active');
 
     const pending: ChatMessage = { ...assistantMessage('assistant-receiving', ''), status: 'streaming', completedAt: undefined };
     rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...base, turnState: 'streaming', messages: [userMessage, pending] }, active: true })} />);
     expect(screen.getByText('Receiving response…')).toBeTruthy();
+    expect(document.querySelector('.mobile-chat-preview__composer-control')?.getAttribute('data-beam-state')).toBe('active');
     expect(screen.queryByRole('progressbar')).toBeNull();
+
+    rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...base, turnState: 'completed' }, active: false })} />);
+    expect(document.querySelector('.mobile-chat-preview__composer-control')?.getAttribute('data-beam-state')).toBe('off');
   });
 
   it('resolves the delayed waiting threshold deterministically', () => {
@@ -991,6 +998,27 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'test.runCase', scenarioId: 'contract-1', kind: 'contract' });
   });
 
+  it('keeps captured drafts out of execution until they are reviewed', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [{
+      id: 'captured-contract', name: 'Captured contract', tags: ['captured', 'needs-review'],
+      capture: { status: 'needsReview', source: 'conversation', capturedAt: '2026-09-04T00:00:00.000Z', profileId: profile.id, profileDigest: 'a'.repeat(64) },
+      steps: [{ id: 'turn-1', input: 'Review me' }],
+    }] } };
+    render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} />);
+
+    expect((screen.getByRole('button', { name: 'Run all' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Review scenario Captured contract before running' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Needs review')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Captured contract' }));
+    await user.click(screen.getByRole('button', { name: 'Mark ready' }));
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'profile.patch', path: ['tests', 'scenarios'],
+      value: [expect.objectContaining({ tags: ['captured'], capture: expect.objectContaining({ status: 'ready' }) })],
+    }));
+  });
+
   it('bounds 100 automation scenarios to one searchable page', async () => {
     const user = userEvent.setup();
     const scenarios = Array.from({ length: 100 }, (_, index) => ({ id: `contract-${index + 1}`, name: `Contract ${index + 1}`, tags: index === 99 ? ['release-critical'] : [], steps: [{ id: 'turn-1', input: 'Hello' }] }));
@@ -1044,6 +1072,8 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'contract-evidence', location: { kind: 'message', messageId: 'assistant-1' } });
     await user.click(screen.getByRole('button', { name: 'Run scenario again' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.runCase', scenarioId: 'contract-1', suiteId: undefined, kind: 'contract' });
+    await user.click(screen.getByRole('button', { name: 'Save as test…' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.capture', source: { kind: 'evidence', evidenceId: 'contract-evidence' }, suggestedKind: 'contract' });
     await user.type(screen.getByRole('searchbox'), 'missing result');
     rerender(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} trusted automationResults={automationResults} />);
     expect(screen.getByText('Contract 1')).toBeTruthy();
@@ -1484,13 +1514,14 @@ describe('Webview DOM behavior', () => {
   });
 
   it('shows bounded recorded-run request and reducer summary details', async () => {
-    const run: LocalRunSummary = { ...localRun('details', [{ sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {} }]), normalizedEventCount: 4, messageCount: 2, errorCount: 1, request: { method: 'POST', url: 'https://example.test/chat', variantId: 'continuation' }, metrics: { ...localRun('base').metrics, reconnectCount: 2 } };
+    const run: LocalRunSummary = { ...localRun('details', [{ sequence: 1, receivedAt: 1, elapsedMs: 0, protocol: 'sse', raw: '{}', data: {} }]), hasSnapshot: true, normalizedEventCount: 4, messageCount: 2, errorCount: 1, request: { method: 'POST', url: 'https://example.test/chat', variantId: 'continuation' }, metrics: { ...localRun('base').metrics, reconnectCount: 2 } };
     render(<Replay runs={[run]} active={false} trusted={true} />);
 
     await userEvent.setup().click(screen.getByText('Run details'));
     expect(screen.getByText('https://example.test/chat')).toBeTruthy();
     expect(screen.getByText('continuation')).toBeTruthy();
     expect(screen.getByText('Reconnects').parentElement?.textContent).toContain('2');
+    expect(screen.getByRole('button', { name: 'Save as test…' })).toBeTruthy();
   });
 
   it('renders safe Markdown and routes links through the host protocol', async () => {
