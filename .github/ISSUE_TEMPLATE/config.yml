@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/boloagegit/TurnStage/security/advisories/new
+    about: Report security and privacy vulnerabilities privately.
+  - name: Support guide
+    url: https://github.com/boloagegit/TurnStage/blob/main/SUPPORT.md
+    about: Review safe diagnostic and support steps before filing an issue.
+

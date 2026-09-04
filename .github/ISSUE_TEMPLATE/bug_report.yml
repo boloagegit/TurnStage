@@ -1,0 +1,68 @@
+name: Bug report
+description: Report reproducible TurnStage behavior
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include secrets, private endpoints, prompts, transcripts, headers, payloads, or customer data. Report security problems through a private security advisory.
+  - type: input
+    id: turnstage-version
+    attributes:
+      label: TurnStage version
+      placeholder: 0.23.4
+    validations:
+      required: true
+  - type: input
+    id: vscode-version
+    attributes:
+      label: VS Code version and environment
+      placeholder: 1.106.0 on Windows 11, local Extension Host
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Chat and streaming
+        - Network and events
+        - Automated tests
+        - Red Team tests
+        - Replay and recorded runs
+        - Copilot integration
+        - Profile configuration
+        - CLI and reports
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Safe reproduction
+      description: Prefer the bundled mock server and synthetic data.
+      placeholder: Describe the smallest sequence that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Data safety
+      options:
+        - label: I removed credentials, private URLs, prompts, transcripts, headers, payloads, and customer data.
+          required: true
+

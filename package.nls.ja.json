@@ -1,5 +1,5 @@
 {
-  "extension.description": "設定駆動の VS Code AI チャット シミュレーションおよびストリーム テスト",
+  "extension.description": "VS Code で LLM チャットとエージェント API をテストし、ストリーム診断、回帰テスト、レッドチーム ケース、証拠出力を提供",
   "chatParticipant.description": "範囲を限定した証拠と確認済みツールで TurnStage テストを実行、診断、比較、改善します。",
   "chatParticipant.command.diagnose": "実行結果、失敗、パフォーマンス問題、または Profile 設定を診断します。",
   "chatParticipant.command.run": "明示的に選択した TurnStage テストを検索、検証、実行します。",

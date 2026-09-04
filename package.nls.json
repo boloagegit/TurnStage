@@ -1,5 +1,5 @@
 {
-  "extension.description": "Config-driven AI chat simulation and stream testing for VS Code",
+  "extension.description": "Test LLM chat and agent APIs with streaming diagnostics, regression suites, red-team cases, and evidence",
   "chatParticipant.description": "Run, diagnose, compare, and improve TurnStage tests with bounded evidence and confirmed tools.",
   "chatParticipant.command.diagnose": "Diagnose a run, failure, performance issue, or profile configuration.",
   "chatParticipant.command.run": "Find, validate, and run an explicit TurnStage test selection.",

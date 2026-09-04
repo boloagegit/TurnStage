@@ -1,5 +1,5 @@
 {
-  "extension.description": "구성 기반 VS Code AI 채팅 시뮬레이션 및 스트림 테스트",
+  "extension.description": "VS Code에서 LLM 채팅 및 에이전트 API를 테스트하고 스트리밍 진단, 회귀 테스트, 레드팀 사례, 증거 내보내기를 제공",
   "chatParticipant.description": "범위가 제한된 증거와 확인된 도구로 TurnStage 테스트를 실행, 진단, 비교하고 개선합니다.",
   "chatParticipant.command.diagnose": "실행, 실패, 성능 문제 또는 Profile 구성을 진단합니다.",
   "chatParticipant.command.run": "명시적으로 선택한 TurnStage 테스트를 찾고 검증하고 실행합니다.",

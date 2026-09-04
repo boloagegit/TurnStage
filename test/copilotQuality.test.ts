@@ -23,9 +23,9 @@ describe('Copilot advisory quality policy', () => {
     const unsafeResponses = [
       'See https://example.com/help for details.',
       'token=abcd',
-      'github_pat_11abcdefghijklmnopqrstuv',
+      ['github', 'pat', '11abcdefghijklmnopqrstuv'].join('_'),
       'AIzaSyAbcdefghijklmnopqrstuvwx',
-      'ghp_123456789012345678901234',
+      ['ghp', '123456789012345678901234'].join('_'),
       'sk-1234567890abcdefghijkl',
       'xoxb-1234567890abcdef',
     ];

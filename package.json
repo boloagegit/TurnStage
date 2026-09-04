@@ -2,23 +2,52 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.23.3",
+  "version": "0.23.4",
   "publisher": "turnstage",
+  "author": {
+    "name": "TurnStage contributors",
+    "url": "https://github.com/boloagegit/TurnStage"
+  },
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
+  "preview": true,
+  "pricing": "Free",
+  "galleryBanner": {
+    "color": "#101a2d",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/boloagegit/TurnStage.git"
+  },
+  "homepage": "https://github.com/boloagegit/TurnStage#readme",
+  "bugs": {
+    "url": "https://github.com/boloagegit/TurnStage/issues"
+  },
+  "markdown": "github",
   "engines": {
     "vscode": "^1.106.0"
   },
   "categories": [
     "Testing",
-    "Other"
+    "Machine Learning"
   ],
   "keywords": [
+    "llm testing",
+    "ai testing",
+    "agent testing",
+    "chat testing",
+    "red team",
+    "adversarial testing",
+    "regression testing",
     "sse",
-    "chat",
-    "agent",
-    "stream",
-    "testing"
+    "ndjson",
+    "streaming",
+    "test explorer",
+    "github copilot",
+    "prompt testing",
+    "api testing",
+    "evidence"
   ],
   "main": "dist/extension.js",
   "bin": {
@@ -1577,7 +1606,7 @@
     "test:visual": "npm run compile && node test/visual/profileWorkspace.visual.mjs",
     "benchmark": "vitest bench --config test/benchmark.vitest.config.ts --run",
     "mock-server": "node examples/mock-server/server.mjs",
-    "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository",
+    "package": "npm run compile && vsce package --no-dependencies",
     "vscode:prepublish": "npm run compile"
   },
   "dependencies": {

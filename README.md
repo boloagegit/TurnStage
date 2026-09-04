@@ -1,120 +1,103 @@
 # TurnStage
 
-**Config-driven AI chat simulation and stream testing for VS Code**
+**Test LLM chat and agent APIs from the place you already debug code.**
 
-TurnStage is a VS Code extension for exercising an arbitrary chat or agent
-backend from a versioned, Git-friendly `*.turnstage.jsonc` profile. A profile
-describes the opening experience, request variants, stream protocol, event
-mapping, and the UI data that can be rendered as chat content, progress, tools,
-citations, follow-ups, actions, forms, diagnostics, and usage.
+TurnStage connects a versioned `*.turnstage.jsonc` Profile to any compatible
+HTTP streaming backend, renders the conversation, and keeps Chat, Network,
+Events, timing, test outcomes, and exportable evidence together in VS Code.
 
-It is a stream-testing workbench, not a fixed-format chat client or a general
-API client. Requests run in the Extension Host; the React Webview is a
-renderer and inspector.
+> TurnStage is a public preview. It is a testing and evidence workbench, not a
+> model-safety certification service or an autonomous attack platform.
 
-## Current implementation at a glance
+## Debug the conversation and the stream together
 
-- Native VS Code Activity Bar container, `Profiles` Tree View, Welcome View,
-  commands, Output Channel, Problems diagnostics, SecretStorage, and a custom
-  editor for `*.turnstage.jsonc`.
-- JSONC profiles and environments with JSON Schema association plus a semantic
-  validator and a version-0-to-1 migration command with backup/diff review.
-- Static, request-backed, and disabled openings; starter buttons can send or
-  fill the composer. Optional response blocks map provider-specific choices,
-  fields, quota meters, status, or JSON details into canonical theme-aware UI
-  without backend-specific components.
-- POST/HTTP streaming through the Extension Host, including SSE parsing and
-  line-delimited NDJSON parsing, abort, total/idle timeouts, bounded pre-data
-  reconnect, controlled redirects, and unexpected-end handling.
-- Configurable request variants, typed `$value` extraction, interpolation,
-  transforms, redacted request previews, normalized event mapping, and a
-  reducer-backed chat snapshot.
-- A profile-scoped **Test** workspace with a Chrome Device Mode-inspired
-  viewport toolbar beside a resizable Debug inspector. Responsive mode follows
-  the Chat pane; device presets, custom width/height, rotation, and Fit/100%/
-  75%/50% zoom test the same RWD chat surface without adding fake device chrome.
-  A camera action copies only the logical Chat viewport to the system clipboard
-  as a PNG, ready to paste into an issue, document, or chat.
-  Messages and their raw/normalized events can be selected in either direction;
-  event evidence is grouped by conversation turn in a collapsible virtual tree.
-- Incremental Host-to-Webview session deltas after a full checkpoint, with a
-  fail-safe full-snapshot resync when ordering or identity cannot be proven.
-  Chat initially mounts the latest 200 messages and can progressively reveal
-  earlier history up to 1,000 rendered messages, while the canonical bounded
-  session remains owned by the Extension Host.
-- Adaptive Assistant response reveal for providers that emit a large response
-  in one event. Reveal pace and maximum visual lag are presentation-only;
-  normalized events, TTFT, evidence, terminal state, and test outcomes update
-  immediately. Reduced-motion and assistive-technology modes bypass the effect.
-- Native Profile Tree resource rows with compact **Run**, **Open**, and
-  **Configure Profile** actions. Profile Configuration provides eight
-  profile-specific sections in the Custom Editor; Test remains the live chat
-  and Debug/Runs surface.
-- Profile-defined multi-turn conversation contracts in VS Code's native Test
-  Explorer. Each step receives declarative assertions plus built-in terminal-
-  state invariants; a failed assertion can reopen the captured session and
-  focus its related Network, Raw Events, or Normalized evidence. Optional
-  baseline/candidate comparison, performance budgets, Fault Lab injection,
-  real PNG visual baselines, passive trace/request ID correlation, linked
-  JSONC/CSV suites, and sanitized JSON/JUnit/HTML evidence bundles support
-  regression and CI without executing profile code or sending background
-  telemetry. The Tests UI pages prompt-free summaries and loads one linked
-  case only when it is opened for structured editing. Chat, recorded runs, and
-  evidence can create a review-gated functional or adversarial draft inline or
-  in a linked CSV/JSONC suite; captured drafts cannot execute until explicitly
-  marked ready.
-- A localhost-only synthetic mock server and three starter profiles, including
-  an enterprise first-turn/multi-turn contract example with no real identity or
-  credentials.
-- Bounded adversarial regression cases that replay fixed single- or multi-turn
-  attack scripts and classify them as Resisted, Attack succeeded,
-  Indeterminate, or Infrastructure error. Bulk JSONC suites and one-row-per-
-  turn CSV import/export support large case sets; linked CSV/JSONC cases can be
-  edited one at a time through the same structured controls without importing
-  them. Timeout never counts as a pass, and results link back to Chat, Network,
-  and Events evidence.
-- Per-case and suite-default repetitions run in fresh conversations and expose
-  stable resistance, stable attack success, unstable, or inconclusive sample
-  status without converting timeout or incomplete samples into a pass. Compact
-  coverage, Wilson confidence interval, resistance rate, and p95 TTFT/duration
-  statistics make probabilistic behavior reviewable; failures, unstable
-  samples, and incomplete samples can be rerun without selecting them again.
-- A safe **Create Profile from cURL** flow parses a deliberately bounded cURL
-  subset without invoking a shell. It opens a sanitized OpenAI-compatible
-  Profile draft for review, replaces detected credentials with SecretStorage
-  references, and excludes captured prompts, messages, tools, and payload
-  content. **Connection Doctor** then analyzes the latest real response's
-  bounded HTTP, framing, mapping, timing, and terminal metadata without sending
-  a second request or copying response content into its result.
-- Nine bounded VS Code language-model tools let GitHub Copilot find, validate,
-  run, inspect, and diagnose TurnStage evidence, draft a regression, or prepare
-  an allowlisted Profile repair. Applying a repair opens a native diff, checks
-  the Profile and source digests again, requires explicit confirmation, and
-  validates or rolls back the edit; it never runs tests automatically. Optional
-  response-quality review is clearly Advisory AI output, requires explicit
-  response disclosure, and cannot change a test outcome or CLI exit code.
-  Network runs and content disclosure require confirmation and Workspace Trust;
-  tool output is bounded, redacted, and protected by integrity fingerprints.
-- The VS Code-native `@turnstage` Chat participant provides `/diagnose`, `/run`,
-  `/compare`, `/configure`, and `/evidence` entry points over those tools. It
-  shows native progress, confirmation cards, evidence buttons, references, and
-  deterministic follow-ups while keeping raw prompts, transcripts, payloads,
-  URLs, headers, and secrets out of retained cross-turn metadata. Test runs use
-  stable Profile and case id selector objects; an optional suite id resolves
-  duplicates without requiring users or models to reconstruct internal Test
-  Explorer URIs. Existing exact-id callers remain compatible through the
-  explicit `exactSelectors` input.
-- An executable `turnstage` CLI runs the same fixed Scenario contracts in CI,
-  supports changed-file selection through explicit `sourceBinding` metadata,
-  emits deterministic exit codes and sanitized JSON/JUnit/HTML/evidence output,
-  and verifies SHA-256 provenance manifests from Evidence Bundles.
+Inspect the rendered response beside its request, headers, timing, SSE or
+NDJSON events, normalized mappings, errors, and correlation identifiers. Stop,
+replay, compare, or reopen the exact evidence without reconstructing a failing
+session from logs.
 
-The implementation is intentionally explicit about limitations in the bundled
-`docs/turnstage-architecture.md`, `docs/profile-schema.md`,
-`docs/event-mapping.md`, `docs/security.md`, `docs/performance.md`, and
-`docs/edge-case-hardening.md`, `docs/automated-testing.md`, and
-`docs/adversarial-testing.md`
-documents.
+![Synthetic TurnStage chat and Network inspection](media/marketplace/stream-debug.png)
+
+_Synthetic localhost data from the bundled mock server. No customer endpoint,
+credential, or production conversation is shown._
+
+## Turn a failure into a repeatable test
+
+Run single- or multi-turn conversation contracts in the Profile editor or VS
+Code Test Explorer. Keep cases inline or link Git-friendly JSONC and CSV suites.
+Failures reopen their captured Chat, Network, Raw Events, or Normalized Events
+evidence. Reports are available as sanitized JSON, JUnit, HTML, and Evidence
+Bundles for local review and CI.
+
+![Synthetic automated test result and evidence review](media/marketplace/automated-tests.png)
+
+## Keep known red-team regressions reproducible
+
+Replay bounded adversarial cases and check observable rules such as forbidden
+content, URLs, CTAs, tools, or normalized events. Each case can run repeatedly
+in fresh conversations so probabilistic behavior is visible instead of hidden
+behind one sample.
+
+Results distinguish **Resisted**, **Attack succeeded**, **Indeterminate**, and
+**Infrastructure error**. A timeout or incomplete evidence never counts as a
+pass.
+
+![Synthetic adversarial result with causal event evidence](media/marketplace/red-team-evidence.png)
+
+## Why use TurnStage
+
+- **Provider-neutral Profiles** describe request variants, streaming protocols,
+  event mappings, controls, openings, and response UI without provider code in
+  the Webview.
+- **Evidence before guesswork** links messages and results to the exact Network
+  and event records that produced them.
+- **Functional and adversarial suites** share bounded execution, multi-turn
+  support, repetitions, campaigns, cancellation, resume, and export workflows
+  while retaining distinct outcomes.
+- **Performance and comparison checks** cover TTFT, duration, visual baselines,
+  baseline/candidate differences, and controlled Fault Lab experiments.
+- **Local-first security** uses Workspace Trust, VS Code SecretStorage, bounded
+  retention, explicit disclosures, and redacted diagnostics without automatic
+  TurnStage telemetry.
+- **Optional Copilot assistance** can diagnose results, explain configuration,
+  draft a regression, or prepare a guarded Profile repair. Copilot output is
+  advisory and cannot relabel deterministic test results.
+
+## Five-minute start
+
+1. Open the **TurnStage** Activity Bar view.
+2. Run **TurnStage: Initialize Workspace** and select a starter Profile.
+3. Open the Profile and send a message in **Debug**. The built-in demo and mock
+   server let you explore without a real service or credential.
+4. Inspect the same turn in **Network**, **Raw Events**, and **Normalized
+   Events**.
+5. Open **Tests** or **Red Team**, add a case, run it, and select **Open
+   evidence** on the result.
+
+For an existing API, use **TurnStage: Create Profile from cURL**. TurnStage
+parses a bounded cURL subset without invoking a shell, excludes captured
+messages and tools, and replaces detected credentials with SecretStorage
+references before you save the Profile.
+
+## Copilot is optional
+
+The `@turnstage` Chat participant and TurnStage language-model tools work when a
+compatible VS Code language model is available. Use `/diagnose`, `/run`,
+`/compare`, `/configure`, or `/evidence` from VS Code Chat. Core chat, replay,
+debug, testing, red-team, CLI, and export features remain available without
+GitHub Copilot.
+
+## Privacy, trust, and support
+
+TurnStage has no operated cloud service and sends no automatic product
+telemetry. Requests go to the endpoint selected by the active Profile. A
+request-backed opening is allowed to run once when a trusted Profile editor
+opens because that behavior is explicitly part of the Profile.
+
+Read [`PRIVACY.md`](PRIVACY.md), [`SECURITY.md`](SECURITY.md), and
+[`SUPPORT.md`](SUPPORT.md) before using TurnStage with a sensitive environment.
+The full implementation boundary is documented in
+[`docs/security.md`](docs/security.md).
 
 ## Requirements and installation
 

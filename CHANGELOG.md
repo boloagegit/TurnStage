@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.23.4
+
+- Prepared the extension for its public preview with Marketplace metadata,
+  mock-data screenshots, concise first-run guidance, privacy, security, support,
+  contribution, and third-party licensing documentation.
+- Added hardened GitHub community files, dependency updates, and a manual draft
+  release workflow that packages and verifies a version without storing a
+  Marketplace publishing credential.
+- Reduced the published VSIX surface by excluding design sources and internal
+  review documents that are not required at runtime.
+
 ## 0.23.3
 
 - Unified functional and adversarial result review around the same top-level
