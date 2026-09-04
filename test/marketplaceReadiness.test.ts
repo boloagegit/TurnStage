@@ -75,6 +75,7 @@ describe('Marketplace and GitHub readiness', () => {
       '.github/**',
       '*.vsix',
       'media/icon.svg',
+      'media/marketplace/**',
       'PRODUCT.md',
       'CONTRIBUTING.md',
       'CODE_OF_CONDUCT.md',

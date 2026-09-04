@@ -16,6 +16,7 @@ PRODUCT.md
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
 media/icon.svg
+media/marketplace/**
 docs/vscode-ui-audit-2026-08-27.md
 docs/performance-results.json
 artifacts/**
