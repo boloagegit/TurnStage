@@ -98,6 +98,7 @@ describe('Marketplace and GitHub readiness', () => {
       const source = read(workflow);
       expect(source).toMatch(/actions\/checkout@[0-9a-f]{40}/u);
       expect(source).toMatch(/actions\/setup-node@[0-9a-f]{40}/u);
+      expect(source).toContain('node-version: 24');
       expect(source).not.toMatch(/uses:\s+[^\n]+@(main|master|v\d+)\s*$/gmu);
     }
     expect(read('.github/workflows/ci.yml')).toContain('permissions:\n  contents: read');

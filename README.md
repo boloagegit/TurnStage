@@ -101,17 +101,17 @@ The full implementation boundary is documented in
 
 ## Requirements and installation
 
-The repository uses npm (`package-lock.json`) and the npm scripts in
-`package.json`. Install dependencies and build the extension bundle with:
+The repository uses Node.js 24, npm (`package-lock.json`), and the npm scripts
+in `package.json`. Install dependencies and build the extension bundle with:
 
 ```sh
 npm install
 npm run compile
 ```
 
-The extension manifest targets VS Code `^1.106.0`. The Extension Host bundle is
-built for Node 20, the headless CLI targets Node 20, and the Webview bundle for ES2022; use a Node runtime
-compatible with the local esbuild/VS Code toolchain.
+The extension manifest targets VS Code `^1.106.0`. Development and CI use Node
+24. The Extension Host and headless CLI bundles target Node 20 for VS Code
+runtime compatibility, and the Webview bundle targets ES2022.
 
 For local development, open this folder in VS Code and run the extension from
 an Extension Development Host. The production packaging command is:

@@ -7,7 +7,7 @@ and consistent with VS Code's native interaction patterns.
 
 Requirements:
 
-- Node.js 20
+- Node.js 24
 - npm
 - VS Code 1.106 or later
 
@@ -39,4 +39,3 @@ backend payloads.
 
 By contributing, you agree that your contribution is licensed under the MIT
 License in [`LICENSE`](LICENSE).
-
