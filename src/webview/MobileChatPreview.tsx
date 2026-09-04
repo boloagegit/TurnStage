@@ -12,11 +12,13 @@ import type {
   MessagePart,
   MessageTagRule,
   OpeningInfoBlock,
+  ResponseAction,
   SessionSnapshot,
   Starter,
   TurnState,
   TurnStageProfile
 } from '../shared/types';
+import { isResponseActionIcon } from '../shared/types';
 import { formatDateTime, formatDuration, formatNumber, t } from './i18n';
 import { IconButton, ProductIcon } from './Icon';
 import { JsonSyntax } from './JsonViewer';
@@ -33,6 +35,10 @@ export const DEFAULT_VISIBLE_CHAT_MESSAGES = 200;
 export const RESPONSE_ACTIVITY_DELAYED_MS = 3_000;
 
 export type ResponseActivityPhase = 'sending' | 'waiting' | 'delayed' | 'receiving';
+
+export function isPreviewOnlyResponseAction(actionId: string): boolean {
+  return actionId === 'uri.open' || actionId === 'citation.open' || actionId === 'vscodeCommand.invoke' || actionId.startsWith('vscodeCommand.invoke:');
+}
 
 export function resolveResponseActivity(turnState: TurnState | undefined, elapsedMs: number): ResponseActivityPhase | undefined {
   if (turnState === 'submitting') return 'sending';
@@ -137,6 +143,7 @@ export function MobileChatPreview({
   const deviceRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const messageScrollRef = useRef<MessageScrollSnapshot | undefined>(undefined);
+  const followNextSentMessage = useRef(false);
   const restoredMessageScroll = useRef(false);
   const onMessageScrollTopChangeRef = useRef(onMessageScrollTopChange);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
@@ -176,6 +183,11 @@ export function MobileChatPreview({
   const logicalHeight = responsive ? responsiveSize.height : viewport.height;
   const selectedZoom = responsive ? 1 : viewport.zoom === 'fit' ? fitScale : Number(viewport.zoom) / 100;
   const previewScale = Math.max(0.1, Math.min(1, selectedZoom));
+  const sendAndFollow: SendMessage = (text, interaction) => {
+    followNextSentMessage.current = true;
+    if (interaction === undefined) send(text);
+    else send(text, interaction);
+  };
   const viewportStyle = responsive ? undefined : {
     '--mcp-logical-width': `${logicalWidth}px`,
     '--mcp-logical-height': `${logicalHeight}px`,
@@ -248,6 +260,10 @@ export function MobileChatPreview({
       const wasNearBottom = previous.nearBottom;
       const prepended = previous.firstMessageId !== undefined && firstMessageId !== undefined && previous.firstMessageId !== firstMessageId && snapshotMessages.length > previous.messageCount;
       if (snapshotMessages.length === 0) {
+        setShowJumpToLatest(false);
+      } else if (followNextSentMessage.current) {
+        followNextSentMessage.current = false;
+        scrollToLatest(messages);
         setShowJumpToLatest(false);
       } else if (prepended && !wasNearBottom) {
         const heightDelta = messages.scrollHeight - previous.scrollHeight;
@@ -376,8 +392,8 @@ export function MobileChatPreview({
             {snapshot?.sessionState === 'notStarted' && profile.opening?.mode === 'request' && <StartSessionCard post={post} trusted={trusted} headingId={`${previewId}-start-heading`} />}
             {snapshot?.sessionState === 'loadingOpening' && profile.opening?.mode === 'request' && <OpeningLoading headingId={`${previewId}-opening-loading-heading`} />}
             {snapshot?.sessionState === 'failed' && profile.opening?.mode === 'request' && <OpeningError profile={profile} snapshot={snapshot} post={post} trusted={trusted} headingId={`${previewId}-opening-error-heading`} />}
-            {opening && componentVisible(profile, 'opening') && <OpeningCard profile={profile} opening={opening} active={active} trusted={trusted} setDraft={setDraft} send={send} post={post} headingId={`${previewId}-opening-heading`} />}
-      {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} snapshot={snapshot} messageTagEventIndex={messageTagEventIndex} post={post} send={send} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback} onActionFeedback={onMessageActionFeedback} />)}
+            {opening && componentVisible(profile, 'opening') && <OpeningCard profile={profile} opening={opening} active={active} trusted={trusted} setDraft={setDraft} send={sendAndFollow} post={post} headingId={`${previewId}-opening-heading`} />}
+      {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} snapshot={snapshot} messageTagEventIndex={messageTagEventIndex} post={post} send={sendAndFollow} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback} onActionFeedback={onMessageActionFeedback} />)}
             {responseActivityPhase && responseActivityPhase !== 'receiving' && !activeAssistant && <ResponseActivity profile={profile} phase={responseActivityPhase} elapsedMs={responseActivityElapsedMs} />}
             {!snapshot && <p className="mobile-chat-preview__empty" role="status">{t('Loading conversation…')}</p>}
             {snapshot && snapshotMessages.length === 0 && !opening && snapshot.sessionState === 'ready' && <p className="mobile-chat-preview__empty">{t('No messages yet. Send a message to begin.')}</p>}
@@ -386,7 +402,7 @@ export function MobileChatPreview({
           </div>
         </div>
 
-        <MobileComposer profile={profile} active={active} sessionReady={snapshot?.sessionState === 'ready'} turnState={snapshot?.turnState} continuationBlocked={continuationBlocked} trusted={trusted} draft={draft} setDraft={setDraft} send={send} post={post} />
+        <MobileComposer profile={profile} active={active} sessionReady={snapshot?.sessionState === 'ready'} turnState={snapshot?.turnState} continuationBlocked={continuationBlocked} trusted={trusted} draft={draft} setDraft={setDraft} send={sendAndFollow} post={post} />
       </div>
       </div>
     </div>
@@ -641,6 +657,9 @@ function stopActionLabel(turnState?: TurnState): string {
 }
 
 function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post, send, setDraft, trusted, selected, onSelectMessage, acceptedForms, actionFeedback, onActionFeedback }: { profile: TurnStageProfile; message: ChatMessage; snapshot?: SessionSnapshot; messageTagEventIndex: MessageTagEventIndex; post: PostMessage; send: SendMessage; setDraft: SetDraft; trusted: boolean; selected: boolean; onSelectMessage?: (messageId: string) => void; acceptedForms?: ReadonlySet<string>; actionFeedback?: MessageActionFeedback; onActionFeedback?: (feedback: MessageActionFeedback | undefined) => void }): React.JSX.Element {
+  const [responseActionPreview, setResponseActionPreview] = useState<{ action: ResponseAction; previewOnly: boolean }>();
+  const responseActionReceiptRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { if (responseActionPreview) responseActionReceiptRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [responseActionPreview]);
   const parts = message.parts ?? [];
   const text = parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text ?? '').join('');
   const citations = message.citations ?? [];
@@ -698,8 +717,8 @@ function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post,
       {parts.map((part, index) => <MobileMessagePart key={`${part.type}-${index}`} profile={profile} part={part} messageId={message.id} citations={citations} post={post} trusted={trusted} accepted={acceptedForms?.has(formInstanceKey(message.id, part) ?? '')} streaming={message.role === 'assistant' ? streaming : undefined} streamingActive={streamingAssistant && index === trailingTextPartIndex} />)}
       {streamingAssistant && !hasVisibleResponseContent && <ResponseActivity phase="receiving" inline />}
       {componentVisible(profile, 'citations') && citations.length > 0 && <CitationList profile={profile} citations={citations} post={post} trusted={trusted} />}
-      {componentVisible(profile, 'responseActions') && message.status === 'completed' && actions.length > 0 && <div className="mobile-chat-preview__action-row" role="group" aria-label={t('Response actions')}>{primaryActions.map((action) => <ResponseActionButton key={action.id} action={action} messageId={message.id} trusted={trusted} setDraft={setDraft} post={post} onSelectMessage={onSelectMessage} />)}{overflowActions.length > 0 && <details className="mobile-chat-preview__overflow"><summary>{t('More actions')}</summary><div>{overflowActions.map((action) => <ResponseActionButton key={action.id} action={action} messageId={message.id} trusted={trusted} setDraft={setDraft} post={post} onSelectMessage={onSelectMessage} />)}</div></details>}</div>}
-      {componentVisible(profile, 'followups') && message.status === 'completed' && followups.length > 0 && <div className="mobile-chat-preview__followups" role="group" aria-label={t('Follow-up questions')}>{primaryFollowups.map((followup) => <button className="mobile-chat-preview__chip" type="button" title={followup.tooltip} key={followup.id} disabled={!trusted} onClick={() => invokeFollowup(followup, message.id, setDraft, send, post)}>{followup.label}</button>)}{overflowFollowups.length > 0 && <details className="mobile-chat-preview__overflow"><summary>{t('More suggestions')}</summary><div>{overflowFollowups.map((followup) => <button className="mobile-chat-preview__chip" type="button" title={followup.tooltip} key={followup.id} disabled={!trusted} onClick={() => invokeFollowup(followup, message.id, setDraft, send, post)}>{followup.label}</button>)}</div></details>}</div>}
+      {componentVisible(profile, 'responseActions') && message.status === 'completed' && actions.length > 0 && <section className="mobile-chat-preview__response-controls" aria-label={t('Response actions')}><span className="mobile-chat-preview__control-label">{t('Actions')}</span><div className="mobile-chat-preview__action-row">{primaryActions.map((action) => <ResponseActionButton key={action.id} action={action} messageId={message.id} trusted={trusted} setDraft={setDraft} post={post} onSelectMessage={onSelectMessage} onTriggered={(triggered, previewOnly) => setResponseActionPreview({ action: triggered, previewOnly })} />)}{overflowActions.length > 0 && <details className="mobile-chat-preview__overflow"><summary>{t('More actions')}</summary><div>{overflowActions.map((action) => <ResponseActionButton key={action.id} action={action} messageId={message.id} trusted={trusted} setDraft={setDraft} post={post} onSelectMessage={onSelectMessage} onTriggered={(triggered, previewOnly) => setResponseActionPreview({ action: triggered, previewOnly })} />)}</div></details>}</div>{responseActionPreview ? <div ref={responseActionReceiptRef}><ResponseActionReceipt action={responseActionPreview.action} previewOnly={responseActionPreview.previewOnly} onClose={() => setResponseActionPreview(undefined)} /></div> : null}</section>}
+      {componentVisible(profile, 'followups') && message.status === 'completed' && followups.length > 0 && <section className="mobile-chat-preview__response-controls" aria-label={t('Follow-up questions')}><span className="mobile-chat-preview__control-label">{t('Follow-ups')}</span><div className="mobile-chat-preview__followups">{primaryFollowups.map((followup) => <button className="mobile-chat-preview__chip" type="button" title={followup.tooltip} key={followup.id} disabled={!trusted} onClick={() => invokeFollowup(followup, message.id, setDraft, send, post)}>{followup.label}</button>)}{overflowFollowups.length > 0 && <details className="mobile-chat-preview__overflow"><summary>{t('More suggestions')}</summary><div>{overflowFollowups.map((followup) => <button className="mobile-chat-preview__chip" type="button" title={followup.tooltip} key={followup.id} disabled={!trusted} onClick={() => invokeFollowup(followup, message.id, setDraft, send, post)}>{followup.label}</button>)}</div></details>}</div></section>}
       {componentVisible(profile, 'messageMetrics') && (showTtft || showTotalDuration || messageMetrics.length > 0) && <MessageMetrics message={message} metrics={messageMetrics} showTtft={showTtft} showTotalDuration={showTotalDuration} />}
       {messageActions.length > 0 && <footer className={`mobile-chat-preview__message-toolbar mobile-chat-preview__message-toolbar--${messageActionVisibility}`} role="group" aria-label={t('Message actions')}>
         {messageActions.map((actionId) => actionId === 'message.inspectRaw'
@@ -1019,8 +1038,11 @@ function MobileForm({ form, messageId, post, trusted, accepted }: { form: FormDe
   </form>;
 }
 
-function ResponseActionButton({ action, messageId, trusted, setDraft, post, onSelectMessage }: { action: NonNullable<ChatMessage['actions']>[number]; messageId: string; trusted: boolean; setDraft: SetDraft; post: PostMessage; onSelectMessage?: (messageId: string) => void }): React.JSX.Element {
+function ResponseActionButton({ action, messageId, trusted, setDraft, post, onSelectMessage, onTriggered }: { action: ResponseAction; messageId: string; trusted: boolean; setDraft: SetDraft; post: PostMessage; onSelectMessage?: (messageId: string) => void; onTriggered: (action: ResponseAction, previewOnly: boolean) => void }): React.JSX.Element {
   const invoke = () => {
+    const previewOnly = isPreviewOnlyResponseAction(action.actionId);
+    onTriggered(action, previewOnly);
+    if (previewOnly) return;
     if (action.actionId === 'input.fill') {
       const text = action.payload?.text ?? action.payload?.prompt ?? action.payload?.value;
       if (typeof text === 'string') setDraft(text);
@@ -1037,7 +1059,19 @@ function ResponseActionButton({ action, messageId, trusted, setDraft, post, onSe
     }
     post({ type: 'action.invoke', actionId: action.id, sourceMessageId: messageId });
   };
-  return <button className={`mobile-chat-preview__button ${action.appearance === 'primary' ? 'mobile-chat-preview__button--primary' : ''}`} type="button" title={action.tooltip} disabled={!trusted} onClick={invoke}>{action.label}</button>;
+  const appearance = action.appearance === 'primary' || action.appearance === 'link' ? action.appearance : 'secondary';
+  const icon = isResponseActionIcon(action.icon) ? action.icon : undefined;
+  return <button className={`mobile-chat-preview__button mobile-chat-preview__button--${appearance}`} type="button" title={action.tooltip} disabled={!trusted} onClick={invoke}>{icon ? <ProductIcon name={icon} /> : null}<span>{action.label}</span></button>;
+}
+
+function ResponseActionReceipt({ action, previewOnly, onClose }: { action: ResponseAction; previewOnly: boolean; onClose: () => void }): React.JSX.Element {
+  const serializedPayload = action.payload && Object.keys(action.payload).length ? safeJson(action.payload) : undefined;
+  const payload = serializedPayload && serializedPayload.length > 4_000 ? `${serializedPayload.slice(0, 4_000)}\n…` : serializedPayload;
+  return <div className="mobile-chat-preview__action-receipt">
+    <div className="mobile-chat-preview__action-receipt-heading"><ProductIcon name={previewOnly ? 'info' : 'check'} /><strong role="status" aria-live="polite" aria-atomic="true">{t('CTA triggered: {label}', { label: action.label })}</strong><IconButton icon="close" label={t('Close CTA details')} type="button" onClick={onClose} /></div>
+    <dl><div><dt>{t('Action')}</dt><dd>{action.actionId}</dd></div>{payload ? <div><dt>{t('Payload')}</dt><dd><pre className="json"><code><JsonSyntax text={payload} /></code></pre></dd></div> : null}</dl>
+    <p>{t(previewOnly ? 'Preview only — no external target was opened.' : 'The action was handled inside TurnStage.')}</p>
+  </div>;
 }
 
 function findMessageForm(messageId: string, formId?: string): HTMLFormElement | undefined {

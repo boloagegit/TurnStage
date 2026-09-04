@@ -116,8 +116,8 @@ async function handleContractStream(request, response, body, mode) {
   }
   if (mode === 'contract-actions') {
     if (!await write('followup', { id: 'followup-example', label: 'Show another example', prompt: 'Show another example', behavior: 'send' })) return;
-    if (!await write('action', { id: 'cta-details', label: 'Explain details', actionId: 'request.send', payload: { messageText: 'Explain the sample details', ctaKey: 'sample_details' } })) return;
-    if (!await write('action', { id: 'cta-web', label: 'Open sample documentation', actionId: 'uri.open', payload: { uri: 'https://example.com/sample-guide', ctaKey: 'sample_guide' } })) return;
+    if (!await write('action', { id: 'cta-details', label: 'Explain details', actionId: 'request.send', appearance: 'primary', icon: 'beaker', payload: { messageText: 'Explain the sample details', ctaKey: 'sample_details' } })) return;
+    if (!await write('action', { id: 'cta-web', label: 'Open sample documentation', actionId: 'uri.open', appearance: 'link', icon: 'link', payload: { uri: 'https://example.com/sample-guide', ctaKey: 'sample_guide' } })) return;
     if (!await write('custom_card', { type: 'form', id: 'sample-form', title: 'Synthetic form', fields: [{ id: 'name', type: 'text', label: 'Name', required: true }], submit: { action: 'conversation.send', messageTemplate: 'Submit sample form', interactionKind: 'formSubmit' } })) return;
     if (!await write('diagnostic', { intent: 'sample-intent', selectedTools: ['sample_search'], guardrails: ['sample-check'], e2e_ms: 180 })) return;
   }
@@ -215,7 +215,7 @@ const server = http.createServer(async (request, response) => {
   if (request.url.startsWith('/agent/')) {
     await write('citation', { id: 'citation-1', title: 'Example source', kind: 'url', uri: 'https://example.com', description: 'A safe example citation.' });
     await write('citation_reference', { citationId: 'citation-1' });
-    await write('action', { id: 'open-details', label: 'Open details', actionId: 'message.copy', appearance: 'secondary' });
+    await write('action', { id: 'open-details', label: 'Open details', actionId: 'message.copy', appearance: 'secondary', icon: 'copy' });
     await write('form', { type: 'form', id: 'contact-form', title: 'Contact Information', fields: [{ id: 'name', type: 'text', label: 'Name', required: true, maxLength: 50 }, { id: 'phone', type: 'tel', label: 'Phone', required: true, pattern: '^[0-9+\\- ]+$' }], submit: { action: 'conversation.send', messageTemplate: 'Submit contact information', interactionKind: 'formSubmit' } });
     await write('followup', { id: 'followup-another', label: 'Show another example', prompt: 'Please show another example.', behavior: 'send' });
     await write('diagnostic', { intent: 'sample-search', selectedTools: ['sample_search'], safetyChecks: ['example-only'], requestId: 'example-value' });

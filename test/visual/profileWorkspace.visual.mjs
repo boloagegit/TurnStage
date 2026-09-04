@@ -286,6 +286,35 @@ try {
   assert.ok(messageMetricText.includes('Total') && messageMetricText.includes('3,612 ms'), 'Per-message total duration must be visible');
   assert.ok(!messageMetricText.includes('E2E') && !messageMetricText.includes('Tokens'), 'Backend-reported and token metrics must not appear unless a profile opts in');
   await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'message-actions-metrics-dark.png') });
+  const ctaPage = await browser.newPage({ viewport: { width: 980, height: 780 } });
+  const ctaPageErrors = [];
+  ctaPage.on('pageerror', (error) => ctaPageErrors.push(error.stack ?? error.message));
+  await ctaPage.goto(`${url}?ctas=true&split=58`);
+  try { await ctaPage.getByRole('button', { name: 'Open docs' }).waitFor(); }
+  catch (error) { throw new Error(`CTA preview did not hydrate. Page errors: ${ctaPageErrors.join(' | ') || 'none'}`, { cause: error }); }
+  const ctaControls = ctaPage.getByRole('region', { name: 'Response actions' });
+  assert.equal(await ctaControls.getByText('Actions', { exact: true }).count(), 1, 'Response actions must have a compact visible section label');
+  assert.equal(await ctaControls.getByRole('button', { name: 'Run probe' }).locator('.codicon-beaker').count(), 1, 'Primary CTA must render its configured Codicon');
+  assert.equal(await ctaControls.getByRole('button', { name: 'Copy result' }).locator('.codicon-copy').count(), 1, 'Secondary CTA must render its configured Codicon');
+  assert.equal(await ctaControls.getByRole('button', { name: 'Open docs' }).locator('.codicon-link').count(), 1, 'Link CTA must render its configured Codicon');
+  await ctaControls.getByRole('button', { name: 'Open docs' }).click();
+  const receipt = ctaControls.locator('.mobile-chat-preview__action-receipt');
+  assert.equal(await receipt.getByRole('status').innerText(), 'CTA triggered: Open docs', 'CTA activation must be announced without reading the entire payload');
+  assert.match(await receipt.innerText(), /CTA triggered: Open docs[\s\S]*uri\.open[\s\S]*https:\/\/example\.test\/docs[\s\S]*Preview only/, 'External CTA must show its action and payload without navigation');
+  assert.equal(await ctaPage.evaluate(() => globalThis.__turnstageMessages.some((message) => message.type === 'action.invoke')), false, 'Preview-only CTA must not invoke the Extension Host action');
+  assert.equal(await ctaPage.locator('[data-message-id="assistant-1"] .mobile-chat-preview__message-body').evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'CTA controls and receipt must fit a narrow Chat pane');
+  await ctaPage.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'chat-cta-preview-dark.png') });
+  await receipt.getByRole('button', { name: 'Close CTA details' }).click();
+  assert.equal(await ctaControls.locator('.mobile-chat-preview__action-receipt').count(), 0, 'CTA receipt must be dismissible');
+  await ctaPage.getByRole('tab', { name: 'Configure' }).click();
+  await ctaPage.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('stream-mapping');
+  const iconSelect = ctaPage.getByRole('combobox', { name: 'CTA icon' });
+  await iconSelect.waitFor();
+  await iconSelect.scrollIntoViewIfNeeded();
+  assert.equal(await iconSelect.inputValue(), 'link', 'Mapping GUI must expose the configured CTA icon');
+  assert.equal(await ctaPage.getByRole('combobox', { name: 'CTA style' }).inputValue(), 'link', 'Mapping GUI must expose the configured CTA appearance');
+  await ctaPage.locator('.mapping-card').filter({ has: iconSelect }).screenshot({ path: resolve(artifactDirectory, 'mapping-cta-controls-dark.png') });
+  await ctaPage.close();
   await page.getByRole('tab', { name: 'Configure' }).click();
   const inspectMessage = assistantMessage.getByRole('button', { name: 'Inspect message' });
   await inspectMessage.click();
@@ -322,6 +351,10 @@ try {
   assert.equal(await firstEventRow.getAttribute('aria-selected'), 'true', 'Selecting an event must expose its payload');
   assert.equal(await firstEventRow.locator('.codicon-chevron-down').count(), 1, 'Selected event must use the expanded VS Code Codicon');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'event-payload-dark.png') });
+  await page.getByRole('button', { name: 'Close event payload' }).click();
+  assert.equal(await page.getByRole('region', { name: 'Event payload' }).count(), 0, 'The Event payload inspector must close without leaving the event list');
+  assert.equal(await firstEventRow.getAttribute('aria-selected'), 'false', 'Closing Event payload must clear the selected event state');
+  assert.equal(await firstEventRow.getAttribute('title'), 'View event payload', 'A closed event row must explain that it can reopen the payload');
   await page.getByRole('tab', { name: 'Configure' }).click();
   await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
   assert.equal(await page.locator('.preview-pane').count(), 1, 'Opening Configure must keep the Chat preview mounted');

@@ -2,11 +2,11 @@
 
 import React, { useState } from 'react';
 import axe from 'axe-core';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AdversarialResultSummary, AutomationResultSummary, ChatMessage, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
-import { MobileChatPreview, resizeComposerTextarea, resolveResponseActivity } from '../src/webview/MobileChatPreview';
+import { isPreviewOnlyResponseAction, MobileChatPreview, resizeComposerTextarea, resolveResponseActivity } from '../src/webview/MobileChatPreview';
 import { ACCESSIBLE_EVENT_WINDOW_SIZE, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, eventTimeDeltas, EvidenceReviewBar, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, resolveActiveEvidence, resolveMessageInspectionTarget, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
 import { AdversarialWorkspace, AutomationWorkspace, SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
@@ -171,6 +171,21 @@ describe('Webview DOM behavior', () => {
     await user.click(screen.getByRole('button', { name: 'Configure profile' }));
     expect(onConfigure).toHaveBeenCalledOnce();
     expect(document.querySelector('.profile-identity')).toBeNull();
+  });
+
+  it('edits response-action style and icon through bounded mapping controls', async () => {
+    const post = vi.fn();
+    const configured: TurnStageProfile = { ...profile, stream: { ...profile.stream, mappings: [...profile.stream.mappings, { id: 'action', match: { event: 'action' }, emit: { type: 'action.upsert', action: { id: { path: '$.id' }, label: { path: '$.label' }, actionId: 'message.copy', appearance: 'secondary', icon: 'copy' } } }] } };
+    render(<SettingsWorkspace section="stream-mapping" onSectionChange={vi.fn()} profile={configured} post={post} />);
+
+    expect((screen.getByRole('combobox', { name: 'CTA style' }) as HTMLSelectElement).value).toBe('secondary');
+    expect((screen.getByRole('combobox', { name: 'CTA icon' }) as HTMLSelectElement).value).toBe('copy');
+    await userEvent.setup().selectOptions(screen.getByRole('combobox', { name: 'CTA icon' }), 'target');
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'profile.patch',
+      path: ['stream', 'mappings', 0, 'emit', 'action'],
+      value: expect.objectContaining({ icon: 'target', appearance: 'secondary' }),
+    }));
   });
 
   it('gives every icon-only chat control an accessible name and matching tooltip', () => {
@@ -410,6 +425,30 @@ describe('Webview DOM behavior', () => {
     scrollHeight = 840;
     rerender(<MobileChatPreview {...mobileProps({ snapshot: { ...snapshot, messages: [...snapshot.messages, assistantMessage('assistant-2', '新訊息 🧪'), assistantMessage('assistant-3', '更多內容') ] } })} />);
     expect(messages.scrollTop).toBe(640);
+  });
+
+  it('moves to the newest message after the user sends while preserving manual reading for other updates', async () => {
+    const send = vi.fn();
+    const { rerender } = render(<MobileChatPreview {...mobileProps({ draft: 'Newest question', send })} />);
+    const messages = screen.getByRole('log') as HTMLDivElement;
+    let scrollHeight = 600;
+    Object.defineProperties(messages, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTo: { configurable: true, value: vi.fn(({ top }: { top: number }) => { messages.scrollTop = top; }) }
+    });
+    messages.scrollTop = 100;
+    fireEvent.scroll(messages);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Send message' }));
+    expect(send).toHaveBeenCalledWith('Newest question');
+
+    scrollHeight = 760;
+    const sent: ChatMessage = { ...assistantMessage('user-newest', 'Newest question'), role: 'user' };
+    rerender(<MobileChatPreview {...mobileProps({ draft: '', send, snapshot: { ...snapshot, messages: [...snapshot.messages, sent] } })} />);
+
+    expect(messages.scrollTop).toBe(560);
+    expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull();
   });
 
   it('preserves the reading position when older messages are prepended', () => {
@@ -684,10 +723,23 @@ describe('Webview DOM behavior', () => {
 
     await user.click(rows[0]);
     expect(rows[0].getAttribute('aria-selected')).toBe('true');
+    expect(rows[0].getAttribute('aria-expanded')).toBe('true');
     expect(rows[0].getAttribute('data-disclosure-state')).toBe('expanded');
+    expect(rows[0].getAttribute('title')).toBe('Hide event payload');
     expect(rows[0].querySelector('.codicon-chevron-down')).toBeTruthy();
     expect(screen.getByRole('region', { name: 'Event payload' }).textContent).toContain('hello');
     expect(screen.getByText('Event payload opened for message #1.')).toBeTruthy();
+
+    await user.click(rows[0]);
+    expect(rows[0].getAttribute('aria-selected')).toBe('false');
+    expect(rows[0].getAttribute('aria-expanded')).toBe('false');
+    expect(rows[0].getAttribute('title')).toBe('View event payload');
+    expect(screen.queryByRole('region', { name: 'Event payload' })).toBeNull();
+
+    await user.click(rows[0]);
+    await user.click(screen.getByRole('button', { name: 'Close event payload' }));
+    expect(screen.queryByRole('region', { name: 'Event payload' })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(rows[0]));
 
     rows[1].focus();
     await user.keyboard('{Enter}');
@@ -1561,6 +1613,39 @@ describe('Webview DOM behavior', () => {
     expect(setDraft).toHaveBeenCalledWith('Prepared text');
     expect(screen.getByText('More actions')).toBeTruthy();
     expect(screen.getByText('More suggestions')).toBeTruthy();
+  });
+
+  it('renders themed CTA icons and previews external effects with an inspectable receipt', async () => {
+    const post = vi.fn();
+    const message: ChatMessage = {
+      ...assistantMessage('cta-preview', 'Choose an action'),
+      actions: [
+        { id: 'docs', label: 'Open docs', actionId: 'uri.open', appearance: 'link', icon: 'link', payload: { uri: 'https://example.test/docs', source: 'assistant' } },
+      ],
+    };
+    const configured = { ...profile, ui: { ...profile.ui, components: { responseActions: { visible: true } } } };
+    const { container } = render(<MobileChatPreview {...mobileProps({ post, profile: configured, snapshot: { ...snapshot, messages: [message] } })} />);
+
+    const button = screen.getByRole('button', { name: 'Open docs' });
+    expect(button.classList.contains('mobile-chat-preview__button--link')).toBe(true);
+    expect(button.querySelector('.codicon-link')).toBeTruthy();
+    await userEvent.setup().click(button);
+
+    expect(screen.getByText('CTA triggered: Open docs')).toBeTruthy();
+    expect(screen.getByText('uri.open')).toBeTruthy();
+    expect(container.querySelectorAll('.mobile-chat-preview__action-receipt .json-token--key').length).toBeGreaterThan(0);
+    expect(screen.getByText('Preview only — no external target was opened.')).toBeTruthy();
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'action.invoke' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Close CTA details' }));
+    expect(screen.queryByText('CTA triggered: Open docs')).toBeNull();
+  });
+
+  it('classifies only external response actions as preview-only', () => {
+    expect(isPreviewOnlyResponseAction('uri.open')).toBe(true);
+    expect(isPreviewOnlyResponseAction('citation.open')).toBe(true);
+    expect(isPreviewOnlyResponseAction('vscodeCommand.invoke:workbench.action.files.save')).toBe(true);
+    expect(isPreviewOnlyResponseAction('request.send')).toBe(false);
+    expect(isPreviewOnlyResponseAction('input.fill')).toBe(false);
   });
 
   it('replaces a form with its acknowledged submitted state', () => {

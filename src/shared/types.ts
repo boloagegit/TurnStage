@@ -891,7 +891,31 @@ export interface Citation {
 }
 
 export interface Followup { id: string; label: string; prompt: string; behavior: 'send' | 'fill' | 'action'; tooltip?: string; actionId?: string; payload?: JsonObject }
-export interface ResponseAction { id: string; label: string; actionId: string; appearance?: 'primary' | 'secondary' | 'link'; tooltip?: string; payload?: JsonObject; confirm?: { title: string; message: string } }
+export const responseActionIcons = [
+  'add',
+  'arrow-right',
+  'beaker',
+  'check',
+  'copy',
+  'debug-start',
+  'diff',
+  'edit',
+  'export',
+  'file-code',
+  'go-to-file',
+  'info',
+  'link',
+  'refresh',
+  'save',
+  'send',
+  'target',
+  'warning',
+] as const;
+export type ResponseActionIcon = typeof responseActionIcons[number];
+export function isResponseActionIcon(value: unknown): value is ResponseActionIcon {
+  return typeof value === 'string' && (responseActionIcons as readonly string[]).includes(value);
+}
+export interface ResponseAction { id: string; label: string; actionId: string; appearance?: 'primary' | 'secondary' | 'link'; icon?: ResponseActionIcon; tooltip?: string; payload?: JsonObject; confirm?: { title: string; message: string } }
 export interface FormDefinition { type: 'form'; id: string; title: string; fields: FormField[]; submit: { action: string; messageTemplate: string; interactionKind: 'formSubmit' } }
 export interface FormField { id: string; type: 'text' | 'textarea' | 'tel' | 'email' | 'number' | 'select' | 'checkbox'; label: string; required?: boolean; maxLength?: number; pattern?: string; options?: Array<{ label: string; value: string }> }
 

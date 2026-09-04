@@ -724,5 +724,9 @@
   "Test Case Name": "測試案例名稱",
   "The active TurnStage session is unavailable.": "目前無法取得進行中的 TurnStage 工作階段。",
   "Unsupported scenario capture field: {field}.": "不支援的情境擷取欄位：{field}。",
-  "Verify that prohibited observable effects do not occur.": "驗證禁止的可觀察效果不會發生。"
+  "Verify that prohibited observable effects do not occur.": "驗證禁止的可觀察效果不會發生。",
+  "Unknown response action appearance: {appearance}.": "未知的回應動作樣式：{appearance}。",
+  "Unknown response action icon: {icon}.": "未知的回應動作圖示：{icon}。",
+  "Response action appearance must be a supported style or a mapping expression.": "回應動作樣式必須是支援的樣式或映射運算式。",
+  "Response action icon must be a supported icon name or a mapping expression.": "回應動作圖示必須是支援的圖示名稱或映射運算式。"
 }

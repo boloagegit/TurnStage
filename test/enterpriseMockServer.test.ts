@@ -86,6 +86,10 @@ describe('generic POST plus SSE chat mock contract', () => {
     });
     const events = parseSse(await response.text());
     expect(events.map((event) => event.event)).toEqual(['start', 'status', 'message', 'followup', 'action', 'action', 'custom_card', 'diagnostic', 'title', 'done']);
+    expect(events.filter((event) => event.event === 'action').map((event) => event.data)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ actionId: 'request.send', appearance: 'primary', icon: 'beaker' }),
+      expect.objectContaining({ actionId: 'uri.open', appearance: 'link', icon: 'link' }),
+    ]));
     expect(events.find((event) => event.event === 'custom_card')?.data).toMatchObject({ type: 'form', fields: expect.any(Array) });
   });
 

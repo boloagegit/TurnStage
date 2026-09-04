@@ -1,5 +1,5 @@
 import { findNodeAtLocation, type Node } from 'jsonc-parser';
-import type { AdversarialForbidDefinition, MatchCondition, OpeningResponseBlockDefinition, RequestDefinition, ScenarioAssertionDefinition, ScenarioComparisonTargetDefinition, ScenarioDefinition, ScenarioPerformanceMetric, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
+import { isResponseActionIcon, type AdversarialForbidDefinition, type MatchCondition, type OpeningResponseBlockDefinition, type RequestDefinition, type ScenarioAssertionDefinition, type ScenarioComparisonTargetDefinition, type ScenarioDefinition, type ScenarioPerformanceMetric, type TurnStageEnvironment, type TurnStageProfile } from '../../shared/types';
 import { localize } from '../l10n';
 import { isSafeAssertionRegex, isValidAssertionPath } from '../testing/assertionEvaluator';
 import { isValidComparisonPath } from '../testing/scenarioComparison';
@@ -574,8 +574,13 @@ export class ProfileValidator {
     for (const duplicate of duplicates(declaredActionIds)) out.push(issue(tree, ['stream', 'mappings'], localize('Duplicate action id: {id}.', { id: duplicate })));
     profile.stream.mappings.forEach((mapping, index) => {
       const action = mapping.emit.action;
-      const actionId = action && typeof action === 'object' ? (action as Record<string, unknown>).actionId : undefined;
+      const definition = action && typeof action === 'object' && !Array.isArray(action) ? action as Record<string, unknown> : undefined;
+      const actionId = definition?.actionId;
       if (typeof actionId === 'string' && !actionIds.has(actionId) && !actionId.startsWith('vscodeCommand.invoke:')) out.push(issue(tree, ['stream', 'mappings', index, 'emit'], localize('Unknown response action id: {id}.', { id: actionId })));
+      if (typeof definition?.appearance === 'string' && !['primary', 'secondary', 'link'].includes(definition.appearance)) out.push(issue(tree, ['stream', 'mappings', index, 'emit', 'action', 'appearance'], localize('Unknown response action appearance: {appearance}.', { appearance: definition.appearance })));
+      if (definition?.appearance !== undefined && typeof definition.appearance !== 'string' && (!definition.appearance || typeof definition.appearance !== 'object' || Array.isArray(definition.appearance))) out.push(issue(tree, ['stream', 'mappings', index, 'emit', 'action', 'appearance'], localize('Response action appearance must be a supported style or a mapping expression.')));
+      if (typeof definition?.icon === 'string' && !isResponseActionIcon(definition.icon)) out.push(issue(tree, ['stream', 'mappings', index, 'emit', 'action', 'icon'], localize('Unknown response action icon: {icon}.', { icon: definition.icon })));
+      if (definition?.icon !== undefined && typeof definition.icon !== 'string' && (!definition.icon || typeof definition.icon !== 'object' || Array.isArray(definition.icon))) out.push(issue(tree, ['stream', 'mappings', index, 'emit', 'action', 'icon'], localize('Response action icon must be a supported icon name or a mapping expression.')));
     });
     for (const starter of profile.opening?.starters ?? []) if (starter.behavior === 'action' && (!starter.actionId || !actionIds.has(starter.actionId))) out.push(issue(tree, ['opening', 'starters'], localize('Unknown starter action id: {id}.', { id: starter.actionId ?? localize('(missing)') })));
     const lockable = new Set(['composer', 'environment', 'newConversation', 'runProfile', 'history.apply', 'history.open', 'configuration.open', 'inspector.open', 'message.copy', 'stop', ...(profile.controls ?? []).map((control) => control.id)]);

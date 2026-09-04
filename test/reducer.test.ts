@@ -113,7 +113,8 @@ describe('reduceEvent', () => {
     reduceEvent(snapshot, event('followup.upsert', 1, { followup: { id: 'f-1', label: 'First', prompt: 'one', behavior: 'send' } }));
     reduceEvent(snapshot, event('followup.upsert', 2, { followup: { id: 'f-1', label: 'Updated', prompt: 'two', behavior: 'fill' } }));
     reduceEvent(snapshot, event('followup.upsert', 3, { followup: { label: 'Generated', prompt: 'three', behavior: 'action' } }));
-    reduceEvent(snapshot, event('action.upsert', 4, { action: { id: 'a-1', label: 'Run', actionId: 'run', appearance: 'primary' } }));
+    reduceEvent(snapshot, event('action.upsert', 4, { action: { id: 'a-1', label: 'Run', actionId: 'run', appearance: 'primary', icon: 'debug-start' } }));
+    expect(assistantMessage(snapshot).actions).toEqual([{ id: 'a-1', label: 'Run', actionId: 'run', appearance: 'primary', icon: 'debug-start' }]);
     reduceEvent(snapshot, event('action.remove', 5, { actionId: 'a-1' }));
     reduceEvent(snapshot, event('followup.remove', 6, { followupId: 'f-1' }));
 

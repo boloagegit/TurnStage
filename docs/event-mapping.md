@@ -172,6 +172,35 @@ The current reducer handles these types:
 | `stream.failed` | Add a stream error and finalize as failed |
 | `stream.aborted` | Finalize as aborted |
 
+### Response-action presentation
+
+`action.upsert` may include an optional `appearance` (`primary`, `secondary`,
+or `link`) and an optional `icon`. Icons use a bounded TurnStage allowlist of
+VS Code Codicons, so they follow the active theme and cannot load external
+images or inject CSS. The supported names are `add`, `arrow-right`, `beaker`,
+`check`, `copy`, `debug-start`, `diff`, `edit`, `export`, `file-code`,
+`go-to-file`, `info`, `link`, `refresh`, `save`, `send`, `target`, and
+`warning`. The text label remains required and is the accessible name.
+
+```jsonc
+{
+  "type": "action.upsert",
+  "action": {
+    "id": { "path": "$.id" },
+    "label": { "path": "$.label" },
+    "actionId": "message.copy",
+    "appearance": "secondary",
+    "icon": "copy"
+  }
+}
+```
+
+An icon may also use a `{ "path": "$.icon" }` mapping expression. Unknown
+runtime values are ignored visually rather than producing a broken icon. CTA
+actions that would open a URI, citation, or VS Code command are previewed in
+Chat instead of executing the external side effect; the receipt shows the
+action ID and payload for inspection.
+
 The reducer creates an assistant message when an event arrives and no pending
 assistant exists. This allows message/content events before a start event. It
 deduplicates an event when sequence, type, and mapping rule ID all match an

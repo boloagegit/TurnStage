@@ -256,7 +256,7 @@ describe('LocalRunRepository', () => {
     recorded.metrics = { ...recorded.metrics, ttft: 125, totalDuration: 480 };
     recorded.messages = [{
       id: 'assistant-timed', role: 'assistant', status: 'completed', createdAt: 1, completedAt: 481,
-      parts: [{ type: 'text', text: 'Measured response' }], citations: [], actions: [], followups: [],
+      parts: [{ type: 'text', text: 'Measured response' }], citations: [], actions: [{ id: 'copy', label: 'Copy', actionId: 'message.copy', appearance: 'secondary', icon: 'copy' }], followups: [],
       timing: { ttft: 125, totalDuration: 480 },
       metrics: [{ id: 'tokens', label: 'Tokens', value: 42, format: 'number', aggregation: 'sum', sampleCount: 2 }],
     }];
@@ -270,6 +270,7 @@ describe('LocalRunRepository', () => {
     expect(imported?.run.snapshot?.messages[0]).toMatchObject({
       timing: { ttft: 125, totalDuration: 480 },
       metrics: [{ id: 'tokens', value: 42, aggregation: 'sum', sampleCount: 2 }],
+      actions: [{ id: 'copy', label: 'Copy', actionId: 'message.copy', appearance: 'secondary', icon: 'copy' }],
     });
   });
 

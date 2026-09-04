@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { ChatMessage, Citation, Followup, LocalRun, MessageMetric, MessageMetricAggregation, MessagePart, MetricsSnapshot, NormalizedEvent, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ResponseAction, RuntimeErrorData, SessionSnapshot, Starter } from '../../shared/types';
+import { isResponseActionIcon, type ChatMessage, type Citation, type Followup, type LocalRun, type MessageMetric, type MessageMetricAggregation, type MessagePart, type MetricsSnapshot, type NormalizedEvent, type RawStreamEvent, type RemoteSessionReference, type ReplaySnapshot, type ResponseAction, type RuntimeErrorData, type SessionSnapshot, type Starter } from '../../shared/types';
 import { localize } from '../l10n';
 import { logAt } from '../logging';
 
@@ -548,6 +548,7 @@ function sanitizeActions(value: unknown): ResponseAction[] | undefined {
     const record = asRecord(item);
     if (!record || !isNonEmptyString(record.id) || !isNonEmptyString(record.label) || !isNonEmptyString(record.actionId)) return undefined;
     if (record.appearance !== undefined && (typeof record.appearance !== 'string' || !actionAppearances.has(record.appearance as NonNullable<ResponseAction['appearance']>))) return undefined;
+    if (record.icon !== undefined && !isResponseActionIcon(record.icon)) return undefined;
     if (record.tooltip !== undefined && typeof record.tooltip !== 'string') return undefined;
     if (record.payload !== undefined && !isRecord(record.payload)) return undefined;
     if (record.confirm !== undefined) {

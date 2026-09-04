@@ -18,6 +18,7 @@
   --mcp-danger-border: var(--vscode-inputValidation-errorBorder);
   --mcp-danger-foreground: var(--vscode-errorForeground);
   --mcp-code-background: var(--vscode-textCodeBlock-background);
+  --mcp-subtle-background: var(--vscode-editorWidget-background, var(--mcp-surface-raised));
   --mcp-selection: var(--vscode-list-inactiveSelectionBackground, var(--vscode-list-activeSelectionBackground));
   --mcp-request-background: var(--vscode-chat-requestBubbleBackground, var(--vscode-chat-requestBackground, var(--vscode-input-background)));
   --mcp-request-border: var(--vscode-chat-requestBorder, var(--vscode-input-border, var(--mcp-border)));
@@ -533,8 +534,19 @@
 }
 
 .mobile-chat-preview__starter-list,
-.mobile-chat-preview__followups {
+.mobile-chat-preview__response-controls {
   margin-top: var(--mcp-space-3);
+}
+
+.mobile-chat-preview__response-controls {
+  display: grid;
+  gap: var(--mcp-space-1);
+}
+
+.mobile-chat-preview__control-label {
+  color: var(--mcp-muted);
+  font-size: .846em;
+  font-weight: 600;
 }
 
 .mobile-chat-preview__button,
@@ -552,14 +564,91 @@
 
 .mobile-chat-preview__button,
 .mobile-chat-preview__chip {
+  align-items: center;
+  justify-content: center;
   min-height: calc(var(--mcp-control-height) + var(--mcp-space-1));
   padding: calc(var(--mcp-space-1) + 2px) calc(var(--mcp-space-2) + 3px);
+}
+
+.mobile-chat-preview__button {
+  display: inline-flex;
+  gap: calc(var(--mcp-space-1) + 1px);
 }
 
 .mobile-chat-preview__button--primary {
   border-color: var(--mcp-button-background);
   background: var(--mcp-button-background);
   color: var(--mcp-button-foreground);
+}
+
+.mobile-chat-preview__button--link {
+  min-height: var(--mcp-control-height);
+  padding-inline: var(--mcp-space-1);
+  border-color: transparent;
+  color: var(--mcp-link);
+}
+
+.mobile-chat-preview__button--link:hover:not(:disabled),
+.mobile-chat-preview__button--link:active:not(:disabled) {
+  background: transparent;
+  color: var(--mcp-link);
+  text-decoration: underline;
+}
+
+.mobile-chat-preview__action-receipt {
+  display: grid;
+  gap: var(--mcp-space-2);
+  max-width: 560px;
+  padding: var(--mcp-space-2) var(--mcp-space-3);
+  border-inline-start: 2px solid var(--mcp-link);
+  background: var(--mcp-subtle-background);
+  color: var(--mcp-foreground);
+}
+
+.mobile-chat-preview__action-receipt-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--mcp-space-2);
+}
+
+.mobile-chat-preview__action-receipt-heading .icon-button {
+  min-width: var(--mcp-control-height);
+  min-height: var(--mcp-control-height);
+  padding: 0;
+}
+
+.mobile-chat-preview__action-receipt dl,
+.mobile-chat-preview__action-receipt p {
+  margin: 0;
+}
+
+.mobile-chat-preview__action-receipt dl {
+  display: grid;
+  gap: var(--mcp-space-1);
+}
+
+.mobile-chat-preview__action-receipt dl > div {
+  display: grid;
+  grid-template-columns: minmax(58px, auto) minmax(0, 1fr);
+  gap: var(--mcp-space-2);
+}
+
+.mobile-chat-preview__action-receipt dt,
+.mobile-chat-preview__action-receipt p {
+  color: var(--mcp-muted);
+  font-size: .846em;
+}
+
+.mobile-chat-preview__action-receipt dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mobile-chat-preview__action-receipt .json {
+  max-height: 160px;
+  margin: 0;
 }
 
 .mobile-chat-preview__button--danger {
@@ -1301,6 +1390,7 @@
     --mcp-danger-border: CanvasText;
     --mcp-danger-foreground: CanvasText;
     --mcp-code-background: Canvas;
+    --mcp-subtle-background: Canvas;
   }
 
   .mobile-chat-preview button,

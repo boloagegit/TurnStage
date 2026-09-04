@@ -281,8 +281,8 @@ describe('SessionController end-to-end functional flow', () => {
     expect(controller.snapshot.metrics.unmatchedEventCount).toBe(1);
     expect(controller.snapshot.turnState).toBe('completed');
     expect(controller.snapshot.normalizedEvents.filter((event) => event.type === 'action.upsert')).toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: expect.objectContaining({ actionId: 'request.send', payload: { text: expect.any(String), interactionKey: 'sample_details' } }) }),
-      expect.objectContaining({ action: expect.objectContaining({ actionId: 'uri.open', payload: { uri: 'https://example.com/sample-guide', interactionKey: 'sample_guide' } }) }),
+      expect.objectContaining({ action: expect.objectContaining({ actionId: 'request.send', appearance: 'primary', icon: 'beaker', payload: { text: expect.any(String), interactionKey: 'sample_details' } }) }),
+      expect.objectContaining({ action: expect.objectContaining({ actionId: 'uri.open', appearance: 'link', icon: 'link', payload: { uri: 'https://example.com/sample-guide', interactionKey: 'sample_guide' } }) }),
     ]));
 
     await controller.setControl('mode', 'contract-error');

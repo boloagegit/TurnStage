@@ -321,6 +321,17 @@ describe('response action dispatch', () => {
     expect(send).toHaveBeenCalledWith('Explain the details', expect.objectContaining({ kind: 'responseAction', actionId: 'cta-details', actionKey: 'sample_details', sourceMessageId: 'message-1' }));
   });
 
+  it('supports a mapped copy CTA instead of treating its generated id as unsupported', async () => {
+    const actionController = {
+      profile: profile(), profileUri,
+      snapshot: { messages: [{ id: 'message-1', role: 'assistant', parts: [{ type: 'text', text: 'Copy this response' }], actions: [{ id: 'copy-result', label: 'Copy result', actionId: 'message.copy' }] }] },
+    };
+
+    await invoke('copy-result', actionController);
+
+    expect(mock.env.clipboard.writeText).toHaveBeenCalledWith('Copy this response');
+  });
+
   it('confirms before restarting a session and respects cancellation', async () => {
     const newConversation = vi.fn(async () => undefined);
     const actionController = {

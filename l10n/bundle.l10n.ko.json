@@ -719,5 +719,9 @@
   "Test Case Name": "테스트 케이스 이름",
   "The active TurnStage session is unavailable.": "활성 TurnStage 세션을 사용할 수 없습니다.",
   "Unsupported scenario capture field: {field}.": "지원하지 않는 시나리오 캡처 필드입니다: {field}.",
-  "Verify that prohibited observable effects do not occur.": "금지된 관찰 가능 효과가 발생하지 않는지 확인합니다."
+  "Verify that prohibited observable effects do not occur.": "금지된 관찰 가능 효과가 발생하지 않는지 확인합니다.",
+  "Unknown response action appearance: {appearance}.": "알 수 없는 응답 작업 스타일입니다: {appearance}.",
+  "Unknown response action icon: {icon}.": "알 수 없는 응답 작업 아이콘입니다: {icon}.",
+  "Response action appearance must be a supported style or a mapping expression.": "응답 작업 스타일은 지원되는 스타일 또는 매핑 식이어야 합니다.",
+  "Response action icon must be a supported icon name or a mapping expression.": "응답 작업 아이콘은 지원되는 아이콘 이름 또는 매핑 식이어야 합니다."
 }

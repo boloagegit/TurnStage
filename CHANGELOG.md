@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.23.1
+
+- Refined the Chat preview with clearer action and follow-up hierarchy, native
+  VS Code primary, secondary, and link treatments, optional validated Codicons,
+  and automatic follow-through to newly sent messages.
+- Added an inspectable CTA receipt that shows the triggered action and bounded
+  syntax-highlighted payload. External URLs, citations, and VS Code command
+  actions remain preview-only and never open or execute from the test surface.
+- Added structured CTA style and icon controls to Mapping GUI, schema and
+  persistence validation, localized feedback, mock-server coverage, and visual,
+  unit, security, and Extension Host regression tests.
+
 ## 0.23.0
 
 - Added a unified **Save as test…** flow for active conversations, recorded-run

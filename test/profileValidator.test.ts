@@ -521,6 +521,16 @@ describe('ProfileValidator', () => {
     ]));
   });
 
+  it('accepts allowlisted response-action icons and rejects unsafe presentation values', () => {
+    const valid = validProfile();
+    valid.stream.mappings.push({ id: 'action', match: { event: 'action' }, emit: { type: 'action.upsert', action: { id: { path: '$.id' }, label: { path: '$.label' }, actionId: 'message.copy', icon: 'copy', appearance: 'secondary' } } });
+    expect(new ProfileValidator().validate(valid)).toEqual([]);
+
+    const invalid = validProfile();
+    invalid.stream.mappings.push({ id: 'bad-action', match: { event: 'action' }, emit: { type: 'action.upsert', action: { id: 'bad', label: 'Bad', actionId: 'message.copy', icon: 'url(https://example.test/icon.svg)' } } });
+    expect(new ProfileValidator().validate(invalid).map((entry) => entry.message)).toContain('Unknown response action icon: url(https://example.test/icon.svg).');
+  });
+
   it('accepts bounded opening response blocks and rejects unsafe or ambiguous definitions', () => {
     const valid = validProfile();
     valid.opening = { mode: 'request', response: { messagePath: '$.content', blocks: [

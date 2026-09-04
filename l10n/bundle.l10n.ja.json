@@ -719,5 +719,9 @@
   "Test Case Name": "テストケース名",
   "The active TurnStage session is unavailable.": "アクティブな TurnStage セッションを利用できません。",
   "Unsupported scenario capture field: {field}.": "未対応のシナリオキャプチャフィールドです: {field}。",
-  "Verify that prohibited observable effects do not occur.": "禁止された観測可能な効果が発生しないことを確認します。"
+  "Verify that prohibited observable effects do not occur.": "禁止された観測可能な効果が発生しないことを確認します。",
+  "Unknown response action appearance: {appearance}.": "不明な応答アクションスタイルです: {appearance}。",
+  "Unknown response action icon: {icon}.": "不明な応答アクションアイコンです: {icon}。",
+  "Response action appearance must be a supported style or a mapping expression.": "応答アクションのスタイルは、対応するスタイルまたはマッピング式である必要があります。",
+  "Response action icon must be a supported icon name or a mapping expression.": "応答アクションのアイコンは、対応するアイコン名またはマッピング式である必要があります。"
 }

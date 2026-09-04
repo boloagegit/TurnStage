@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import type { MappingTestInput, MappingTestResult, WebviewPayload } from '../shared/protocol';
-import type { MappingRule, MessageTagRule, OpeningResponseBlockDefinition, OpeningResponseBlockKind, OpeningResponseFieldDefinition, RawStreamEvent, RequestVariant, TurnStageProfile } from '../shared/types';
+import { responseActionIcons, type MappingRule, type MessageTagRule, type OpeningResponseBlockDefinition, type OpeningResponseBlockKind, type OpeningResponseFieldDefinition, type RawStreamEvent, type RequestVariant, type TurnStageProfile } from '../shared/types';
 import { formatNumber, localizeHumanized, t } from './i18n';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
@@ -355,6 +355,14 @@ function MappingCard({ rule, index, count, post, onMove, onDelete }: { rule: Map
   useEffect(() => setMatchValue(formatValue(rule.match.value)), [rule.match.value]);
   const base: Array<string | number> = ['stream', 'mappings', index];
   const patch = (suffix: string[], value: unknown) => post({ type: 'profile.patch', path: [...base, ...suffix], value });
+  const action = rule.emit.type === 'action.upsert' && isRecord(rule.emit.action) && !(typeof rule.emit.action.path === 'string' && Object.keys(rule.emit.action).length === 1) ? rule.emit.action : undefined;
+  const patchAction = (key: 'appearance' | 'icon', value: string) => {
+    if (!action || value === '__mapped__') return;
+    const next = { ...action };
+    if (value) next[key] = value;
+    else delete next[key];
+    patch(['emit', 'action'], next);
+  };
   const applyEmit = () => { try { const parsed = JSON.parse(emitText) as unknown; if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || typeof (parsed as Record<string, unknown>).type !== 'string') throw new Error(t('Emit must be an object with a string “{key}”.', { key: 'type' })); setEmitError(''); patch(['emit'], parsed); } catch (error) { setEmitError(error instanceof Error ? error.message : t('Enter valid JSON.')); } };
   return <article className="mapping-card">
     <header><div className="mapping-title"><span className="rule-number">{formatNumber(index + 1)}</span><div><strong>{rule.id}</strong><span>{rule.match.event ?? rule.match.path ?? t('Any event')} → {String(rule.emit.type)}</span></div></div><div className="rule-actions"><IconButton icon="arrow-up" label={t('Move {id} up', { id: rule.id })} disabled={index === 0} onClick={() => onMove(index, -1)} /><IconButton icon="arrow-down" label={t('Move {id} down', { id: rule.id })} disabled={index === count - 1} onClick={() => onMove(index, 1)} /><button className="danger-subtle" onClick={() => onDelete(index)}>{t('Delete')}</button></div></header>
@@ -365,6 +373,10 @@ function MappingCard({ rule, index, count, post, onMove, onDelete }: { rule: Map
       <Field label={t('Operator')}><select aria-label={t('Mapping operator')} value={rule.match.operator ?? 'equals'} onChange={(event) => patch(['match', 'operator'], event.target.value)}>{operators.map((operator) => <option key={operator} value={operator}>{localizeHumanized(operator)}</option>)}</select></Field>
       <Field label={t('Match value')} hint={t('JSON values are preserved; unquoted text is saved as a string.')}><input aria-label={t('Mapping match value')} value={matchValue} onChange={(event) => setMatchValue(event.target.value)} onBlur={() => patch(['match', 'value'], parseLooseValue(matchValue))} /></Field>
       <Field label={t('Continue matching')}><label className="checkbox-control"><input type="checkbox" checked={Boolean(rule.continue)} onChange={(event) => patch(['continue'], event.target.checked)} /><span>{t('Run later rules after this match')}</span></label></Field>
+      {action ? <>
+        <Field label={t('CTA style')} hint={t('Uses native VS Code button colors in every theme.')}><select aria-label={t('CTA style')} value={typeof action.appearance === 'string' ? action.appearance : isRecord(action.appearance) ? '__mapped__' : 'secondary'} onChange={(event) => patchAction('appearance', event.target.value)}>{isRecord(action.appearance) ? <option value="__mapped__">{t('Mapped from event')}</option> : null}<option value="primary">{t('Primary')}</option><option value="secondary">{t('Secondary')}</option><option value="link">{t('Link')}</option></select></Field>
+        <Field label={t('CTA icon')} hint={t('Optional validated Codicon shown before the text label.')}><select aria-label={t('CTA icon')} value={typeof action.icon === 'string' ? action.icon : isRecord(action.icon) ? '__mapped__' : ''} onChange={(event) => patchAction('icon', event.target.value)}>{isRecord(action.icon) ? <option value="__mapped__">{t('Mapped from event')}</option> : null}<option value="">{t('No icon')}</option>{responseActionIcons.map((icon) => <option value={icon} key={icon}>{localizeHumanized(icon)}</option>)}</select></Field>
+      </> : null}
       <Field label={t('Emit object (JSON)')} hint={t('Must include a string {key}. Paths extract values from the raw event.', { key: 'type' })} wide error={emitError}><textarea aria-label={t('Mapping emit JSON')} className="code-input" rows={7} value={emitText} spellCheck={false} aria-invalid={Boolean(emitError)} onChange={(event) => setEmitText(event.target.value)} onBlur={applyEmit} /><button className="apply-inline" onClick={applyEmit}>{t('Apply emit JSON')}</button></Field>
     </div>
   </article>;

@@ -700,7 +700,9 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           case 'action.invoke': {
             try {
               await this.invokeAction(message.actionId, message.sourceMessageId, controller);
-              if (message.sourceMessageId && message.actionId === 'message.copy') await post({ type: 'action.feedback', actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: 'success', message: localize('Message copied.') }, message.requestId);
+              const source = message.sourceMessageId ? controller.snapshot.messages.find((item) => item.id === message.sourceMessageId) : undefined;
+              const responseAction = source?.actions.find((item) => item.id === message.actionId || item.actionId === message.actionId);
+              if (message.sourceMessageId && (message.actionId === 'message.copy' || responseAction?.actionId === 'message.copy')) await post({ type: 'action.feedback', actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: 'success', message: localize('Message copied.') }, message.requestId);
             } catch (error) {
               if (message.sourceMessageId) await post({ type: 'action.feedback', actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: 'error', message: error instanceof Error ? error.message : String(error) }, message.requestId);
               throw error;
@@ -1132,6 +1134,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     }
     const payload = action.payload ?? {};
     const payloadText = [payload.text, payload.prompt, payload.message].find((value): value is string => typeof value === 'string' && Boolean(value.trim()));
+    if (action.actionId === 'message.copy') { await vscode.env.clipboard.writeText(message?.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text).join('') ?? ''); return; }
     if (action.actionId === 'request.send' || action.actionId === 'request.resend' || action.actionId === 'followup.send') {
       const lastUserText = [...controller.snapshot.messages].reverse().find((item) => item.role === 'user')?.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text ?? '').join('');
       const text = payloadText ?? lastUserText;

@@ -724,5 +724,9 @@
   "Test Case Name": "Test Case Name",
   "The active TurnStage session is unavailable.": "The active TurnStage session is unavailable.",
   "Unsupported scenario capture field: {field}.": "Unsupported scenario capture field: {field}.",
-  "Verify that prohibited observable effects do not occur.": "Verify that prohibited observable effects do not occur."
+  "Verify that prohibited observable effects do not occur.": "Verify that prohibited observable effects do not occur.",
+  "Unknown response action appearance: {appearance}.": "Unknown response action appearance: {appearance}.",
+  "Unknown response action icon: {icon}.": "Unknown response action icon: {icon}.",
+  "Response action appearance must be a supported style or a mapping expression.": "Response action appearance must be a supported style or a mapping expression.",
+  "Response action icon must be a supported icon name or a mapping expression.": "Response action icon must be a supported icon name or a mapping expression."
 }

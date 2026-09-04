@@ -446,8 +446,11 @@ const zhTw: Record<string, string> = {
   'No matching events': '沒有符合的事件',
   'Adjust the search or event type filter.': '請調整搜尋字詞或事件類型篩選條件。',
   'View event payload': '查看事件 payload',
+  'Hide event payload': '收合事件 payload',
   'Event payload': '事件 payload',
   'Event payload opened for {event} #{sequence}.': '已開啟 {event} #{sequence} 的事件 payload。',
+  'Event payload closed.': '已關閉事件 payload。',
+  'Close event payload': '關閉事件 payload',
   'Total elapsed': '累計時間',
   'Since previous event': '與前一事件的間隔',
   'Total {duration}': '累計 {duration}',
@@ -1417,7 +1420,22 @@ const zhTw: Record<string, string> = {
   'Delete field': '刪除欄位',
   'Number': '數字',
   'Datetime': '日期時間',
-  'Percent': '百分比'
+  'Percent': '百分比',
+  'Follow-ups': '後續建議',
+  'CTA style': 'CTA 樣式',
+  'CTA icon': 'CTA 圖示',
+  'Primary': '主要',
+  'Secondary': '次要',
+  'Link': '連結',
+  'No icon': '無圖示',
+  'Mapped from event': '由事件映射',
+  'Uses native VS Code button colors in every theme.': '在所有主題中使用 VS Code 原生按鈕色彩。',
+  'Optional validated Codicon shown before the text label.': '可選的已驗證 Codicon，顯示於文字標籤前。',
+  'CTA triggered: {label}': '已觸發 CTA：{label}',
+  'Close CTA details': '關閉 CTA 詳細資料',
+  'Action': '動作',
+  'Preview only — no external target was opened.': '僅預覽，未開啟外部目標。',
+  'The action was handled inside TurnStage.': '此動作已在 TurnStage 內處理。'
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {

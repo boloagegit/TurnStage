@@ -208,7 +208,12 @@ function App(): React.JSX.Element {
     });
     focusAfterRender(() => (target.networkId ? document.getElementById(networkRowId(target.networkId)) : target.sequence === undefined ? document.getElementById('right-pane-panel') : document.getElementById(`inspector-event-${String(target.sequence)}`))?.focus());
   };
-  const selectEvent = (event: Record<string, unknown>) => {
+  const selectEvent = (event?: Record<string, unknown>) => {
+    if (!event) {
+      setSelectedRawSequence(undefined);
+      setSelectedMessageId(undefined);
+      return;
+    }
     const rawSequence = typeof event.rawSequence === 'number' ? event.rawSequence : typeof event.sequence === 'number' ? event.sequence : undefined;
     setSelectedRawSequence(rawSequence);
     const message = snapshot?.messages.find((item) => rawSequence !== undefined && rawSequencesForMessage(item).includes(rawSequence));
@@ -303,7 +308,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   visualFeedback?: VisualFeedback;
   onMessageActionFeedback: (feedback: MessageActionFeedback | undefined) => void;
   onSelectMessage: (messageId: string) => void;
-  onSelectEvent: (event: Record<string, unknown>) => void;
+  onSelectEvent: (event?: Record<string, unknown>) => void;
   onCreateMapping: (event: RawStreamEvent) => void;
   rightPaneMode: RightPaneMode;
   setRightPaneMode: (mode: RightPaneMode) => void;
@@ -621,7 +626,7 @@ export function EventEmptyState({ eventKind, filtersActive, active, canStart, in
   </div>;
 }
 
-export function Inspector({ profile, snapshot, runs = [], networkEntries = [], active = false, tab, setTab, requestPreview, full = false, interactive = true, eventFilters = normalizeInspectorEventFilters(), onEventFiltersChange = () => undefined, collapsedEventTurns = normalizeCollapsedEventTurns(), onCollapsedEventTurnsChange = () => undefined, onCreateMapping, selectedSequence, selectedNetworkId, onSelectEvent, scrollPositions = {}, onScrollPositionChange = () => undefined, networkInspector, onNetworkInspectorChange }: { profile?: TurnStageProfile; snapshot?: SessionSnapshot; runs?: LocalRunSummary[]; networkEntries?: NetworkExchange[]; active?: boolean; tab: InspectorTab; setTab: (tab: InspectorTab) => void; requestPreview: unknown; full?: boolean; interactive?: boolean; eventFilters?: InspectorEventFilters; onEventFiltersChange?: (filters: InspectorEventFilters) => void; collapsedEventTurns?: CollapsedEventTurns; onCollapsedEventTurnsChange?: (turns: CollapsedEventTurns) => void; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; selectedNetworkId?: string; onSelectEvent?: (event: Record<string, unknown>) => void; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; onScrollPositionChange?: (key: ScrollPositionKey, value: number) => void; networkInspector?: NetworkInspectorState; onNetworkInspectorChange?: (state: NetworkInspectorState) => void }): React.JSX.Element {
+export function Inspector({ profile, snapshot, runs = [], networkEntries = [], active = false, tab, setTab, requestPreview, full = false, interactive = true, eventFilters = normalizeInspectorEventFilters(), onEventFiltersChange = () => undefined, collapsedEventTurns = normalizeCollapsedEventTurns(), onCollapsedEventTurnsChange = () => undefined, onCreateMapping, selectedSequence, selectedNetworkId, onSelectEvent, scrollPositions = {}, onScrollPositionChange = () => undefined, networkInspector, onNetworkInspectorChange }: { profile?: TurnStageProfile; snapshot?: SessionSnapshot; runs?: LocalRunSummary[]; networkEntries?: NetworkExchange[]; active?: boolean; tab: InspectorTab; setTab: (tab: InspectorTab) => void; requestPreview: unknown; full?: boolean; interactive?: boolean; eventFilters?: InspectorEventFilters; onEventFiltersChange?: (filters: InspectorEventFilters) => void; collapsedEventTurns?: CollapsedEventTurns; onCollapsedEventTurnsChange?: (turns: CollapsedEventTurns) => void; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; selectedNetworkId?: string; onSelectEvent?: (event?: Record<string, unknown>) => void; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; onScrollPositionChange?: (key: ScrollPositionKey, value: number) => void; networkInspector?: NetworkInspectorState; onNetworkInspectorChange?: (state: NetworkInspectorState) => void }): React.JSX.Element {
   const availableTabs: InspectorTab[] = profile && !componentVisible(profile, 'metrics') ? inspectorTabs.filter((item): item is InspectorTab => item !== 'Metrics') : [...inspectorTabs];
   const effectiveTab = availableTabs.includes(tab) ? tab : availableTabs[0]!;
   const data = effectiveTab === 'Raw Events' ? snapshot?.rawEvents ?? [] : effectiveTab === 'Normalized' ? snapshot?.normalizedEvents ?? [] : [];
@@ -859,7 +864,7 @@ export function flattenEventTree(groups: readonly EventTurnGroup[], collapsedTur
   return rows;
 }
 
-export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas, terminalRawSequences = new Set<number>(), label, collapsedTurnKeys, onCollapsedTurnKeysChange, onCreateMapping, selectedSequence, onSelectEvent, initialScrollTop, onScrollTopChange }: { items: Array<Record<string, any>>; messages?: readonly ChatMessage[]; kind?: 'raw' | 'normalized'; eventDeltas?: ReadonlyMap<number, number | undefined>; terminalRawSequences?: ReadonlySet<number>; label: string; collapsedTurnKeys?: readonly string[]; onCollapsedTurnKeysChange?: (keys: string[]) => void; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; onSelectEvent?: (event: Record<string, unknown>) => void; initialScrollTop?: number; onScrollTopChange?: (value: number) => void }): React.JSX.Element {
+export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas, terminalRawSequences = new Set<number>(), label, collapsedTurnKeys, onCollapsedTurnKeysChange, onCreateMapping, selectedSequence, onSelectEvent, initialScrollTop, onScrollTopChange }: { items: Array<Record<string, any>>; messages?: readonly ChatMessage[]; kind?: 'raw' | 'normalized'; eventDeltas?: ReadonlyMap<number, number | undefined>; terminalRawSequences?: ReadonlySet<number>; label: string; collapsedTurnKeys?: readonly string[]; onCollapsedTurnKeysChange?: (keys: string[]) => void; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; onSelectEvent?: (event?: Record<string, unknown>) => void; initialScrollTop?: number; onScrollTopChange?: (value: number) => void }): React.JSX.Element {
   const rowHeight = 32;
   const listRef = useRef<HTMLDivElement>(null);
   const restoredScroll = useRef(false);
@@ -959,8 +964,16 @@ export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas,
   };
   const selectEvent = (row: Extract<EventTreeRow, { kind: 'event' }>, index: number) => {
     setActiveIndex(index);
-    setUncontrolledSelectedSequence(eventSequence(row.item));
-    onSelectEvent?.(row.item);
+    const sequence = eventSequence(row.item);
+    const closing = sequence === effectiveSelectedSequence;
+    setUncontrolledSelectedSequence(closing ? undefined : sequence);
+    onSelectEvent?.(closing ? undefined : row.item);
+  };
+  const closeEventDetail = () => {
+    const rowId = selectedItem && selectedRowIndex >= 0 ? eventRowId(selectedItem, selectedRowIndex) : undefined;
+    setUncontrolledSelectedSequence(undefined);
+    onSelectEvent?.(undefined);
+    if (rowId) focusAfterRender(() => document.getElementById(rowId)?.focus());
   };
   const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, row: EventTreeRow, index: number) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -982,7 +995,7 @@ export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas,
   const selectedDelta = selectedItem ? eventDeltas?.get(eventSequence(selectedItem) ?? -1) : undefined;
   return <div className={`event-browser ${selectedItem ? 'event-browser--detail' : ''} ${accessibleWindow ? 'event-browser--accessible-window' : ''}`.trim()}>
     {screenReader && rows.length > ACCESSIBLE_EVENT_WINDOW_SIZE && <p className="event-accessibility-notice" role="status" aria-live="polite">{t('Showing event rows {start}–{end} of {total} for screen reader performance.', { start: formatNumber(visibleStart + 1), end: formatNumber(accessibleEnd), total: formatNumber(rows.length) })}</p>}
-    <span className="sr-only" aria-live="polite" aria-atomic="true">{selectedItem ? t('Event payload opened for {event} #{sequence}.', { event: eventLabel(selectedItem), sequence: formatNumber(selectedItem.sequence) }) : ''}</span>
+    <span className="sr-only" aria-live="polite" aria-atomic="true">{selectedItem ? t('Event payload opened for {event} #{sequence}.', { event: eventLabel(selectedItem), sequence: formatNumber(selectedItem.sequence) }) : t('Event payload closed.')}</span>
     <div ref={listRef} className="virtual-list event-tree" role="tree" aria-label={label} onScroll={(event) => { const next = event.currentTarget.scrollTop; setTop(next); onScrollTopChange?.(next); }}>
       {!items.length ? <div className="empty-state compact"><strong>{t('No matching events')}</strong></div> : <div className="virtual-space" style={{ height: rows.length * rowHeight }}><div style={{ transform: `translateY(${visibleStart * rowHeight}px)` }}>{visible.map((row, visibleIndex) => {
         const rowIndex = visibleStart + visibleIndex;
@@ -997,13 +1010,13 @@ export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas,
         const selected = itemSequence === effectiveSelectedSequence;
         const status = eventRowStatus(row.item, kind, terminalRawSequences);
         const eventDelta = itemSequence === undefined ? undefined : eventDeltas?.get(itemSequence);
-        return <button type="button" role="treeitem" aria-level={2} aria-selected={selected} aria-controls={eventDetailId(kind, row.item, rowIndex)} aria-setsize={row.group.items.length} aria-posinset={row.eventIndex + 1} id={eventRowId(row.item, rowIndex)} data-disclosure-state={selected ? 'expanded' : 'collapsed'} tabIndex={rowIndex === rovingIndex ? 0 : -1} title={t('View event payload')} className={`event-row event-row--child ${eventDeltas ? 'event-row--with-delta' : ''} ${selected ? 'selected' : ''}`.trim()} key={`${row.group.key}:${String(row.item.sequence)}:${eventLabel(row.item)}`} onClick={() => selectEvent(row, rowIndex)} onKeyDown={(event) => handleKeyDown(event, row, rowIndex)}>
+        return <button type="button" role="treeitem" aria-level={2} aria-selected={selected} aria-expanded={selected} aria-controls={eventDetailId(kind, row.item, rowIndex)} aria-setsize={row.group.items.length} aria-posinset={row.eventIndex + 1} id={eventRowId(row.item, rowIndex)} data-disclosure-state={selected ? 'expanded' : 'collapsed'} tabIndex={rowIndex === rovingIndex ? 0 : -1} title={t(selected ? 'Hide event payload' : 'View event payload')} className={`event-row event-row--child ${eventDeltas ? 'event-row--with-delta' : ''} ${selected ? 'selected' : ''}`.trim()} key={`${row.group.key}:${String(row.item.sequence)}:${eventLabel(row.item)}`} onClick={() => selectEvent(row, rowIndex)} onKeyDown={(event) => handleKeyDown(event, row, rowIndex)}>
           <span className="event-tree-indent" aria-hidden="true" /><span className="event-disclosure"><ProductIcon name={selected ? 'chevron-down' : 'chevron-right'} /></span><span className="event-turn" title={eventTurnDescription(row.item)}>#{formatNumber(typeof row.item.turnSequence === 'number' ? row.item.turnSequence : row.eventIndex + 1)}</span><strong>{eventLabel(row.item)}</strong><span className={`event-status event-status--${status.kind}`} title={t(status.label)} aria-label={t(status.label)}><ProductIcon name={status.icon} /></span><span className="event-time-total"><span className="sr-only">{t('Total elapsed')}</span>+{formatDuration(row.item.elapsedMs ?? 0)}</span>{eventDeltas && <span className="event-time-gap"><span className="sr-only">{t('Since previous event')}</span>Δ{eventDelta === undefined ? '—' : formatDuration(eventDelta)}</span>}
         </button>;
       })}</div></div>}
     </div>
     {selectedItem && <section id={selectedDetailId} className="event-detail" aria-labelledby={`${selectedDetailId}-heading`}>
-      <header><div><strong id={`${selectedDetailId}-heading`}>{t('Event payload')}</strong><span>{eventLabel(selectedItem)} · {eventTurnDescription(selectedItem)} · {t('Total {duration}', { duration: formatDuration(selectedItem.elapsedMs ?? 0) })}{eventDeltas ? ` · ${t('Gap {duration}', { duration: selectedDelta === undefined ? '—' : formatDuration(selectedDelta) })}` : ''}</span></div>{onCreateMapping && <button onClick={() => onCreateMapping(selectedItem as RawStreamEvent)}>{t('Create mapping draft')}</button>}</header>
+      <header><div className="event-detail__heading"><strong id={`${selectedDetailId}-heading`}>{t('Event payload')}</strong><span>{eventLabel(selectedItem)} · {eventTurnDescription(selectedItem)} · {t('Total {duration}', { duration: formatDuration(selectedItem.elapsedMs ?? 0) })}{eventDeltas ? ` · ${t('Gap {duration}', { duration: selectedDelta === undefined ? '—' : formatDuration(selectedDelta) })}` : ''}</span></div><div className="event-detail__actions">{onCreateMapping && <button onClick={() => onCreateMapping(selectedItem as RawStreamEvent)}>{t('Create mapping draft')}</button>}<IconButton type="button" icon="close" label={t('Close event payload')} onClick={closeEventDetail} /></div></header>
       <JsonBlock value={selectedItem} />
     </section>}
   </div>;
