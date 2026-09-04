@@ -65,6 +65,61 @@ describe('localization catalogs', () => {
     expect(t('Run scenario {name}', { name: 'smoke' })).toBe('시나리오 “smoke” 실행');
   });
 
+  it('does not fall back to English across the automated testing workspace', () => {
+    const messages = [
+      'Functional, regression, comparison, and performance automation.',
+      'Run deterministic conversation contracts and inspect bounded evidence without mixing them with adversarial outcomes.',
+      'Deterministic contract, comparison, and performance outcomes from this Extension Host session.',
+      'Review test result',
+      'Test result navigation',
+      'Previous test result',
+      'Next test result',
+      'Selected test result actions',
+      'Selected test result summary',
+      'Run selected scenario again',
+      'Select test result {name}',
+      'Actions',
+      'Duration',
+      'Showing {start}–{end} of {total}',
+      'Page {current} of {total}',
+      'Linked suites',
+      'Inline',
+      'Keep small cases inline or link a JSONC/CSV suite. Full prompts load only when you edit a case.',
+      'Test campaigns',
+      'Create a bounded, repeatable selection of existing cases. Campaign history stores metadata only; raw prompts and evidence remain session-scoped.',
+      'Add campaign',
+      'Repetitions per adversarial case',
+      'Conversation contracts run once; adversarial cases use this sample size.',
+      'Concurrent cases',
+      'Cases may run in parallel. Turns and repeated attempts within one case remain sequential.',
+      'Case IDs',
+      'Leave empty to select by suite or tags.',
+      'Suite IDs',
+      'Optional exact suite IDs.',
+      'Selector tags',
+      'All tags must match unless tag mode is changed in JSONC.',
+      'Coverage tags',
+      'Missing required tags are reported before and after execution.',
+      '{completed}/{planned} cases complete',
+      'Concurrency {limit} / 8',
+      '{percent}% coverage',
+      '{count} regression',
+      'Preview plan',
+      'Cancel run',
+      'Resume',
+      'Accept as baseline',
+      'Export results JSONL',
+      'Summarize with Copilot',
+      'Delete campaign',
+      'Attack succeeded',
+      'Resisted',
+    ];
+    for (const supportedLocale of ['zh-TW', 'ja-JP', 'ko-KR']) {
+      setLocale(supportedLocale);
+      for (const message of messages) expect(t(message), `${supportedLocale}: ${message}`).not.toBe(message);
+    }
+  });
+
   it('keeps Webview locale placeholders intact', () => {
     for (const path of ['src/webview/i18n.ja.ts', 'src/webview/i18n.ko.ts']) {
       for (const [message, translation] of sourceCatalog(path)) {

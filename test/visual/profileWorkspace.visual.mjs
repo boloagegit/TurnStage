@@ -408,8 +408,61 @@ try {
   await assertRedTeamTabVisual(automationNavigation, 'Automation dark theme');
   assert.equal(await page.getByRole('heading', { name: 'Latest test results' }).count(), 1, 'Tests opens on functional automation results');
   assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 0, 'Results must remain an inspection surface, not the main execution surface');
-  assert.equal(await page.locator('.automation-result-table tbody > tr').count(), 1, 'Automation results must remain distinct from adversarial outcomes');
+  assert.equal(await page.locator('.automation-result-table tbody > tr').count(), 2, 'Automation results must remain distinct from adversarial outcomes');
+  const automationReview = page.getByRole('region', { name: 'Review test result' });
+  const automationResultSelector = automationReview.getByRole('combobox', { name: 'Review test result' });
+  assert.equal(await automationResultSelector.locator('option').count(), 2, 'Automation results must expose every result in the top review selector');
+  assert.ok((await automationResultSelector.inputValue()).includes('visual-contract-evidence'), 'The first automation result must be selected initially');
+  await automationReview.getByRole('button', { name: 'Next test result' }).click();
+  assert.equal(await automationResultSelector.inputValue(), 'visual-contract-evidence-2', 'Next result must switch the selected automation evidence without paging the table');
+  assert.equal(await automationReview.getByText('4 passed · 0 failed', { exact: true }).count(), 1, 'The top review summary must update with the selected test result');
+  const exportTestResults = automationReview.locator('summary[aria-label="Export test results"]');
+  const reviewAlignment = await automationReview.evaluate((element) => {
+    const actions = element.querySelector('.automation-result-review__actions');
+    const exportSummary = element.querySelector('.adversarial-export-actions > summary');
+    if (!actions || !exportSummary) return null;
+    const actionBounds = [...actions.children].map((action) => action.getBoundingClientRect());
+    const exportBounds = exportSummary.getBoundingClientRect();
+    return {
+      actionBottoms: actionBounds.map((bounds) => bounds.bottom),
+      exportWidth: exportBounds.width,
+      exportHeight: exportBounds.height,
+      overflowFree: element.scrollWidth <= element.clientWidth + 1,
+    };
+  });
+  assert.ok(reviewAlignment, 'Automation result alignment check requires the selector and export action');
+  assert.ok(reviewAlignment.actionBottoms.every((bottom) => Math.abs(bottom - reviewAlignment.actionBottoms[0]) <= 1), 'Every selected-result action, including export, must share the same bottom alignment');
+  assert.ok(Math.abs(reviewAlignment.exportWidth - reviewAlignment.exportHeight) <= 1, 'The export action must render as one compact square icon button');
+  assert.equal(reviewAlignment.overflowFree, true, 'The automation result review must not overflow at the desktop width');
+  await exportTestResults.click();
+  const automationExportMenu = automationReview.locator('.adversarial-export-actions > div');
+  await automationExportMenu.waitFor();
+  assert.equal(await automationExportMenu.getByRole('button').count(), 4, 'The export menu must expose HTML, evidence, JSON, and JUnit formats');
+  assert.equal(await automationExportMenu.evaluate((menu) => {
+    const bounds = menu.getBoundingClientRect();
+    return bounds.left >= 0 && bounds.right <= document.documentElement.clientWidth && bounds.top >= 0 && bounds.bottom <= document.documentElement.clientHeight;
+  }), true, 'The automation export menu must remain fully visible in the viewport');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-export-dark.png') });
+  await exportTestResults.click();
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-dark.png') });
+  await page.setViewportSize({ width: 520, height: 720 });
+  await automationReview.scrollIntoViewIfNeeded();
+  const narrowAutomationReview = await automationReview.evaluate((element) => {
+    const controls = [...element.querySelectorAll('button, select, summary')].filter((control) => {
+      const style = getComputedStyle(control);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    }).map((control) => {
+      const bounds = control.getBoundingClientRect();
+      return { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom };
+    });
+    const overlaps = controls.some((control, index) => controls.slice(index + 1).some((other) =>
+      control.left < other.right - 1 && control.right > other.left + 1 && control.top < other.bottom - 1 && control.bottom > other.top + 1));
+    return { overflowFree: element.scrollWidth <= element.clientWidth + 1, overlaps };
+  });
+  assert.equal(narrowAutomationReview.overflowFree, true, 'The automation result navigator must not require horizontal scrolling at a narrow width');
+  assert.equal(narrowAutomationReview.overlaps, false, 'Automation result controls must not overlap at a narrow width');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-narrow-dark.png') });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await automationNavigation.getByRole('tab', { name: /Cases/ }).click();
   assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 1, 'Scenario execution must live beside the authored contracts');
   await page.getByText('Linked multi-turn contract', { exact: true }).waitFor();
@@ -829,6 +882,17 @@ try {
   await page.reload();
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'Runs' }).getAttribute('aria-selected'), 'true', 'A saved inspector tab must win over the Profile initial Metrics tab after Webview recreation');
+  await page.getByRole('tab', { name: 'Tests' }).click();
+  const persistedAutomationSelector = page.getByRole('combobox', { name: 'Review test result' });
+  await persistedAutomationSelector.selectOption('visual-contract-evidence-2');
+  await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').selectedAutomationResultKey === 'visual-contract-evidence-2');
+  await page.getByRole('tab', { name: 'Debug' }).click();
+  await page.getByRole('tab', { name: 'Tests' }).click();
+  assert.equal(await page.getByRole('combobox', { name: 'Review test result' }).inputValue(), 'visual-contract-evidence-2', 'The selected test result must survive switching away from Tests');
+  await page.reload();
+  await waitForProfile();
+  assert.equal(await page.getByRole('tab', { name: 'Tests' }).getAttribute('aria-selected'), 'true', 'The saved Tests workspace must survive Webview recreation');
+  assert.equal(await page.getByRole('combobox', { name: 'Review test result' }).inputValue(), 'visual-contract-evidence-2', 'The selected test result must survive Webview recreation');
   await page.setViewportSize({ width: 1000, height: 600 });
   await page.getByRole('tab', { name: 'Red Team' }).click();
   await page.getByRole('tab', { name: /Cases:/ }).click();
@@ -1115,16 +1179,29 @@ try {
   await capturePage.close();
 
   for (const localeCase of [
-    { locale: 'ja-JP', tabs: ['デバッグ', 'テスト', 'レッドチーム', '設定'], artifact: 'locale-ja-dark.png' },
-    { locale: 'ko-KR', tabs: ['디버그', '테스트', '레드 팀', '설정'], artifact: 'locale-ko-dark.png' },
+    { locale: 'zh-TW', tabs: ['除錯', '測試', '紅隊測試', '設定'], results: '最新測試結果', review: '檢視測試結果', cases: '測試案例', contracts: '對話契約', campaigns: '測試活動', addCampaign: '新增測試活動', artifact: 'automation-results-zh-tw-dark.png' },
+    { locale: 'ja-JP', tabs: ['デバッグ', 'テスト', 'レッドチーム', '設定'], results: '最新のテスト結果', review: 'テスト結果を確認', cases: 'ケース', contracts: '会話コントラクト', campaigns: 'キャンペーン', addCampaign: 'キャンペーンを追加', artifact: 'automation-results-ja-dark.png' },
+    { locale: 'ko-KR', tabs: ['디버그', '테스트', '레드 팀', '설정'], results: '최신 테스트 결과', review: '테스트 결과 검토', cases: '케이스', contracts: '대화 계약', campaigns: '캠페인', addCampaign: '캠페인 추가', artifact: 'automation-results-ko-dark.png' },
   ]) {
-    const localePage = await browser.newPage({ viewport: { width: 720, height: 640 } });
+    const localePage = await browser.newPage({ viewport: { width: 720, height: 900 } });
     await localePage.goto(`${url}?locale=${encodeURIComponent(localeCase.locale)}`);
     const localeTabs = localePage.locator('.right-pane-tabs:visible').first();
     await localeTabs.getByRole('tab', { name: localeCase.tabs[0], exact: true }).waitFor();
     for (const label of localeCase.tabs) assert.equal(await localeTabs.getByRole('tab', { name: label, exact: true }).count(), 1, `${localeCase.locale}: expected translated primary tab ${label}`);
     assert.equal(await localeTabs.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, `${localeCase.locale}: primary right-pane tabs must fit without horizontal scrolling at 720px`);
-    await localePage.screenshot({ path: resolve(artifactDirectory, localeCase.artifact), fullPage: true });
+    await localeTabs.getByRole('tab', { name: localeCase.tabs[1], exact: true }).click();
+    await localePage.getByRole('heading', { name: localeCase.results }).waitFor();
+    assert.equal(await localePage.getByRole('combobox', { name: localeCase.review }).count(), 1, `${localeCase.locale}: the top result selector must be translated`);
+    assert.equal(await localePage.getByText('Latest test results', { exact: true }).count(), 0, `${localeCase.locale}: the Results heading must not fall back to English`);
+    await localePage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, localeCase.artifact) });
+    const localizedTestNavigation = localePage.getByRole('tablist', { name: localeCase.locale === 'zh-TW' ? '測試區段' : localeCase.locale === 'ja-JP' ? 'テストセクション' : '테스트 섹션' });
+    await localizedTestNavigation.getByRole('tab', { name: new RegExp(localeCase.cases) }).click();
+    await localePage.getByRole('heading', { name: localeCase.contracts }).waitFor();
+    assert.equal(await localePage.getByText('Conversation contracts', { exact: true }).count(), 0, `${localeCase.locale}: the Cases heading must not fall back to English`);
+    await localizedTestNavigation.getByRole('tab', { name: new RegExp(localeCase.campaigns) }).click();
+    await localePage.getByRole('heading', { name: localeCase.campaigns }).waitFor();
+    assert.equal(await localePage.getByRole('button', { name: localeCase.addCampaign, exact: true }).count(), 1, `${localeCase.locale}: campaign actions must be translated`);
+    assert.equal(await localePage.getByText('Test campaigns', { exact: true }).count(), 0, `${localeCase.locale}: the Campaigns heading must not fall back to English`);
     await localePage.close();
   }
 
@@ -1136,7 +1213,7 @@ try {
   assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
   assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
 
-  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, networkPayloadJsonHighlighting: true, defaultDebugNetwork: true, compactEventEmptyStates: true, sessionAutoStartLoading: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, requestScopedTlsWarning: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, cjkLocales: ['ja-JP', 'ko-KR'], screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, networkPayloadJsonHighlighting: true, defaultDebugNetwork: true, compactEventEmptyStates: true, sessionAutoStartLoading: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, requestScopedTlsWarning: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, cjkLocales: ['zh-TW', 'ja-JP', 'ko-KR'], screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
 } finally {
   await browser.close();
   await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));

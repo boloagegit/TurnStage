@@ -295,6 +295,9 @@
     const automationResults = [{
       profileId: profile.id, scenarioId: 'slow-stream-contract', scenarioName: 'Slow stream contract', outcome: 'failed', durationMs: 5120,
       passedChecks: 2, failedChecks: 1, completedSteps: 1, evidenceId: 'visual-contract-evidence', primaryLocation: { kind: 'normalizedEvent', sequence: 4 }, comparison: true, performance: true
+    }, {
+      profileId: profile.id, suiteId: 'linked-regression', scenarioId: 'steady-contract', scenarioName: 'Steady response contract', outcome: 'passed', durationMs: 840,
+      passedChecks: 4, failedChecks: 0, completedSteps: 2, evidenceId: 'visual-contract-evidence-2', primaryLocation: { kind: 'network', networkId: 'stream-1' }, comparison: false, performance: false
     }];
     const contractCatalog = {
       entries: [{

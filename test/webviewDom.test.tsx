@@ -1115,20 +1115,63 @@ describe('Webview DOM behavior', () => {
     const automationResults: AutomationResultSummary[] = [{
       profileId: profile.id, scenarioId: 'contract-1', scenarioName: 'Contract 1', outcome: 'failed', durationMs: 120,
       passedChecks: 3, failedChecks: 1, completedSteps: 2, evidenceId: 'contract-evidence', primaryLocation: { kind: 'message', messageId: 'assistant-1' }, comparison: true, performance: true,
+    }, {
+      profileId: profile.id, suiteId: 'linked-suite', scenarioId: 'contract-2', scenarioName: 'Contract 2', outcome: 'passed', durationMs: 80,
+      passedChecks: 4, failedChecks: 0, completedSteps: 1, evidenceId: 'contract-evidence-2', primaryLocation: { kind: 'network', networkId: 'network-2' }, comparison: false, performance: false,
     }];
     const { rerender } = render(<AutomationWorkspace activeSection="results" profile={configured} post={post} trusted automationResults={automationResults} />);
 
     expect(screen.queryByRole('button', { name: 'Run all' })).toBeNull();
-    expect(screen.getByText('3 passed · 1 failed')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Open evidence' }));
+    expect(screen.getAllByText('3 passed · 1 failed')).toHaveLength(2);
+    const review = screen.getByRole('region', { name: 'Review test result' });
+    const selector = within(review).getByRole('combobox', { name: 'Review test result' }) as HTMLSelectElement;
+    expect(selector.value).toBe('contract-evidence');
+    expect((within(review).getByRole('button', { name: 'Previous test result' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(review).getByRole('button', { name: 'Open evidence' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'contract-evidence', location: { kind: 'message', messageId: 'assistant-1' } });
-    await user.click(screen.getByRole('button', { name: 'Run scenario again' }));
+    await user.click(within(review).getByRole('button', { name: 'Run selected scenario again' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.runCase', scenarioId: 'contract-1', suiteId: undefined, kind: 'contract' });
-    await user.click(screen.getByRole('button', { name: 'Save as test…' }));
+    await user.click(within(review).getByRole('button', { name: 'Save as test…' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.capture', source: { kind: 'evidence', evidenceId: 'contract-evidence' }, suggestedKind: 'contract' });
+    await user.click(within(review).getByRole('button', { name: 'Next test result' }));
+    expect(selector.value).toBe('contract-evidence-2');
+    expect(within(review).getByText('4 passed · 0 failed')).toBeTruthy();
+    await user.click(within(review).getByRole('button', { name: 'Open evidence' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'contract-evidence-2', location: { kind: 'network', networkId: 'network-2' } });
+    await user.click(screen.getByRole('button', { name: 'Select test result Contract 1' }));
+    expect(selector.value).toBe('contract-evidence');
+    await user.click(review.querySelector('.adversarial-export-actions > summary')!);
+    await user.click(within(review).getByRole('button', { name: 'JSON report' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.report.export', format: 'json' });
     await user.type(screen.getByRole('searchbox'), 'missing result');
     rerender(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} trusted automationResults={automationResults} />);
     expect(screen.getByText('Contract 1')).toBeTruthy();
+  });
+
+  it('keeps 100 automation results paged while every result remains selectable', async () => {
+    const user = userEvent.setup();
+    const automationResults: AutomationResultSummary[] = Array.from({ length: 100 }, (_, index) => ({
+      profileId: profile.id,
+      scenarioId: `contract-${index + 1}`,
+      scenarioName: `Contract ${index + 1}`,
+      outcome: index === 99 ? 'failed' : 'passed',
+      durationMs: 80 + index,
+      passedChecks: index === 99 ? 2 : 3,
+      failedChecks: index === 99 ? 1 : 0,
+      completedSteps: 1,
+      evidenceId: `evidence-${index + 1}`,
+      primaryLocation: { kind: 'message', messageId: `assistant-${index + 1}` },
+      comparison: false,
+      performance: false,
+    }));
+    const { container } = render(<AutomationWorkspace activeSection="results" profile={profile} post={vi.fn()} trusted automationResults={automationResults} />);
+
+    expect(container.querySelectorAll('.automation-result-table tbody > tr')).toHaveLength(25);
+    expect(screen.getByText('Page 1 of 4')).toBeTruthy();
+    const selector = screen.getByRole('combobox', { name: 'Review test result' }) as HTMLSelectElement;
+    expect(selector.options).toHaveLength(100);
+    await user.selectOptions(selector, 'evidence-100');
+    expect(within(screen.getByRole('region', { name: 'Review test result' })).getByText('2 passed · 1 failed')).toBeTruthy();
   });
 
   it('authors, bulk-transfers, and opens evidence for adversarial cases', async () => {
