@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.23.4",
+  "version": "0.23.5",
   "publisher": "turnstage",
   "author": {
     "name": "TurnStage contributors",
