@@ -907,7 +907,7 @@ try {
   assert.ok(appliedRedTeamScroll > 0, 'The representative Red Team viewport must have a real reading position to restore');
   await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').rightPaneMode === 'adversarial');
   await page.waitForFunction(() => Boolean(JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').expandedAdversarialCaseId));
-  await page.waitForFunction(() => (JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').scrollPositions?.['adversarial.cases'] ?? 0) > 0);
+  await page.waitForFunction((expectedScrollTop) => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').scrollPositions?.['adversarial.cases'] === expectedScrollTop, appliedRedTeamScroll);
   const savedRedTeamScroll = await page.evaluate(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').scrollPositions['adversarial.cases']);
   await page.reload();
   await waitForProfile();
