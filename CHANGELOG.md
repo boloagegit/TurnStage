@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.23.5
+
+- Added a concise synthetic localhost product demo to the Marketplace and
+  GitHub overview.
+- Clarified the first-run value proposition and added a direct Marketplace
+  installation path without changing extension behavior.
+
 ## 0.23.4
 
 - Prepared the extension for its public preview with Marketplace metadata,

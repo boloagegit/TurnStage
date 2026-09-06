@@ -1,10 +1,18 @@
 # TurnStage
 
-**Test LLM chat and agent APIs from the place you already debug code.**
+**Debug your LLM stream. Reproduce the failure. Keep the evidence.**
 
 TurnStage connects a versioned `*.turnstage.jsonc` Profile to any compatible
 HTTP streaming backend, renders the conversation, and keeps Chat, Network,
 Events, timing, test outcomes, and exportable evidence together in VS Code.
+
+[Install TurnStage from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=turnstage.turnstage)
+or open VS Code Quick Open and run `ext install turnstage.turnstage`.
+
+![TurnStage synthetic localhost demo](media/marketplace/turnstage-demo.gif)
+
+_Synthetic localhost demonstration. No credentials, customer endpoint, or
+production conversation is shown._
 
 > TurnStage is a public preview. It is a testing and evidence workbench, not a
 > model-safety certification service or an autonomous attack platform.
