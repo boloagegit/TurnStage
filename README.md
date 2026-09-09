@@ -438,10 +438,9 @@ including status, first-chunk latency, total/idle timeout settings, transferred
 bytes, event count, and a structured failure such as `IdleTimeoutError`. The
 filter searches request kind, method, URL, status, state, and variant. Network
 entries are live-session diagnostics: restarting the session clears them and
-they are not added to Recorded Runs. In a Trusted Workspace, the Network
-Headers view shows the exact outgoing `Authorization` value so authentication
-problems can be compared with Chrome DevTools. Other structurally sensitive
-headers remain masked.
+they are not added to Recorded Runs. The Network Headers view masks outgoing
+`Authorization` and other structurally sensitive header values while preserving
+useful metadata such as the authentication scheme.
 
 ## Commands and settings
 
@@ -512,9 +511,8 @@ Use **Debug → Network** for the request and response view. For a timeout, firs
 check whether a row received an HTTP status, then compare **Headers**, **First
 chunk**, **Total**, and **Idle timeout** under Timing. Output remains the more
 durable correlated timeline; Network deliberately includes bounded, redacted
-request/response previews for the current editor session only, with the explicit
-exception that outgoing `Authorization` is visible there. Output never records
-that header value.
+request/response previews for the current editor session only. Sensitive header
+values remain masked, and Output never records them.
 
 `displayLanguage` has VS Code `application` scope, so one User setting applies
 across projects. `profileGlob` has VS Code `resource` scope. The runtime-limit settings use
@@ -529,10 +527,18 @@ fixture replay remains available, but session requests and request-backed
 openings are blocked. The Webview displays a restricted-mode banner. Citation
 opening also requires trust.
 
+Loopback openings remain automatic. The first automatic opening to another host
+asks for consent and shows the destination, method, secret usage, and TLS state.
+**Allow this Profile** remembers a hashed workspace-local grant; **Allow once**
+does not. Changing the destination, request definition, secret references, or
+TLS mode asks again. Explicit requests that send secrets over non-loopback HTTP,
+or disable certificate verification, use the same consent boundary.
+
 Use **TurnStage: Set Secret** to store a value in VS Code SecretStorage. Only
 the Extension Host resolves `${secret.name}`. Request previews redact sensitive
 headers and secret/token/password-like body fields before sending data to the
-Webview. See `docs/security.md` for the exact current policy and its boundaries.
+Webview. File and symbol citations accept only normalized workspace-relative
+paths. See `docs/security.md` for the exact current policy and its boundaries.
 
 ## Local mock server
 

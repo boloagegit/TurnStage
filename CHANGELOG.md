@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.24.0
+
+- Added low-friction, workspace-local connection approval for the first
+  non-loopback request-backed opening, cleartext HTTP requests carrying
+  secrets, and requests that disable certificate verification. Remembered
+  approvals contain only a SHA-256 fingerprint and relevant Profile or
+  environment changes require approval again; localhost workflows remain
+  automatic.
+- Hardened file, symbol, and artifact citation handling so absolute,
+  URI-shaped, ambiguous, and traversal paths cannot open files outside the
+  workspace.
+- Clarified replay privacy controls and corrected documentation to match the
+  masked sensitive headers shown in Network evidence.
+- Compatibility: existing Profiles remain valid. Explicit test and campaign
+  runs are unchanged; existing non-loopback request-backed openings ask once
+  after upgrade.
+
 ## 0.23.5
 
 - Added a concise synthetic localhost product demo to the Marketplace and

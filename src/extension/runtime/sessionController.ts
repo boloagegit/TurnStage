@@ -3,7 +3,7 @@ import type { ChatMessage, ConnectionNetworkPathSummary, ControlDefinition, Inte
 import { MappingEngine } from '../mapping/mappingEngine';
 import { RequestBuilder } from '../request/requestBuilder';
 import { getPath } from '../request/templateResolver';
-import { redactHeaders, redactKnownSecrets, type SecretService } from '../security/security';
+import { SECRET_REDACTION, redactHeaders, redactKnownSecrets, type SecretService } from '../security/security';
 import { HttpStreamTransport } from '../transport/transport';
 import { TurnStageError, errors } from '../errors';
 import { LocalRunRepository, type LocalRunImportResult } from '../history/localRunRepository';
@@ -21,12 +21,16 @@ import { extractNetworkCorrelation, mergeNetworkCorrelation } from '../observabi
 import { fetchBoundedText } from '../transport/boundedFetch';
 import { networkPathDebugLine, networkPathInfoLine } from '../connection/networkPath';
 import { captureVSCodeNetworkPath, resolveVSCodeInsecureTlsRoute, type VSCodeNetworkPathInspector } from '../connection/vscodeNetworkPath';
+import type { RequestAuthorizationPurpose } from '../security/requestAuthorization';
 
 const MAX_NETWORK_ENTRIES = 50;
 const MAX_NETWORK_RESPONSE_PREVIEW_CHARS = 64 * 1024;
 const MAX_OPENING_RESPONSE_BYTES = 1024 * 1024;
 
-export interface SessionRuntimeOptions { faults?: ScenarioFaultDefinition }
+export interface SessionRuntimeOptions {
+  faults?: ScenarioFaultDefinition;
+  authorizeRequest?: (request: PreparedRequest, purpose: RequestAuthorizationPurpose, hasSecrets: boolean) => Promise<boolean>;
+}
 
 export class SessionController implements vscode.Disposable {
   snapshot: SessionSnapshot;
@@ -229,6 +233,7 @@ export class SessionController implements vscode.Disposable {
       const request = await this.requestBuilder().build(opening.request as any, this.contextFor('', { kind: 'manual' }));
       this.registerRequestSecrets(request);
       this.requestPreview = this.publicValue(request.redacted);
+      if (!await this.authorizeRequest(request, 'opening') || this.disposed || !vscode.workspace.isTrusted) { this.snapshot.sessionState = 'notStarted'; this.changed(); return; }
       networkEntry = this.beginNetworkExchange('opening', request, startedAt);
       networkPathInspector = captureVSCodeNetworkPath(request.url);
       logNetworkPathStart(this.log, logId, networkPathInspector.assess({ tlsVerificationDisabled: request.tls?.allowInvalidCertificates === true }));
@@ -315,6 +320,13 @@ export class SessionController implements vscode.Disposable {
       const request = await this.requestBuilder().build(this.profile.conversation.send, this.contextFor(text, interaction, clientRequestId, startedAt));
       this.registerRequestSecrets(request);
       this.requestPreview = this.publicValue(request.redacted);
+      if (!await this.authorizeRequest(request, 'conversation') || this.disposed || !vscode.workspace.isTrusted) {
+        this.snapshot.turnState = 'idle';
+        this.currentTurn = undefined;
+        this.finalized = true;
+        this.changed();
+        return;
+      }
       networkPathInspector = captureVSCodeNetworkPath(request.url);
       logNetworkPathStart(this.log, logId, networkPathInspector.assess({ tlsVerificationDisabled: request.tls?.allowInvalidCertificates === true }));
       const protocol = this.profile.stream.transport === 'fixture' ? 'ndjson' : this.profile.stream.transport;
@@ -417,6 +429,11 @@ export class SessionController implements vscode.Disposable {
       else try {
         const request = await this.requestBuilder().build(stop.request, stopContext);
         this.registerRequestSecrets(request);
+        if (!await this.authorizeRequest(request, 'stop') || this.disposed || !vscode.workspace.isTrusted) {
+          this.snapshot.errors.push({ type: 'RemoteStopWarning', message: localize('Local stream stopped. The remote stop request was not sent because connection access was not allowed.') });
+          await this.finalizeTurn({ type: 'aborted', reason: 'user_cancel' });
+          return;
+        }
         const logId = `stop-${(this.currentTurn?.clientRequestId ?? crypto.randomUUID()).slice(0, 8)}`;
         const startedAt = Date.now();
         const networkEntry = this.beginNetworkExchange('stop', request, startedAt);
@@ -648,6 +665,24 @@ export class SessionController implements vscode.Disposable {
       if (value === undefined && storageName !== name) throw errors.missingSecret(storageName);
       return value;
     });
+  }
+  private async authorizeRequest(request: PreparedRequest, purpose: RequestAuthorizationPurpose): Promise<boolean> {
+    const authorize = this.runtimeOptions.authorizeRequest;
+    if (!authorize) return true;
+    const serialized = [request.url, ...Object.values(request.headers), request.body ?? ''].join('\n');
+    const hasSecrets = Boolean(request.secretValues?.length)
+      || this.secretControlValues().some((value) => typeof value === 'string' && value.length > 0 && serialized.includes(value))
+      || this.requestDefinitionUsesSecretControl(purpose)
+      || JSON.stringify(request.redacted).includes(SECRET_REDACTION);
+    return authorize({ ...request, redacted: this.publicValue(request.redacted) }, purpose, hasSecrets);
+  }
+  private requestDefinitionUsesSecretControl(purpose: RequestAuthorizationPurpose): boolean {
+    const definition = purpose === 'opening'
+      ? this.profile.opening?.request
+      : purpose === 'stop' ? this.profile.conversation.stop?.request : this.profile.conversation.send;
+    if (!definition) return false;
+    const serialized = JSON.stringify(definition);
+    return (this.profile.controls ?? []).some((control) => control.persist === 'secret' && serialized.includes(`controls.${control.id}`));
   }
   private useOpeningFallback(selected?: NonNullable<OpeningDefinition['fallbacks']>[number]): void { const fallback = selected ?? this.profile.opening?.fallbacks?.[0]; if (fallback) { this.snapshot.opening = { message: fallback.message, starters: normalizeOpeningStarters(fallback.starters) }; this.snapshot.sessionState = 'ready'; } else this.snapshot.sessionState = 'failed'; this.changed(); }
   private legacyControlKey(id: string): string { const workspace = vscode.workspace.getWorkspaceFolder(this.profileUri)?.uri.toString() ?? 'no-workspace'; return `turnstage.control.${workspace}.${this.profile.id}.${id}`; }

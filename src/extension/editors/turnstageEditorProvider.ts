@@ -8,6 +8,7 @@ import { ProfileCodec } from '../config/profileCodec';
 import { ProfileValidator, validateAdversarialScenariosAgainstProfile, validateContractScenariosAgainstProfile } from '../config/profileValidator';
 import { LocalRunRepository, type LocalRunImportResult } from '../history/localRunRepository';
 import { SecretService, UriPolicy } from '../security/security';
+import { RequestAuthorizationService } from '../security/requestAuthorization';
 import { isActive, SessionController } from '../runtime/sessionController';
 import { MappingEngine } from '../mapping/mappingEngine';
 import { localize } from '../l10n';
@@ -49,6 +50,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private readonly runs: LocalRunRepository;
   private readonly secrets: SecretService;
   private readonly uriPolicy = new UriPolicy();
+  private readonly requestAuthorization: RequestAuthorizationService;
   private readonly visualRegression: VisualRegressionService;
   private readonly externalAdversarialSuites: ExternalAdversarialSuiteRepository;
   private readonly controllers = new Map<string, SessionController>();
@@ -68,7 +70,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
   private readonly latestAutomationResults = new Map<string, AutomationResultSummary[]>();
   private readonly latestTestOperations = new Map<string, TestOperationSnapshot>();
-  constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel, private readonly environments = new EnvironmentRepository(context.globalStorageUri), visualRegression?: VisualRegressionService, private readonly scenarioTests?: ScenarioTestController) { this.runs = new LocalRunRepository(context, output); this.secrets = new SecretService(context); this.visualRegression = visualRegression ?? new VisualRegressionService(context); this.externalAdversarialSuites = new ExternalAdversarialSuiteRepository(context); }
+  constructor(private readonly context: vscode.ExtensionContext, private readonly diagnostics: vscode.DiagnosticCollection, private readonly output: vscode.OutputChannel, private readonly environments = new EnvironmentRepository(context.globalStorageUri), visualRegression?: VisualRegressionService, private readonly scenarioTests?: ScenarioTestController) { this.runs = new LocalRunRepository(context, output); this.secrets = new SecretService(context); this.requestAuthorization = new RequestAuthorizationService(context); this.visualRegression = visualRegression ?? new VisualRegressionService(context); this.externalAdversarialSuites = new ExternalAdversarialSuiteRepository(context); }
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     const resourceTitle = panel.title;
@@ -229,7 +231,9 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       if (!parsed.profile || issues.some((item) => item.severity === 'error')) { await disposeController(); return; }
       if (!controller || controller.profile !== parsed.profile) {
         await disposeController(); const environment = envEntries.find((item) => item.environment.id === parsed.profile!.environment)?.environment ?? builtInEnvironment();
-        const nextController = new SessionController(parsed.profile, document.uri, environment, this.context, this.secrets, this.runs, sendSession, this.output); await nextController.loadRuns();
+        const nextController = new SessionController(parsed.profile, document.uri, environment, this.context, this.secrets, this.runs, sendSession, this.output, {
+          authorizeRequest: (request, purpose, hasSecrets) => this.requestAuthorization.authorize(document.uri, parsed.profile!, environment, request, purpose, hasSecrets),
+        }); await nextController.loadRuns();
         if (disposed || document.version !== version) { nextController.dispose(); return; }
         controller = nextController;
         syncTurnActiveContext();

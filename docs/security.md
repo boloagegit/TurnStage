@@ -75,6 +75,16 @@ bounded hop count. The default is same-origin only; explicit cross-origin
 following strips common credential headers and any header whose value contains
 a secret resolved for that request.
 
+Loopback request-backed openings remain automatic for local development. Before
+the first automatic opening to another host, the host shows a modal summary of
+the destination, method, secret usage, and TLS verification state. A remembered
+grant contains only a SHA-256 fingerprint in workspace storage. The fingerprint
+changes with the Profile URI, destination origin, request definition,
+environment secret-reference mapping, purpose, or TLS mode. Explicit
+non-loopback HTTP requests containing known secrets and all requests that disable
+certificate verification use the same boundary. Cancelling the prompt sends no
+request and stores no grant.
+
 Opening response blocks are presentation-only projections owned by the
 Extension Host. Profiles may select bounded dotted paths and fixed display
 types, but responses cannot supply HTML, CSS, commands, scripts, or visual
@@ -185,12 +195,10 @@ Redaction boundaries to account for when designing profiles:
   profiles should still avoid putting unrelated sensitive values in endpoint
   paths or locally constructed error messages.
 
-The live Debug **Network** inspector receives request headers, a redacted request
-body, redacted response headers, a response preview capped at 64 KiB per
-request, structured error details, and timing counters. In a Trusted Workspace,
-the exact outgoing `Authorization` header is intentionally exposed to the
-Webview for authentication debugging. `Cookie`, `Set-Cookie`, `X-API-Key`, and
-`Proxy-Authorization` remain masked, and known current-session secret values are
+The live Debug **Network** inspector receives redacted request headers and body,
+redacted response headers, a response preview capped at 64 KiB per request,
+structured error details, and timing counters. `Authorization`, `Cookie`,
+`Set-Cookie`, `X-API-Key`, and `Proxy-Authorization` remain masked, and known current-session secret values are
 scrubbed from response previews and errors before they reach the Webview. At most 50
 entries are retained; restarting the session clears them. These entries are
 not persisted in Recorded Runs or written to the Output Channel. Response data
@@ -220,10 +228,12 @@ file behavior explicitly and review the profile before running it.
 
 ### File and symbol citations
 
-The host resolves a relative citation path against the workspace folder that
-contains the profile. Paths that resolve outside the workspace are rejected;
-the document is opened with VS Code's text editor. The current implementation
-does not apply citation ranges and does not implement `artifact` opening.
+The host accepts only normalized workspace-relative paths. Absolute paths,
+URI-shaped values, backslashes, empty segments, `.` segments, and `..` traversal
+are rejected before URI joining. A second scheme, authority, and path containment
+check is applied against the workspace folder that contains the Profile. Valid
+file, symbol, and workspace-artifact citations open in VS Code's text editor,
+including a validated source range when supplied.
 
 Do not pass arbitrary paths from a Webview click directly to
 `workspace.fs`/`openTextDocument`; keep the citation-ID lookup and workspace

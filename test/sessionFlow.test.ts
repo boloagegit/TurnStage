@@ -125,6 +125,45 @@ describe('SessionController end-to-end functional flow', () => {
     expect(outputText).not.toContain('local-api-key');
   });
 
+  it('blocks transport when authorization is denied and recognizes transformed secret controls', async () => {
+    const { SessionController } = await import('../src/extension/runtime/sessionController');
+    const profile = basicProfile();
+    profile.controls!.push({ id: 'privateToken', type: 'text', label: 'Private token', persist: 'secret' });
+    profile.conversation.send.url = 'http://external.example/chat';
+    profile.conversation.send.headers = { 'Content-Type': 'application/json' };
+    profile.conversation.send.body = {
+      credential: { $value: 'controls.privateToken', $transforms: ['uppercase'] },
+      message: { $value: 'input.text' },
+    };
+    const authorizeRequest = vi.fn(async () => false);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      const controller = new SessionController(
+        profile,
+        {} as never,
+        { version: 1, id: 'external', name: 'External', variables: {} },
+        {} as never,
+        { get: vi.fn(async () => undefined) } as never,
+        { list: vi.fn(async () => []), save: vi.fn(async () => undefined) } as never,
+        vi.fn(),
+        { appendLine: vi.fn() } as never,
+        { authorizeRequest },
+      );
+      controller.controls.privateToken = 'transformed-secret';
+
+      await controller.send('Do not transmit', { kind: 'manual' });
+
+      expect(controller.snapshot.errors).toEqual([]);
+      expect(authorizeRequest).toHaveBeenCalledWith(expect.objectContaining({ url: 'http://external.example/chat' }), 'conversation', true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(controller.snapshot.turnState).toBe('idle');
+      expect(controller.snapshot.messages).toEqual([]);
+      expect(controller.getNetworkEntries()).toEqual([]);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('serializes reconnect attempts into a failed run when the retry budget is exhausted', async () => {
     const { SessionController } = await import('../src/extension/runtime/sessionController');
     const originalFetch = globalThis.fetch;
