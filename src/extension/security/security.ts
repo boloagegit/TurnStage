@@ -64,15 +64,26 @@ export class UriPolicy {
     if ((citation.kind === 'file' || citation.kind === 'symbol' || citation.kind === 'artifact') && citation.path) {
       const folder = vscode.workspace.getWorkspaceFolder(profileUri);
       if (!folder) throw new Error(localize('The profile is not inside a workspace folder.'));
+      if (!isSafeWorkspaceRelativePath(citation.path)) throw new Error(localize('Files outside the workspace are not allowed.'));
       const uri = vscode.Uri.joinPath(folder.uri, citation.path);
-      const relative = vscode.workspace.asRelativePath(uri, false);
-      if (relative.startsWith('..')) throw new Error(localize('Files outside the workspace are not allowed.'));
+      if (!isUriWithin(folder.uri, uri)) throw new Error(localize('Files outside the workspace are not allowed.'));
       const document = await vscode.workspace.openTextDocument(uri);
       const range = citationRange(citation.range);
       if (range) await vscode.window.showTextDocument(document, { selection: range });
       else await vscode.window.showTextDocument(document);
     }
   }
+}
+
+export function isSafeWorkspaceRelativePath(value: string): boolean {
+  if (!value || value.length > 4096 || value.includes('\\') || value.startsWith('/') || /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(value)) return false;
+  return value.split('/').every((segment) => Boolean(segment) && segment !== '.' && segment !== '..');
+}
+
+function isUriWithin(root: vscode.Uri, candidate: vscode.Uri): boolean {
+  if (root.scheme !== candidate.scheme || root.authority !== candidate.authority) return false;
+  const rootPath = root.path.replace(/\/+$/u, '');
+  return candidate.path === rootPath || candidate.path.startsWith(`${rootPath}/`);
 }
 
 function citationRange(value: unknown): vscode.Range | undefined {

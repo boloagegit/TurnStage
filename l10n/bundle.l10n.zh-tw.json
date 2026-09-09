@@ -728,5 +728,22 @@
   "Unknown response action appearance: {appearance}.": "未知的回應動作樣式：{appearance}。",
   "Unknown response action icon: {icon}.": "未知的回應動作圖示：{icon}。",
   "Response action appearance must be a supported style or a mapping expression.": "回應動作樣式必須是支援的樣式或映射運算式。",
-  "Response action icon must be a supported icon name or a mapping expression.": "回應動作圖示必須是支援的圖示名稱或映射運算式。"
+  "Response action icon must be a supported icon name or a mapping expression.": "回應動作圖示必須是支援的圖示名稱或映射運算式。",
+  "Allow this Profile": "允許此 Profile",
+  "Allow once": "僅允許一次",
+  "Allow this TurnStage Profile to connect?": "允許此 TurnStage Profile 連線嗎？",
+  "Profile": "Profile",
+  "Destination": "目的地",
+  "Request": "請求",
+  "Uses secrets": "使用密鑰",
+  "Yes": "是",
+  "No": "否",
+  "TLS verification": "TLS 驗證",
+  "Disabled": "已停用",
+  "Enabled": "已啟用",
+  "This request starts automatically when the Profile opens.": "此請求會在 Profile 開啟時自動執行。",
+  "This HTTP request contains secret values and is not encrypted.": "此 HTTP 請求包含密鑰值，且傳輸未加密。",
+  "Certificate verification is disabled for this request.": "此請求已停用憑證驗證。",
+  "TurnStage will ask again if the destination, secret references, or TLS settings change.": "若目的地、密鑰引用或 TLS 設定變更，TurnStage 會再次詢問。",
+  "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "本機串流已停止；由於未允許連線存取，因此未送出遠端停止請求。"
 }

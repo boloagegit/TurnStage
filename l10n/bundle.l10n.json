@@ -728,5 +728,22 @@
   "Unknown response action appearance: {appearance}.": "Unknown response action appearance: {appearance}.",
   "Unknown response action icon: {icon}.": "Unknown response action icon: {icon}.",
   "Response action appearance must be a supported style or a mapping expression.": "Response action appearance must be a supported style or a mapping expression.",
-  "Response action icon must be a supported icon name or a mapping expression.": "Response action icon must be a supported icon name or a mapping expression."
+  "Response action icon must be a supported icon name or a mapping expression.": "Response action icon must be a supported icon name or a mapping expression.",
+  "Allow this Profile": "Allow this Profile",
+  "Allow once": "Allow once",
+  "Allow this TurnStage Profile to connect?": "Allow this TurnStage Profile to connect?",
+  "Profile": "Profile",
+  "Destination": "Destination",
+  "Request": "Request",
+  "Uses secrets": "Uses secrets",
+  "Yes": "Yes",
+  "No": "No",
+  "TLS verification": "TLS verification",
+  "Disabled": "Disabled",
+  "Enabled": "Enabled",
+  "This request starts automatically when the Profile opens.": "This request starts automatically when the Profile opens.",
+  "This HTTP request contains secret values and is not encrypted.": "This HTTP request contains secret values and is not encrypted.",
+  "Certificate verification is disabled for this request.": "Certificate verification is disabled for this request.",
+  "TurnStage will ask again if the destination, secret references, or TLS settings change.": "TurnStage will ask again if the destination, secret references, or TLS settings change.",
+  "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "Local stream stopped. The remote stop request was not sent because connection access was not allowed."
 }

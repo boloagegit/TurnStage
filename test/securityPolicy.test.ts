@@ -81,7 +81,7 @@ const mock = vi.hoisted(() => {
 
 vi.mock('vscode', () => mock);
 
-import { SecretService, UriPolicy, redactDeep, redactHeaders } from '../src/extension/security/security';
+import { SecretService, UriPolicy, isSafeWorkspaceRelativePath, redactDeep, redactHeaders } from '../src/extension/security/security';
 import { TurnStageEditorProvider, canOpenLinkedAdversarialSuite, isAllowedPatchPath } from '../src/extension/editors/turnstageEditorProvider';
 
 const profileUri = new mock.Uri('file', '/workspace/.vscode/turnstage/profiles/demo.turnstage.jsonc');
@@ -171,10 +171,24 @@ describe('UriPolicy', () => {
     expect(mock.window.showTextDocument).not.toHaveBeenCalled();
   });
 
+  it.each(['/etc/passwd', 'C:/Windows/System32/drivers/etc/hosts', 'docs\\secret.txt', 'docs//secret.txt', 'file:///etc/passwd', 'https:outside.txt'])('rejects an absolute, ambiguous, or URI-shaped file path: %s', async (path) => {
+    await expect(policy.open(citation({ kind: 'file', path }), profile(), profileUri as never)).rejects.toThrow('Files outside the workspace are not allowed.');
+    expect(mock.workspace.openTextDocument).not.toHaveBeenCalled();
+  });
+
   it('rejects file citations whose profile is not in a workspace folder', async () => {
     const externalProfileUri = new mock.Uri('file', '/outside/profile.turnstage.jsonc');
 
     await expect(policy.open(citation({ kind: 'file', path: 'readme.md' }), profile(), externalProfileUri as never)).rejects.toThrow('The profile is not inside a workspace folder.');
+  });
+});
+
+describe('workspace-relative path validation', () => {
+  it('accepts ordinary nested paths and rejects traversal before URI joining', () => {
+    expect(isSafeWorkspaceRelativePath('docs/results/report.json')).toBe(true);
+    expect(isSafeWorkspaceRelativePath('../outside.txt')).toBe(false);
+    expect(isSafeWorkspaceRelativePath('/absolute.txt')).toBe(false);
+    expect(isSafeWorkspaceRelativePath('docs\\outside.txt')).toBe(false);
   });
 });
 

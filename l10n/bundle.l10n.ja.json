@@ -723,5 +723,22 @@
   "Unknown response action appearance: {appearance}.": "不明な応答アクションスタイルです: {appearance}。",
   "Unknown response action icon: {icon}.": "不明な応答アクションアイコンです: {icon}。",
   "Response action appearance must be a supported style or a mapping expression.": "応答アクションのスタイルは、対応するスタイルまたはマッピング式である必要があります。",
-  "Response action icon must be a supported icon name or a mapping expression.": "応答アクションのアイコンは、対応するアイコン名またはマッピング式である必要があります。"
+  "Response action icon must be a supported icon name or a mapping expression.": "応答アクションのアイコンは、対応するアイコン名またはマッピング式である必要があります。",
+  "Allow this Profile": "この Profile を許可",
+  "Allow once": "一度だけ許可",
+  "Allow this TurnStage Profile to connect?": "この TurnStage Profile の接続を許可しますか？",
+  "Profile": "Profile",
+  "Destination": "接続先",
+  "Request": "リクエスト",
+  "Uses secrets": "シークレットを使用",
+  "Yes": "はい",
+  "No": "いいえ",
+  "TLS verification": "TLS 検証",
+  "Disabled": "無効",
+  "Enabled": "有効",
+  "This request starts automatically when the Profile opens.": "このリクエストは Profile を開くと自動的に開始されます。",
+  "This HTTP request contains secret values and is not encrypted.": "この HTTP リクエストにはシークレット値が含まれ、暗号化されていません。",
+  "Certificate verification is disabled for this request.": "このリクエストでは証明書の検証が無効です。",
+  "TurnStage will ask again if the destination, secret references, or TLS settings change.": "接続先、シークレット参照、または TLS 設定が変更された場合、TurnStage は再度確認します。",
+  "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "ローカルストリームは停止しました。接続が許可されなかったため、リモート停止リクエストは送信されませんでした。"
 }

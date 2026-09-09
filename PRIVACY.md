@@ -19,9 +19,12 @@ individual runs or clear a Profile's run history from the Runs interface.
 
 TurnStage sends requests only to endpoints selected by the active Profile. A
 request is initiated by a user action, a test or campaign run, or a trusted
-Profile that explicitly configures a request-backed opening. Request-backed
-openings run once when that Profile editor opens. Restricted Mode blocks these
-requests.
+Profile that explicitly configures a request-backed opening. Loopback openings
+run when that Profile editor opens. The first automatic opening to another host
+requires consent; a remembered grant is stored as a one-way fingerprint without
+the endpoint, secret name, or request content. Changing the destination, request
+definition, secret references, or TLS mode requires consent again. Restricted
+Mode blocks these requests.
 
 TurnStage follows VS Code's network and proxy configuration by default. A
 Profile can explicitly allow an invalid TLS certificate for a request. That
@@ -53,4 +56,3 @@ copying screenshots or sharing files.
 For the complete technical boundary, read
 [`docs/security.md`](docs/security.md). Report a privacy or security concern
 using the process in [`SECURITY.md`](SECURITY.md).
-
