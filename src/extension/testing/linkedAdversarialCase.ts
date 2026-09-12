@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from '../../shared/sha256';
 import * as vscode from 'vscode';
 import { applyEdits, modify } from 'jsonc-parser';
 import type { AdversarialSuiteCaseDefinition, AdversarialSuiteDefinition, ScenarioDefinition } from '../../shared/types';
@@ -280,7 +280,7 @@ async function readBoundedSource(uri: vscode.Uri, path: string): Promise<string>
   return new TextDecoder().decode(bytes);
 }
 
-function digest(text: string): string { return createHash('sha256').update(text).digest('hex'); }
+function digest(text: string): string { return sha256Hex(text); }
 function sameValue(left: unknown, right: unknown): boolean { return JSON.stringify(left) === JSON.stringify(right); }
 function spreadsheetText(value: string): string { return /^'[=+\-@]/u.test(value) ? value.slice(1) : value; }
 function csvCell(value: string): string { return /[",\r\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value; }

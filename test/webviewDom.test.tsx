@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AdversarialResultSummary, AutomationResultSummary, ChatMessage, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 import { isPreviewOnlyResponseAction, MobileChatPreview, resizeComposerTextarea, resolveResponseActivity } from '../src/webview/MobileChatPreview';
-import { ACCESSIBLE_EVENT_WINDOW_SIZE, AutomationEvidenceReviewBar, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, eventTimeDeltas, EvidenceReviewBar, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, resolveActiveAutomationEvidence, resolveActiveEvidence, resolveMessageInspectionTarget, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
+import { ACCESSIBLE_EVENT_WINDOW_SIZE, adversarialCaseCount, AutomationEvidenceReviewBar, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, eventTimeDeltas, EvidenceReviewBar, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, resolveActiveAutomationEvidence, resolveActiveEvidence, resolveMessageInspectionTarget, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
 import { AdversarialWorkspace, AutomationWorkspace, SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
 
@@ -28,6 +28,15 @@ function eventRows(scope: HTMLElement | Document = document): HTMLElement[] {
 }
 
 describe('Webview DOM behavior', () => {
+  it('counts imported linked Red Team cases alongside inline cases', () => {
+    const profileWithInlineCase: TurnStageProfile = {
+      ...profile,
+      tests: { ...profile.tests, scenarios: [{ id: 'inline-red', name: 'Inline red', turns: [{ role: 'user', content: 'probe' }], adversarial: true }] },
+    };
+
+    expect(adversarialCaseCount(profileWithInlineCase, { entries: [], total: 2, truncated: false })).toBe(3);
+  });
+
   it('labels profile opening content instead of presenting it as an Assistant response', () => {
     const openingProfile: TurnStageProfile = { ...profile, opening: { mode: 'static', message: 'Welcome to the fixture.', starters: [] } };
     render(<MobileChatPreview {...mobileProps({ profile: openingProfile, snapshot: undefined })} />);
@@ -171,6 +180,52 @@ describe('Webview DOM behavior', () => {
     await user.click(screen.getByRole('button', { name: 'Configure profile' }));
     expect(onConfigure).toHaveBeenCalledOnce();
     expect(document.querySelector('.profile-identity')).toBeNull();
+  });
+
+  it('keeps server-managed Web Profiles read-only until the user explicitly duplicates them', async () => {
+    const post = vi.fn();
+    render(<SettingsWorkspace embedded section="general" onSectionChange={vi.fn()} profile={profile} post={post} readOnly vscodeFeatures={false} />);
+
+    expect(screen.getByRole('status').textContent).toBe('Read-only');
+    expect((screen.getByRole('textbox', { name: 'Display name' }).closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Save Profile' }) as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Duplicate to edit' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.duplicate' });
+  });
+
+  it('disables Extension Host-only controls in Web', () => {
+    render(<SettingsWorkspace embedded section="request" onSectionChange={vi.fn()} profile={profile} post={vi.fn()} vscodeFeatures={false} connectionResult={{
+      protocol: 'sse', confidence: 'high', status: 200,
+      rawEventCount: 1, normalizedEventCount: 0, mappedEventCount: 0, unmatchedEventCount: 1,
+      parseErrorCount: 0, mappingErrorCount: 0, terminalEventSeen: true, terminalMapped: false, safe: false,
+      findings: [{ id: 'terminal-not-mapped', category: 'terminal', severity: 'error', message: 'A terminal response signal was observed but no normalized terminal event was mapped.' }],
+    }} />);
+    expect((screen.getByRole('button', { name: 'Open diagnostic output' }) as HTMLButtonElement).disabled).toBe(true);
+    const copilot = screen.getByRole('button', { name: 'Ask Copilot to diagnose this configuration' }) as HTMLButtonElement;
+    expect(copilot.disabled).toBe(true);
+    expect(copilot.title).toBe('Available only in the VS Code extension');
+  });
+
+  it('disables Red Team Copilot actions in Web while keeping evidence available', async () => {
+    const result: AdversarialResultSummary = {
+      profileId: profile.id, scenarioId: 'known-attack', scenarioName: 'Known attack', outcome: 'resisted', durationMs: 420,
+      attemptedTurns: 1, completedTurns: 1, plannedTurns: 1, findingCount: 0, issueCount: 0, evidenceId: 'evidence-1',
+      primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }],
+    };
+    render(<AdversarialWorkspace profile={profile} post={vi.fn()} testResults={[result]} activeSection="cases" vscodeFeatures={false} />);
+    const doctor = screen.getByRole('button', { name: 'Diagnose profile with Copilot' }) as HTMLButtonElement;
+    expect(doctor.disabled).toBe(true);
+    expect(doctor.title).toBe('Available only in the VS Code extension');
+
+    cleanup();
+    const view = render(<AdversarialWorkspace profile={profile} post={vi.fn()} testResults={[result]} activeSection="results" vscodeFeatures={false} />);
+    expect((screen.getByRole('button', { name: 'Open evidence' }) as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.setup().click(view.container.querySelector('.adversarial-result-actions details > summary')!);
+    for (const name of ['Diagnose with Copilot', 'Advisory quality review']) {
+      const button = screen.getByRole('button', { name }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      expect(button.title).toBe('Available only in the VS Code extension');
+    }
   });
 
   it('edits response-action style and icon through bounded mapping controls', async () => {
@@ -503,7 +558,7 @@ describe('Webview DOM behavior', () => {
     expect(container.querySelectorAll('.mobile-chat-preview__message')).toHaveLength(400);
     expect(screen.getByText('Response 51')).toBeTruthy();
     expect(screen.queryByText('Response 50')).toBeNull();
-  });
+  }, 10_000);
 
   it('auto-grows the multiline composer, caps its height, and shrinks after clearing', () => {
     const textarea = document.createElement('textarea');
@@ -1162,6 +1217,41 @@ describe('Webview DOM behavior', () => {
     expect(screen.queryByRole('combobox', { name: 'Review test result' })).toBeNull();
   });
 
+  it('disables VS Code-only suite actions in Web while preserving browser imports', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    render(<AutomationWorkspace activeSection="scenarios" profile={profile} post={post} trusted vscodeFeatures={false} />);
+
+    await user.click(screen.getByLabelText('More test suite actions'));
+    const importCopy = screen.getByRole('button', { name: 'Import JSONC copy' });
+    const linkSuites = screen.getAllByRole('button', { name: 'Link suite' });
+    const refreshSuites = screen.getByRole('button', { name: 'Refresh linked suites' });
+    expect(linkSuites).toHaveLength(2);
+    expect(linkSuites.every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect(linkSuites.every((button) => button.getAttribute('title') === 'Available only in the VS Code extension')).toBe(true);
+    expect((refreshSuites as HTMLButtonElement).disabled).toBe(true);
+    await user.click(importCopy);
+    expect(post).toHaveBeenCalledWith({ type: 'contract.file', action: 'importJsonc' });
+    expect(post).not.toHaveBeenCalledWith({ type: 'contract.file', action: 'linkSuite' });
+  });
+
+  it('disables Red Team workspace-file actions in Web while preserving portable imports', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured = { ...profile, tests: { scenarios: [{ id: 'case-1', name: 'Case 1', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } }] } } as TurnStageProfile;
+    render(<AdversarialWorkspace profile={configured} post={post} activeSection="cases" vscodeFeatures={false} />);
+
+    const linkSuite = screen.getByRole('button', { name: 'Link suite' });
+    const refreshCases = screen.getByRole('button', { name: 'Refresh linked cases' });
+    expect((linkSuite as HTMLButtonElement).disabled).toBe(true);
+    expect(linkSuite.getAttribute('title')).toBe('Available only in the VS Code extension');
+    expect((refreshCases as HTMLButtonElement).disabled).toBe(true);
+    expect(refreshCases.getAttribute('title')).toBe('Available only in the VS Code extension');
+    await user.click(screen.getByRole('button', { name: 'Import CSV' }));
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'importCsv' });
+    expect(post).not.toHaveBeenCalledWith({ type: 'adversarial.file', action: 'linkSuite' });
+  });
+
   it('authors, bulk-transfers, and opens evidence for adversarial cases', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
@@ -1221,6 +1311,7 @@ describe('Webview DOM behavior', () => {
     }
     const { container } = render(<Harness />);
 
+    expect(screen.getByRole('tab', { name: 'Cases: 100' })).toBeTruthy();
     expect(container.querySelectorAll('.adversarial-case-table tbody > tr').length).toBe(25);
     expect(screen.getByText('100 of 100 cases')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Run all' }));

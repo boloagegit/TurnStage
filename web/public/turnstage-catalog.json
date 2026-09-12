@@ -1,0 +1,34 @@
+{
+  "format": "turnstage-web-catalog",
+  "version": 1,
+  "id": "turnstage-default",
+  "revision": "1",
+  "profiles": [
+    {
+      "bundled": "basic-sse-chat",
+      "category": "Examples",
+      "tags": ["chat", "sse"],
+      "version": "1"
+    },
+    {
+      "bundled": "agent-flow",
+      "category": "Examples",
+      "tags": ["agent", "flow"],
+      "version": "1"
+    },
+    {
+      "bundled": "enterprise-chat",
+      "category": "Examples",
+      "tags": ["enterprise", "contract"],
+      "version": "1"
+    }
+  ],
+  "environments": [
+    {
+      "bundled": "local",
+      "category": "Examples",
+      "tags": ["local"],
+      "version": "1"
+    }
+  ]
+}

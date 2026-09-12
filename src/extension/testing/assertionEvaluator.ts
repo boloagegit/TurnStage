@@ -50,7 +50,11 @@ export function evaluateSessionInvariants(evidence: AssertionEvidence): Scenario
   const turnTerminal = terminalTurnStates.has(snapshot.turnState);
   const assistantStateMatches = !latestAssistant || !turnTerminal || latestAssistant.status === snapshot.turnState;
   const assistantHasCompletedAt = !latestAssistant || !terminalMessageStates.has(latestAssistant.status) || typeof latestAssistant.completedAt === 'number';
-  const eventCountCoversBuffer = snapshot.metrics.eventCount >= snapshot.rawEvents.length;
+  const latestTurnId = typeof latestAssistant?.metadata?.clientRequestId === 'string' ? latestAssistant.metadata.clientRequestId : undefined;
+  const currentTurnEvents = latestTurnId && snapshot.rawEvents.some((event) => event.turnId === latestTurnId)
+    ? snapshot.rawEvents.filter((event) => event.turnId === latestTurnId)
+    : snapshot.rawEvents;
+  const eventCountCoversBuffer = snapshot.metrics.eventCount >= currentTurnEvents.length;
 
   return [
     invariant('invariant.turn-terminal', localize('Turn released all active-state locks'), turnTerminal, snapshot.turnState, [...terminalTurnStates], { kind: 'message', messageId: latestAssistant?.id }),
@@ -59,7 +63,7 @@ export function evaluateSessionInvariants(evidence: AssertionEvidence): Scenario
     invariant('invariant.assistant-completed-at', localize('Terminal assistant message has a completion time'), assistantHasCompletedAt, latestAssistant?.completedAt, 'number', { kind: 'message', messageId: latestAssistant?.id }),
     invariant('invariant.parts-terminal', localize('Progress and tool parts have no active state'), runningParts.length === 0, runningParts, [], { kind: 'message', messageId: latestAssistant?.id }),
     invariant('invariant.metrics-bounded', localize('Runtime metrics are finite and non-negative'), metricsValid, snapshot.metrics, 'finite non-negative values', { kind: 'profile', path: 'metrics' }),
-    invariant('invariant.event-count', localize('Event count covers the retained raw-event buffer'), eventCountCoversBuffer, snapshot.metrics.eventCount, `>= ${snapshot.rawEvents.length}`, { kind: 'rawEvent', sequence: snapshot.rawEvents.at(-1)?.sequence }),
+    invariant('invariant.event-count', localize('Event count covers the retained raw-event buffer'), eventCountCoversBuffer, snapshot.metrics.eventCount, `>= ${currentTurnEvents.length}`, { kind: 'rawEvent', sequence: currentTurnEvents.at(-1)?.sequence }),
   ];
 }
 

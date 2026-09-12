@@ -8,9 +8,22 @@ const mainSource = readFileSync(resolve(root, 'src/webview/main.tsx'), 'utf8');
 const mobileSource = readFileSync(resolve(root, 'src/webview/MobileChatPreview.tsx'), 'utf8');
 const mobileStyles = readFileSync(resolve(root, 'src/webview/mobileChatPreview.css'), 'utf8').replace(/\r\n?/gu, '\n');
 const baseStyles = readFileSync(resolve(root, 'src/webview/styles.css'), 'utf8').replace(/\r\n?/gu, '\n');
+const settingsStyles = readFileSync(resolve(root, 'src/webview/settingsWorkspace.css'), 'utf8').replace(/\r\n?/gu, '\n');
+const settingsSource = readFileSync(resolve(root, 'src/webview/SettingsWorkspace.tsx'), 'utf8');
 const iconSource = readFileSync(resolve(root, 'src/webview/Icon.tsx'), 'utf8');
 
 describe('Inspector keyboard helpers', () => {
+  it('keeps every Copilot-labelled action behind the VS Code capability flag', () => {
+    for (const label of ['Ask Copilot to diagnose this configuration', 'Summarize with Copilot', 'Diagnose profile with Copilot', 'Diagnose with Copilot', 'Advisory quality review']) {
+      const labelIndex = settingsSource.indexOf(`{t('${label}')}`);
+      const start = settingsSource.lastIndexOf('<button', labelIndex);
+      const end = settingsSource.indexOf('>', start);
+      expect(labelIndex).toBeGreaterThan(-1);
+      expect(settingsSource.slice(start, end)).toContain('disabled={!vscodeFeatures}');
+      expect(settingsSource.slice(start, end)).toContain("t('Available only in the VS Code extension')");
+    }
+  });
+
   it('moves horizontal tabs with wrapping and Home/End', () => {
     expect(getRovingIndex(0, 'ArrowLeft', 4, 'horizontal')).toBe(3);
     expect(getRovingIndex(3, 'ArrowRight', 4, 'horizontal')).toBe(0);
@@ -88,6 +101,19 @@ describe('Inspector keyboard helpers', () => {
     expect(mobileStyles).toContain('outline-offset: -2px;');
     expect(baseStyles).toContain('outline: 2px solid var(--vscode-focusBorder);');
     expect(baseStyles).toContain('outline-offset: -2px;');
+  });
+
+  it('aligns inspector tabs with the right pane edge', () => {
+    expect(baseStyles).toMatch(/\.mini-tabs\s*\{[^}]*padding-inline:\s*0;/u);
+  });
+
+  it('uses one VS Code-relative type and pane spacing system', () => {
+    expect(baseStyles).toContain('--ts-type-title: calc(var(--ts-font-size) * 1.2308);');
+    expect(baseStyles).toContain('--ts-pane-inline: var(--ts-space-4);');
+    expect(baseStyles).not.toContain('clamp(14px, 4vw, 40px)');
+    expect(settingsStyles).toContain('font-family: var(--vscode-font-family);');
+    expect(settingsStyles).toContain('.settings-workspace--embedded .settings-editor-frame > .content-page');
+    expect(settingsStyles).toContain('margin-inline: calc(var(--ts-pane-inline) * -1);');
   });
 
   it('uses logical directional CSS and keeps long-script content breakable', () => {

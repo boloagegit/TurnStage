@@ -354,7 +354,7 @@ export function MobileChatPreview({
   const rootClassName = ['mobile-chat-preview', className].filter(Boolean).join(' ');
 
   return <section className={rootClassName} aria-label={t('Responsive chat preview')}>
-    <header className="mobile-chat-preview__viewport-toolbar" aria-label={t('Chat preview controls')}>
+    <header className="mobile-chat-preview__viewport-toolbar" role="group" aria-label={t('Chat preview controls')}>
       <details className="mobile-chat-preview__viewport-settings">
         <summary aria-label={t('Preview size settings')}><ProductIcon name={responsive ? 'screen-full' : logicalWidth >= 900 ? 'device-desktop' : 'device-mobile'} /><span>{t('Preview size')}</span><small>{responsive ? t('Responsive') : `${formatNumber(logicalWidth)} × ${formatNumber(logicalHeight)}`}</small></summary>
         <div className="mobile-chat-preview__viewport-settings-panel">
@@ -366,7 +366,7 @@ export function MobileChatPreview({
       <div className="mobile-chat-preview__session-tools" role="group" aria-label={t('Session status and actions')}>
         <span className="mobile-chat-preview__environment">{profile.environment ?? t('No environment')}</span>
         <span aria-hidden="true">·</span>
-        <span className={`mobile-chat-preview__session-state mobile-chat-preview__session-state--${sessionState}`} aria-label={t('Conversation status: {status}', { status: humanize(sessionState) })}>
+        <span className={`mobile-chat-preview__session-state mobile-chat-preview__session-state--${sessionState}`} role="status" aria-label={t('Conversation status: {status}', { status: humanize(sessionState) })}>
           <ProductIcon name="circle-filled" />
           <span>{humanize(sessionState)}</span>
         </span>
@@ -522,7 +522,7 @@ function StartSessionCard({ post, trusted, headingId }: { post: PostMessage; tru
   return <section className="mobile-chat-preview__session-start" aria-labelledby={headingId}>
     <ProductIcon name="debug-start" />
     <div className="mobile-chat-preview__session-start-copy">
-      <h3 id={headingId}>{t('Not started')}</h3>
+      <h2 id={headingId}>{t('Not started')}</h2>
       <p>{t('This profile loads its opening message when a session starts.')}</p>
     </div>
     <button className="mobile-chat-preview__button mobile-chat-preview__button--primary" type="button" disabled={!trusted} onClick={() => post({ type: 'session.start' })}>{t('Start session')}</button>
@@ -533,7 +533,7 @@ function OpeningLoading({ headingId }: { headingId: string }): React.JSX.Element
   return <section className="mobile-chat-preview__session-start mobile-chat-preview__session-start--loading" role="status" aria-labelledby={headingId}>
     <ProductIcon name="loading" />
     <div className="mobile-chat-preview__session-start-copy">
-      <h3 id={headingId}>{t('Loading opening…')}</h3>
+      <h2 id={headingId}>{t('Loading opening…')}</h2>
       <p>{t('TurnStage is starting this session automatically.')}</p>
     </div>
   </section>;
@@ -542,7 +542,7 @@ function OpeningLoading({ headingId }: { headingId: string }): React.JSX.Element
 function OpeningError({ profile, snapshot, post, trusted, headingId }: { profile: TurnStageProfile; snapshot: SessionSnapshot; post: PostMessage; trusted: boolean; headingId: string }): React.JSX.Element {
   const error = snapshot.errors.at(-1)?.message ?? t('The opening content could not be loaded.');
   return <section className="mobile-chat-preview__opening-error" role="alert" aria-labelledby={headingId}>
-    <h3 id={headingId}>{t('Opening request failed')}</h3>
+    <h2 id={headingId}>{t('Opening request failed')}</h2>
     <p>{error}</p>
     <div className="mobile-chat-preview__action-row">
       <button className="mobile-chat-preview__button mobile-chat-preview__button--primary" type="button" disabled={!trusted} onClick={() => post({ type: 'opening.retry' })}>{t('Retry opening')}</button>
@@ -554,9 +554,9 @@ function OpeningError({ profile, snapshot, post, trusted, headingId }: { profile
 function OpeningCard({ profile, opening, active, trusted, setDraft, send, post, headingId }: { profile: TurnStageProfile; opening: NonNullable<SessionSnapshot['opening']>; active: boolean; trusted: boolean; setDraft: SetDraft; send: SendMessage; post: PostMessage; headingId: string }): React.JSX.Element {
   return <section className="mobile-chat-preview__opening" aria-labelledby={headingId}>
     <span className="mobile-chat-preview__opening-avatar" aria-hidden="true">{profile.name.trim().charAt(0).toUpperCase() || 'T'}</span>
-    <div className="mobile-chat-preview__opening-content"><h3 className="mobile-chat-preview__opening-label" id={headingId}>{t('Opening')}</h3><p className="mobile-chat-preview__opening-message">{opening.message}</p>
+    <div className="mobile-chat-preview__opening-content"><h2 className="mobile-chat-preview__opening-label" id={headingId}>{t('Opening')}</h2><p className="mobile-chat-preview__opening-message">{opening.message}</p>
       {opening.blocks?.length ? <OpeningBlocks blocks={opening.blocks} active={active} trusted={trusted} setDraft={setDraft} send={send} /> : null}
-      {componentVisible(profile, 'starters') && opening.starters.length > 0 && <div className="mobile-chat-preview__starter-list" aria-label={t('Starter prompts')}>
+      {componentVisible(profile, 'starters') && opening.starters.length > 0 && <div className="mobile-chat-preview__starter-list" role="group" aria-label={t('Starter prompts')}>
         {opening.starters.map((starter) => <StarterButton key={starter.id} starter={starter} active={active} trusted={trusted} setDraft={setDraft} send={send} post={post} />)}
       </div>}
     </div>
@@ -566,7 +566,7 @@ function OpeningCard({ profile, opening, active, trusted, setDraft, send, post, 
 function OpeningBlocks({ blocks, active, trusted, setDraft, send }: { blocks: OpeningInfoBlock[]; active: boolean; trusted: boolean; setDraft: SetDraft; send: SendMessage }): React.JSX.Element {
   return <div className="mobile-chat-preview__opening-blocks">{blocks.map((block) => <section className={`mobile-chat-preview__opening-block mobile-chat-preview__opening-block--${block.kind}`} key={block.id} aria-label={block.label || t('Opening information')}>
     {block.label ? <h4>{block.label}</h4> : null}
-    {block.empty ? <span className="mobile-chat-preview__opening-block-empty">{t('No information available')}</span> : block.kind === 'choices' ? <div className="mobile-chat-preview__starter-list" aria-label={block.label || t('Suggested choices')}>{block.items.map((item) => <StarterButton key={item.id} starter={item} active={active} trusted={trusted} setDraft={setDraft} send={send} post={() => undefined} />)}</div> : block.kind === 'fields' ? <dl>{block.items.map((item) => <div key={item.id}><dt>{item.label}</dt><dd>{formatOpeningField(item.value, item.format)}</dd></div>)}</dl> : block.kind === 'meter' ? <div className="mobile-chat-preview__opening-meter"><div><strong>{formatNumber(block.value ?? 0)}</strong><span> / {formatNumber(block.max ?? 0)}{block.unit ? ` ${block.unit}` : ''}</span></div><progress aria-label={block.label || t('Usage')} value={Math.max(0, Math.min(block.value ?? 0, block.max ?? 0))} max={block.max || 1} />{block.resetAt ? <span>{t('Resets {time}', { time: formatOpeningDate(block.resetAt) })}</span> : null}</div> : block.kind === 'status' ? <span className={`mobile-chat-preview__opening-status is-${block.tone}`}>{block.value}</span> : <details open={!block.defaultCollapsed}><summary>{block.label ? t('View details') : t('Opening information')}</summary><pre className="json"><code><JsonSyntax value={block.value} /></code><ClipboardButton text={safeJson(block.value)} label={t('Copy JSON')} /></pre></details>}
+    {block.empty ? <span className="mobile-chat-preview__opening-block-empty">{t('No information available')}</span> : block.kind === 'choices' ? <div className="mobile-chat-preview__starter-list" role="group" aria-label={block.label || t('Suggested choices')}>{block.items.map((item) => <StarterButton key={item.id} starter={item} active={active} trusted={trusted} setDraft={setDraft} send={send} post={() => undefined} />)}</div> : block.kind === 'fields' ? <dl>{block.items.map((item) => <div key={item.id}><dt>{item.label}</dt><dd>{formatOpeningField(item.value, item.format)}</dd></div>)}</dl> : block.kind === 'meter' ? <div className="mobile-chat-preview__opening-meter"><div><strong>{formatNumber(block.value ?? 0)}</strong><span> / {formatNumber(block.max ?? 0)}{block.unit ? ` ${block.unit}` : ''}</span></div><progress aria-label={block.label || t('Usage')} value={Math.max(0, Math.min(block.value ?? 0, block.max ?? 0))} max={block.max || 1} />{block.resetAt ? <span>{t('Resets {time}', { time: formatOpeningDate(block.resetAt) })}</span> : null}</div> : block.kind === 'status' ? <span className={`mobile-chat-preview__opening-status is-${block.tone}`}>{block.value}</span> : <details open={!block.defaultCollapsed}><summary>{block.label ? t('View details') : t('Opening information')}</summary><pre className="json"><code><JsonSyntax value={block.value} /></code><ClipboardButton text={safeJson(block.value)} label={t('Copy JSON')} /></pre></details>}
   </section>)}</div>;
 }
 

@@ -164,4 +164,16 @@ describe('session invariants', () => {
 
     expect(checks.find((check) => check.id === 'invariant.turn-terminal')).toMatchObject({ passed: false, actual: 'streaming' });
   });
+
+  it('compares per-turn metrics with only the latest turn in a retained multi-turn event buffer', () => {
+    const multiTurn = evidence();
+    multiTurn.snapshot.messages[0]!.metadata = { clientRequestId: 'turn-2' };
+    multiTurn.snapshot.rawEvents = [
+      ...multiTurn.snapshot.rawEvents.map((event) => ({ ...event, turnId: 'turn-1' })),
+      ...multiTurn.snapshot.rawEvents.map((event) => ({ ...event, sequence: event.sequence + 3, turnId: 'turn-2' })),
+    ];
+    multiTurn.snapshot.metrics.eventCount = 3;
+
+    expect(evaluateSessionInvariants(multiTurn).find((check) => check.id === 'invariant.event-count')).toMatchObject({ passed: true, expected: '>= 3' });
+  });
 });

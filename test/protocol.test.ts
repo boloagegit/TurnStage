@@ -44,6 +44,7 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.case.save', sourcePath: 'tests/safety.adversarial.csv', scenarioId: 'case-1', expectedRevision: 'a'.repeat(64), scenario: linkedScenario }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.case.save', sourcePath: 'tests/safety.adversarial.csv', scenarioId: 'case-1', expectedRevision: 'stale', scenario: linkedScenario }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'contract.file', action: 'linkSuite' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'contract.file', action: 'importJsonc' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'contract.catalog.request', force: true }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'contract.case.save', sourcePath: 'tests/regression.csv', scenarioId: 'case-1', expectedRevision: 'b'.repeat(64), scenario: { id: 'case-1', name: 'Case 1', steps: [{ id: 'turn-1', input: 'hello' }] } }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.runCase', scenarioId: 'case-1', suiteId: 'safety' }, 'editor-1')).toBe(true);
@@ -80,6 +81,10 @@ describe('cross-boundary message validation', () => {
 
   it('validates Host messages before the Webview consumes them', () => {
     expect(isHostMessage({ ...envelope, type: 'host.ready', trusted: true, locale: 'zh-tw', direction: 'ltr' }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'host.ready', trusted: true, locale: 'zh-tw', direction: 'ltr', hostKind: 'web' }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'host.ready', trusted: true, locale: 'zh-tw', direction: 'ltr', hostKind: 'desktop' }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, type: 'profile.snapshot', version: 1, environments: [], readOnly: true }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'profile.snapshot', version: 1, environments: [], readOnly: 'yes' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'workspace.section', section: 'legacy' }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'workspace.navigate', destination: { pane: 'adversarial', section: 'results' } }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'workspace.navigate', destination: { pane: 'tests', section: 'scenarios' } }, 'editor-1')).toBe(true);

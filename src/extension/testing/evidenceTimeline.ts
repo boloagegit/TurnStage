@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import type { AdversarialOutcome, EvidenceTimelineEntry, EvidenceTimelinePhase, EvidenceTimelineStatus, EvidenceTimelineSummary, NetworkExchange, ScenarioEvidenceLocation, ScenarioRunResult } from '../../shared/types';
+import { sha256Hex } from '../../shared/sha256';
 
 export const EVIDENCE_TIMELINE_VERSION = 1 as const;
 export const MAX_EVIDENCE_TIMELINE_ENTRIES = 256;
@@ -133,7 +133,7 @@ export function fingerprintFailure(result: ScenarioRunResult): FailureFingerprin
     statusCode: failure?.metadata?.statusCode,
     ruleId: failure?.metadata?.ruleId,
   };
-  return { version: 1, digest: createHash('sha256').update(stableJson(material)).digest('hex'), ...material };
+  return { version: 1, digest: sha256Hex(stableJson(material)), ...material };
 }
 
 export function clusterFailures(items: readonly { caseId: string; result: ScenarioRunResult }[]): FailureClusterV1[] {

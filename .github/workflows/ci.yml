@@ -28,7 +28,9 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - run: npm run test:web
       - run: npm run compile
+      - run: npm run web:build
       - name: Extension Host integration tests
         if: runner.os != 'Linux'
         run: npm run test:integration
@@ -41,11 +43,18 @@ jobs:
           TURNSTAGE_VSCODE_VERSION: 1.106.0
         run: xvfb-run -a npm run test:integration
       - run: npm run package
+      - run: npm run package:web
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: runner.os == 'Linux'
         with:
           name: turnstage-vsix
           path: '*.vsix'
+          retention-days: 14
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: runner.os == 'Linux'
+        with:
+          name: turnstage-web
+          path: 'turnstage-web-*.zip'
           retention-days: 14
 
   security:

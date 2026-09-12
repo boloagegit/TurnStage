@@ -39,20 +39,35 @@ async function assertRedTeamTabVisual(navigation, label) {
   const style = await selected.evaluate((element) => {
     const navigationElement = element.closest('.red-team-section-nav');
     const computed = getComputedStyle(element);
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = 'var(--vscode-list-inactiveSelectionBackground)';
+    document.body.append(probe);
+    const selectedSurface = getComputedStyle(probe).backgroundColor;
+    probe.remove();
     return {
       appearance: computed.appearance,
       backgroundColor: computed.backgroundColor,
       backgroundImage: computed.backgroundImage,
-      borderBottomColor: computed.borderBottomColor,
+      borderBottomWidth: computed.borderBottomWidth,
+      fontWeight: computed.fontWeight,
       boxShadow: computed.boxShadow,
+      selectedSurface,
       navigationBackgroundColor: navigationElement ? getComputedStyle(navigationElement).backgroundColor : '',
     };
   });
   assert.equal(style.appearance, 'none', `${label}: Red Team tabs must opt out of native button painting`);
-  assert.equal(style.backgroundColor, style.navigationBackgroundColor, `${label}: the selected and hovered Red Team tab must use the navigation surface instead of a dark button fill`);
+  assert.equal(style.backgroundColor, style.selectedSurface, `${label}: the selected and hovered Red Team tab must use the complete selected surface`);
   assert.equal(style.backgroundImage, 'none', `${label}: the selected Red Team tab must not paint a background image`);
   assert.equal(style.boxShadow, 'none', `${label}: the selected Red Team tab must not paint a selection block through a shadow`);
-  assert.notEqual(style.borderBottomColor, 'rgba(0, 0, 0, 0)', `${label}: the selected Red Team tab must keep a visible focus underline`);
+  assert.equal(style.borderBottomWidth, '0px', `${label}: the selected Red Team tab must not use a one-sided colored underline`);
+  assert.ok(Number(style.fontWeight) >= 600, `${label}: the selected Red Team tab must retain a non-color cue`);
+}
+
+async function assertInlineInset(child, container, expected, label) {
+  const [childBounds, containerBounds] = await Promise.all([child.boundingBox(), container.boundingBox()]);
+  assert.ok(childBounds && containerBounds, `${label}: both elements must be rendered`);
+  const inset = childBounds.x - containerBounds.x;
+  assert.ok(Math.abs(inset - expected) <= 1, `${label}: expected ${expected}px inline inset, received ${inset}px`);
 }
 
 async function assertAdversarialResultLayout(table, label) {
@@ -174,6 +189,7 @@ try {
   await page.getByRole('tab', { name: 'Network' }).click();
   const networkList = page.getByRole('listbox', { name: 'Network requests' });
   assert.equal(await networkList.getByRole('option').count(), 3, 'Network must list opening and each stream attempt');
+  await assertInlineInset(networkList, page.locator('.right-pane-panel'), 0, 'Network data table');
   assert.equal(await networkList.getByRole('option', { name: /stream.*Attempt 2/i }).getAttribute('aria-selected'), 'true', 'Latest request must be selected by default');
   assert.ok((await page.getByRole('region', { name: 'Request details' }).innerText()).includes('IdleTimeoutError'), 'Failed request details must expose the timeout class');
   await page.getByRole('tab', { name: 'Payload' }).click();
@@ -187,9 +203,23 @@ try {
   assert.notEqual(payloadColors.key, payloadColors.punctuation, 'Network Payload JSON keys and punctuation must remain visually distinct');
   await page.getByRole('tabpanel', { name: 'Payload' }).screenshot({ path: resolve(artifactDirectory, 'network-payload-json-dark.png') });
   await page.getByRole('tab', { name: 'Response' }).click();
-  assert.ok((await page.getByRole('tabpanel', { name: 'Response' }).innerText()).includes('Working'), 'Response view must expose the bounded response preview');
+  const responsePanel = page.getByRole('tabpanel', { name: 'Response' });
+  assert.ok((await responsePanel.innerText()).includes('Working'), 'Response view must expose the bounded response preview');
+  const responseCodeSurface = responsePanel.locator('.network-response > pre, .network-response .json-view > pre');
+  await assertInlineInset(responseCodeSurface, responsePanel, 0, 'Response code surface');
+  assert.equal(await responseCodeSurface.evaluate((element) => getComputedStyle(element).paddingInlineStart), '16px', 'Response content must use the shared right-pane inline padding');
   await page.getByRole('tab', { name: 'Timing' }).click();
-  assert.ok((await page.getByRole('tabpanel', { name: 'Timing' }).innerText()).includes('5,000 ms'), 'Timing view must expose the configured idle timeout');
+  const timingPanel = page.getByRole('tabpanel', { name: 'Timing' });
+  assert.ok((await timingPanel.innerText()).includes('5,000 ms'), 'Timing view must expose the configured idle timeout');
+  await assertInlineInset(timingPanel.locator('.network-properties--timing dt').first(), timingPanel, 16, 'Timing content');
+  const timingTypography = await timingPanel.locator('.network-properties--timing dd').first().evaluate((element) => ({
+    family: getComputedStyle(element).fontFamily,
+    bodyFamily: getComputedStyle(document.body).fontFamily,
+    size: getComputedStyle(element).fontSize,
+    bodySize: getComputedStyle(document.body).fontSize,
+  }));
+  assert.equal(timingTypography.family, timingTypography.bodyFamily, 'Timing values must use the host interface font');
+  assert.equal(timingTypography.size, timingTypography.bodySize, 'Timing values must use the body type level');
   await page.getByRole('tab', { name: 'Headers' }).click();
   const networkHeaders = await page.getByRole('tabpanel', { name: 'Headers' }).innerText();
   assert.ok(!networkHeaders.includes('local-debug-token') && networkHeaders.includes('••••••••'), 'Header view must mask Authorization and response cookies');
@@ -202,6 +232,7 @@ try {
   assert.equal(await page.locator('#network-row-stream-1').getAttribute('aria-selected'), 'true', 'Inspect request must select the request from the same conversation turn');
   await page.screenshot({ path: resolve(artifactDirectory, 'inspect-request-network-dark.png'), fullPage: true });
   await page.getByRole('tab', { name: 'Raw Events' }).click();
+  await assertInlineInset(page.getByRole('tree', { name: 'Raw Events' }), page.locator('.right-pane-panel'), 0, 'Raw Events data tree');
   const screenshotButton = page.getByRole('button', { name: 'Copy chat screenshot' });
   await page.keyboard.press('Tab');
   await screenshotButton.focus();
@@ -355,12 +386,25 @@ try {
   assert.equal(await page.getByRole('region', { name: 'Event payload' }).count(), 0, 'The Event payload inspector must close without leaving the event list');
   assert.equal(await firstEventRow.getAttribute('aria-selected'), 'false', 'Closing Event payload must clear the selected event state');
   assert.equal(await firstEventRow.getAttribute('title'), 'View event payload', 'A closed event row must explain that it can reopen the payload');
+  await page.getByRole('tab', { name: 'Normalized' }).click();
+  const normalizedTree = page.getByRole('tree', { name: 'Normalized' });
+  await normalizedTree.locator('[role="treeitem"]').first().waitFor();
+  assert.equal(await normalizedTree.locator('[role="treeitem"][aria-level="2"]').count(), 6, 'Normalized must render mapped data for every fixture event');
+  await assertInlineInset(normalizedTree, page.locator('.right-pane-panel'), 0, 'Normalized data tree');
+  await page.getByRole('tab', { name: 'Metrics' }).click();
+  assert.ok(await page.locator('.metrics > div').count() >= 5, 'Metrics must render populated measurement cells');
+  await assertInlineInset(page.locator('.metrics'), page.locator('.right-pane-panel'), 16, 'Metrics grid');
+  await page.getByRole('tab', { name: 'Errors' }).click();
+  assert.equal(await page.locator('.error-list details').count(), 1, 'Errors must render the fixture runtime error');
+  await assertInlineInset(page.locator('.error-list details').first(), page.locator('.right-pane-panel'), 16, 'Errors list');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'debug-tabs-populated-dark.png') });
   await page.getByRole('tab', { name: 'Configure' }).click();
   await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
   assert.equal(await page.locator('.preview-pane').count(), 1, 'Opening Configure must keep the Chat preview mounted');
   assert.equal(await page.locator('.settings-workspace--embedded').count(), 1, 'Configure uses the compact right-pane settings layout');
   assert.equal(await page.getByRole('navigation', { name: 'Profile configuration sections' }).count(), 0, 'Embedded Configure must not add another navigation rail');
   assert.equal(await page.getByRole('combobox', { name: 'Profile configuration sections' }).inputValue(), 'general', 'Embedded Configure uses one compact section picker');
+  await assertInlineInset(page.locator('.settings-panel-heading'), page.locator('.right-pane-panel'), 16, 'Configure heading');
   assert.equal(await page.locator('[data-message-id="assistant-1"][data-selected="true"]').count(), 0, 'Configure must hide Debug message selection styling');
   await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-dirty', type: 'profile.editState', dirty: true } })));
   await page.getByText('Unsaved changes', { exact: true }).waitFor();
@@ -405,6 +449,7 @@ try {
   await page.getByRole('heading', { level: 1, name: 'Automated testing' }).waitFor();
   const automationNavigation = page.getByRole('tablist', { name: 'Test sections' });
   assert.equal(await automationNavigation.getByRole('tab').count(), 3, 'Tests must expose Results, Cases, and Campaigns');
+  await assertInlineInset(automationNavigation, page.locator('.right-pane-panel'), 0, 'Tests section tabs');
   await assertRedTeamTabVisual(automationNavigation, 'Automation dark theme');
   assert.equal(await page.getByRole('heading', { name: 'Latest test results' }).count(), 1, 'Tests opens on functional automation results');
   assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 0, 'Results must remain an inspection surface, not the main execution surface');
@@ -816,6 +861,7 @@ try {
   await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'input-hover-vscode-dark.png') });
   await idleComposer.focus();
   assert.notEqual(await composerControl.evaluate((element) => getComputedStyle(element).borderColor), idleComposerBorder, 'Composer focus must use the VS Code focus border');
+  assert.equal(await idleComposer.evaluate((element) => getComputedStyle(element).outlineStyle), 'none', 'Composer focus must not draw a second outline inside the focus border');
   await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'input-focus-vscode-dark.png') });
 
   await page.goto(`${url}?section=chat-ui&indicator=dots&reveal=adaptive&pace=fast&maxVisualLag=500&speed=1200&intensity=80`);
@@ -837,6 +883,15 @@ try {
 
   await page.goto(`${url}?openingBlocks=true&section=opening-flow`);
   await waitForProfile();
+  await assertInlineInset(page.locator('.settings-editor-frame .config-section').first(), page.locator('.right-pane-panel'), 16, 'Opening and Flow nested editor');
+  const openingTypeScale = await page.evaluate(() => ({
+    family: getComputedStyle(document.querySelector('.settings-workspace')).fontFamily,
+    heading: Number.parseFloat(getComputedStyle(document.querySelector('.settings-panel-heading h1')).fontSize),
+    nested: Number.parseFloat(getComputedStyle(document.querySelector('.settings-editor-frame .page-heading h2')).fontSize),
+    body: Number.parseFloat(getComputedStyle(document.querySelector('.settings-editor-frame .config-section')).fontSize),
+  }));
+  assert.ok(openingTypeScale.family.length > 0, 'Settings must inherit the host font family');
+  assert.ok(openingTypeScale.heading > openingTypeScale.nested && openingTypeScale.nested >= openingTypeScale.body, `Settings type levels must descend from page to nested editor to body; received ${JSON.stringify(openingTypeScale)}`);
   const openingBlocks = page.locator('.mobile-chat-preview__opening-block');
   assert.equal(await openingBlocks.count(), 4, 'Opening must render choices, fields, meter, and status from one canonical block list');
   assert.equal(await page.getByRole('progressbar', { name: 'Usage' }).getAttribute('value'), '48', 'Opening meter must expose the provider quota value');
@@ -856,6 +911,7 @@ try {
 
   await page.getByRole('tab', { name: 'Runs' }).click();
   await page.getByRole('heading', { name: 'Recorded runs' }).waitFor();
+  await assertInlineInset(page.locator('.replay-page > .page-heading'), page.locator('.right-pane-panel'), 16, 'Recorded Runs content');
   assert.equal(await page.getByRole('button', { name: 'Import run' }).count(), 1, 'Recorded Runs must expose Import run');
   await page.screenshot({ path: resolve(artifactDirectory, 'recorded-runs-dark.png'), fullPage: true });
 

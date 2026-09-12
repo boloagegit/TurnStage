@@ -144,6 +144,16 @@ TurnStage currently targets desktop and remote VS Code Extension Hosts. It
 does not declare a `browser` entry and therefore does not claim support for
 `vscode.dev` or `github.dev`.
 
+### Standalone Web build
+
+The same repository also produces a standalone static browser application; it is not a VSIX host and does not require code-server, OpenVSCode Server, Theia, Node.js, or an Extension Host in production:
+
+```sh
+npm run package:web
+```
+
+Extract `turnstage-web-<version>.zip` behind any static Linux web server. The archive includes both Web guides under `docs/`. Replace the adjacent `turnstage-catalog.json` to provide deployment-owned, read-only official Profile and Environment presets without rebuilding the application. Official Profile controls stay disabled until the user explicitly duplicates the preset into browser-local storage; the Web host also rejects direct writes to the server-owned entry. Users can create, import, duplicate, edit, delete, and export their own browser-local Profiles without changing the official catalog. A portable Profile export contains the Profile, its referenced Environment, and any plaintext credentials stored in either, so another user can import one file and run the same configuration. The browser connects directly to target APIs, so those APIs must be reachable from the user device, trust their TLS certificate, and allow the Web origin through CORS. Personal Profiles and Environments remain in browser `localStorage`, larger testing artifacts remain in IndexedDB, and optional `${secret.*}` session values remain only in page memory. See the [`Web deployment guide`](https://github.com/boloagegit/TurnStage/blob/main/docs/web-deployment.md) for administrator setup, catalog semantics, and security boundaries, and the [`TurnStage Web user guide`](https://github.com/boloagegit/TurnStage/blob/main/docs/web-user-guide.md) for browser-local Profile, Environment, test, backup, and troubleshooting workflows.
+
 ## First run
 
 1. Open a workspace folder in VS Code.

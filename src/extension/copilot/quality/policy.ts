@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { sha256Hex } from '../../../shared/sha256';
 import {
   DEFAULT_QUALITY_RUBRIC,
   QUALITY_REVIEW_LIMITS,
@@ -73,7 +73,7 @@ export function createQualityDisclosureGrant(input: {
     if (disclosedCharacters > QUALITY_REVIEW_LIMITS.maxTotalCharacters) throw new QualityPolicyError('INVALID_SELECTION', `Selected responses exceed ${QUALITY_REVIEW_LIMITS.maxTotalCharacters} characters.`);
     return { attemptId, response: attempt.response };
   });
-  const grantId = safeId(input.grantId ?? randomUUID(), 'grant id');
+  const grantId = safeId(input.grantId ?? crypto.randomUUID(), 'grant id');
   return {
     version: 'QualityDisclosureGrantV1', grantId, evidenceIds, attempts, rubrics: validateQualityRubrics(input.rubrics), disclosedCharacters,
     createdAt: now, expiresAt: now + QUALITY_REVIEW_LIMITS.grantTtlMs,
@@ -151,7 +151,7 @@ export class QualityGrantStore {
   private prune(now: number): void { for (const [id, grant] of this.grants) if (grant.expiresAt < now) this.grants.delete(id); }
 }
 
-function digest(value: unknown): string { return createHash('sha256').update(canonical(value)).digest('hex'); }
+function digest(value: unknown): string { return sha256Hex(canonical(value)); }
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;

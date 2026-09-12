@@ -13,6 +13,8 @@ TurnStage includes or bundles the following third-party software.
 
 ## MIT-licensed software
 
+- `@noble/hashes` — Copyright (c) 2022 Paul Miller
+- `fflate` — Copyright (c) 2026 Arjun Barrett
 - `html-to-image` — Copyright (c) 2017–2025 W.Y.
 - `jsonc-parser` — Copyright (c) Microsoft
 - `pngjs` — Copyright (c) 2015 Luke Page and original contributors; derived
@@ -41,4 +43,3 @@ The following MIT terms apply to the software listed above:
 > LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
-

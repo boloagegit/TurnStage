@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from '../../shared/sha256';
 
 export const PROVENANCE_FORMAT = 'turnstage-provenance-manifest' as const;
 export const PROVENANCE_VERSION = 1 as const;
@@ -244,7 +244,7 @@ export function sanitizeForManifest(value: unknown, secretValues: readonly unkno
 }
 
 export function sha256(value: string | Uint8Array): string {
-  return createHash('sha256').update(value).digest('hex');
+  return sha256Hex(value);
 }
 
 function validateInput(input: ProvenanceInput): void {

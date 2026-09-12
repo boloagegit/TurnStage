@@ -2,6 +2,110 @@
 
 ## Unreleased
 
+## 0.27.0
+
+- Made standalone Web testing capability-aware: workspace file linking,
+  source-file refresh, original-file opening, Test Explorer, Output, and
+  Copilot-only actions are visibly disabled instead of failing after use.
+- Added browser-local JSONC suite import for functional tests while retaining
+  JSONC, CSV, and JSONL import/export for adversarial tests. Imported suites
+  remain editable and runnable in IndexedDB without modifying the original
+  files.
+- Added a standalone static Web distribution with deployment-managed,
+  read-only Profile presets, browser-local Profile copies, portable Profile
+  and Environment transfer, four display languages, and documented Linux
+  deployment without a VS Code Extension Host.
+- Unified Web and VSIX right-pane layout, typography, responsive behavior,
+  theme tokens, accessible disabled states, and test/evidence navigation.
+- Hardened request authorization, redaction, portable artifact validation, and
+  fail-closed functional and adversarial test outcomes.
+- Compatibility: existing Profile, Environment, test-suite, and VSIX formats
+  remain supported. Web imports are explicit browser copies; live workspace
+  file linking continues to require the VS Code extension.
+
+## 0.26.5
+
+- Unified right-pane gutters across Debug, Tests, Red Team, Configure, and Runs,
+  including nested editors selected from the Configure section picker.
+- Added a semantic type scale derived from the VS Code host font size while
+  retaining the VS Code font family in the VSIX.
+- Made deployment-owned Web catalog Profiles explicitly read-only: users must
+  duplicate a preset before editing, and the Web host rejects direct writes.
+- Disabled controls whose capability exists only in the VS Code Extension Host
+  when the shared workspace is running in the standalone Web application,
+  including every Copilot/Profile Doctor/AI Advisory action. The Web host now
+  rejects direct Copilot messages instead of substituting local downloads.
+- Compatibility: Profile, Environment, portable export, and VSIX file formats
+  are unchanged from 0.26.4; the Web/Host message protocol adds optional
+  capability and read-only metadata.
+
+## 0.26.4
+
+- Removed the duplicate inner focus outline from the chat composer while
+  retaining its accessible outer focus border.
+- Compatibility: no Profile, Environment, Web bundle, or VSIX contract changed.
+
+## 0.26.3
+
+- Aligned the Network inspector tab with the right pane edge by removing its
+  stray two-pixel inline inset.
+- Compatibility: no Profile, Environment, Web bundle, or VSIX contract changed.
+
+## 0.26.2
+
+- Unified the standalone Web Profile library with the shared VS Code workbench
+  surfaces, selection states, spacing, controls, typography, and Codicons.
+- Removed sidebar-only gradients, shadows, oversized rounding, and decorative
+  selection treatments while preserving the existing Profile workflows.
+- Kept Environment, theme, language, and Profile actions reachable in
+  low-height browser windows by bounding and scrolling the settings footer.
+- Compatibility: no Profile, Environment, Web bundle, or VSIX contract changed.
+
+## 0.26.1
+
+- Fixed Web streaming completion so active progress and tool parts move to a
+  terminal state instead of remaining visually active after the response ends.
+- Fixed multi-turn contract validation so the current turn's event metric is
+  compared with that turn's correlated raw events rather than the retained
+  conversation-wide event buffer.
+- Fixed Red Team case totals after importing browser-local JSONC, CSV, or JSONL
+  suites, and added accessible names for Profile choices on narrow layouts.
+- Compatibility: Profile, Environment, portable export, and VSIX formats are
+  unchanged from 0.26.0.
+
+## 0.26.0
+
+- Added a single-file TurnStage Web portable Profile export that carries the
+  selected Profile, its referenced Environment, and plaintext credentials
+  stored in either. Import creates a collision-safe local pair and keeps the
+  Profile bound to the imported Environment.
+- Allowed deployment-owned Web Catalog presets to contain plaintext shared
+  credentials, and made their browser-storage and distribution exposure
+  explicit in the interface and Web guides. Optional `${secret.*}` session
+  values remain memory-only and are not added to portable exports.
+- Fixed Web Profile selection so it activates the Environment referenced by
+  the selected Profile before starting its browser session.
+- Compatibility: legacy single Profile JSON/JSONC imports and separate
+  Environment imports remain supported. VSIX Profile behavior and
+  SecretStorage are unchanged; the new Web bundle is a Web-only envelope.
+
+## 0.25.0
+
+- Added a standalone static TurnStage Web build that shares the production
+  Profile, request, streaming, inspection, testing, adversarial, evidence, and
+  redaction paths without requiring a VS Code Extension Host in production.
+- Added a deployment-owned official Profile and Environment catalog with
+  immutable presets, deterministic browser-local overlays, import, export,
+  duplication, update notices, four display languages, and documented Linux
+  deployment and end-user workflows.
+- Kept Web secrets in page memory, rejected persisted credential literals from
+  configured catalogs, bounded catalog and browser artifact inputs, and made
+  direct browser connectivity, TLS, CORS, and origin-scoped storage limits
+  explicit.
+- Compatibility: the desktop and remote VSIX behavior and Profile format remain
+  supported. Existing versioned Web browser data is preserved; moving to a
+  different Web origin requires an explicit export and import.
+
 ## 0.24.0
 
 - Added low-friction, workspace-local connection approval for the first
