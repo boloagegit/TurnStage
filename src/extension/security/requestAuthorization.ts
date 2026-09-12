@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
 import * as vscode from 'vscode';
 import type { PreparedRequest, RequestDefinition, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
+import { sha256Hex } from '../../shared/sha256';
 import { localize } from '../l10n';
 
 const STORAGE_KEY = 'turnstage.requestAuthorizations.v1';
@@ -114,7 +114,7 @@ export function requestAuthorizationFingerprint(
     hasSecrets: assessment.hasSecrets,
     invalidCertificates: assessment.invalidCertificates,
   });
-  return createHash('sha256').update(material).digest('hex');
+  return sha256Hex(material);
 }
 
 function authorizationDetail(profile: TurnStageProfile, request: PreparedRequest, assessment: RequestAuthorizationAssessment): string {

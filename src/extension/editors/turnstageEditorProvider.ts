@@ -279,7 +279,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     });
     const postHostReady = (requestId?: string) => {
       const locale = configuredLocale();
-      return post({ type: 'host.ready', trusted: vscode.workspace.isTrusted, remoteName: vscode.env.remoteName, locale, direction: textDirection(locale) }, requestId);
+      return post({ type: 'host.ready', trusted: vscode.workspace.isTrusted, remoteName: vscode.env.remoteName, locale, direction: textDirection(locale), hostKind: 'vscode' }, requestId);
     };
     const configurationListener = vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('turnstage.displayLanguage')) observeBackground(postHostReady(), 'display-language');
@@ -879,6 +879,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private async handleContractFile(document: vscode.TextDocument, action: Extract<WebviewMessage, { type: 'contract.file' }>['action']): Promise<{ status: 'completed' | 'cancelled'; detail: string; path?: string }> {
     const profile = this.codec.parse(document.getText()).profile;
     if (!profile) throw new Error(localize('Profile could not be parsed.'));
+    if (action === 'importJsonc') throw new Error(localize('Importing a browser-local suite copy is available only in TurnStage Web.'));
     if (action === 'csvTemplate') {
       const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file('turnstage-tests-template.csv'), filters: { CSV: ['csv'] } });
       if (!uri) return cancelledOperation();

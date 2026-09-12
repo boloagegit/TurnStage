@@ -740,5 +740,6 @@
   "This HTTP request contains secret values and is not encrypted.": "この HTTP リクエストにはシークレット値が含まれ、暗号化されていません。",
   "Certificate verification is disabled for this request.": "このリクエストでは証明書の検証が無効です。",
   "TurnStage will ask again if the destination, secret references, or TLS settings change.": "接続先、シークレット参照、または TLS 設定が変更された場合、TurnStage は再度確認します。",
-  "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "ローカルストリームは停止しました。接続が許可されなかったため、リモート停止リクエストは送信されませんでした。"
+  "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "ローカルストリームは停止しました。接続が許可されなかったため、リモート停止リクエストは送信されませんでした。",
+  "Importing a browser-local suite copy is available only in TurnStage Web.": "ブラウザー内のスイートコピーのインポートは TurnStage Web でのみ利用できます。"
 }

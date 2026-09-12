@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from '../../shared/sha256';
 import * as vscode from 'vscode';
 import { applyEdits, modify } from 'jsonc-parser';
 import type { ContractSuiteCaseDefinition, ContractSuiteDefinition, ScenarioDefinition } from '../../shared/types';
@@ -178,7 +178,7 @@ function resolveSuiteUri(profileUri: vscode.Uri, path: string, resolveExternal?:
   return vscode.Uri.joinPath(folder.uri, ...path.split('/'));
 }
 async function readBoundedSource(uri: vscode.Uri, path: string): Promise<string> { if ((await vscode.workspace.fs.stat(uri)).size > MAX_CONTRACT_SUITE_BYTES) throw new Error(`Test suite ${path} exceeds the 5 MB limit.`); const bytes = await vscode.workspace.fs.readFile(uri); if (bytes.byteLength > MAX_CONTRACT_SUITE_BYTES) throw new Error(`Test suite ${path} exceeds the 5 MB limit.`); return new TextDecoder().decode(bytes); }
-function digest(text: string): string { return createHash('sha256').update(text).digest('hex'); }
+function digest(text: string): string { return sha256Hex(text); }
 function spreadsheetText(value: string): string { return /^'[=+\-@]/u.test(value) ? value.slice(1) : value; }
 function csvCell(value: string): string { return /[",\r\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value; }
 export function isLinkedContractRevision(value: unknown): value is string { return typeof value === 'string' && REVISION_PATTERN.test(value); }

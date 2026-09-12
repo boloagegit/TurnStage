@@ -34,6 +34,7 @@ export type ProductIconName =
   | 'info'
   | 'link'
   | 'list-tree'
+  | 'lock'
   | 'loading'
   | 'refresh'
   | 'save'
@@ -79,6 +80,7 @@ const codicons: Record<ProductIconName, string> = {
   info: 'info',
   link: 'link',
   'list-tree': 'list-tree',
+  lock: 'lock',
   loading: 'loading',
   refresh: 'refresh',
   save: 'save',
@@ -96,6 +98,6 @@ export function ProductIcon({ name, className = '' }: { name: ProductIconName; c
   return <span className={`codicon codicon-${codicons[name]} product-icon ${className}`.trim()} aria-hidden="true" />;
 }
 
-export function IconButton({ icon, label, className = '', ...props }: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'aria-label' | 'title'> & { icon: ProductIconName; label: string }): React.JSX.Element {
-  return <button {...props} className={`icon-button ${className}`.trim()} aria-label={label} title={label}><ProductIcon name={icon} /></button>;
+export function IconButton({ icon, label, title = label, className = '', ...props }: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'aria-label' | 'title'> & { icon: ProductIconName; label: string; title?: string }): React.JSX.Element {
+  return <button {...props} className={`icon-button ${className}`.trim()} aria-label={label} title={title}><ProductIcon name={icon} /></button>;
 }

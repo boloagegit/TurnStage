@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from '../../shared/sha256';
 import type {
   EvidenceReference,
   EvidenceSource,
@@ -71,7 +71,7 @@ export function fingerprint(value: unknown): string {
   // changing its fingerprint. Secret-bearing fields are still replaced before
   // hashing, and oversized values are represented by a digest plus length.
   const canonical = canonicalize(fingerprintValue(value, '$', 0, new WeakSet<object>()));
-  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+  return sha256Hex(canonical);
 }
 
 export function createIntegrityLock(profile: unknown, suite?: unknown, caseValues?: Record<string, unknown>): IntegrityLock {
@@ -296,7 +296,7 @@ function fingerprintValue(value: unknown, path: string, depth: number, seen: Wea
   if (typeof value === 'string') {
     if (SECRET_VALUE.test(value)) return `[secret:${value.length}]`;
     if (value.length <= MAX_FINGERPRINT_STRING) return value;
-    return `[sha256:${createHash('sha256').update(value, 'utf8').digest('hex')}:${value.length}]`;
+    return `[sha256:${sha256Hex(value)}:${value.length}]`;
   }
   if (typeof value !== 'object' || seen.has(value)) return `[omitted:${path}:unsupported]`;
   seen.add(value);

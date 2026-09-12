@@ -745,5 +745,6 @@
   "This HTTP request contains secret values and is not encrypted.": "This HTTP request contains secret values and is not encrypted.",
   "Certificate verification is disabled for this request.": "Certificate verification is disabled for this request.",
   "TurnStage will ask again if the destination, secret references, or TLS settings change.": "TurnStage will ask again if the destination, secret references, or TLS settings change.",
-  "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "Local stream stopped. The remote stop request was not sent because connection access was not allowed."
+  "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "Local stream stopped. The remote stop request was not sent because connection access was not allowed.",
+  "Importing a browser-local suite copy is available only in TurnStage Web.": "Importing a browser-local suite copy is available only in TurnStage Web."
 }

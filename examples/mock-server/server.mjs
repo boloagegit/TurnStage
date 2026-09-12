@@ -137,6 +137,11 @@ function handleContractStop(response, body) {
 }
 
 const server = http.createServer(async (request, response) => {
+  // The bundled mock target is also used by TurnStage Web during local browser testing.
+  response.setHeader('access-control-allow-origin', '*');
+  response.setHeader('access-control-allow-headers', 'content-type, accept, x-turnstage-mode');
+  response.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
+  if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return; }
   if (request.method !== 'POST') return json(response, 405, { code: 'METHOD_NOT_ALLOWED' });
   if (request.url === '/__turnstage_test/concurrency/reset') { resetConcurrencyProbe(); return json(response, 200, concurrencyProbeSnapshot()); }
   if (request.url === '/__turnstage_test/concurrency/metrics') return json(response, 200, concurrencyProbeSnapshot());

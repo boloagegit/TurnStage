@@ -1,7 +1,9 @@
 # Dependencies and build output
 node_modules/
 dist/
+web-dist/
 *.vsix
+turnstage-web-*.zip
 
 # VS Code integration-test downloads and coverage output
 .vscode-test/

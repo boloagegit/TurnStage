@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "types": ["node", "vscode", "vitest/globals"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "web/src/**/*.ts", "web/src/**/*.tsx", "vite.config.ts", "test/**/*.ts"]
 }

@@ -745,5 +745,6 @@
   "This HTTP request contains secret values and is not encrypted.": "此 HTTP 請求包含密鑰值，且傳輸未加密。",
   "Certificate verification is disabled for this request.": "此請求已停用憑證驗證。",
   "TurnStage will ask again if the destination, secret references, or TLS settings change.": "若目的地、密鑰引用或 TLS 設定變更，TurnStage 會再次詢問。",
-  "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "本機串流已停止；由於未允許連線存取，因此未送出遠端停止請求。"
+  "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "本機串流已停止；由於未允許連線存取，因此未送出遠端停止請求。",
+  "Importing a browser-local suite copy is available only in TurnStage Web.": "只有 TurnStage Web 支援匯入瀏覽器本機套件副本。"
 }

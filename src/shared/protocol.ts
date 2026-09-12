@@ -120,6 +120,7 @@ export type WebviewMessage = Envelope & (
   | { type: 'webview.ready' }
   | { type: 'profile.validate' }
   | { type: 'profile.openAsText' }
+  | { type: 'profile.duplicate' }
   | { type: 'profile.save' }
   | { type: 'profile.openFirstIssue' }
   | { type: 'profile.patch'; path: Array<string | number>; value: unknown }
@@ -156,7 +157,7 @@ export type WebviewMessage = Envelope & (
   | { type: 'adversarial.catalog.request'; force?: boolean }
   | { type: 'adversarial.case.request'; sourcePath: string; scenarioId: string }
   | { type: 'adversarial.case.save'; sourcePath: string; scenarioId: string; expectedRevision: string; scenario: ScenarioDefinition }
-  | { type: 'contract.file'; action: 'linkSuite' | 'csvTemplate' }
+  | { type: 'contract.file'; action: 'importJsonc' | 'linkSuite' | 'csvTemplate' }
   | { type: 'contract.openLinkedSuite'; path: string }
   | { type: 'contract.catalog.request'; force?: boolean }
   | { type: 'contract.case.request'; sourcePath: string; scenarioId: string }
@@ -188,11 +189,11 @@ export type WebviewMessage = Envelope & (
 );
 
 export type HostMessage = Envelope & (
-  | { type: 'host.ready'; trusted: boolean; remoteName?: string; locale: string; direction: 'ltr' | 'rtl' }
+  | { type: 'host.ready'; trusted: boolean; remoteName?: string; locale: string; direction: 'ltr' | 'rtl'; hostKind?: 'vscode' | 'web' }
   | { type: 'workspace.section'; section: WorkspaceSection }
   | { type: 'workspace.navigate'; destination: WorkspaceDestination }
   | { type: 'inspector.focus'; tab: InspectorTargetTab; evidenceId?: string; networkId?: string; sequence?: number; messageId?: string }
-  | { type: 'profile.snapshot'; profile?: TurnStageProfile; parseError?: string; version: number; environments: string[] }
+  | { type: 'profile.snapshot'; profile?: TurnStageProfile; parseError?: string; version: number; environments: string[]; readOnly?: boolean }
   | { type: 'profile.validation'; diagnostics: Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number }> }
   | { type: 'profile.editState'; dirty: boolean }
   | { type: 'profile.validated'; valid: boolean }
@@ -210,7 +211,7 @@ export type HostMessage = Envelope & (
   | { type: 'adversarial.case.loaded'; detail: LinkedAdversarialCaseDetail }
   | { type: 'adversarial.case.saved'; detail: LinkedAdversarialCaseDetail }
   | { type: 'adversarial.case.error'; sourcePath: string; scenarioId: string; message: string; conflict: boolean }
-  | { type: 'contract.operation'; action: 'linkSuite' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string; artifactId?: string }
+  | { type: 'contract.operation'; action: 'importJsonc' | 'linkSuite' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string; artifactId?: string }
   | { type: 'contract.catalog'; catalog: ContractCaseCatalog }
   | { type: 'contract.case.loaded'; detail: LinkedContractCaseDetail }
   | { type: 'contract.case.saved'; detail: LinkedContractCaseDetail }
@@ -317,13 +318,13 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   if (!isRecord(value) || !hasEnvelope(value, instanceId)) return false;
   const message = value;
   switch (message.type) {
-    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'profile.save': case 'profile.openFirstIssue': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'testExplorer.open': case 'test.runAll': case 'test.runContracts': case 'test.cancel': case 'test.evidenceBundle.export': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
+    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'profile.duplicate': case 'profile.save': case 'profile.openFirstIssue': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'testExplorer.open': case 'test.runAll': case 'test.runContracts': case 'test.cancel': case 'test.evidenceBundle.export': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
     case 'adversarial.catalog.request': return message.force === undefined || typeof message.force === 'boolean';
     case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
     case 'adversarial.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
     case 'adversarial.case.request': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId);
     case 'adversarial.case.save': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId) && isRevision(message.expectedRevision) && isRecord(message.scenario) && isStructuredValue(message.scenario, MAX_HOST_VALUE_NODES);
-    case 'contract.file': return message.action === 'linkSuite' || message.action === 'csvTemplate';
+    case 'contract.file': return message.action === 'importJsonc' || message.action === 'linkSuite' || message.action === 'csvTemplate';
     case 'contract.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
     case 'contract.catalog.request': return message.force === undefined || typeof message.force === 'boolean';
     case 'contract.case.request': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId);
@@ -363,11 +364,11 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
   if (!isRecord(value) || !hasEnvelope(value, instanceId)) return false;
   const message = value;
   switch (message.type) {
-    case 'host.ready': return typeof message.trusted === 'boolean' && optionalBoundedString(message.remoteName) && isBoundedString(message.locale, 64) && (message.direction === 'ltr' || message.direction === 'rtl');
+    case 'host.ready': return typeof message.trusted === 'boolean' && optionalBoundedString(message.remoteName) && isBoundedString(message.locale, 64) && (message.direction === 'ltr' || message.direction === 'rtl') && (message.hostKind === undefined || message.hostKind === 'vscode' || message.hostKind === 'web');
     case 'workspace.section': return isWorkspaceSection(message.section);
     case 'workspace.navigate': return isWorkspaceDestination(message.destination);
     case 'inspector.focus': return (message.tab === 'Network' || message.tab === 'Raw Events' || message.tab === 'Normalized') && optionalBoundedString(message.evidenceId) && optionalBoundedString(message.networkId) && optionalBoundedString(message.messageId) && (message.sequence === undefined || (Number.isInteger(message.sequence) && Number(message.sequence) >= 0));
-    case 'profile.snapshot': return (message.profile === undefined || (isRecord(message.profile) && isStructuredValue(message.profile, MAX_HOST_VALUE_NODES))) && optionalBoundedString(message.parseError) && Number.isInteger(message.version) && Array.isArray(message.environments) && message.environments.every((item) => isBoundedString(item));
+    case 'profile.snapshot': return (message.profile === undefined || (isRecord(message.profile) && isStructuredValue(message.profile, MAX_HOST_VALUE_NODES))) && optionalBoundedString(message.parseError) && Number.isInteger(message.version) && Array.isArray(message.environments) && message.environments.every((item) => isBoundedString(item)) && (message.readOnly === undefined || typeof message.readOnly === 'boolean');
     case 'profile.validation': return Array.isArray(message.diagnostics) && message.diagnostics.length <= 10_000 && message.diagnostics.every((item) => isRecord(item) && (item.severity === 'error' || item.severity === 'warning') && isBoundedString(item.message, MAX_TEXT_LENGTH) && Number.isInteger(item.offset) && Number(item.offset) >= 0 && Number.isInteger(item.length) && Number(item.length) >= 0);
     case 'profile.editState': return typeof message.dirty === 'boolean';
     case 'profile.validated': return typeof message.valid === 'boolean';
@@ -384,7 +385,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'adversarial.catalog': return isAdversarialCaseCatalog(message.catalog);
     case 'adversarial.case.loaded': case 'adversarial.case.saved': return isLinkedAdversarialCaseDetail(message.detail);
     case 'adversarial.case.error': return isBoundedString(message.sourcePath, 4096) && isBoundedId(message.scenarioId) && isBoundedString(message.message, 4096) && typeof message.conflict === 'boolean';
-    case 'contract.operation': return (message.action === 'linkSuite' || message.action === 'csvTemplate') && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path) && optionalBoundedString(message.artifactId);
+    case 'contract.operation': return (message.action === 'importJsonc' || message.action === 'linkSuite' || message.action === 'csvTemplate') && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path) && optionalBoundedString(message.artifactId);
     case 'contract.catalog': return isContractCaseCatalog(message.catalog);
     case 'contract.case.loaded': case 'contract.case.saved': return isLinkedContractCaseDetail(message.detail);
     case 'contract.case.error': return isBoundedString(message.sourcePath, 4096) && isBoundedId(message.scenarioId) && isBoundedString(message.message, 4096) && typeof message.conflict === 'boolean';

@@ -1,5 +1,5 @@
 import type { InteractionContext, PreparedRequest, RequestDefinition, RequestVariant } from '../../shared/types';
-import { redactDeep, redactHeaders, redactKnownSecrets } from '../security/security';
+import { redactDeep, redactHeaders, redactKnownSecrets } from '../../shared/redaction';
 import { errors } from '../errors';
 import { getPath, resolveTemplate, type ResolutionContext } from './templateResolver';
 import { localize } from '../l10n';

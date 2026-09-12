@@ -5,8 +5,13 @@ src/**
 test/**
 dist/test/**
 tsconfig.json
+tsconfig.web.json
 eslint.config.mjs
 esbuild.mjs
+vite.config.ts
+web/**
+web-dist/**
+scripts/package-web.mjs
 vitest.config.ts
 node_modules/**
 .vscode-test/**
@@ -19,5 +24,8 @@ media/icon.svg
 media/marketplace/**
 docs/vscode-ui-audit-2026-08-27.md
 docs/performance-results.json
+docs/web-deployment.md
+docs/web-user-guide.md
 artifacts/**
 *.vsix
+turnstage-web-*.zip

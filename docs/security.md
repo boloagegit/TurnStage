@@ -5,6 +5,25 @@ The Extension Host is the security boundary: it owns network requests, file
 access, SecretStorage, URI checks, and command execution. The Webview receives
 snapshots and redacted previews and renders declarative content.
 
+## Standalone Web credential storage and sharing
+
+The standalone Web build may intentionally store shared plaintext credentials
+inside a Profile, Environment, or deployment Catalog. Browser-local Profile and
+Environment values are persisted in origin-scoped `localStorage`. A portable
+Profile export contains the selected Profile and its referenced Environment,
+including plaintext credentials in either object. The bundle is JSON, not an
+encrypted secret container; possession of the file grants access to its full
+contents.
+
+Deployment Catalog credentials are readable by every client authorized to
+fetch the static Catalog. Protect the Web origin and exported files with the
+organization's normal access and data-handling controls. `${secret.*}` remains
+available for per-user session values: those values stay in page memory, clear
+on refresh, and are not inserted into portable Profile exports. Request and run
+inspection continues masking known credential headers, but redaction is not a
+substitute for controlling access to the Profile, Environment, Catalog, or
+portable file itself.
+
 ## Webview isolation
 
 The custom editor creates a Webview with:

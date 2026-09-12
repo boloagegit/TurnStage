@@ -59,8 +59,10 @@
 
 .safe-markdown__blockquote {
   margin-inline: 0;
-  padding-inline-start: var(--vscode-spacing-size12, 12px);
-  border-inline-start: 2px solid var(--vscode-textBlockQuote-border, var(--vscode-editorWidget-border));
+  padding: var(--vscode-spacing-size8, 8px) var(--vscode-spacing-size12, 12px);
+  border: 1px solid var(--vscode-textBlockQuote-border, var(--vscode-editorWidget-border));
+  border-radius: 3px;
+  background: var(--vscode-textBlockQuote-background);
   color: var(--vscode-textPreformat-foreground, var(--vscode-descriptionForeground));
 }
 
