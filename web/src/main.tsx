@@ -467,6 +467,7 @@ function createBlankProfile(): void {
 }
 
 function importEnvironment(file: File): void {
+  if (active.builtIn) { notifyUnavailable('Duplicate the official Profile before changing its environment.'); return; }
   void file.text().then((source) => {
     const parsed = parseEnvironment(source);
     if (!parsed) throw new Error('The selected file is not a valid TurnStage environment JSONC.');
@@ -480,6 +481,7 @@ function importEnvironment(file: File): void {
 }
 
 function selectEnvironment(id: string): void {
+  if (active.builtIn) return;
   const selected = environments.find((item) => item.id === id);
   if (!selected) return;
   activeEnvironmentItem = selected;
@@ -490,23 +492,34 @@ function selectEnvironment(id: string): void {
   onLibraryChanged?.();
 }
 
+function duplicateEnvironment(): void {
+  if (active.builtIn) return;
+  const source = activeEnvironmentItem;
+  const parsed = parseEnvironment(source.raw);
+  if (!parsed) return;
+  const id = uniqueEnvironmentId(`${source.id}-copy`);
+  const name = `${source.name} Copy`;
+  let raw = applyEdits(source.raw, modify(source.raw, ['id'], id, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
+  raw = applyEdits(raw, modify(raw, ['name'], name, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
+  const reference = source.official ?? source.basedOn;
+  const item: StoredEnvironment = { id, name, raw, updatedAt: Date.now(), ...(reference ? { basedOn: reference } : {}) };
+  environments = [...environments, item];
+  persistEnvironments();
+  selectEnvironment(id);
+}
+
 function updateEnvironment(raw: string): void {
   const parsed = parseEnvironment(raw);
   if (!parsed) { window.alert('Environment JSONC requires version, id, name, and a variables object.'); return; }
   const source = activeEnvironmentItem;
   const previousId = source.id;
-  let nextRaw = raw;
-  let nextId = parsed.id;
-  let nextName = parsed.name;
-  if (source.builtIn) {
-    nextId = uniqueEnvironmentId(parsed.id === source.id ? `${source.id}-copy` : parsed.id);
-    nextName = parsed.name === source.name ? `${source.name} Copy` : parsed.name;
-    nextRaw = applyEdits(nextRaw, modify(nextRaw, ['id'], nextId, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
-    nextRaw = applyEdits(nextRaw, modify(nextRaw, ['name'], nextName, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
-  } else if (parsed.id !== previousId && environments.some((item) => item.id === parsed.id)) { window.alert(`Environment id ${parsed.id} already exists in this browser.`); return; }
-  activeEnvironmentItem = { id: nextId, name: nextName, raw: nextRaw, updatedAt: Date.now(), ...(source.official || source.basedOn ? { basedOn: source.official ?? source.basedOn } : {}) };
-  environments = source.builtIn ? [...environments, activeEnvironmentItem] : environments.map((item) => item.id === previousId ? activeEnvironmentItem : item);
+  if (source.builtIn) return;
+  if (raw === source.raw) return;
+  if (parsed.id !== previousId && environments.some((item) => item.id === parsed.id)) { window.alert(`Environment id ${parsed.id} already exists in this browser.`); return; }
+  activeEnvironmentItem = { id: parsed.id, name: parsed.name, raw, updatedAt: Date.now(), ...(source.official || source.basedOn ? { basedOn: source.official ?? source.basedOn } : {}) };
+  environments = environments.map((item) => item.id === previousId ? activeEnvironmentItem : item);
   persistEnvironments();
+  if (activeProfile().environment === previousId && parsed.id !== previousId) { patchProfile(['environment'], parsed.id); return; }
   session.updateProfile(activeProfile(), activeEnvironment());
   postProfile();
   onLibraryChanged?.();
@@ -638,14 +651,13 @@ function ProfileLibrary(): React.JSX.Element {
       <label>{labels.language}<select value={locale} onChange={(event) => { preferences.locale = event.target.value; savePreferences(preferences); window.location.reload(); }}><option value="en">English</option><option value="zh-TW">繁體中文</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
       <label>{labels.theme}<select value={preferences.theme ?? 'system'} onChange={(event) => { preferences.theme = event.target.value as WebThemePreference; savePreferences(preferences); applyWebAppearance(preferences.theme); render((value) => value + 1); }}><option value="system">{labels.themeSystem}</option><option value="dark">{labels.themeDark}</option><option value="light">{labels.themeLight}</option></select></label>
       <details className="environment-editor"><summary>{labels.environments}</summary>
-        <label>{labels.activeEnvironment}<select value={activeEnvironmentItem.id} onChange={(event) => selectEnvironment(event.target.value)}>{environments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <div className="environment-actions"><button onClick={() => environmentInput.current?.click()}>{labels.importEnvironment}</button><button onClick={() => download(`${activeEnvironmentItem.id}.environment.jsonc`, activeEnvironmentItem.raw, 'application/json')}>{labels.exportEnvironment}</button></div>
+        <label>{labels.activeEnvironment}<select value={activeEnvironmentItem.id} disabled={Boolean(active.builtIn)} onChange={(event) => selectEnvironment(event.target.value)}>{environments.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.builtIn ? labels.official : labels.browser}</option>)}</select></label>
+        <div className="environment-actions"><button disabled={Boolean(active.builtIn)} onClick={duplicateEnvironment}>{labels.duplicateEnvironment}</button><button disabled={Boolean(active.builtIn)} onClick={() => environmentInput.current?.click()}>{labels.importEnvironment}</button><button onClick={() => download(`${activeEnvironmentItem.id}.environment.jsonc`, activeEnvironmentItem.raw, 'application/json')}>{labels.exportEnvironment}</button></div>
         <input ref={environmentInput} className="visually-hidden" type="file" aria-label={labels.importEnvironment} accept=".jsonc,.json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importEnvironment(file); event.target.value = ''; }} />
-        <label>{labels.environmentJson}<textarea key={`${activeEnvironmentItem.id}:${activeEnvironmentItem.updatedAt}`} defaultValue={activeEnvironmentItem.raw} spellCheck={false} onBlur={(event) => updateEnvironment(event.target.value)} /></label>
+        <label>{labels.environmentJson}<textarea key={`${activeEnvironmentItem.id}:${activeEnvironmentItem.updatedAt}`} defaultValue={activeEnvironmentItem.raw} readOnly={Boolean(activeEnvironmentItem.builtIn)} aria-readonly={Boolean(activeEnvironmentItem.builtIn)} spellCheck={false} onBlur={(event) => { if (!activeEnvironmentItem.builtIn) updateEnvironment(event.target.value); }} /></label>
       </details>
       {secretNames.length > 0 && <details className="secret-editor"><summary>{labels.secrets}</summary>{secretNames.map((name) => <label key={name}>{name}<input type="password" autoComplete="off" value={secrets.get(name) ?? ''} placeholder={labels.memoryOnly} onChange={(event) => { if (event.target.value) secrets.set(name, event.target.value); else secrets.delete(name); renderSecrets((value) => value + 1); }} /></label>)}</details>}
-      {active.builtIn && <p className="catalog-note">{labels.officialReadOnly}</p>}
-      {catalog.warning ? <p className="catalog-note catalog-note--warning" role="status" title={catalog.warning}>{labels.catalogFallback}</p> : <p className="catalog-note">{labels.catalog}: {catalog.catalogId} · {catalog.revision}</p>}
+      {catalog.warning && <p className="catalog-note catalog-note--warning" role="status" title={catalog.warning}>{labels.catalogFallback}</p>}
     </footer>
   </div>;
 }
@@ -702,4 +714,31 @@ function pickFile(accept: string): Promise<{ name: string; text: string } | unde
     input.click();
   });
 }
-function copy(locale: string) { return locale === 'zh-TW' ? { profiles: '設定檔', profileActions: '設定檔動作', newProfile: '新增設定檔', newProfileName: '新設定檔', import: '匯入設定檔', official: '官方範本', browser: '瀏覽器本機', officialCopy: '源自官方範本', officialUpdated: '官方範本已有新版', duplicate: '複製', export: '匯出可攜檔', delete: '刪除', reset: '還原官方', officialReadOnly: '官方範本由伺服器管理且為唯讀；請按「複製」建立瀏覽器本機副本後再編輯。', catalog: '官方 Catalog', catalogFallback: '官方 Catalog 無法載入，已使用隨附範本。', language: '顯示語言', theme: '外觀主題', themeSystem: '跟隨系統', themeDark: '深色', themeLight: '淺色', environments: '環境', activeEnvironment: '目前環境', importEnvironment: '匯入', exportEnvironment: '匯出', environmentJson: '環境 JSONC', secrets: '工作階段密鑰', memoryOnly: '僅保留於記憶體', storage: '個人設定檔與環境儲存在此瀏覽器。直接寫入其中的憑證也會保存並包含於可攜匯出檔。' } : locale === 'ja' ? { profiles: 'プロファイル', profileActions: 'プロファイル操作', newProfile: '新規プロファイル', newProfileName: '新規プロファイル', import: 'インポート', official: '公式プリセット', browser: 'ブラウザー', officialCopy: '公式プリセットから作成', officialUpdated: '公式プリセットに更新あり', duplicate: '複製', export: 'ポータブル書き出し', delete: '削除', reset: '公式版に戻す', officialReadOnly: '公式プリセットはサーバー管理の読み取り専用です。「複製」を選んでブラウザー内のコピーを作成してから編集してください。', catalog: '公式カタログ', catalogFallback: '公式カタログを読み込めなかったため、同梱プリセットを使用しています。', language: '表示言語', theme: '外観テーマ', themeSystem: 'システム設定', themeDark: 'ダーク', themeLight: 'ライト', environments: '環境', activeEnvironment: '使用中の環境', importEnvironment: 'インポート', exportEnvironment: 'エクスポート', environmentJson: '環境 JSONC', secrets: 'セッションシークレット', memoryOnly: 'メモリのみ', storage: '個人プロファイルと環境はこのブラウザーに保存されます。直接記述した認証情報は保存され、ポータブル書き出しにも含まれます。' } : locale === 'ko' ? { profiles: '프로필', profileActions: '프로필 작업', newProfile: '새 프로필', newProfileName: '새 프로필', import: '가져오기', official: '공식 프리셋', browser: '브라우저 로컬', officialCopy: '공식 프리셋에서 생성', officialUpdated: '공식 프리셋 업데이트 있음', duplicate: '복제', export: '휴대용 내보내기', delete: '삭제', reset: '공식 버전 복원', officialReadOnly: '공식 프리셋은 서버에서 관리되는 읽기 전용 항목입니다. 편집하려면 “복제”를 눌러 브라우저 로컬 사본을 만드세요.', catalog: '공식 카탈로그', catalogFallback: '공식 카탈로그를 불러오지 못해 기본 프리셋을 사용합니다.', language: '표시 언어', theme: '화면 테마', themeSystem: '시스템 설정', themeDark: '어둡게', themeLight: '밝게', environments: '환경', activeEnvironment: '활성 환경', importEnvironment: '가져오기', exportEnvironment: '내보내기', environmentJson: '환경 JSONC', secrets: '세션 비밀', memoryOnly: '메모리에만 저장', storage: '개인 프로필과 환경은 이 브라우저에 저장됩니다. 직접 입력한 자격 증명도 저장되며 휴대용 내보내기에 포함됩니다.' } : { profiles: 'Profiles', profileActions: 'Profile actions', newProfile: 'New profile', newProfileName: 'New Profile', import: 'Import profile', official: 'Official preset', browser: 'Browser local', officialCopy: 'Based on official preset', officialUpdated: 'Official preset updated', duplicate: 'Duplicate', export: 'Portable export', delete: 'Delete', reset: 'Restore official', officialReadOnly: 'Official presets are server-managed and read-only. Select Duplicate to create an editable browser-local copy.', catalog: 'Official catalog', catalogFallback: 'The official catalog could not be loaded. Bundled presets are active.', language: 'Display language', theme: 'Appearance theme', themeSystem: 'Use system setting', themeDark: 'Dark', themeLight: 'Light', environments: 'Environments', activeEnvironment: 'Active environment', importEnvironment: 'Import', exportEnvironment: 'Export', environmentJson: 'Environment JSONC', secrets: 'Session secrets', memoryOnly: 'Memory only', storage: 'Personal Profiles and Environments are saved in this browser. Credentials written into them are also saved and included in portable exports.' }; }
+function copy(locale: string) {
+  const common = locale === 'zh-TW' ? {
+    profiles: '設定檔', profileActions: '設定檔動作', newProfile: '新增設定檔', newProfileName: '新設定檔', import: '匯入設定檔',
+    official: '官方', browser: '本機', officialCopy: '源自官方範本', officialUpdated: '官方範本已有新版',
+    duplicate: '複製', duplicateEnvironment: '複製環境', export: '匯出可攜檔', delete: '刪除', reset: '還原官方',
+    catalogFallback: '無法載入官方範本，已改用內建範本。', language: '顯示語言', theme: '外觀主題', themeSystem: '跟隨系統', themeDark: '深色', themeLight: '淺色',
+    environments: '環境', activeEnvironment: '目前環境', importEnvironment: '匯入', exportEnvironment: '匯出', environmentJson: '環境 JSONC', secrets: '工作階段密鑰', memoryOnly: '僅保留於記憶體',
+  } : locale === 'ja' ? {
+    profiles: 'プロファイル', profileActions: 'プロファイル操作', newProfile: '新規プロファイル', newProfileName: '新規プロファイル', import: 'インポート',
+    official: '公式', browser: 'ローカル', officialCopy: '公式プリセットから作成', officialUpdated: '公式プリセットに更新あり',
+    duplicate: '複製', duplicateEnvironment: '環境を複製', export: 'ポータブル書き出し', delete: '削除', reset: '公式版に戻す',
+    catalogFallback: '公式プリセットを読み込めません。内蔵プリセットを使用しています。', language: '表示言語', theme: '外観テーマ', themeSystem: 'システム設定', themeDark: 'ダーク', themeLight: 'ライト',
+    environments: '環境', activeEnvironment: '使用中の環境', importEnvironment: 'インポート', exportEnvironment: 'エクスポート', environmentJson: '環境 JSONC', secrets: 'セッションシークレット', memoryOnly: 'メモリのみ',
+  } : locale === 'ko' ? {
+    profiles: '프로필', profileActions: '프로필 작업', newProfile: '새 프로필', newProfileName: '새 프로필', import: '가져오기',
+    official: '공식', browser: '로컬', officialCopy: '공식 프리셋에서 생성', officialUpdated: '공식 프리셋 업데이트 있음',
+    duplicate: '복제', duplicateEnvironment: '환경 복제', export: '휴대용 내보내기', delete: '삭제', reset: '공식 버전 복원',
+    catalogFallback: '공식 프리셋을 불러오지 못했습니다. 기본 프리셋을 사용합니다.', language: '표시 언어', theme: '화면 테마', themeSystem: '시스템 설정', themeDark: '어둡게', themeLight: '밝게',
+    environments: '환경', activeEnvironment: '활성 환경', importEnvironment: '가져오기', exportEnvironment: '내보내기', environmentJson: '환경 JSONC', secrets: '세션 비밀', memoryOnly: '메모리에만 저장',
+  } : {
+    profiles: 'Profiles', profileActions: 'Profile actions', newProfile: 'New profile', newProfileName: 'New Profile', import: 'Import profile',
+    official: 'Official', browser: 'Local', officialCopy: 'Based on official preset', officialUpdated: 'Official preset updated',
+    duplicate: 'Duplicate', duplicateEnvironment: 'Duplicate environment', export: 'Portable export', delete: 'Delete', reset: 'Restore official',
+    catalogFallback: 'Official presets unavailable. Using bundled presets.', language: 'Display language', theme: 'Appearance theme', themeSystem: 'Use system setting', themeDark: 'Dark', themeLight: 'Light',
+    environments: 'Environments', activeEnvironment: 'Active environment', importEnvironment: 'Import', exportEnvironment: 'Export', environmentJson: 'Environment JSONC', secrets: 'Session secrets', memoryOnly: 'Memory only',
+  };
+  return common;
+}

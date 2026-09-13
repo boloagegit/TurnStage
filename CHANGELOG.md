@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.28.2
+
+- Simplified the standalone Web sidebar: removed the explanatory official-Profile paragraph and internal catalog ID/revision from the interface while retaining a concise warning if official presets cannot load.
+- Made official Web Environments visibly read-only. After duplicating an official Profile, users can explicitly duplicate its Environment into browser-local storage and edit the copy without changing the deployment-owned preset.
+- Compatibility: VSIX runtime and Profile/Environment formats are unchanged from 0.28.1.
+
 ## 0.28.1
 
 - Refreshed the Marketplace overview and synthetic screenshots to show the current VS Code case-management, run-history, result-comparison, and separate Red Team workflows rather than the older 0.23.5 interface.
