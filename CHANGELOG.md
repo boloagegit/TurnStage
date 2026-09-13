@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.28.1
+
+- Refreshed the Marketplace overview and synthetic screenshots to show the current VS Code case-management, run-history, result-comparison, and separate Red Team workflows rather than the older 0.23.5 interface.
+- Clarified that the Marketplace VSIX and standalone Web ZIP are separate builds, and documented local Web preview with Python 3.6 while reserving a managed static server for shared deployment.
+- Compatibility: extension behavior, Profile and suite formats, and Web runtime behavior are unchanged from 0.28.0.
+
 ## 0.28.0
 
 - Reworked General tests and Red Team into consistent in-place case and result views with searchable, selectable cases, clearer unavailable-case reasons, and direct access to completed results.

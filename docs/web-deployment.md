@@ -11,6 +11,16 @@ npm run package:web
 
 The command creates `turnstage-web-<version>.zip`. Extract its contents into the document root of any static HTTP server. Do not open `index.html` through `file://`; browser modules and security controls require HTTP or HTTPS.
 
+## Preview the extracted archive locally
+
+After extracting the ZIP, change into the extracted directory that contains `index.html` and run:
+
+```bash
+python3 -m http.server 8000 --bind 127.0.0.1
+```
+
+Open `http://127.0.0.1:8000/` in a browser. Python 3.6 supports this command; Python is needed only for this optional local preview, not to build or run the deployed Web archive. The server serves the current directory, so running it beside the ZIP instead of inside the extracted directory will not open TurnStage Web. Stop it with Ctrl+C. Python's `http.server` is not intended for production; use a managed static HTTP server or reverse proxy for shared access. A local preview does not start the optional mock API, and real API calls still require browser reachability, trusted TLS, and CORS permission.
+
 ## Minimal Linux example
 
 If the company server already has Nginx, copy the extracted files into a dedicated directory and point an Nginx `root` at that directory. A minimal location is:

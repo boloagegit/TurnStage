@@ -4,7 +4,7 @@
 
 ## 開始使用
 
-1. 使用公司提供的 HTTPS 網址開啟 TurnStage Web。不要直接以 `file://` 開啟解壓縮後的 `index.html`。
+1. 使用公司提供的 HTTPS 網址開啟 TurnStage Web；若要在自己的電腦預覽解壓縮的 Web 包，請依 [Web 部署手冊的本機預覽步驟](web-deployment.md#preview-the-extracted-archive-locally) 啟動本機 HTTP 服務。不要直接以 `file://` 開啟 `index.html`。
 2. 從左側清單選擇一個 Profile。
 3. 確認左側的 Environment，以及畫面上方顯示的連線狀態。
 4. 在聊天輸入框送出一筆不含敏感資料的測試訊息。

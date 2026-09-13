@@ -34,6 +34,7 @@ describe('Marketplace and GitHub readiness', () => {
 
     for (const path of [
       'media/marketplace/stream-debug.png',
+      'media/marketplace/test-case-management.png',
       'media/marketplace/automated-tests.png',
       'media/marketplace/red-team-evidence.png',
     ]) expect(existsSync(resolve(root, path)), `${path} must exist`).toBe(true);
