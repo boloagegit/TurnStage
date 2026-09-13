@@ -2,13 +2,13 @@
 
 **Debug the stream. Save the case. Check the next run.**
 
-TurnStage is a VS Code workbench for testing streaming LLM chat and agent APIs.
-A versioned `*.turnstage.jsonc` Profile describes the endpoint and event
-mapping; the editor keeps the conversation, HTTP requests, stream events,
+TurnStage tests streaming LLM chat and agent APIs. Use it as a VS Code
+extension or a standalone Web app. A Profile describes the endpoint and event
+mapping; TurnStage keeps the conversation, HTTP requests, stream events,
 timing, test results, and evidence together.
 
-[Install TurnStage from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=turnstage.turnstage)
-or open VS Code Quick Open and run `ext install turnstage.turnstage`.
+- **VS Code:** [Install from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=turnstage.turnstage), or run `ext install turnstage.turnstage` in Quick Open.
+- **Web:** [Deploy the static Web build](docs/web-deployment.md) or [read the Web user guide](docs/web-user-guide.md). No VS Code installation or VSIX is needed.
 
 ![TurnStage conversation beside its Network requests](media/marketplace/stream-debug.png)
 
@@ -64,7 +64,7 @@ service, real user data, or a production test outcome._
 The Marketplace installs the VS Code extension. It uses a desktop or remote
 Extension Host for workspace-linked suites, Test Explorer, and optional Copilot
 integration. The repository also provides a [standalone Web
-build](https://github.com/boloagegit/TurnStage/blob/main/docs/web-deployment.md)
+build](docs/web-deployment.md)
 as a static ZIP; it does not load or run the VSIX. Web users can choose
 deployment-owned read-only Profile presets or make browser-local copies.
 VS Code-only actions are disabled in Web. The browser calls the configured API
@@ -88,7 +88,7 @@ directly, so that API must allow the Web origin through CORS.
   draft a regression, or prepare a guarded Profile repair. Copilot output is
   advisory and cannot relabel deterministic test results.
 
-## Five-minute start
+## Five-minute start in VS Code
 
 1. Open the **TurnStage** Activity Bar view.
 2. Run **TurnStage: Initialize Workspace** and select a starter Profile.
@@ -163,17 +163,29 @@ does not declare a `browser` entry and therefore does not claim support for
 
 ### Standalone Web build
 
-The same repository also produces a standalone static browser application; it is not a VSIX host and does not require code-server, OpenVSCode Server, Theia, Node.js, or an Extension Host in production:
+Build the static Web app (Node.js is needed to build, but not to serve it):
 
 ```sh
 npm run package:web
 ```
 
-Extract `turnstage-web-<version>.zip` behind any static Linux web server. The archive includes both Web guides under `docs/`. Replace the adjacent `turnstage-catalog.json` to provide deployment-owned, read-only official Profile and Environment presets without rebuilding the application. Official Profile controls stay disabled until the user explicitly duplicates the preset into browser-local storage; the Web host also rejects direct writes to the server-owned entry. Users can create, import, duplicate, edit, delete, and export their own browser-local Profiles without changing the official catalog. A portable Profile export contains the Profile, its referenced Environment, and any plaintext credentials stored in either, so another user can import one file and run the same configuration. The browser connects directly to target APIs, so those APIs must be reachable from the user device, trust their TLS certificate, and allow the Web origin through CORS. Personal Profiles and Environments remain in browser `localStorage`, larger testing artifacts remain in IndexedDB, and optional `${secret.*}` session values remain only in page memory. See the [`Web deployment guide`](https://github.com/boloagegit/TurnStage/blob/main/docs/web-deployment.md) for administrator setup, catalog semantics, and security boundaries, and the [`TurnStage Web user guide`](https://github.com/boloagegit/TurnStage/blob/main/docs/web-user-guide.md) for browser-local Profile, Environment, test, backup, and troubleshooting workflows.
+Extract `turnstage-web-<version>.zip` and serve its contents with a static HTTP
+server. For local development, run `npm run web:dev`. To preview the packaged
+files, run `python3 -m http.server 8000 --bind 127.0.0.1` from the extracted
+directory and open `http://127.0.0.1:8000/` (Python 3.6 or newer). Do not open
+`index.html` directly. The Python server is for local preview, not production.
 
-For a local preview, extract the ZIP, change into the directory containing `index.html`, and run `python3 -m http.server 8000 --bind 127.0.0.1` (Python 3.6 or newer). Open `http://127.0.0.1:8000/`; do not double-click `index.html` or serve the ZIP itself. This Python server is for local preview only, not production deployment.
+The adjacent `turnstage-catalog.json` supplies deployment-owned, read-only
+Profiles without rebuilding the app. Users can duplicate an official Profile
+or create, import, edit, and export their own browser-local Profiles. A
+portable Profile export includes its referenced Environment and any plaintext
+credentials in those settings. Browser requests go directly to the configured
+API, which must be reachable from the user's device and allow the Web origin
+through CORS. See the [Web deployment guide](docs/web-deployment.md) for
+administrator setup and security boundaries, and the
+[Web user guide](docs/web-user-guide.md) for everyday use and backups.
 
-## First run
+## First run in VS Code
 
 1. Open a workspace folder in VS Code.
 2. Open the **TurnStage** Activity Bar view.
