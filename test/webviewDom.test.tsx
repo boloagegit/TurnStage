@@ -28,6 +28,17 @@ function eventRows(scope: HTMLElement | Document = document): HTMLElement[] {
 }
 
 describe('Webview DOM behavior', () => {
+  it('shows the environment in VS Code but keeps the Web toolbar focused on session status', () => {
+    const previewProfile = { ...profile, environment: 'sit' };
+    const vscode = render(<MobileChatPreview {...mobileProps({ profile: previewProfile })} />);
+    expect(vscode.container.querySelector('.mobile-chat-preview__environment')?.textContent).toBe('sit');
+    vscode.unmount();
+
+    const web = render(<MobileChatPreview {...mobileProps({ profile: previewProfile, showEnvironment: false })} />);
+    expect(web.container.querySelector('.mobile-chat-preview__environment')).toBeNull();
+    expect(within(web.container.querySelector('.mobile-chat-preview__session-tools') as HTMLElement).getByRole('status')).toBeTruthy();
+  });
+
   it('counts imported linked Red Team cases alongside inline cases', () => {
     const profileWithInlineCase: TurnStageProfile = {
       ...profile,

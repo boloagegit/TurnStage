@@ -85,6 +85,7 @@ export interface VisualFeedback { operation: 'baseline' | 'compare'; status: 'sa
 
 export interface MobileChatPreviewProps {
   profile: TurnStageProfile;
+  showEnvironment?: boolean;
   snapshot?: SessionSnapshot;
   active: boolean;
   continuationBlocked: boolean;
@@ -117,6 +118,7 @@ export interface MobileChatPreviewProps {
  */
 export function MobileChatPreview({
   profile,
+  showEnvironment = true,
   snapshot,
   active,
   continuationBlocked,
@@ -364,8 +366,7 @@ export function MobileChatPreview({
         </div>
       </details>
       <div className="mobile-chat-preview__session-tools" role="group" aria-label={t('Session status and actions')}>
-        <span className="mobile-chat-preview__environment">{profile.environment ?? t('No environment')}</span>
-        <span aria-hidden="true">·</span>
+        {showEnvironment && <><span className="mobile-chat-preview__environment">{profile.environment ?? t('No environment')}</span><span aria-hidden="true">·</span></>}
         <span className={`mobile-chat-preview__session-state mobile-chat-preview__session-state--${sessionState}`} role="status" aria-label={t('Conversation status: {status}', { status: humanize(sessionState) })}>
           <ProductIcon name="circle-filled" />
           <span>{humanize(sessionState)}</span>

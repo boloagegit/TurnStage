@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.28.3
+
+- Removed the standalone Web Environment editor from the sidebar and environment ID from the chat toolbar. Users select Profiles; referenced Environments remain available through the deployment catalog or portable Profile import/export.
+- Updated Web deployment and user guides to match the Profile-focused workflow.
+- Compatibility: VSIX runtime and Profile/Environment formats are unchanged from 0.28.2.
+
 ## 0.28.2
 
 - Simplified the standalone Web sidebar: removed the explanatory official-Profile paragraph and internal catalog ID/revision from the interface while retaining a concise warning if official presets cannot load.

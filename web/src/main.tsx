@@ -466,65 +466,6 @@ function createBlankProfile(): void {
   selectProfile(item.id);
 }
 
-function importEnvironment(file: File): void {
-  if (active.builtIn) { notifyUnavailable('Duplicate the official Profile before changing its environment.'); return; }
-  void file.text().then((source) => {
-    const parsed = parseEnvironment(source);
-    if (!parsed) throw new Error('The selected file is not a valid TurnStage environment JSONC.');
-    const id = uniqueEnvironmentId(parsed.id);
-    const raw = id === parsed.id ? source : applyEdits(source, modify(source, ['id'], id, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
-    const item: StoredEnvironment = { id, name: parsed.name, raw, updatedAt: Date.now() };
-    environments = [...environments, item];
-    persistEnvironments();
-    selectEnvironment(id);
-  }).catch((error) => window.alert(error instanceof Error ? error.message : String(error)));
-}
-
-function selectEnvironment(id: string): void {
-  if (active.builtIn) return;
-  const selected = environments.find((item) => item.id === id);
-  if (!selected) return;
-  activeEnvironmentItem = selected;
-  persistEnvironments();
-  if (activeProfile().environment !== id) { patchProfile(['environment'], id); return; }
-  session.updateProfile(activeProfile(), activeEnvironment());
-  postProfile();
-  onLibraryChanged?.();
-}
-
-function duplicateEnvironment(): void {
-  if (active.builtIn) return;
-  const source = activeEnvironmentItem;
-  const parsed = parseEnvironment(source.raw);
-  if (!parsed) return;
-  const id = uniqueEnvironmentId(`${source.id}-copy`);
-  const name = `${source.name} Copy`;
-  let raw = applyEdits(source.raw, modify(source.raw, ['id'], id, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
-  raw = applyEdits(raw, modify(raw, ['name'], name, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
-  const reference = source.official ?? source.basedOn;
-  const item: StoredEnvironment = { id, name, raw, updatedAt: Date.now(), ...(reference ? { basedOn: reference } : {}) };
-  environments = [...environments, item];
-  persistEnvironments();
-  selectEnvironment(id);
-}
-
-function updateEnvironment(raw: string): void {
-  const parsed = parseEnvironment(raw);
-  if (!parsed) { window.alert('Environment JSONC requires version, id, name, and a variables object.'); return; }
-  const source = activeEnvironmentItem;
-  const previousId = source.id;
-  if (source.builtIn) return;
-  if (raw === source.raw) return;
-  if (parsed.id !== previousId && environments.some((item) => item.id === parsed.id)) { window.alert(`Environment id ${parsed.id} already exists in this browser.`); return; }
-  activeEnvironmentItem = { id: parsed.id, name: parsed.name, raw, updatedAt: Date.now(), ...(source.official || source.basedOn ? { basedOn: source.official ?? source.basedOn } : {}) };
-  environments = environments.map((item) => item.id === previousId ? activeEnvironmentItem : item);
-  persistEnvironments();
-  if (activeProfile().environment === previousId && parsed.id !== previousId) { patchProfile(['environment'], parsed.id); return; }
-  session.updateProfile(activeProfile(), activeEnvironment());
-  postProfile();
-  onLibraryChanged?.();
-}
-
 function duplicateActive(): void {
   const item = deriveLocalProfile(active);
   profiles = [...profiles, item];
@@ -576,12 +517,6 @@ function persistLibrary(): void {
   savePreferences(preferences);
 }
 
-function persistEnvironments(): void {
-  saveEnvironments(environments.filter((item) => !item.builtIn));
-  preferences.activeEnvironmentId = activeEnvironmentItem.id;
-  savePreferences(preferences);
-}
-
 function post(payload: HostPayload, requestId: string = crypto.randomUUID()): void {
   // Match the structured-clone boundary used by VS Code and omit undefined fields.
   const message = JSON.parse(JSON.stringify({ ...payload, protocolVersion: PROTOCOL_VERSION, editorInstanceId: 'turnstage-web', requestId })) as HostMessage;
@@ -630,7 +565,6 @@ function ProfileLibrary(): React.JSX.Element {
   const [, render] = useState(0);
   const [, renderSecrets] = useState(0);
   const input = useRef<HTMLInputElement>(null);
-  const environmentInput = useRef<HTMLInputElement>(null);
   const activeProfileButton = useRef<HTMLButtonElement>(null);
   onLibraryChanged = () => render((value) => value + 1);
   const locale = normalizeLocale(preferences.locale ?? navigator.language);
@@ -650,12 +584,6 @@ function ProfileLibrary(): React.JSX.Element {
       <div className="sidebar-actions"><button onClick={duplicateActive}>{labels.duplicate}</button><button onClick={exportActive}>{labels.export}</button><button disabled={Boolean(active.builtIn)} onClick={deleteActive}>{overridesOfficial ? labels.reset : labels.delete}</button></div>
       <label>{labels.language}<select value={locale} onChange={(event) => { preferences.locale = event.target.value; savePreferences(preferences); window.location.reload(); }}><option value="en">English</option><option value="zh-TW">繁體中文</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
       <label>{labels.theme}<select value={preferences.theme ?? 'system'} onChange={(event) => { preferences.theme = event.target.value as WebThemePreference; savePreferences(preferences); applyWebAppearance(preferences.theme); render((value) => value + 1); }}><option value="system">{labels.themeSystem}</option><option value="dark">{labels.themeDark}</option><option value="light">{labels.themeLight}</option></select></label>
-      <details className="environment-editor"><summary>{labels.environments}</summary>
-        <label>{labels.activeEnvironment}<select value={activeEnvironmentItem.id} disabled={Boolean(active.builtIn)} onChange={(event) => selectEnvironment(event.target.value)}>{environments.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.builtIn ? labels.official : labels.browser}</option>)}</select></label>
-        <div className="environment-actions"><button disabled={Boolean(active.builtIn)} onClick={duplicateEnvironment}>{labels.duplicateEnvironment}</button><button disabled={Boolean(active.builtIn)} onClick={() => environmentInput.current?.click()}>{labels.importEnvironment}</button><button onClick={() => download(`${activeEnvironmentItem.id}.environment.jsonc`, activeEnvironmentItem.raw, 'application/json')}>{labels.exportEnvironment}</button></div>
-        <input ref={environmentInput} className="visually-hidden" type="file" aria-label={labels.importEnvironment} accept=".jsonc,.json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importEnvironment(file); event.target.value = ''; }} />
-        <label>{labels.environmentJson}<textarea key={`${activeEnvironmentItem.id}:${activeEnvironmentItem.updatedAt}`} defaultValue={activeEnvironmentItem.raw} readOnly={Boolean(activeEnvironmentItem.builtIn)} aria-readonly={Boolean(activeEnvironmentItem.builtIn)} spellCheck={false} onBlur={(event) => { if (!activeEnvironmentItem.builtIn) updateEnvironment(event.target.value); }} /></label>
-      </details>
       {secretNames.length > 0 && <details className="secret-editor"><summary>{labels.secrets}</summary>{secretNames.map((name) => <label key={name}>{name}<input type="password" autoComplete="off" value={secrets.get(name) ?? ''} placeholder={labels.memoryOnly} onChange={(event) => { if (event.target.value) secrets.set(name, event.target.value); else secrets.delete(name); renderSecrets((value) => value + 1); }} /></label>)}</details>}
       {catalog.warning && <p className="catalog-note catalog-note--warning" role="status" title={catalog.warning}>{labels.catalogFallback}</p>}
     </footer>
@@ -718,27 +646,27 @@ function copy(locale: string) {
   const common = locale === 'zh-TW' ? {
     profiles: '設定檔', profileActions: '設定檔動作', newProfile: '新增設定檔', newProfileName: '新設定檔', import: '匯入設定檔',
     official: '官方', browser: '本機', officialCopy: '源自官方範本', officialUpdated: '官方範本已有新版',
-    duplicate: '複製', duplicateEnvironment: '複製環境', export: '匯出可攜檔', delete: '刪除', reset: '還原官方',
+    duplicate: '複製', export: '匯出可攜檔', delete: '刪除', reset: '還原官方',
     catalogFallback: '無法載入官方範本，已改用內建範本。', language: '顯示語言', theme: '外觀主題', themeSystem: '跟隨系統', themeDark: '深色', themeLight: '淺色',
-    environments: '環境', activeEnvironment: '目前環境', importEnvironment: '匯入', exportEnvironment: '匯出', environmentJson: '環境 JSONC', secrets: '工作階段密鑰', memoryOnly: '僅保留於記憶體',
+    secrets: '工作階段密鑰', memoryOnly: '僅保留於記憶體',
   } : locale === 'ja' ? {
     profiles: 'プロファイル', profileActions: 'プロファイル操作', newProfile: '新規プロファイル', newProfileName: '新規プロファイル', import: 'インポート',
     official: '公式', browser: 'ローカル', officialCopy: '公式プリセットから作成', officialUpdated: '公式プリセットに更新あり',
-    duplicate: '複製', duplicateEnvironment: '環境を複製', export: 'ポータブル書き出し', delete: '削除', reset: '公式版に戻す',
+    duplicate: '複製', export: 'ポータブル書き出し', delete: '削除', reset: '公式版に戻す',
     catalogFallback: '公式プリセットを読み込めません。内蔵プリセットを使用しています。', language: '表示言語', theme: '外観テーマ', themeSystem: 'システム設定', themeDark: 'ダーク', themeLight: 'ライト',
-    environments: '環境', activeEnvironment: '使用中の環境', importEnvironment: 'インポート', exportEnvironment: 'エクスポート', environmentJson: '環境 JSONC', secrets: 'セッションシークレット', memoryOnly: 'メモリのみ',
+    secrets: 'セッションシークレット', memoryOnly: 'メモリのみ',
   } : locale === 'ko' ? {
     profiles: '프로필', profileActions: '프로필 작업', newProfile: '새 프로필', newProfileName: '새 프로필', import: '가져오기',
     official: '공식', browser: '로컬', officialCopy: '공식 프리셋에서 생성', officialUpdated: '공식 프리셋 업데이트 있음',
-    duplicate: '복제', duplicateEnvironment: '환경 복제', export: '휴대용 내보내기', delete: '삭제', reset: '공식 버전 복원',
+    duplicate: '복제', export: '휴대용 내보내기', delete: '삭제', reset: '공식 버전 복원',
     catalogFallback: '공식 프리셋을 불러오지 못했습니다. 기본 프리셋을 사용합니다.', language: '표시 언어', theme: '화면 테마', themeSystem: '시스템 설정', themeDark: '어둡게', themeLight: '밝게',
-    environments: '환경', activeEnvironment: '활성 환경', importEnvironment: '가져오기', exportEnvironment: '내보내기', environmentJson: '환경 JSONC', secrets: '세션 비밀', memoryOnly: '메모리에만 저장',
+    secrets: '세션 비밀', memoryOnly: '메모리에만 저장',
   } : {
     profiles: 'Profiles', profileActions: 'Profile actions', newProfile: 'New profile', newProfileName: 'New Profile', import: 'Import profile',
     official: 'Official', browser: 'Local', officialCopy: 'Based on official preset', officialUpdated: 'Official preset updated',
-    duplicate: 'Duplicate', duplicateEnvironment: 'Duplicate environment', export: 'Portable export', delete: 'Delete', reset: 'Restore official',
+    duplicate: 'Duplicate', export: 'Portable export', delete: 'Delete', reset: 'Restore official',
     catalogFallback: 'Official presets unavailable. Using bundled presets.', language: 'Display language', theme: 'Appearance theme', themeSystem: 'Use system setting', themeDark: 'Dark', themeLight: 'Light',
-    environments: 'Environments', activeEnvironment: 'Active environment', importEnvironment: 'Import', exportEnvironment: 'Export', environmentJson: 'Environment JSONC', secrets: 'Session secrets', memoryOnly: 'Memory only',
+    secrets: 'Session secrets', memoryOnly: 'Memory only',
   };
   return common;
 }
