@@ -1,5 +1,5 @@
 {
-  "extension.description": "在 VS Code 測試 LLM 聊天與 Agent API，涵蓋串流診斷、回歸案例、紅隊測試與證據匯出",
+  "extension.description": "在 VS Code 除錯串流 LLM 與 Agent API，執行一般及紅隊測試，查看執行紀錄、結果比較與證據",
   "chatParticipant.description": "以界線明確的證據與需確認的工具，執行、診斷、比較及改善 TurnStage 測試。",
   "chatParticipant.command.diagnose": "診斷執行結果、失敗、效能或設定檔設定問題。",
   "chatParticipant.command.run": "尋找、驗證並執行明確選取的 TurnStage 測試。",

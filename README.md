@@ -1,56 +1,74 @@
 # TurnStage
 
-**Debug your LLM stream. Reproduce the failure. Keep the evidence.**
+**Debug the stream. Save the case. Check the next run.**
 
-TurnStage connects a versioned `*.turnstage.jsonc` Profile to any compatible
-HTTP streaming backend, renders the conversation, and keeps Chat, Network,
-Events, timing, test outcomes, and exportable evidence together in VS Code.
+TurnStage is a VS Code workbench for testing streaming LLM chat and agent APIs.
+A versioned `*.turnstage.jsonc` Profile describes the endpoint and event
+mapping; the editor keeps the conversation, HTTP requests, stream events,
+timing, test results, and evidence together.
 
 [Install TurnStage from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=turnstage.turnstage)
 or open VS Code Quick Open and run `ext install turnstage.turnstage`.
 
-![TurnStage synthetic localhost demo](media/marketplace/turnstage-demo.gif)
+![TurnStage conversation beside its Network requests](media/marketplace/stream-debug.png)
 
-_Synthetic localhost demonstration. No credentials, customer endpoint, or
-production conversation is shown._
+_Synthetic local fixture in a VS Code-style Webview. No live API, credential,
+customer endpoint, or production conversation is shown._
 
 > TurnStage is a public preview. It is a testing and evidence workbench, not a
 > model-safety certification service or an autonomous attack platform.
 
-## Debug the conversation and the stream together
+## Inspect one conversation from message to network event
 
 Inspect the rendered response beside its request, headers, timing, SSE or
-NDJSON events, normalized mappings, errors, and correlation identifiers. Stop,
-replay, compare, or reopen the exact evidence without reconstructing a failing
-session from logs.
+NDJSON events, normalized mappings, errors, and correlation identifiers. Stop
+or replay a turn, then reopen its evidence without reconstructing the session
+from logs.
 
-![Synthetic TurnStage chat and Network inspection](media/marketplace/stream-debug.png)
+## Save and run general test cases
 
-_Synthetic localhost data from the bundled mock server. No customer endpoint,
-credential, or production conversation is shown._
+Save a conversation as a draft test, review its expected behavior, and run it
+again. Create single- or multi-turn cases inline, or link JSONC/CSV files for
+version control. Search and select cases in the Profile editor, run one or
+several, and see why a case is unavailable before trying to run it. VS Code
+Test Explorer and the headless CLI can also run ready cases.
 
-## Turn a failure into a repeatable test
+![Synthetic general-test case list in the Profile editor](media/marketplace/test-case-management.png)
 
-Run single- or multi-turn conversation contracts in the Profile editor or VS
-Code Test Explorer. Keep cases inline or link Git-friendly JSONC and CSV suites.
-Failures reopen their captured Chat, Network, Raw Events, or Normalized Events
-evidence. Reports are available as sanitized JSON, JUnit, HTML, and Evidence
-Bundles for local review and CI.
+Results stay separate from case setup. Pick a previous run, compare it with an
+accepted baseline, rerun cases that did not pass, or export that run. Open a
+failed result to inspect its captured Chat, Network, Raw Events, or Normalized
+Events. Reports include sanitized JSON, JUnit, HTML, and Evidence Bundles for
+local review or CI.
 
-![Synthetic automated test result and evidence review](media/marketplace/automated-tests.png)
+![Synthetic general-test results and run history](media/marketplace/automated-tests.png)
 
-## Keep known red-team regressions reproducible
+## Keep red-team regressions reproducible
 
-Replay bounded adversarial cases and check observable rules such as forbidden
-content, URLs, CTAs, tools, or normalized events. Each case can run repeatedly
-in fresh conversations so probabilistic behavior is visible instead of hidden
-behind one sample.
+Red Team has its own case list and results, not a mixed view with general
+tests. Replay bounded adversarial cases against observable rules such as
+forbidden content, URLs, CTAs, tools, or normalized events. Repeat a case in
+fresh conversations to see unstable behavior instead of relying on one sample.
 
 Results distinguish **Resisted**, **Attack succeeded**, **Indeterminate**, and
 **Infrastructure error**. A timeout or incomplete evidence never counts as a
 pass.
 
-![Synthetic adversarial result with causal event evidence](media/marketplace/red-team-evidence.png)
+![Synthetic red-team results and run history](media/marketplace/red-team-evidence.png)
+
+_All screenshots above use synthetic local fixtures; they do not show a live
+service, real user data, or a production test outcome._
+
+## VS Code extension and standalone Web are separate builds
+
+The Marketplace installs the VS Code extension. It uses a desktop or remote
+Extension Host for workspace-linked suites, Test Explorer, and optional Copilot
+integration. The repository also provides a [standalone Web
+build](https://github.com/boloagegit/TurnStage/blob/main/docs/web-deployment.md)
+as a static ZIP; it does not load or run the VSIX. Web users can choose
+deployment-owned read-only Profile presets or make browser-local copies.
+VS Code-only actions are disabled in Web. The browser calls the configured API
+directly, so that API must allow the Web origin through CORS.
 
 ## Why use TurnStage
 
@@ -59,9 +77,8 @@ pass.
   the Webview.
 - **Evidence before guesswork** links messages and results to the exact Network
   and event records that produced them.
-- **Functional and adversarial suites** share bounded execution, multi-turn
-  support, repetitions, campaigns, cancellation, resume, and export workflows
-  while retaining distinct outcomes.
+- **Separate general and red-team workflows** share familiar case selection,
+  run history, and evidence navigation while retaining distinct outcomes.
 - **Performance and comparison checks** cover TTFT, duration, visual baselines,
   baseline/candidate differences, and controlled Fault Lab experiments.
 - **Local-first security** uses Workspace Trust, VS Code SecretStorage, bounded
@@ -75,12 +92,12 @@ pass.
 
 1. Open the **TurnStage** Activity Bar view.
 2. Run **TurnStage: Initialize Workspace** and select a starter Profile.
-3. Open the Profile and send a message in **Debug**. The built-in demo and mock
-   server let you explore without a real service or credential.
+3. Open the Profile and send a message in **Debug** using your configured API,
+   or start the bundled local mock server to explore without credentials.
 4. Inspect the same turn in **Network**, **Raw Events**, and **Normalized
    Events**.
-5. Open **General tests** or **Red Team**, add a case, run it, and select **Open
-   evidence** on the result.
+5. In **General tests** or **Red Team**, add or select a case, run it, and use
+   **Results → Open evidence** to inspect what happened.
 
 For an existing API, use **TurnStage: Create Profile from cURL**. TurnStage
 parses a bounded cURL subset without invoking a shell, excludes captured
@@ -153,6 +170,8 @@ npm run package:web
 ```
 
 Extract `turnstage-web-<version>.zip` behind any static Linux web server. The archive includes both Web guides under `docs/`. Replace the adjacent `turnstage-catalog.json` to provide deployment-owned, read-only official Profile and Environment presets without rebuilding the application. Official Profile controls stay disabled until the user explicitly duplicates the preset into browser-local storage; the Web host also rejects direct writes to the server-owned entry. Users can create, import, duplicate, edit, delete, and export their own browser-local Profiles without changing the official catalog. A portable Profile export contains the Profile, its referenced Environment, and any plaintext credentials stored in either, so another user can import one file and run the same configuration. The browser connects directly to target APIs, so those APIs must be reachable from the user device, trust their TLS certificate, and allow the Web origin through CORS. Personal Profiles and Environments remain in browser `localStorage`, larger testing artifacts remain in IndexedDB, and optional `${secret.*}` session values remain only in page memory. See the [`Web deployment guide`](https://github.com/boloagegit/TurnStage/blob/main/docs/web-deployment.md) for administrator setup, catalog semantics, and security boundaries, and the [`TurnStage Web user guide`](https://github.com/boloagegit/TurnStage/blob/main/docs/web-user-guide.md) for browser-local Profile, Environment, test, backup, and troubleshooting workflows.
+
+For a local preview, extract the ZIP, change into the directory containing `index.html`, and run `python3 -m http.server 8000 --bind 127.0.0.1` (Python 3.6 or newer). Open `http://127.0.0.1:8000/`; do not double-click `index.html` or serve the ZIP itself. This Python server is for local preview only, not production deployment.
 
 ## First run
 
