@@ -5,8 +5,8 @@
 ## 開始使用
 
 1. 使用公司提供的 HTTPS 網址開啟 TurnStage Web；若要在自己的電腦預覽解壓縮的 Web 包，請依 [Web 部署手冊的本機預覽步驟](web-deployment.md#preview-the-extracted-archive-locally) 啟動本機 HTTP 服務。不要直接以 `file://` 開啟 `index.html`。
-2. 從左側清單選擇一個 Profile。
-3. 確認左側的 Environment，以及畫面上方顯示的連線狀態。
+2. 從左側清單選擇一個設定檔。
+3. 確認畫面上方顯示的連線狀態。
 4. 在聊天輸入框送出一筆不含敏感資料的測試訊息。
 5. 從右側的「除錯」、「測試」或「紅隊測試」頁籤檢查請求、事件、結果與證據。
 
@@ -30,7 +30,7 @@
 
 ### 新增空白 Profile
 
-選擇左側標題旁的「新增設定檔」按鈕。新 Profile 會包含可通過基本驗證的請求與串流骨架，接著可在「設定」中修改名稱、Environment、Request 與事件 Mapping。
+選擇左側標題旁的「新增設定檔」按鈕。新設定檔會包含可通過基本驗證的請求與串流骨架，接著可在「設定」中修改名稱、請求與事件 Mapping。
 
 ### 複製 Profile
 
@@ -41,8 +41,8 @@
 1. 按左側標題旁的「匯入設定檔」。
 2. 優先選擇 TurnStage Web 產生的 `*.turnstage-profile.json` 可攜檔。它會一次匯入 Profile、對應 Environment，以及兩者內直接寫入的 token 等設定。
 3. 若 Profile 或 Environment ID 已存在，TurnStage Web 會為兩者產生不重複的本機 ID，並同步修正 Profile 的 Environment 參照，不會覆蓋既有資料。
-4. 舊版單一 `.json` 或 `.jsonc` Profile 仍可匯入，但不包含 Environment；使用前需確認目前瀏覽器已有相符 Environment。
-5. 匯入後先檢查 Environment、目標 URL、headers、Request body 與事件 Mapping，再執行測試。
+4. 舊版單一 `.json` 或 `.jsonc` 設定檔仍可匯入，但不包含對應的連線環境；若瀏覽器缺少該環境，請改用包含環境的可攜檔，或請部署管理員提供官方設定檔。
+5. 匯入後先檢查目標 URL、headers、Request body 與事件 Mapping，再執行測試。
 
 匯入檔案視為不受信任的設定。不要匯入來源不明的檔案；可攜檔可包含明文 token、cookie、password 或 API key，匯入前應確認分享者與目標網址。
 
@@ -58,13 +58,11 @@
 
 刪除瀏覽器資料後沒有伺服器端回收站。重要 Profile 應先匯出備份。
 
-## Environment 與 secrets
+## 設定檔的連線環境與 secrets
 
-展開左側的「環境」區塊可以選擇、匯入、匯出或編輯 Environment。
+左側只列設定檔，不單獨列出或編輯連線環境。設定檔可透過 `${env.name}` 讀取環境變數；官方環境由部署管理員在伺服器範本中維護。可攜設定檔會連同其參照的環境一起匯入或匯出，且不會修改官方版本。
 
-- 修改官方 Environment 時，系統會建立瀏覽器本機副本。
-- Profile 使用 `${env.name}` 讀取 Environment variable。
-- Profile 或 Environment 可直接寫入共用的明文 token、cookie、password 或 API key；它們會保存於 `localStorage`，也會包含於可攜匯出檔。
+- 設定檔或其連線環境可包含共用的明文 token、cookie、password 或 API key；它們會保存於 `localStorage`，也會包含於可攜匯出檔。
 - Profile 使用 `${secret.name}` 表示不需要分享、只由目前使用者輸入的 session secret。
 - Environment 的 `secretReferences` 只描述 secret 名稱，不保存 secret 值。
 - secret 值只保留在目前頁面的記憶體，重新整理或關閉頁面後必須重新輸入。
@@ -81,7 +79,7 @@ Web 的「匯入」會把測試套件複製到此網站的 IndexedDB；後續編
 
 執行前請確認：
 
-- 目標系統允許此測試流量，且目前 Environment 指向正確的非正式環境。
+- 目標系統允許此測試流量，且所選設定檔指向正確的非正式環境。
 - CSV／JSONC 中沒有正式客戶資料、credential 或不應外流的 prompt。
 - timeout、連線失敗或證據不完整不代表測試通過。
 - 匯出 Evidence 或報告後，仍依公司資料分類政策保存與分享。
