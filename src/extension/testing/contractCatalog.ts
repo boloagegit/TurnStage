@@ -3,7 +3,7 @@ import type { ContractCaseCatalog, LinkedContractCaseSummary } from '../../share
 import type { ScenarioDefinition, TurnStageProfile } from '../../shared/types';
 import { loadContractSuite } from './contractSuiteRepository';
 
-export const MAX_LINKED_CONTRACT_CATALOG_ENTRIES = 100;
+export const MAX_LINKED_CONTRACT_CATALOG_ENTRIES = 500;
 
 /** Load bounded, prompt-free summaries. Full case content is loaded only on selection. */
 export async function loadLinkedContractCaseCatalog(profileUri: vscode.Uri, profile: TurnStageProfile, resolveExternal?: (reference: string) => vscode.Uri | undefined): Promise<ContractCaseCatalog> {
@@ -17,7 +17,7 @@ export async function loadLinkedContractCaseCatalog(profileUri: vscode.Uri, prof
       const loaded = await loadContractSuite(profileUri, sourcePath, resolveExternal);
       total += loaded.scenarios.length;
       const remaining = MAX_LINKED_CONTRACT_CATALOG_ENTRIES - entries.length;
-      entries.push(...loaded.scenarios.slice(0, remaining).map((scenario) => summarize(sourcePath, loaded.suite.id, loaded.suite.name, scenario)));
+      entries.push(...loaded.scenarios.slice(0, remaining).map((scenario) => ({ ...summarize(sourcePath, loaded.suite.id, loaded.suite.name, scenario), revision: loaded.revision })));
       if (loaded.scenarios.length > remaining) truncated = true;
     } catch (error) { issues.push({ sourcePath, message: boundedMessage(error) }); }
   }

@@ -2,8 +2,9 @@ import type { HostPayload } from '../../src/shared/protocol';
 import type { AdversarialOutcome, CampaignBaselineV1, CampaignCaseOutcome, CampaignCaseResultV1, CampaignDashboardV1, CampaignRunRecordV1, TestCampaignDefinition, TurnStageProfile } from '../../src/shared/types';
 import { attachCampaignBaseline, createCampaignPlan, createCampaignRunRecord, type CampaignCaseInput } from '../../src/extension/testing/campaign';
 import { serializeCampaignResultsJsonl } from '../../src/extension/testing/adversarialJsonl';
+import { isScenarioReady } from '../../src/extension/testing/scenarioCapture';
 import { ArtifactStore } from './artifactStore';
-import { WebTestController, type WebScenarioEntry } from './webTestController';
+import { WebTestController, webCaseUnsupportedReason, type WebScenarioEntry } from './webTestController';
 
 export class WebCampaignController {
   private readonly store = new ArtifactStore();
@@ -33,6 +34,11 @@ export class WebCampaignController {
     const profile = this.profile();
     const { plan, entries } = await this.prepare(campaignId);
     if (!plan.batch.valid || !plan.batch.withinBudget) throw new Error(plan.batch.issues.map((item) => item.message).join('\n'));
+    for (const selected of plan.selected) {
+      const scenario = entries.find((entry) => entry.itemId === selected.itemId)?.scenario;
+      const reason = scenario && webCaseUnsupportedReason(scenario);
+      if (reason) throw new Error(reason);
+    }
     let record = resumeRunId ? await this.getRun(resumeRunId) : undefined;
     if (resumeRunId && !record) throw new Error('The browser-local campaign run to resume was not found.');
     if (record && (record.campaignId !== campaignId || record.sourceDigest !== plan.sourceDigest)) throw new Error('The saved campaign no longer matches the current profile or selectors.');
@@ -89,7 +95,7 @@ export class WebCampaignController {
     const profile = this.profile();
     const definition = profile.tests?.campaigns?.find((item) => item.id === campaignId);
     if (!definition) throw new Error(`Campaign ${campaignId} is not defined in this profile.`);
-    const entries = await this.tests.scenarioEntries();
+    const entries = (await this.tests.scenarioEntries()).filter((item) => isScenarioReady(item.scenario));
     const cases: CampaignCaseInput[] = entries.map((item) => ({ key: item.key, itemId: item.itemId, profileId: profile.id, suiteId: item.suiteId, scenarioId: item.scenario.id, scenarioName: item.scenario.name, tags: item.scenario.tags, adversarial: Boolean(item.scenario.adversarial), repetitions: item.scenario.adversarial?.repetitions, plannedTurns: item.scenario.steps.length, requestsPerAttempt: item.scenario.steps.length, timeoutMs: item.scenario.adversarial?.timeoutMs }));
     return { definition, plan: createCampaignPlan(definition, cases), entries };
   }

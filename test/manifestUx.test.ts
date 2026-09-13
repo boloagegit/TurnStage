@@ -75,7 +75,7 @@ describe('VS Code contribution UX', () => {
     const english = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.nls.json'), 'utf8')) as Record<string, string>;
     const traditionalChinese = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.nls.zh-tw.json'), 'utf8')) as Record<string, string>;
     expect(english['command.createProfile']).toBe('Create Empty Profile');
-    expect(traditionalChinese['command.createProfile']).toBe('建立空白 Profile');
+    expect(traditionalChinese['command.createProfile']).toBe('建立空白設定檔');
   });
 
   it('uses a theme-aware, square Activity Bar icon that remains legible at native size', () => {

@@ -37,7 +37,9 @@ export type ProductIconName =
   | 'lock'
   | 'loading'
   | 'refresh'
+  | 'remove'
   | 'save'
+  | 'search'
   | 'send'
   | 'screen-full'
   | 'settings-gear'
@@ -83,7 +85,9 @@ const codicons: Record<ProductIconName, string> = {
   lock: 'lock',
   loading: 'loading',
   refresh: 'refresh',
+  remove: 'remove',
   save: 'save',
+  search: 'search',
   send: 'send',
   'screen-full': 'screen-full',
   'settings-gear': 'settings-gear',

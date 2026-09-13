@@ -52,6 +52,10 @@ describe('scenario CI reports', () => {
     expect(outputs.join('\n')).toContain('content.text.delta');
     for (const forbidden of ['CI_SECRET_SHOULD_NOT_LEAK', 'secret.test', 'private prompt', 'authorization']) expect(outputs.join('\n')).not.toContain(forbidden);
     expect(serializeScenarioJUnit([attack])).toContain('Adversarial attack succeeded');
+    const partialXml = serializeScenarioJUnit([{ ...attack, status: 'error' }]);
+    expect(partialXml).toContain('tests="1" failures="0" errors="1"');
+    expect(partialXml).toContain('<error message=');
+    expect(partialXml).not.toContain('<failure message=');
     const report = createScenarioReport([attack]);
     expect(report.failureClusters).toHaveLength(1);
     expect(report.scenarios[0]?.adversarial?.timeline).toMatchObject({ version: 1 });

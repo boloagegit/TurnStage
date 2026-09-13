@@ -1,0 +1,7 @@
+.confirm-action-overlay { position: fixed; z-index: 1100; inset: 0; display: grid; place-items: center; box-sizing: border-box; padding: var(--ts-space-3, 16px); background: rgba(0, 0, 0, .68); }
+.confirm-action-dialog { box-sizing: border-box; width: min(100%, 30em); max-height: min(90dvh, 36em); overflow: auto; padding: var(--ts-space-4, 24px); color: var(--vscode-foreground); background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); box-shadow: 0 12px 48px var(--vscode-widget-shadow, rgba(0, 0, 0, .45)); }
+.confirm-action-dialog h2 { margin: 0 0 var(--ts-space-2, 12px); font-size: 1.15em; line-height: 1.35; overflow-wrap: anywhere; }
+.confirm-action-dialog p { margin: 0; color: var(--vscode-descriptionForeground, var(--vscode-foreground)); line-height: 1.5; overflow-wrap: anywhere; }
+.confirm-action-dialog__actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--ts-space-2, 12px); margin-top: var(--ts-space-4, 24px); }
+.confirm-action-dialog :focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+@media (forced-colors: active) { .confirm-action-dialog { outline: 2px solid ButtonText; } }

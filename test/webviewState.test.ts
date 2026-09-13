@@ -26,11 +26,11 @@ describe('Webview UI checkpoint', () => {
     });
 
     expect(restored).toMatchObject({
-      version: 6,
+      version: 7,
       section: 'security',
       configurationSection: 'security',
       rightPaneMode: 'configure',
-      testsSection: 'campaigns',
+      testsSection: 'scenarios',
       redTeamSection: 'campaigns',
       selectedAutomationResultKey: 'evidence-42',
       selectedCampaignId: 'campaign-1',
@@ -59,6 +59,13 @@ describe('Webview UI checkpoint', () => {
     expect(shouldApplyProfileInspectorDefault(normalizeWebviewState({ rightPaneMode: 'debug' }))).toBe(true);
   });
 
+  it('restores Red Team as a top-level pane and migrates the combined test filter', () => {
+    expect(normalizeWebviewState({ rightPaneMode: 'adversarial', redTeamSection: 'cases' })).toMatchObject({ rightPaneMode: 'adversarial', redTeamSection: 'cases', testKind: 'adversarial' });
+    expect(normalizeWebviewState({ rightPaneMode: 'adversarial', redTeamSection: 'timeline' })).toMatchObject({ rightPaneMode: 'adversarial', redTeamSection: 'timeline', testKind: 'adversarial' });
+    expect(normalizeWebviewState({ rightPaneMode: 'tests', testKind: 'adversarial', testsSection: 'results' })).toMatchObject({ rightPaneMode: 'adversarial', redTeamSection: 'results', testKind: 'adversarial' });
+    expect(normalizeWebviewState({ rightPaneMode: 'tests', testKind: 'contract', testsSection: 'scenarios' })).toMatchObject({ rightPaneMode: 'tests', testsSection: 'scenarios', testKind: 'contract' });
+  });
+
   it('fails closed for malformed, oversized, and non-finite transient state', () => {
     expect(normalizeWebviewState(null)).toBeUndefined();
     const restored = normalizeWebviewState({
@@ -73,7 +80,8 @@ describe('Webview UI checkpoint', () => {
       networkInspector: { query: 'q'.repeat(600), selectedId: 'x'.repeat(513), detailTab: 'Unknown' }
     });
     expect(restored).toEqual({
-      version: 6,
+      version: 7,
+      testKind: 'contract',
       scrollPositions: { chat: 0, 'adversarial.timeline': 10_000_000 },
       adversarialCaseCollection: { query: '', mode: 'all', source: 'all', tag: 'all', sort: 'sourceOrder', page: 0, pageSize: 25 },
       adversarialResultCollection: { query: '', outcome: 'all', stability: 'all', attentionOnly: false, page: 0, pageSize: 25 },

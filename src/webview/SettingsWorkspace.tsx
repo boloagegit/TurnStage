@@ -4,8 +4,11 @@ import type { AdversarialForbidDefinition, AdversarialResultSummary, AutomationR
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
+import { CaseEditorOverlay } from './CaseEditorOverlay';
+import { useConfirmAction } from './ConfirmAction';
 import { JsonViewer } from './JsonViewer';
 import { formatDuration, formatNumber, localizeHumanized, t } from './i18n';
+import { testCaseKey, type TestCaseIdentity } from '../shared/testSelection';
 import './settingsWorkspace.css';
 
 /**
@@ -33,9 +36,9 @@ export type LinkedContractCaseEditorState =
   | { status: 'loaded' | 'saved'; detail: LinkedContractCaseDetail }
   | { status: 'error'; sourcePath: string; scenarioId: string; message: string; conflict: boolean };
 
-export const RED_TEAM_SECTIONS = ['results', 'cases', 'campaigns', 'timeline'] as const;
+export const RED_TEAM_SECTIONS = ['cases', 'results', 'campaigns', 'timeline'] as const;
 export type RedTeamSectionId = typeof RED_TEAM_SECTIONS[number];
-export const AUTOMATION_SECTIONS = ['results', 'scenarios', 'campaigns'] as const;
+export const AUTOMATION_SECTIONS = ['results', 'scenarios'] as const;
 export type AutomationSectionId = typeof AUTOMATION_SECTIONS[number];
 interface EvaluationSectionTab<Section extends string> { id: Section; label: string; value: string }
 
@@ -205,7 +208,6 @@ export function SettingsWorkspace({
         {diagnostics.length > 0 && <IconButton icon="warning" label={t('Show first issue')} type="button" onClick={() => post({ type: 'profile.openFirstIssue' })} />}
         <IconButton icon="save" label={t('Save Profile')} type="button" disabled={readOnly || !profileDirty} onClick={() => post({ type: 'profile.save' })} />
         <IconButton icon="file-code" label={t('Open JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
-        <IconButton icon="check" label={t('Validate')} type="button" className="settings-primary-action" onClick={() => post({ type: 'profile.validate' })} />
       </div>
     </header>
 
@@ -247,7 +249,7 @@ export function SettingsWorkspace({
   </div>;
 }
 
-export function AutomationWorkspace({ profile, post, automationResults = [], campaignDashboard, testOperation, trusted = false, vscodeFeatures = true, scrollTop, onScrollTopChange, activeSection = 'results', onActiveSectionChange = () => undefined, selectedCampaignId, onSelectedCampaignIdChange, expandedCaseId, onExpandedCaseIdChange, selectedResultKey, onSelectedResultKeyChange, linkedCaseCatalog, linkedCaseEditor }: {
+export function AutomationWorkspace({ profile, post, automationResults = [], campaignDashboard, testOperation, trusted = false, vscodeFeatures = true, unified = false, readOnly = false, selectedCaseKeys, onToggleCase, scrollTop, onScrollTopChange, activeSection = 'results', onActiveSectionChange = () => undefined, selectedCampaignId, onSelectedCampaignIdChange, expandedCaseId, onExpandedCaseIdChange, selectedResultKey, onSelectedResultKeyChange, linkedCaseCatalog, linkedCaseEditor }: {
   profile: TurnStageProfile;
   post: SettingsWorkspacePost;
   automationResults?: AutomationResultSummary[];
@@ -255,6 +257,10 @@ export function AutomationWorkspace({ profile, post, automationResults = [], cam
   testOperation?: TestOperationSnapshot;
   trusted?: boolean;
   vscodeFeatures?: boolean;
+  unified?: boolean;
+  readOnly?: boolean;
+  selectedCaseKeys?: ReadonlySet<string>;
+  onToggleCase?: (identity: TestCaseIdentity) => void;
   scrollTop?: number;
   onScrollTopChange?: (value: number) => void;
   activeSection?: AutomationSectionId;
@@ -272,7 +278,6 @@ export function AutomationWorkspace({ profile, post, automationResults = [], cam
   const scrollRef = useRef<HTMLDivElement>(null);
   const inlineScenarioCount = profile.tests?.scenarios?.filter((scenario) => !scenario.adversarial).length ?? 0;
   const scenarioCount = inlineScenarioCount + (linkedCaseCatalog?.total ?? 0);
-  const campaignCount = profile.tests?.campaigns?.length ?? 0;
   const suiteSignature = (profile.tests?.contractSuites ?? []).join('\u001f');
   useRestoredScrollPosition(scrollRef, `tests.${activeSection}`, scrollTop);
   useEffect(() => { post({ type: 'contract.catalog.request' }); }, [post, suiteSignature]);
@@ -281,26 +286,20 @@ export function AutomationWorkspace({ profile, post, automationResults = [], cam
     requestAnimationFrame(() => document.getElementById(`automation-${section}`)?.focus());
   };
   const sections: EvaluationSectionTab<AutomationSectionId>[] = [
-    { id: 'results', label: t('Results'), value: formatNumber(automationResults.length) },
     { id: 'scenarios', label: t('Cases'), value: formatNumber(scenarioCount) },
-    { id: 'campaigns', label: t('Campaigns'), value: formatNumber(campaignCount) },
+    { id: 'results', label: t('Results'), value: formatNumber(automationResults.length) },
   ];
-  return <div className="settings-workspace settings-workspace--embedded red-team-workspace automation-workspace">
-    <header className="settings-header settings-header--embedded" role="group" aria-label={t('Tests toolbar')}>
-      <div className="red-team-title"><strong>{t('Tests')}</strong><span>{t('Functional, regression, comparison, and performance automation.')}</span></div>
-      <div className="settings-header-actions" role="group" aria-label={t('Test actions')}><IconButton icon="beaker" label={t('Open Test Explorer')} type="button" disabled={!vscodeFeatures} onClick={() => post({ type: 'testExplorer.open' })} /><IconButton icon="file-code" label={t('Open JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} /></div>
-    </header>
+  return <div className="settings-workspace settings-workspace--embedded settings-workspace--evaluation red-team-workspace automation-workspace">
     <div ref={scrollRef} className="settings-main" onScroll={(event) => onScrollTopChange?.(event.currentTarget.scrollTop)}>
-      <section className="settings-panel red-team-panel" aria-labelledby="automation-panel-title" tabIndex={-1}>
-        <div className="settings-panel-heading"><div className="settings-panel-title"><h1 id="automation-panel-title">{t('Automated testing')}</h1><p className="settings-section-description">{t('Run deterministic conversation contracts and inspect bounded evidence without mixing them with adversarial outcomes.')}</p></div><span className="settings-section-count">{t('{count} cases', { count: formatNumber(scenarioCount) })}</span></div>
-        <EvaluationSectionTabs label={t('Test sections')} className="automation-section-nav" idPrefix="automation" sections={sections} activeSection={activeSection} onSelect={selectSection} />
-        <ScenarioTestsSection view="contracts" automationSection={activeSection} profile={profile} patch={patch} post={post} testResults={[]} automationResults={automationResults} campaignDashboard={campaignDashboard} testOperation={testOperation} trusted={trusted} vscodeFeatures={vscodeFeatures} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={onSelectedCampaignIdChange} expandedContractCaseId={expandedCaseId} onExpandedContractCaseIdChange={onExpandedCaseIdChange} selectedAutomationResultKey={selectedResultKey} onSelectedAutomationResultKeyChange={onSelectedResultKeyChange} linkedContractCatalog={linkedCaseCatalog} linkedContractEditor={linkedCaseEditor} />
+      <section className="settings-panel red-team-panel" aria-label={t('Tests')} tabIndex={-1}>
+        {!unified && <EvaluationSectionTabs label={t('Test sections')} className="automation-section-nav" idPrefix="automation" sections={sections} activeSection={activeSection} onSelect={selectSection} />}
+        <ScenarioTestsSection view="contracts" automationSection={activeSection} onAutomationSectionChange={selectSection} profile={profile} patch={patch} post={post} testResults={[]} automationResults={automationResults} campaignDashboard={campaignDashboard} testOperation={testOperation} trusted={trusted} vscodeFeatures={vscodeFeatures} readOnly={readOnly} selectedCaseKeys={selectedCaseKeys} onToggleCase={onToggleCase} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={onSelectedCampaignIdChange} expandedContractCaseId={expandedCaseId} onExpandedContractCaseIdChange={onExpandedCaseIdChange} selectedAutomationResultKey={selectedResultKey} onSelectedAutomationResultKeyChange={onSelectedResultKeyChange} linkedContractCatalog={linkedCaseCatalog} linkedContractEditor={linkedCaseEditor} />
       </section>
     </div>
   </div>;
 }
 
-export function AdversarialWorkspace({ profile, post, testResults = [], campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, vscodeFeatures = true, scrollTop, onScrollTopChange, activeSection = 'results', onActiveSectionChange = () => undefined, selectedCampaignId, onSelectedCampaignIdChange, expandedCaseId, onExpandedCaseIdChange, linkedCaseCatalog, linkedCaseEditor, caseCollection = DEFAULT_ADVERSARIAL_CASE_COLLECTION, onCaseCollectionChange = () => undefined, resultCollection = DEFAULT_ADVERSARIAL_RESULT_COLLECTION, onResultCollectionChange = () => undefined }: {
+export function AdversarialWorkspace({ profile, post, testResults = [], campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, vscodeFeatures = true, unified = false, readOnly = false, selectedCaseKeys, onToggleCase, scrollTop, onScrollTopChange, activeSection = 'results', onActiveSectionChange = () => undefined, selectedCampaignId, onSelectedCampaignIdChange, expandedCaseId, onExpandedCaseIdChange, linkedCaseCatalog, linkedCaseEditor, caseCollection = DEFAULT_ADVERSARIAL_CASE_COLLECTION, onCaseCollectionChange = () => undefined, resultCollection = DEFAULT_ADVERSARIAL_RESULT_COLLECTION, onResultCollectionChange = () => undefined }: {
   profile: TurnStageProfile;
   post: SettingsWorkspacePost;
   testResults?: AdversarialResultSummary[];
@@ -310,6 +309,10 @@ export function AdversarialWorkspace({ profile, post, testResults = [], campaign
   timeline?: React.ReactNode;
   trusted?: boolean;
   vscodeFeatures?: boolean;
+  unified?: boolean;
+  readOnly?: boolean;
+  selectedCaseKeys?: ReadonlySet<string>;
+  onToggleCase?: (identity: TestCaseIdentity) => void;
   scrollTop?: number;
   onScrollTopChange?: (value: number) => void;
   activeSection?: RedTeamSectionId;
@@ -338,27 +341,16 @@ export function AdversarialWorkspace({ profile, post, testResults = [], campaign
     requestAnimationFrame(() => document.getElementById(`red-team-${section}`)?.focus());
   };
   const sections: EvaluationSectionTab<RedTeamSectionId>[] = [
-    { id: 'results', label: t('Results'), value: formatNumber(testResults.length) },
     { id: 'cases', label: t('Cases'), value: formatNumber(caseCount) },
+    { id: 'results', label: t('Results'), value: formatNumber(testResults.length) },
     { id: 'campaigns', label: t('Campaigns'), value: formatNumber(campaignCount) },
     { id: 'timeline', label: t('Timeline'), value: activeEvidenceId ? t('Selected') : '—' },
   ];
-  return <div className="settings-workspace settings-workspace--embedded red-team-workspace">
-    <header className="settings-header settings-header--embedded" role="group" aria-label={t('Red Team toolbar')}>
-      <div className="red-team-title"><strong>{t('Red Team')}</strong><span>{t('Bounded adversarial cases, results, and causal evidence.')}</span></div>
-      <div className="settings-header-actions" role="group" aria-label={t('Red Team actions')}>
-        <IconButton icon="file-code" label={t('Open JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
-        <IconButton icon="check" label={t('Validate')} type="button" className="settings-primary-action" onClick={() => post({ type: 'profile.validate' })} />
-      </div>
-    </header>
+  return <div className="settings-workspace settings-workspace--embedded settings-workspace--evaluation red-team-workspace">
     <div ref={scrollRef} className="settings-main" onScroll={(event) => onScrollTopChange?.(event.currentTarget.scrollTop)}>
-      <section className="settings-panel red-team-panel" aria-labelledby="red-team-panel-title" tabIndex={-1}>
-        <div className="settings-panel-heading">
-          <div className="settings-panel-title"><h1 id="red-team-panel-title">{t('Adversarial testing')}</h1><p className="settings-section-description">{t('Author known attacks, run bounded samples, and inspect causal evidence without changing formal outcomes.')}</p></div>
-          <span className="settings-section-count">{t('{count} inline cases', { count: formatNumber(inlineCaseCount) })}</span>
-        </div>
-        <EvaluationSectionTabs label={t('Red Team sections')} idPrefix="red-team" sections={sections} activeSection={activeSection} onSelect={selectSection} />
-        <ScenarioTestsSection view="adversarial" adversarialSection={activeSection} onAdversarialSectionChange={selectSection} profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={timeline} trusted={trusted} vscodeFeatures={vscodeFeatures} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={onSelectedCampaignIdChange} expandedCaseId={expandedCaseId} onExpandedCaseIdChange={onExpandedCaseIdChange} linkedCaseCatalog={linkedCaseCatalog} linkedCaseEditor={linkedCaseEditor} caseCollection={caseCollection} onCaseCollectionChange={onCaseCollectionChange} resultCollection={resultCollection} onResultCollectionChange={onResultCollectionChange} />
+      <section className="settings-panel red-team-panel" aria-label={t('Red Team')} tabIndex={-1}>
+        {!unified && <EvaluationSectionTabs label={t('Red Team sections')} idPrefix="red-team" sections={sections} activeSection={activeSection} onSelect={selectSection} />}
+        <ScenarioTestsSection view="adversarial" adversarialSection={activeSection} onAdversarialSectionChange={selectSection} profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={timeline} trusted={trusted} vscodeFeatures={vscodeFeatures} readOnly={readOnly} selectedCaseKeys={selectedCaseKeys} onToggleCase={onToggleCase} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={onSelectedCampaignIdChange} expandedCaseId={expandedCaseId} onExpandedCaseIdChange={onExpandedCaseIdChange} linkedCaseCatalog={linkedCaseCatalog} linkedCaseEditor={linkedCaseEditor} caseCollection={caseCollection} onCaseCollectionChange={onCaseCollectionChange} resultCollection={resultCollection} onResultCollectionChange={onResultCollectionChange} />
       </section>
     </div>
   </div>;
@@ -639,7 +631,8 @@ const performanceMetricOptions: Array<{ id: ScenarioPerformanceMetric; label: st
   { id: 'metrics.maxEventGap', label: 'Maximum event gap' },
 ];
 
-function ScenarioTestsSection({ view, automationSection = 'settings', adversarialSection = 'results', onAdversarialSectionChange, profile, patch, post, testResults, automationResults = [], campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, vscodeFeatures = true, selectedCampaignId: controlledSelectedCampaignId, onSelectedCampaignIdChange, expandedCaseId: controlledExpandedCaseId, onExpandedCaseIdChange, linkedCaseCatalog, linkedCaseEditor, expandedContractCaseId: controlledExpandedContractCaseId, onExpandedContractCaseIdChange, selectedAutomationResultKey: controlledSelectedAutomationResultKey, onSelectedAutomationResultKeyChange, linkedContractCatalog, linkedContractEditor, caseCollection = DEFAULT_ADVERSARIAL_CASE_COLLECTION, onCaseCollectionChange = () => undefined, resultCollection = DEFAULT_ADVERSARIAL_RESULT_COLLECTION, onResultCollectionChange = () => undefined }: { view: 'contracts' | 'adversarial'; automationSection?: AutomationSectionId | 'settings'; adversarialSection?: RedTeamSectionId; onAdversarialSectionChange?: (section: RedTeamSectionId) => void; profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; automationResults?: AutomationResultSummary[]; campaignDashboard?: CampaignDashboardV1; testOperation?: TestOperationSnapshot; activeEvidenceId?: string; timeline?: React.ReactNode; trusted?: boolean; vscodeFeatures?: boolean; selectedCampaignId?: string; onSelectedCampaignIdChange?: (id: string | undefined) => void; expandedCaseId?: string; onExpandedCaseIdChange?: (id: string | undefined) => void; linkedCaseCatalog?: AdversarialCaseCatalog; linkedCaseEditor?: LinkedAdversarialCaseEditorState; expandedContractCaseId?: string; onExpandedContractCaseIdChange?: (id: string | undefined) => void; selectedAutomationResultKey?: string; onSelectedAutomationResultKeyChange?: (key: string | undefined) => void; linkedContractCatalog?: ContractCaseCatalog; linkedContractEditor?: LinkedContractCaseEditorState; caseCollection?: AdversarialCaseCollectionState; onCaseCollectionChange?: (state: AdversarialCaseCollectionState) => void; resultCollection?: AdversarialResultCollectionState; onResultCollectionChange?: (state: AdversarialResultCollectionState) => void }): React.JSX.Element {
+function ScenarioTestsSection({ view, automationSection = 'settings', onAutomationSectionChange, adversarialSection = 'results', onAdversarialSectionChange, profile, patch, post, testResults, automationResults = [], campaignDashboard, testOperation, activeEvidenceId, timeline, trusted = false, vscodeFeatures = true, readOnly = false, selectedCaseKeys, onToggleCase, selectedCampaignId: controlledSelectedCampaignId, onSelectedCampaignIdChange, expandedCaseId: controlledExpandedCaseId, onExpandedCaseIdChange, linkedCaseCatalog, linkedCaseEditor, expandedContractCaseId: controlledExpandedContractCaseId, onExpandedContractCaseIdChange, selectedAutomationResultKey: controlledSelectedAutomationResultKey, onSelectedAutomationResultKeyChange, linkedContractCatalog, linkedContractEditor, caseCollection = DEFAULT_ADVERSARIAL_CASE_COLLECTION, onCaseCollectionChange = () => undefined, resultCollection = DEFAULT_ADVERSARIAL_RESULT_COLLECTION, onResultCollectionChange = () => undefined }: { view: 'contracts' | 'adversarial'; automationSection?: AutomationSectionId | 'settings'; onAutomationSectionChange?: (section: AutomationSectionId) => void; adversarialSection?: RedTeamSectionId; onAdversarialSectionChange?: (section: RedTeamSectionId) => void; profile: TurnStageProfile; patch: (path: PatchPath, value: unknown) => void; post: SettingsWorkspacePost; testResults: AdversarialResultSummary[]; automationResults?: AutomationResultSummary[]; campaignDashboard?: CampaignDashboardV1; testOperation?: TestOperationSnapshot; activeEvidenceId?: string; timeline?: React.ReactNode; trusted?: boolean; vscodeFeatures?: boolean; readOnly?: boolean; selectedCaseKeys?: ReadonlySet<string>; onToggleCase?: (identity: TestCaseIdentity) => void; selectedCampaignId?: string; onSelectedCampaignIdChange?: (id: string | undefined) => void; expandedCaseId?: string; onExpandedCaseIdChange?: (id: string | undefined) => void; linkedCaseCatalog?: AdversarialCaseCatalog; linkedCaseEditor?: LinkedAdversarialCaseEditorState; expandedContractCaseId?: string; onExpandedContractCaseIdChange?: (id: string | undefined) => void; selectedAutomationResultKey?: string; onSelectedAutomationResultKeyChange?: (key: string | undefined) => void; linkedContractCatalog?: ContractCaseCatalog; linkedContractEditor?: LinkedContractCaseEditorState; caseCollection?: AdversarialCaseCollectionState; onCaseCollectionChange?: (state: AdversarialCaseCollectionState) => void; resultCollection?: AdversarialResultCollectionState; onResultCollectionChange?: (state: AdversarialResultCollectionState) => void }): React.JSX.Element {
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
   const scenarios = profile.tests?.scenarios ?? [];
   const qualityRubrics = profile.tests?.qualityRubrics ?? [];
   const [undo, setUndo] = useState<{ label: string; path: PatchPath; value: unknown }>();
@@ -659,12 +652,15 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
   const setSelectedCampaignId = (id: string | undefined) => { setUncontrolledSelectedCampaignId(id); onSelectedCampaignIdChange?.(id); };
   const selectedAutomationResultKey = onSelectedAutomationResultKeyChange ? controlledSelectedAutomationResultKey : uncontrolledSelectedAutomationResultKey;
   const setSelectedAutomationResultKey = (key: string | undefined) => { setUncontrolledSelectedAutomationResultKey(key); onSelectedAutomationResultKeyChange?.(key); };
+  const contractCasesVisible = view === 'contracts' && automationSection === 'scenarios';
   const adversarialEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => scenario.adversarial);
   const contractEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => !scenario.adversarial);
   const contractRows = useMemo<ContractCaseRow[]>(() => [
     ...contractEntries.map(({ scenario, index }) => ({ key: `inline:${index}:${scenario.id}`, source: 'inline' as const, sourceLabel: t('Inline'), scenarioId: scenario.id, scenarioName: scenario.name || scenario.id, tags: scenario.tags ?? [], turns: scenario.steps.length, assertions: contractAssertionCount(scenario), comparison: Boolean(scenario.comparison), performance: Boolean(scenario.performance), faults: Boolean(scenario.faults), capture: scenario.capture, scenario, index })),
-    ...(linkedContractCatalog?.entries ?? []).map((entry) => ({ key: linkedContractCaseRowKey(entry), source: 'linked' as const, sourceLabel: entry.suiteName || linkedSuiteLabel(entry.sourcePath), scenarioId: entry.scenarioId, scenarioName: entry.scenarioName || entry.scenarioId, tags: entry.tags, turns: entry.turns, assertions: entry.assertions, comparison: entry.comparison, performance: entry.performance, faults: entry.faults, capture: entry.capture, sourcePath: entry.sourcePath, suiteId: entry.suiteId })),
+    ...(linkedContractCatalog?.entries ?? []).map((entry) => ({ key: linkedContractCaseRowKey(entry), source: 'linked' as const, sourceLabel: entry.suiteName || linkedSuiteLabel(entry.sourcePath), scenarioId: entry.scenarioId, scenarioName: entry.scenarioName || entry.scenarioId, tags: entry.tags, turns: entry.turns, assertions: entry.assertions, comparison: entry.comparison, performance: entry.performance, faults: entry.faults, capture: entry.capture, sourcePath: entry.sourcePath, suiteId: entry.suiteId, revision: entry.revision })),
   ], [contractEntries, linkedContractCatalog]);
+  const canExportContractCases = trusted && (vscodeFeatures ? contractEntries.length > 0 : contractRows.length > 0);
+  const canExportAdversarialCases = trusted && (vscodeFeatures ? adversarialEntries.length > 0 : adversarialEntries.length + (linkedCaseCatalog?.entries.length ?? 0) > 0);
   useEffect(() => {
     if (!expandedCaseId) return;
     if (expandedCaseId.startsWith('linked:')) {
@@ -724,8 +720,6 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
   const selectedCampaignIndex = Math.max(0, campaigns.findIndex((campaign) => campaign.id === selectedCampaignId));
   const selectedCampaign = campaigns[selectedCampaignIndex];
   const testRunActive = testOperation?.state === 'running' || testOperation?.state === 'cancelling';
-  const hasRunnableContracts = contractRows.some((row) => !captureNeedsReview(row.capture, row.tags));
-  const hasRunnableAdversarialCases = adversarialEntries.some(({ scenario }) => !captureNeedsReview(scenario.capture, scenario.tags)) || Boolean(linkedCaseCatalog?.entries.some((entry) => !captureNeedsReview(entry.capture, entry.tags)));
   const deferredAutomationScenarioQuery = useDeferredValue(automationScenarioQuery);
   const matchingContracts = useMemo(() => {
     const query = deferredAutomationScenarioQuery.trim().toLocaleLowerCase();
@@ -768,28 +762,46 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
   };
   return <div className="settings-section-stack">
     {view === 'contracts' && automationSection === 'results' && <section id="automation-results" className="settings-card red-team-section" role="tabpanel" aria-labelledby="automation-results-tab automation-results-heading" tabIndex={-1}>
-      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="automation-results-heading">{t('Latest test results')}</h2><p className="settings-card-description">{t('Deterministic contract, comparison, and performance outcomes from this Extension Host session.')}</p></div>{automationResults.length > 0 && <details className="adversarial-export-actions"><summary aria-label={t('Export test results')} title={t('Export test results')}><ProductIcon name="export" /></summary><div><button type="button" onClick={() => post({ type: 'test.report.export', format: 'html' })}>{t('HTML report')}</button><button type="button" disabled={!trusted} onClick={() => post({ type: 'test.evidenceBundle.export' })}>{t('Evidence Bundle')}</button><button type="button" onClick={() => post({ type: 'test.report.export', format: 'json' })}>{t('JSON report')}</button><button type="button" onClick={() => post({ type: 'test.report.export', format: 'junit' })}>{t('JUnit XML')}</button></div></details>}</div>
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="automation-results-heading">{t('Latest test results')}</h2></div>{automationResults.length > 0 && <details className="adversarial-export-actions"><summary aria-label={t('Export test results')} title={t('Export test results')}><ProductIcon name="export" /></summary><div><button type="button" onClick={() => post({ type: 'test.report.export', format: 'html' })}>{t('HTML report')}</button><button type="button" disabled={!trusted} onClick={() => post({ type: 'test.evidenceBundle.export' })}>{t('Evidence Bundle')}</button><button type="button" onClick={() => post({ type: 'test.report.export', format: 'json' })}>{t('JSON report')}</button><button type="button" onClick={() => post({ type: 'test.report.export', format: 'junit' })}>{t('JUnit XML')}</button></div></details>}</div>
       <TestOperationStatus operation={testOperation} />
       {automationResults.length > 0 && <label className="automation-search"><span>{t('Search results')}</span><input type="search" value={automationResultQuery} placeholder={t('Scenario name or ID')} onChange={(event) => { setAutomationResultQuery(event.target.value); setAutomationResultPage(0); }} /></label>}
-      {!automationResults.length ? <div className="settings-empty settings-empty--action"><span>{t('No automation results in this Extension Host session.')}</span><button type="button" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'testExplorer.open' })}>{t('Open Test Explorer')}</button></div> : !matchingAutomationResults.length ? <p className="settings-empty">{t('No results match the current search.')}</p> : <>
+      {!automationResults.length ? <div className="settings-empty settings-empty--action"><span>{t('No test results yet. Run a test case to see results here.')}</span><button type="button" onClick={() => onAutomationSectionChange?.('scenarios')}>{t('View test cases')}</button></div> : !matchingAutomationResults.length ? <p className="settings-empty">{t('No results match the current search.')}</p> : <>
         <div className="adversarial-result-table-wrap"><table className="adversarial-result-table automation-result-table"><thead><tr><th scope="col">{t('Scenario')}</th><th scope="col">{t('Outcome')}</th><th scope="col">{t('Checks')}</th><th scope="col">{t('Duration')}</th><th scope="col" className="adversarial-result-table__actions-heading">{t('Actions')}</th></tr></thead><tbody>{visibleAutomationResults.map((result) => { const resultKey = automationResultKey(result, automationResults.indexOf(result)); const selected = resultKey === selectedAutomationResultEntry?.key; return <tr className={selected ? 'is-result-selected' : undefined} key={resultKey}><td><button type="button" className="automation-result-select" aria-label={t('Select test result {name}', { name: result.scenarioName })} aria-pressed={selected} onClick={() => setSelectedAutomationResultKey(resultKey)}><strong>{result.scenarioName}</strong><code>{result.scenarioId}</code></button></td><td><span className={`automation-outcome automation-outcome--${result.outcome}`}><ProductIcon name={result.outcome === 'passed' ? 'check' : result.outcome === 'failed' ? 'warning' : 'error'} />{t(localizeHumanized(result.outcome))}</span></td><td><span>{t('{passed} passed · {failed} failed', { passed: formatNumber(result.passedChecks), failed: formatNumber(result.failedChecks) })}</span>{(result.comparison || result.performance) && <small>{[result.comparison ? t('Comparison') : '', result.performance ? t('Performance') : ''].filter(Boolean).join(' · ')}</small>}</td><td className="adversarial-result-table__duration">{formatDuration(result.durationMs)}</td><td><div className="adversarial-result-actions">{result.evidenceId ? <button type="button" className="primary" onClick={() => { setSelectedAutomationResultKey(resultKey); post({ type: 'test.evidence.open', evidenceId: result.evidenceId!, location: result.primaryLocation }); }}>{t('Open evidence')}</button> : <button type="button" disabled>{t('Evidence unavailable')}</button>}<IconButton type="button" icon="debug-rerun" label={t('Run scenario again')} disabled={testRunActive} onClick={() => { setSelectedAutomationResultKey(resultKey); post({ type: 'test.runCase', scenarioId: result.scenarioId, suiteId: result.suiteId, kind: 'contract' }); }} /></div></td></tr>; })}</tbody></table></div>
         <CollectionPagination page={boundedAutomationResultPage} pageCount={automationResultPageCount} start={boundedAutomationResultPage * 25 + 1} end={Math.min(matchingAutomationResults.length, (boundedAutomationResultPage + 1) * 25)} total={matchingAutomationResults.length} onPage={setAutomationResultPage} />
       </>}
     </section>}
-    {view === 'contracts' && automationSection === 'scenarios' && <section id="automation-scenarios" className="settings-card red-team-section" role="tabpanel" aria-labelledby="automation-scenarios-tab scenario-contract-heading" tabIndex={-1}>
-      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="scenario-contract-heading">{t('Conversation contracts')}</h2><p className="settings-card-description">{t(vscodeFeatures ? 'Keep small cases inline or link a JSONC/CSV suite. Full prompts load only when you edit a case.' : 'Keep small cases inline or import a JSONC suite copy. Imported files are stored in this browser and do not stay linked to the original.')}</p></div><div className="adversarial-case-heading-actions"><button type="button" className="primary" disabled={testRunActive || !hasRunnableContracts} aria-busy={testOperation?.action === 'runContracts' && testRunActive} onClick={() => post({ type: 'test.runContracts' })}>{t(testOperation?.action === 'runContracts' && testRunActive ? 'Running all…' : 'Run all')}</button><IconButton type="button" icon="add" label={t('Add scenario')} onClick={addScenario} /><details className="adversarial-case-file-menu"><summary aria-label={t('More test suite actions')} title={t('More test suite actions')}><ProductIcon name="ellipsis" /></summary><div>{!vscodeFeatures && <button type="button" onClick={() => post({ type: 'contract.file', action: 'importJsonc' })}>{t('Import JSONC copy')}</button>}<button type="button" disabled={!trusted || !vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'contract.file', action: 'linkSuite' })}>{t('Link suite')}</button><button type="button" disabled={!trusted} onClick={() => post({ type: 'contract.file', action: 'csvTemplate' })}>{t('CSV template')}</button><button type="button" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'contract.catalog.request', force: true })}>{t('Refresh linked suites')}</button></div></details>{testRunActive && <IconButton type="button" className="danger-subtle" icon="stop" label={t('Stop test run')} onClick={() => post({ type: 'test.cancel' })} />}</div></div>
+    {contractCasesVisible && <section id="automation-scenarios" className="settings-card red-team-section" role="tabpanel" aria-labelledby="automation-scenarios-tab scenario-contract-heading" tabIndex={-1}>
+      {readOnly && <div className="settings-readonly-notice" role="note"><ProductIcon name="lock" /><div><strong>{t('Server-managed Profile')}</strong><span>{t('This Profile is read-only. Duplicate it to create an editable copy in this browser.')}</span></div><button type="button" className="primary" onClick={() => post({ type: 'profile.duplicate' })}>{t('Duplicate to edit')}</button></div>}
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="scenario-contract-heading">{t('Test cases')}</h2></div><div className="adversarial-case-heading-actions">
+        <IconButton type="button" icon="add" label={t('Add case')} disabled={readOnly} onClick={addScenario} />
+        <details className="adversarial-case-file-menu"><summary aria-label={t('More case actions')} title={t('More case actions')}><ProductIcon name="ellipsis" /></summary><div>
+          <details className="case-format-submenu"><summary aria-label={t('Add cases from file')}>{t('Add cases from file')}</summary><div>
+            {!vscodeFeatures && <><button type="button" disabled={readOnly} onClick={() => post({ type: 'contract.file', action: 'importJsonc' })}>{t('Import JSONC copy')}</button><button type="button" disabled={readOnly} onClick={() => post({ type: 'contract.file', action: 'importCsv' })}>{t('Import CSV')}</button></>}
+            <button type="button" disabled={readOnly || !trusted || !vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'contract.file', action: 'linkSuite' })}>{t('Link suite')}</button>
+          </div></details>
+          <details className="case-format-submenu"><summary aria-label={t('Export cases')}>{t('Export cases')}</summary><div>
+            <button type="button" disabled={!canExportContractCases} onClick={() => post({ type: 'contract.file', action: 'exportJsonc' })}>{t(vscodeFeatures ? 'Export inline cases (JSONC)' : 'Export cases (JSONC)')}</button>
+            <button type="button" disabled={!canExportContractCases} onClick={() => post({ type: 'contract.file', action: 'exportCsv' })}>{t(vscodeFeatures ? 'Export inline cases (CSV)' : 'Export cases (CSV)')}</button>
+          </div></details>
+          <button type="button" disabled={!trusted} onClick={() => post({ type: 'contract.file', action: 'csvTemplate' })}>{t('CSV template')}</button>
+          <button type="button" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'contract.catalog.request', force: true })}>{t('Refresh linked suites')}</button>
+        </div></details>
+        {testRunActive && <IconButton type="button" className="danger-subtle" icon="stop" label={t('Stop test run')} onClick={() => post({ type: 'test.cancel' })} />}
+      </div></div>
       <TestOperationStatus operation={testOperation} />
-      {(profile.tests?.contractSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.contractSuites!.map((path, index) => { const label = linkedSuiteLabel(path); return <li key={`${path}-${index}`}><code title={path}>{label}</code><div className="adversarial-linked-suite-actions"><IconButton type="button" icon="go-to-file" label={t('Open linked suite {path}', { path: label })} disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'contract.openLinkedSuite', path })} /><IconButton type="button" icon="trash" label={t('Unlink suite {path}', { path: label })} onClick={() => unlinkContractSuite(index, path)} /></div></li>; })}</ul></div>}
-      {contractRows.length > 0 && <label className="automation-search"><span>{t('Search scenarios')}</span><input type="search" value={automationScenarioQuery} placeholder={t('Scenario name, ID, tag, or suite')} onChange={(event) => { setAutomationScenarioQuery(event.target.value); setAutomationScenarioPage(0); }} /></label>}
+      {undo && <div className="settings-undo" role="status"><span>{undo.label}</span><button type="button" onClick={() => { patch(undo.path, undo.value); setUndo(undefined); }}>{t('Undo')}</button><IconButton type="button" icon="close" label={t('Dismiss undo')} onClick={() => setUndo(undefined)} /></div>}
+      {(profile.tests?.contractSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.contractSuites!.map((path, index) => { const label = linkedSuiteLabel(path); return <li key={`${path}-${index}`}><code title={path}>{label}</code><div className="adversarial-linked-suite-actions"><IconButton type="button" icon="go-to-file" label={t('Open linked suite {path}', { path: label })} disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'contract.openLinkedSuite', path })} /><IconButton type="button" icon="remove" disabled={readOnly} label={t('Unlink suite {path}', { path: label })} onClick={() => requestConfirm({ title: t('Unlink suite {path}', { path: label }), actionLabel: t('Unlink'), detail: t('This removes the suite from the current Profile. The source file is not deleted.'), onConfirm: () => unlinkContractSuite(index, path) })} /></div></li>; })}</ul></div>}
+      {contractRows.length > 0 && <label className="automation-search case-list-search"><span>{t('Search cases')}</span><input type="search" value={automationScenarioQuery} placeholder={t('Case name, ID, tag, or suite')} onChange={(event) => { setAutomationScenarioQuery(event.target.value); setAutomationScenarioPage(0); }} /></label>}
+      {contractRows.length > 0 && <div className="adversarial-case-collection-status"><span>{t('{filtered} of {total} cases', { filtered: formatNumber(matchingContracts.length), total: formatNumber(contractRows.length) })}</span>{linkedContractCatalog?.truncated && <span className="is-warning">{t('Only the first {count} linked cases are shown to protect performance.', { count: formatNumber(linkedContractCatalog.entries.length) })}</span>}</div>}
+      <SelectAllCases rows={matchingContracts} profileId={profile.id} kind="contract" selectedCaseKeys={selectedCaseKeys} onToggleCase={onToggleCase} testRunActive={testRunActive} vscodeFeatures={vscodeFeatures} filtered={Boolean(automationScenarioQuery.trim())} />
       {linkedContractCatalog?.issues.length ? <details className="adversarial-catalog-issues"><summary>{t('{count} linked source issues', { count: formatNumber(linkedContractCatalog.issues.length) })}</summary><ul>{linkedContractCatalog.issues.map((issue) => <li key={`${issue.sourcePath}:${issue.message}`}><code>{linkedSuiteLabel(issue.sourcePath)}</code><span>{issue.message}</span></li>)}</ul></details> : null}
-      {!contractRows.length ? <div className="settings-empty settings-empty--action"><span>{t(profile.tests?.contractSuites?.length && !linkedContractCatalog ? 'Loading linked test cases…' : 'No scenarios configured.')}</span><div><button type="button" onClick={addScenario}>{t('Add scenario')}</button><button type="button" disabled={!trusted || !vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'contract.file', action: 'linkSuite' })}>{t('Link suite')}</button></div></div> : !matchingContracts.length ? <p className="settings-empty">{t('No scenarios match the current search.')}</p> : <>
-        <ContractCaseList rows={visibleContracts} expandedCaseId={expandedContractCaseId} onExpandedCaseIdChange={setExpandedContractCaseId} linkedCaseEditor={linkedContractEditor} trusted={trusted} vscodeFeatures={vscodeFeatures} post={post} testOperation={testOperation} onInlineChange={(index, value) => save(replaceAt(scenarios, index, value))} onInlineDestructiveChange={(index, value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onInlineDelete={(index, scenario) => saveDestructive(t('Deleted scenario {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index))} />
-        {linkedContractCatalog?.truncated && <p className="settings-callout settings-callout-warning">{t('Only the first {count} linked cases are shown here to protect editor performance. All valid cases remain available in Test Explorer and Copilot tools.', { count: formatNumber(linkedContractCatalog.entries.length) })}</p>}
+      {!contractRows.length ? <div className="settings-empty settings-empty--action"><span>{t(profile.tests?.contractSuites?.length && !linkedContractCatalog ? 'Loading linked test cases…' : 'No test cases yet.')}</span><div><button type="button" disabled={readOnly} onClick={addScenario}>{t('Add case')}</button><button type="button" disabled={readOnly || !trusted || !vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'contract.file', action: 'linkSuite' })}>{t('Link suite')}</button></div></div> : !matchingContracts.length ? <p className="settings-empty">{t('No cases match the current search.')}</p> : <>
+        <ContractCaseList rows={visibleContracts} editorRows={contractRows} profileId={profile.id} selectedCaseKeys={selectedCaseKeys} onToggleCase={onToggleCase} expandedCaseId={expandedContractCaseId} onExpandedCaseIdChange={setExpandedContractCaseId} linkedCaseEditor={linkedContractEditor} trusted={trusted} vscodeFeatures={vscodeFeatures} readOnly={readOnly} post={post} testOperation={testOperation} onInlineChange={(index, value) => save(replaceAt(scenarios, index, value))} onInlineDelete={(index, scenario, afterDelete) => requestConfirm({ title: t('Delete scenario {name}', { name: scenario.name || scenario.id }), actionLabel: t('Delete'), onConfirm: () => { saveDestructive(t('Deleted scenario {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); afterDelete(); } })} />
         <CollectionPagination page={boundedAutomationPage} pageCount={automationPageCount} start={boundedAutomationPage * 25 + 1} end={Math.min(matchingContracts.length, (boundedAutomationPage + 1) * 25)} total={matchingContracts.length} onPage={setAutomationScenarioPage} />
       </>}
     </section>}
-    {((view === 'adversarial' && adversarialSection === 'campaigns') || (view === 'contracts' && automationSection === 'campaigns')) && <section id={view === 'contracts' ? 'automation-campaigns' : 'red-team-campaigns'} className="settings-card red-team-section" role="tabpanel" aria-labelledby={`${view === 'contracts' ? 'automation-campaigns-tab' : 'red-team-campaigns-tab'} test-campaigns-heading`} tabIndex={-1}>
-      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="test-campaigns-heading">{t('Test campaigns')}</h2><p className="settings-card-description">{t('Create a bounded, repeatable selection of existing cases. Campaign history stores metadata only; raw prompts and evidence remain session-scoped.')}</p></div><button type="button" disabled={campaigns.length >= 50} onClick={addCampaign}>{t('Add campaign')}</button></div>
+    {view === 'adversarial' && adversarialSection === 'campaigns' && <section id="red-team-campaigns" className="settings-card red-team-section" role="tabpanel" aria-labelledby="red-team-campaigns-tab test-campaigns-heading" tabIndex={-1}>
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="test-campaigns-heading">{t('Test campaigns')}</h2></div><button type="button" disabled={campaigns.length >= 50} onClick={addCampaign}>{t('Add campaign')}</button></div>
       {!campaigns.length ? <div className="settings-empty settings-empty--action"><span>{t('No test campaigns configured.')}</span><button type="button" onClick={addCampaign}>{t('Add campaign')}</button></div> : <div className="campaign-master-detail">
         <div className="campaign-selector" role="listbox" aria-label={t('Test campaigns')}>{campaigns.map((campaign) => {
           const latest = campaignDashboard?.campaigns.find((item) => item.definition.id === campaign.id)?.latest;
@@ -806,7 +818,7 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
             <div className="campaign-card__heading"><div><strong>{campaign.name || campaign.id}</strong><code>{campaign.id}</code></div>{latest ? <span className={`campaign-status campaign-status--${latest.status}`}>{t(localizeHumanized(latest.status))}</span> : <span className="campaign-status">{t('Not run')}</span>}</div>
             <div className="settings-form-grid">
               <SettingField label={t('Name')} id={`campaign-${index}-name`}><PatchInput id={`campaign-${index}-name`} value={campaign.name} onCommit={(name) => update({ ...campaign, name })} /></SettingField>
-              <NumberSettingField label={t('Repetitions per adversarial case')} id={`campaign-${index}-repetitions`} value={campaign.runPolicy?.repetitions} placeholder="1" min={1} max={100} hint={t('Conversation contracts run once; adversarial cases use this sample size.')} onCommit={(repetitions) => update({ ...campaign, runPolicy: { ...(campaign.runPolicy ?? {}), repetitions } })} />
+              <NumberSettingField label={t('Repetitions per adversarial case')} id={`campaign-${index}-repetitions`} value={campaign.runPolicy?.repetitions} placeholder="1" min={1} max={100} hint={t('Standard test cases run once; red-team cases use this repetition count.')} onCommit={(repetitions) => update({ ...campaign, runPolicy: { ...(campaign.runPolicy ?? {}), repetitions } })} />
               <NumberSettingField label={t('Concurrent cases')} id={`campaign-${index}-concurrency`} value={campaign.runPolicy?.maxConcurrency} placeholder="3" min={1} max={8} hint={t('Cases may run in parallel. Turns and repeated attempts within one case remain sequential.')} onCommit={(value) => update({ ...campaign, runPolicy: { ...(campaign.runPolicy ?? {}), maxConcurrency: value === undefined ? undefined : Math.round(value) } })} />
               <ListPatchField label={t('Case IDs')} id={`campaign-${index}-cases`} value={campaign.selectors?.caseIds ?? []} placeholder="jailbreak-basic, leakage-check" hint={t('Leave empty to select by suite or tags.')} onCommit={(caseIds) => update({ ...campaign, selectors: { ...(campaign.selectors ?? {}), caseIds: caseIds.length ? caseIds : undefined } })} />
               <ListPatchField label={t('Suite IDs')} id={`campaign-${index}-suites`} value={campaign.selectors?.suiteIds ?? []} placeholder="security-regression" hint={t('Optional exact suite IDs.')} onCommit={(suiteIds) => update({ ...campaign, selectors: { ...(campaign.selectors ?? {}), suiteIds: suiteIds.length ? suiteIds : undefined } })} />
@@ -821,37 +833,36 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
               {latest?.status === 'running' ? <button type="button" className="danger" onClick={() => post({ type: 'campaign.cancel', campaignId: campaign.id })}>{t('Cancel run')}</button> : null}
               {latest?.status === 'cancelled' ? <button type="button" onClick={() => post({ type: 'campaign.resume', campaignId: campaign.id, runId: latest.id })}>{t('Resume')}</button> : null}
               {latest?.status === 'completed' && latest.cases.every((item) => item.sampleComplete) ? <button type="button" disabled={dashboard?.baseline?.runId === latest.id} onClick={() => post({ type: 'campaign.acceptBaseline', campaignId: campaign.id, runId: latest.id })}>{dashboard?.baseline?.runId === latest.id ? t('Accepted baseline') : t('Accept as baseline')}</button> : null}
-              {latest ? <details><summary>{t('More')}</summary><div><button type="button" onClick={() => post({ type: 'campaign.exportResults', campaignId: campaign.id, runId: latest.id })}>{t('Export results JSONL')}</button><button type="button" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'campaign.copilotSummary', campaignId: campaign.id, runId: latest.id })}>{t('Summarize with Copilot')}</button><button type="button" className="danger" onClick={() => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index))}>{t('Delete campaign')}</button></div></details> : <button type="button" className="danger" onClick={() => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index))}>{t('Delete campaign')}</button>}
+              {latest ? <details><summary>{t('More')}</summary><div><button type="button" onClick={() => post({ type: 'campaign.exportResults', campaignId: campaign.id, runId: latest.id })}>{t('Export results JSONL')}</button><button type="button" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'campaign.copilotSummary', campaignId: campaign.id, runId: latest.id })}>{t('Summarize with Copilot')}</button><button type="button" className="danger" onClick={() => requestConfirm({ title: t('Delete campaign {name}', { name: campaign.name || campaign.id }), actionLabel: t('Delete'), onConfirm: () => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index)) })}>{t('Delete campaign')}</button></div></details> : <button type="button" className="danger" onClick={() => requestConfirm({ title: t('Delete campaign {name}', { name: campaign.name || campaign.id }), actionLabel: t('Delete'), onConfirm: () => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index)) })}>{t('Delete campaign')}</button>}
             </div>
           </article>;
         })() : null}</div>
       </div>}
     </section>}
     {view === 'adversarial' && adversarialSection === 'cases' && <section id="red-team-cases" className="settings-card red-team-section" role="tabpanel" aria-labelledby="red-team-cases-tab adversarial-tests-heading" tabIndex={-1}>
-      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-tests-heading">{t('Adversarial tests')}</h2><p className="settings-card-description">{t('Replay known attack messages and record whether observable prohibited effects occurred. Timeout and incomplete evidence never count as resistance.')}</p></div><div className="adversarial-case-heading-actions" role="group" aria-label={t('Run and author adversarial cases')}><button type="button" className="primary" disabled={testRunActive || !hasRunnableAdversarialCases} aria-busy={testOperation?.action === 'runAll' && testRunActive} onClick={() => post({ type: 'test.runAll' })}>{t(testOperation?.action === 'runAll' && testRunActive ? 'Running all…' : 'Run all')}</button><button type="button" onClick={addAdversarial}>{t('Add case')}</button>{testRunActive && <IconButton type="button" className="danger-subtle" icon="stop" label={t(testOperation?.state === 'cancelling' ? 'Stopping test run…' : 'Stop test run')} disabled={testOperation?.state === 'cancelling'} onClick={() => post({ type: 'test.cancel' })} />}</div></div>
+      {readOnly && <div className="settings-readonly-notice" role="note"><ProductIcon name="lock" /><div><strong>{t('Server-managed Profile')}</strong><span>{t('This Profile is read-only. Duplicate it to create an editable copy in this browser.')}</span></div><button type="button" className="primary" onClick={() => post({ type: 'profile.duplicate' })}>{t('Duplicate to edit')}</button></div>}
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-tests-heading">{t('Test cases')}</h2></div><div className="adversarial-case-heading-actions" role="group" aria-label={t('Author adversarial cases')}><IconButton type="button" icon="add" label={t('Add case')} disabled={readOnly} onClick={addAdversarial} /><details className="adversarial-case-file-menu"><summary aria-label={t('More case actions')} title={t('More case actions')}><ProductIcon name="ellipsis" /></summary><div>
+        <details className="case-format-submenu"><summary aria-label={t('Add cases from file')}>{t('Add cases from file')}</summary><div>
+        <button type="button" disabled={readOnly} onClick={() => post({ type: 'adversarial.file', action: 'importJsonc' })}>{t('Import JSONC copy')}</button>
+        <button type="button" disabled={readOnly} onClick={() => post({ type: 'adversarial.file', action: 'importCsv' })}>{t('Import CSV')}</button>
+        <button type="button" disabled={readOnly} onClick={() => post({ type: 'adversarial.file', action: 'importJsonl' })}>{t('Import JSONL')}</button>
+        <button type="button" disabled={readOnly || !vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'adversarial.file', action: 'linkSuite' })}>{t('Link suite')}</button>
+        </div></details>
+        <details className="case-format-submenu"><summary aria-label={t('Export cases')}>{t('Export cases')}</summary><div>
+        <button type="button" disabled={!canExportAdversarialCases} onClick={() => post({ type: 'adversarial.file', action: 'exportJsonc' })}>{t(vscodeFeatures ? 'Export inline cases (JSONC)' : 'Export cases (JSONC)')}</button>
+        <button type="button" disabled={!canExportAdversarialCases} onClick={() => post({ type: 'adversarial.file', action: 'exportCsv' })}>{t(vscodeFeatures ? 'Export inline cases (CSV)' : 'Export cases (CSV)')}</button>
+        <button type="button" disabled={!canExportAdversarialCases} onClick={() => post({ type: 'adversarial.file', action: 'exportJsonl' })}>{t(vscodeFeatures ? 'Export inline cases (JSONL)' : 'Export cases (JSONL)')}</button>
+        </div></details>
+        <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'csvTemplate' })}>{t('CSV template')}</button>
+        {vscodeFeatures && <button type="button" onClick={() => post({ type: 'copilot.profileDoctor' })}>{t('Diagnose profile with Copilot')}</button>}
+      </div></details>{testRunActive && <IconButton type="button" className="danger-subtle" icon="stop" label={t(testOperation?.state === 'cancelling' ? 'Stopping test run…' : 'Stop test run')} disabled={testOperation?.state === 'cancelling'} onClick={() => post({ type: 'test.cancel' })} />}</div></div>
       <TestOperationStatus operation={testOperation} />
-      <div className="copilot-profile-doctor"><div><strong>{t('Profile Doctor')}</strong><span>{t('Ask Copilot to explain validation, timeout, streaming, and mapping configuration evidence without exposing secrets.')}</span></div><button type="button" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'copilot.profileDoctor' })}>{t('Diagnose profile with Copilot')}</button></div>
-      <div className="adversarial-file-actions" role="group" aria-label={t('Bulk adversarial test files')}>
-        <details><summary>{t('Import')}</summary><div>
-          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'importJsonc' })}>{t('Import JSONC copy')}</button>
-          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'importCsv' })}>{t('Import CSV')}</button>
-          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'importJsonl' })}>{t('Import JSONL')}</button>
-        </div></details>
-        <button type="button" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'adversarial.file', action: 'linkSuite' })}>{t('Link suite')}</button>
-        <details><summary>{t('Export')}</summary><div>
-          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'exportJsonc' })}>{t('Export JSONC')}</button>
-          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'exportCsv' })}>{t('Export CSV')}</button>
-          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'exportJsonl' })}>{t('Export JSONL')}</button>
-          <button type="button" onClick={() => post({ type: 'adversarial.file', action: 'csvTemplate' })}>{t('CSV template')}</button>
-        </div></details>
-      </div>
-      {undo && <div className="settings-undo" role="status"><span>{undo.label}</span><button type="button" onClick={() => { patch(undo.path, undo.value); setUndo(undefined); }}>{t('Undo')}</button><IconButton type="button" icon="clear-all" label={t('Dismiss undo')} onClick={() => setUndo(undefined)} /></div>}
-      {(profile.tests?.adversarialSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.adversarialSuites!.map((path, index) => { const label = linkedSuiteLabel(path); return <li key={`${path}-${index}`}><code title={path}>{label}</code><div className="adversarial-linked-suite-actions"><IconButton type="button" icon="go-to-file" label={t('Open linked suite {path}', { path: label })} disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'adversarial.openLinkedSuite', path })} /><IconButton type="button" icon="trash" label={t('Unlink suite {path}', { path: label })} onClick={() => unlinkSuite(index, path)} /></div></li>; })}</ul></div>}
-      {!adversarialEntries.length && !(linkedCaseCatalog?.entries.length) ? <div className="settings-empty settings-empty--action"><span>{t(profile.tests?.adversarialSuites?.length && !linkedCaseCatalog ? 'Loading linked adversarial cases…' : 'No adversarial cases configured.')}</span><button type="button" onClick={addAdversarial}>{t('Add case')}</button></div> : <AdversarialCaseTable entries={adversarialEntries} linkedEntries={linkedCaseCatalog?.entries ?? []} catalog={linkedCaseCatalog} linkedCaseEditor={linkedCaseEditor} trusted={trusted} vscodeFeatures={vscodeFeatures} post={post} testOperation={testOperation} collection={caseCollection} onCollectionChange={onCaseCollectionChange} onRefresh={() => post({ type: 'adversarial.catalog.request', force: true })} expandedCaseId={expandedCaseId} onToggle={(id) => setExpandedCaseId(expandedCaseId === id ? undefined : id)} onChange={(index, value) => save(replaceAt(scenarios, index, value))} onDestructiveChange={(index, value, label) => saveDestructive(label, replaceAt(scenarios, index, value))} onDelete={(index, scenario) => { if (expandedCaseId === scenario.id || expandedCaseId === inlineCaseRowKey(scenario, index)) setExpandedCaseId(undefined); saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); }} onOpenSource={(path) => post({ type: 'adversarial.openLinkedSuite', path })} />}
-      <p className="settings-footnote">{t(vscodeFeatures ? 'Linked CSV stays the source of truth and uses one row per turn. JSONC remains the lossless format for suite-level defaults and metadata.' : 'Imported suites are copied into browser storage. Re-import a file to pick up external changes; the original file is never modified.')}</p>
+      {undo && <div className="settings-undo" role="status"><span>{undo.label}</span><button type="button" onClick={() => { patch(undo.path, undo.value); setUndo(undefined); }}>{t('Undo')}</button><IconButton type="button" icon="close" label={t('Dismiss undo')} onClick={() => setUndo(undefined)} /></div>}
+      {(profile.tests?.adversarialSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.adversarialSuites!.map((path, index) => { const label = linkedSuiteLabel(path); return <li key={`${path}-${index}`}><code title={path}>{label}</code><div className="adversarial-linked-suite-actions"><IconButton type="button" icon="go-to-file" label={t('Open linked suite {path}', { path: label })} disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'adversarial.openLinkedSuite', path })} /><IconButton type="button" icon="remove" disabled={readOnly} label={t('Unlink suite {path}', { path: label })} onClick={() => requestConfirm({ title: t('Unlink suite {path}', { path: label }), actionLabel: t('Unlink'), detail: t('This removes the suite from the current Profile. The source file is not deleted.'), onConfirm: () => unlinkSuite(index, path) })} /></div></li>; })}</ul></div>}
+      {!adversarialEntries.length && !(linkedCaseCatalog?.entries.length) ? <div className="settings-empty settings-empty--action"><span>{t(profile.tests?.adversarialSuites?.length && !linkedCaseCatalog ? 'Loading linked adversarial cases…' : 'No test cases yet.')}</span><div><button type="button" disabled={readOnly} onClick={addAdversarial}>{t('Add case')}</button><button type="button" disabled={readOnly || !vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'adversarial.file', action: 'linkSuite' })}>{t('Link suite')}</button></div></div> : <AdversarialCaseTable entries={adversarialEntries} linkedEntries={linkedCaseCatalog?.entries ?? []} catalog={linkedCaseCatalog} linkedCaseEditor={linkedCaseEditor} trusted={trusted} vscodeFeatures={vscodeFeatures} readOnly={readOnly} post={post} testOperation={testOperation} profileId={profile.id} selectedCaseKeys={selectedCaseKeys} onToggleCase={onToggleCase} collection={caseCollection} onCollectionChange={onCaseCollectionChange} onRefresh={() => post({ type: 'adversarial.catalog.request', force: true })} expandedCaseId={expandedCaseId} onToggle={(id) => setExpandedCaseId(expandedCaseId === id ? undefined : id)} onClose={() => setExpandedCaseId(undefined)} onChange={(index, value) => save(replaceAt(scenarios, index, value))} onDelete={(index, scenario) => requestConfirm({ title: t('Delete scenario {name}', { name: scenario.name || scenario.id }), actionLabel: t('Delete'), onConfirm: () => { if (expandedCaseId === scenario.id || expandedCaseId === inlineCaseRowKey(scenario, index)) setExpandedCaseId(undefined); saveDestructive(t('Deleted case {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); } })} onOpenSource={(path) => post({ type: 'adversarial.openLinkedSuite', path })} />}
     </section>}
     {view === 'adversarial' && adversarialSection === 'results' && <section id="red-team-results" className="settings-card red-team-section" role="tabpanel" aria-labelledby="red-team-results-tab adversarial-results-heading" tabIndex={-1}>
-      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-results-heading">{t('Latest adversarial results')}</h2><p className="settings-card-description">{t('Review outcomes, repeatability, and the exact Chat, Network, or Events evidence for each case.')}</p></div><div className="adversarial-rerun-actions" role="group" aria-label={t('Rerun and export adversarial results')}><button type="button" className="adversarial-rerun-secondary" disabled={testRunActive || !testResults.some((result) => result.outcome !== 'resisted')} onClick={() => post({ type: 'test.rerun', status: 'failed' })}>{t(testOperation?.action === 'rerunFailed' && testRunActive ? 'Rerunning failures…' : 'Rerun failures')}</button><details className="adversarial-rerun-more"><summary aria-label={t('More reruns')} title={t('More reruns')}><ProductIcon name="debug-restart" /></summary><div><button type="button" disabled={testRunActive || !testResults.some((result) => result.repetitions?.stability === 'unstable')} onClick={() => post({ type: 'test.rerun', status: 'unstable' })}>{t('Unstable')}</button><button type="button" disabled={testRunActive || !testResults.some((result) => result.repetitions?.sampleComplete === false)} onClick={() => post({ type: 'test.rerun', status: 'incomplete' })}>{t('Incomplete')}</button></div></details><details className="adversarial-export-actions"><summary aria-label={t('Export adversarial results')} title={t('Export adversarial results')}><ProductIcon name="export" /></summary><div><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'html' })}>{t('HTML report')}</button><button type="button" disabled={!testResults.length || !trusted} onClick={() => post({ type: 'test.evidenceBundle.export' })}>{t('Evidence Bundle')}</button><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'json' })}>{t('JSON report')}</button><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'junit' })}>{t('JUnit XML')}</button></div></details>{testRunActive && <IconButton type="button" className="danger-subtle" icon="stop" label={t(testOperation?.state === 'cancelling' ? 'Stopping test run…' : 'Stop test run')} disabled={testOperation?.state === 'cancelling'} onClick={() => post({ type: 'test.cancel' })} />}</div></div>
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-results-heading">{t('Latest adversarial results')}</h2></div><div className="adversarial-rerun-actions" role="group" aria-label={t('Rerun and export adversarial results')}><button type="button" className="adversarial-rerun-secondary" disabled={testRunActive || !testResults.some((result) => result.outcome !== 'resisted')} onClick={() => post({ type: 'test.rerun', status: 'failed' })}>{t(testOperation?.action === 'rerunFailed' && testRunActive ? 'Rerunning failures…' : 'Rerun failures')}</button><details className="adversarial-rerun-more"><summary aria-label={t('More reruns')} title={t('More reruns')}><ProductIcon name="debug-restart" /></summary><div><button type="button" disabled={testRunActive || !testResults.some((result) => result.repetitions?.stability === 'unstable')} onClick={() => post({ type: 'test.rerun', status: 'unstable' })}>{t('Unstable')}</button><button type="button" disabled={testRunActive || !testResults.some((result) => result.repetitions?.sampleComplete === false)} onClick={() => post({ type: 'test.rerun', status: 'incomplete' })}>{t('Incomplete')}</button></div></details><details className="adversarial-export-actions"><summary aria-label={t('Export adversarial results')} title={t('Export adversarial results')}><ProductIcon name="export" /></summary><div><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'html' })}>{t('HTML report')}</button><button type="button" disabled={!testResults.length || !trusted} onClick={() => post({ type: 'test.evidenceBundle.export' })}>{t('Evidence Bundle')}</button><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'json' })}>{t('JSON report')}</button><button type="button" disabled={!testResults.length} onClick={() => post({ type: 'test.report.export', format: 'junit' })}>{t('JUnit XML')}</button></div></details>{testRunActive && <IconButton type="button" className="danger-subtle" icon="stop" label={t(testOperation?.state === 'cancelling' ? 'Stopping test run…' : 'Stop test run')} disabled={testOperation?.state === 'cancelling'} onClick={() => post({ type: 'test.cancel' })} />}</div></div>
       <TestOperationStatus operation={testOperation} />
       {testResults.length > 0 && <div className="adversarial-result-toolbar" role="group" aria-label={t('Filter adversarial results')}>
         <label className="adversarial-result-search"><span>{t('Search results')}</span><input type="search" value={resultCollection.query} placeholder={t('Case name or ID')} onChange={(event) => updateResultCollection({ query: event.target.value })} /></label>
@@ -859,7 +870,7 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
         <label><span>{t('Stability')}</span><select value={resultCollection.stability} onChange={(event) => updateResultCollection({ stability: event.target.value as AdversarialResultStabilityFilter })}><option value="all">{t('All samples')}</option><option value="stable-pass">{t('Stable pass')}</option><option value="stable-fail">{t('Stable fail')}</option><option value="unstable">{t('Unstable')}</option><option value="inconclusive">{t('Inconclusive')}</option><option value="single-run">{t('Single run')}</option></select></label>
         <div className="collection-filter-actions"><button type="button" aria-pressed={resultCollection.attentionOnly} onClick={() => updateResultCollection({ attentionOnly: !resultCollection.attentionOnly })}>{t('Needs attention')}</button><button type="button" disabled={!resultFilterCount} onClick={() => onResultCollectionChange({ ...DEFAULT_ADVERSARIAL_RESULT_COLLECTION, pageSize: resultCollection.pageSize })}>{t('Clear filters')}{resultFilterCount ? ` (${formatNumber(resultFilterCount)})` : ''}</button></div>
       </div>}
-      {!testResults.length ? <div className="settings-empty settings-empty--action"><span>{t('No adversarial results in this Extension Host session.')}</span><button type="button" className="primary" onClick={() => onAdversarialSectionChange?.('cases')}>{t('View cases')}</button><button type="button" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'testExplorer.open' })}>{t('Open Test Explorer')}</button></div> : !filteredResults.length ? <div className="settings-empty settings-empty--action"><span>{t('No results match the current filters.')}</span><button type="button" onClick={() => onResultCollectionChange({ ...DEFAULT_ADVERSARIAL_RESULT_COLLECTION, pageSize: resultCollection.pageSize })}>{t('Clear filters')}</button></div> : <>
+      {!testResults.length ? <div className="settings-empty settings-empty--action"><span>{t(vscodeFeatures ? 'No adversarial results in this Extension Host session.' : 'No red-team results in this browser session.')}</span><button type="button" className="primary" onClick={() => onAdversarialSectionChange?.('cases')}>{t('View cases')}</button><button type="button" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'testExplorer.open' })}>{t('Open Test Explorer')}</button></div> : !filteredResults.length ? <div className="settings-empty settings-empty--action"><span>{t('No results match the current filters.')}</span><button type="button" onClick={() => onResultCollectionChange({ ...DEFAULT_ADVERSARIAL_RESULT_COLLECTION, pageSize: resultCollection.pageSize })}>{t('Clear filters')}</button></div> : <>
         <div className="adversarial-result-table-wrap"><table className="adversarial-result-table"><thead><tr><th scope="col">{t('Case')}</th><th scope="col">{t('Outcome')}</th><th scope="col">{t('Repeatability')}</th><th scope="col">{t('Duration')}</th><th scope="col" className="adversarial-result-table__actions-heading">{t('Actions')}</th></tr></thead><tbody>{visibleResults.map((result) => <tr className={activeTimelineResult === result ? 'is-timeline-selected' : undefined} key={`${result.scenarioId}-${result.evidenceId}`}>
           <td><div className="adversarial-result-cell-stack"><strong>{highlightMatch(result.scenarioName, deferredResultQuery)}</strong><code>{highlightMatch(result.scenarioId, deferredResultQuery)}</code></div></td>
           <td><span className={`adversarial-outcome adversarial-outcome--${result.outcome}`}><ProductIcon name={result.outcome === 'resisted' ? 'check' : result.outcome === 'attackSucceeded' ? 'target' : 'warning'} />{t(adversarialOutcomeText(result.outcome))}</span></td>
@@ -871,7 +882,7 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
       </>}
     </section>}
     {view === 'adversarial' && adversarialSection === 'timeline' && <section id="red-team-timeline" className="settings-card red-team-section adversarial-timeline-card" role="tabpanel" aria-labelledby="red-team-timeline-tab adversarial-timeline-heading" tabIndex={-1}>
-      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-timeline-heading">{t('Causal timeline')}</h2><p className="settings-card-description">{t('Select Review timeline on a result to load its bounded request, stream, finding, and terminal evidence.')}</p></div>{activeTimelineResult && <div className="adversarial-timeline-context"><span className={`adversarial-outcome adversarial-outcome--${activeTimelineResult.outcome}`}>{t(adversarialOutcomeText(activeTimelineResult.outcome))}</span><strong>{activeTimelineResult.scenarioName}</strong><small>{formatNumber(activeTimelineResult.durationMs)} ms</small></div>}</div>
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-timeline-heading">{t('Causal timeline')}</h2></div>{activeTimelineResult && <div className="adversarial-timeline-context"><span className={`adversarial-outcome adversarial-outcome--${activeTimelineResult.outcome}`}>{t(adversarialOutcomeText(activeTimelineResult.outcome))}</span><strong>{activeTimelineResult.scenarioName}</strong><small>{formatNumber(activeTimelineResult.durationMs)} ms</small></div>}</div>
       {timeline ?? <p className="settings-empty">{activeEvidenceId ? t('Causal evidence is unavailable for the selected result.') : t('Select a result to review its causal timeline.')}</p>}
     </section>}
     {view === 'contracts' && automationSection === 'settings' && <>
@@ -889,8 +900,8 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
     </section>
     <section className="settings-card" aria-labelledby="quality-rubrics-heading">
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="quality-rubrics-heading">{t('Advisory AI review')}</h2><p className="settings-card-description">{t('Optional rubrics guide Copilot after you explicitly select and approve response disclosure. Findings never change formal test outcomes.')}</p></div>{qualityRubrics.length ? <button type="button" onClick={addQualityRubric}>{t('Add rubric')}</button> : null}</div>
-      <SettingCheckbox id="settings-quality-rubrics-enabled" label={t('Use custom quality rubrics')} checked={qualityRubrics.length > 0} onChange={(enabled) => enabled ? addQualityRubric() : saveQualityRubrics(undefined)} />
-      {qualityRubrics.length ? <div className="quality-rubric-list">{qualityRubrics.map((rubric, rubricIndex) => <QualityRubricEditor key={`${rubric.id}-${rubricIndex}`} rubric={rubric} index={rubricIndex} onChange={(value) => saveQualityRubrics(replaceAt(qualityRubrics, rubricIndex, value))} onDelete={() => saveQualityRubrics(qualityRubrics.length === 1 ? undefined : qualityRubrics.filter((_, index) => index !== rubricIndex))} />)}</div> : <p className="settings-footnote">{t('TurnStage uses its built-in relevance, clarity, completeness, and grounding rubric when no custom rubric is configured.')}</p>}
+      <SettingCheckbox id="settings-quality-rubrics-enabled" label={t('Use custom quality rubrics')} checked={qualityRubrics.length > 0} onChange={(enabled) => enabled ? addQualityRubric() : requestConfirm({ title: t('Remove all custom quality rubrics?'), actionLabel: t('Remove'), onConfirm: () => saveQualityRubrics(undefined) })} />
+      {qualityRubrics.length ? <div className="quality-rubric-list">{qualityRubrics.map((rubric, rubricIndex) => <QualityRubricEditor key={`${rubric.id}-${rubricIndex}`} rubric={rubric} index={rubricIndex} onChange={(value) => saveQualityRubrics(replaceAt(qualityRubrics, rubricIndex, value))} onDelete={() => requestConfirm({ title: t('Delete rubric {name}', { name: rubric.name || rubric.id }), actionLabel: t('Delete'), onConfirm: () => saveQualityRubrics(qualityRubrics.length === 1 ? undefined : qualityRubrics.filter((_, index) => index !== rubricIndex)) })} />)}</div> : <p className="settings-footnote">{t('TurnStage uses its built-in relevance, clarity, completeness, and grounding rubric when no custom rubric is configured.')}</p>}
     </section>
     <section className="settings-card" aria-labelledby="scenario-visual-heading">
       <SectionHeading id="scenario-visual-heading" title={t('Visual regression')} description={t('Compare the rendered Chat viewport with a workspace baseline.')} />
@@ -903,11 +914,12 @@ function ScenarioTestsSection({ view, automationSection = 'settings', adversaria
     </section>
     <p className="settings-footnote">{t('Scenario authoring and execution live in Tests. Test Explorer remains the authoritative VS Code runner.')}</p>
     </>}
+    {confirmationDialog}
   </div>;
 }
 
-function CollectionPagination({ page, pageCount, start, end, total, onPage }: { page: number; pageCount: number; start: number; end: number; total: number; onPage: (page: number) => void }): React.JSX.Element {
-  return <div className="adversarial-result-pagination"><span>{t('Showing {start}–{end} of {total}', { start: formatNumber(start), end: formatNumber(end), total: formatNumber(total) })}</span><IconButton type="button" icon="arrow-left" label={t('Previous page')} disabled={page <= 0} onClick={() => onPage(page - 1)} /><span>{t('Page {current} of {total}', { current: formatNumber(page + 1), total: formatNumber(pageCount) })}</span><IconButton type="button" icon="arrow-right" label={t('Next page')} disabled={page >= pageCount - 1} onClick={() => onPage(page + 1)} /></div>;
+function CollectionPagination({ page, pageCount, start, end, total, onPage, pageSize, onPageSize }: { page: number; pageCount: number; start: number; end: number; total: number; onPage: (page: number) => void; pageSize?: 25 | 50 | 100; onPageSize?: (pageSize: 25 | 50 | 100) => void }): React.JSX.Element {
+  return <div className="adversarial-result-pagination"><span>{t('Showing {start}–{end} of {total}', { start: formatNumber(start), end: formatNumber(end), total: formatNumber(total) })}</span>{pageSize && onPageSize && <select aria-label={t('Rows per page')} title={t('Rows per page')} value={pageSize} onChange={(event) => onPageSize(Number(event.target.value) as 25 | 50 | 100)}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>}<IconButton type="button" icon="arrow-left" label={t('Previous page')} disabled={page <= 0} onClick={() => onPage(page - 1)} /><span>{t('Page {current} of {total}', { current: formatNumber(page + 1), total: formatNumber(pageCount) })}</span><IconButton type="button" icon="arrow-right" label={t('Next page')} disabled={page >= pageCount - 1} onClick={() => onPage(page + 1)} /></div>;
 }
 
 function TestOperationStatus({ operation }: { operation?: TestOperationSnapshot }): React.JSX.Element | null {
@@ -915,7 +927,7 @@ function TestOperationStatus({ operation }: { operation?: TestOperationSnapshot 
   const active = operation.state === 'running' || operation.state === 'cancelling';
   const icon = operation.state === 'completed' ? 'check' : operation.state === 'failed' ? 'error' : operation.state === 'cancelled' ? 'stop' : 'refresh';
   const title = operation.state === 'running'
-    ? operation.action === 'runAll' ? 'Running all adversarial cases…' : operation.action === 'runContracts' ? 'Running all conversation contracts…' : operation.action === 'runCase' ? 'Running test scenario…' : operation.action === 'rerunFailed' ? 'Rerunning failed tests…' : operation.action === 'rerunUnstable' ? 'Rerunning unstable tests…' : 'Rerunning incomplete tests…'
+    ? operation.action === 'runAll' ? 'Running all adversarial cases…' : operation.action === 'runContracts' ? 'Running all conversation contracts…' : operation.action === 'runCase' ? 'Running test scenario…' : operation.action === 'runSelection' ? 'Running selected cases…' : operation.action === 'rerunFailed' ? 'Rerunning failed tests…' : operation.action === 'rerunUnstable' ? 'Rerunning unstable tests…' : 'Rerunning incomplete tests…'
     : operation.state === 'cancelling' ? 'Stopping test run…'
       : operation.state === 'completed' ? 'Test run completed'
         : operation.state === 'cancelled' ? 'Test run cancelled'
@@ -965,6 +977,7 @@ interface AdversarialCaseRow {
   index?: number;
   sourcePath?: string;
   suiteId?: string;
+  revision?: string;
 }
 
 function inlineCaseRowKey(scenario: ScenarioDefinition, index: number): string { return `inline:${scenario.id}:${index}`; }
@@ -972,6 +985,31 @@ function linkedCaseRowKey(entry: Pick<LinkedAdversarialCaseSummary, 'sourcePath'
 function automationResultKey(result: AutomationResultSummary, index: number): string { return result.evidenceId ?? `${result.suiteId ?? 'inline'}:${result.scenarioId}:${index}`; }
 function cloneScenario(scenario: ScenarioDefinition): ScenarioDefinition { return JSON.parse(JSON.stringify(scenario)) as ScenarioDefinition; }
 function captureNeedsReview(capture: ScenarioDefinition['capture'], tags: readonly string[] = []): boolean { return capture?.status === 'needsReview' || tags.includes('needs-review'); }
+function caseSelectionBlockReason(row: { capture?: ScenarioDefinition['capture']; tags: readonly string[]; scenario?: ScenarioDefinition; comparison?: boolean; performance?: boolean; faults?: boolean }, vscodeFeatures: boolean): string | undefined {
+  if (captureNeedsReview(row.capture, row.tags)) return t('Review this case before selecting it.');
+  if (row.scenario && !row.scenario.name?.trim()) return t('Add a case name.');
+  if (row.scenario && !row.scenario.steps.length) return t('Add a test message.');
+  const missingStep = row.scenario?.steps.findIndex((step) => !step.input?.trim()) ?? -1;
+  if (missingStep >= 0) return t('Add the message for step {number}.', { number: formatNumber(missingStep + 1) });
+  if (!vscodeFeatures && (row.comparison || row.performance || row.faults)) return t('This case needs the VS Code extension.');
+  return undefined;
+}
+
+function SelectAllCases({ rows, profileId, kind, selectedCaseKeys, onToggleCase, testRunActive, vscodeFeatures, filtered }: {
+  rows: readonly { scenarioId: string; suiteId?: string; capture?: ScenarioDefinition['capture']; tags: readonly string[]; scenario?: ScenarioDefinition; comparison?: boolean; performance?: boolean; faults?: boolean }[];
+  profileId: string;
+  kind: TestCaseIdentity['kind'];
+  selectedCaseKeys?: ReadonlySet<string>;
+  onToggleCase?: (identity: TestCaseIdentity) => void;
+  testRunActive: boolean;
+  vscodeFeatures: boolean;
+  filtered: boolean;
+}): React.JSX.Element | null {
+  if (!onToggleCase || !rows.length) return null;
+  const selectable = rows.filter((row) => !caseSelectionBlockReason(row, vscodeFeatures));
+  const remaining = selectable.filter((row) => !selectedCaseKeys?.has(testCaseKey({ profileId, kind, suiteId: row.suiteId, scenarioId: row.scenarioId })));
+  return <div className="collection-filter-actions"><button type="button" disabled={testRunActive || !remaining.length} onClick={() => remaining.forEach((row) => onToggleCase({ profileId, kind, suiteId: row.suiteId, scenarioId: row.scenarioId }))}>{t(filtered ? 'Select matching cases ({selectable}/{total})' : 'Select all selectable cases ({selectable}/{total})', { selectable: formatNumber(selectable.length), total: formatNumber(rows.length) })}</button></div>;
+}
 function markCaptureReady(scenario: ScenarioDefinition): ScenarioDefinition {
   return {
     ...scenario,
@@ -980,31 +1018,40 @@ function markCaptureReady(scenario: ScenarioDefinition): ScenarioDefinition {
   };
 }
 
-function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEditor, trusted, vscodeFeatures, post, testOperation, collection, onCollectionChange, onRefresh, expandedCaseId, onToggle, onChange, onDestructiveChange, onDelete, onOpenSource }: {
+function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEditor, trusted, vscodeFeatures, readOnly = false, post, testOperation, profileId, selectedCaseKeys, onToggleCase, collection, onCollectionChange, onRefresh, expandedCaseId, onToggle, onClose, onChange, onDelete, onOpenSource }: {
   entries: Array<{ scenario: ScenarioDefinition; index: number }>;
   linkedEntries: LinkedAdversarialCaseSummary[];
   catalog?: AdversarialCaseCatalog;
   linkedCaseEditor?: LinkedAdversarialCaseEditorState;
   trusted: boolean;
   vscodeFeatures: boolean;
+  readOnly?: boolean;
   post: SettingsWorkspacePost;
   testOperation?: TestOperationSnapshot;
+  profileId?: string;
+  selectedCaseKeys?: ReadonlySet<string>;
+  onToggleCase?: (identity: TestCaseIdentity) => void;
   collection: AdversarialCaseCollectionState;
   onCollectionChange: (state: AdversarialCaseCollectionState) => void;
   onRefresh: () => void;
   expandedCaseId?: string;
   onToggle: (id: string) => void;
+  onClose: () => void;
   onChange: (index: number, value: ScenarioDefinition) => void;
-  onDestructiveChange: (index: number, value: ScenarioDefinition, label: string) => void;
   onDelete: (index: number, scenario: ScenarioDefinition) => void;
   onOpenSource: (path: string) => void;
 }): React.JSX.Element {
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
   const [linkedTarget, setLinkedTarget] = useState<{ sourcePath: string; scenarioId: string }>();
   const [linkedDraft, setLinkedDraft] = useState<ScenarioDefinition>();
   const [linkedOriginal, setLinkedOriginal] = useState<ScenarioDefinition>();
   const [linkedRevision, setLinkedRevision] = useState<string>();
   const [linkedPending, setLinkedPending] = useState<'load' | 'save'>();
   const [linkedMessage, setLinkedMessage] = useState<{ tone: 'info' | 'success' | 'error'; text: string }>();
+  const [inlineDraft, setInlineDraft] = useState<ScenarioDefinition>();
+  const [inlineOriginal, setInlineOriginal] = useState<ScenarioDefinition>();
+  const [inlineDraftKey, setInlineDraftKey] = useState<string>();
+  const [closeWarning, setCloseWarning] = useState(false);
   const linkedResponseBaseline = useRef<LinkedAdversarialCaseEditorState | undefined>(undefined);
   const linkedDirty = Boolean(linkedDraft && linkedOriginal && JSON.stringify(linkedDraft) !== JSON.stringify(linkedOriginal));
   useEffect(() => {
@@ -1081,6 +1128,7 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEdito
       rules: linkedAdversarialRuleSummary(entry),
       capture: entry.capture,
       sourcePath: entry.sourcePath,
+      revision: entry.revision,
       suiteId: entry.suiteId,
     })),
   ], [entries, linkedEntries]);
@@ -1102,12 +1150,45 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEdito
   const pageCount = Math.max(1, Math.ceil(filtered.length / collection.pageSize));
   const page = Math.min(collection.page, pageCount - 1);
   const visible = filtered.slice(page * collection.pageSize, (page + 1) * collection.pageSize);
+  const activeRow = rows.find((row) => row.key === expandedCaseId || (row.source === 'inline' && row.scenarioId === expandedCaseId));
+  useEffect(() => {
+    if (activeRow?.source !== 'linked' || !activeRow.sourcePath || (linkedTarget?.sourcePath === activeRow.sourcePath && linkedTarget.scenarioId === activeRow.scenarioId)) return;
+    setLinkedTarget({ sourcePath: activeRow.sourcePath, scenarioId: activeRow.scenarioId });
+    setLinkedDraft(undefined); setLinkedOriginal(undefined); setLinkedRevision(undefined); setLinkedMessage(undefined); setLinkedPending('load');
+    linkedResponseBaseline.current = linkedCaseEditor;
+    post({ type: 'adversarial.case.request', sourcePath: activeRow.sourcePath, scenarioId: activeRow.scenarioId });
+  }, [activeRow?.key, activeRow?.scenarioId, activeRow?.sourcePath, activeRow?.source, linkedTarget?.sourcePath, linkedTarget?.scenarioId, linkedCaseEditor, post]);
+  useEffect(() => {
+    if (!activeRow || activeRow.source !== 'inline' || !activeRow.scenario || inlineDraftKey === activeRow.key) return;
+    const next = cloneScenario(activeRow.scenario);
+    setInlineDraft(next);
+    setInlineOriginal(cloneScenario(next));
+    setInlineDraftKey(activeRow.key);
+    setCloseWarning(false);
+  }, [activeRow, inlineDraftKey]);
+  const inlineDirty = Boolean(inlineDraft && inlineOriginal && JSON.stringify(inlineDraft) !== JSON.stringify(inlineOriginal));
+  const requestClose = () => {
+    if (linkedPending === 'save' || inlineDirty || linkedDirty) { setCloseWarning(true); return; }
+    setCloseWarning(false);
+    setInlineDraft(undefined); setInlineOriginal(undefined); setInlineDraftKey(undefined);
+    onClose();
+  };
+  const discardAndClose = () => {
+    setInlineDraft(undefined); setInlineOriginal(undefined); setInlineDraftKey(undefined);
+    setLinkedDraft(undefined); setLinkedOriginal(undefined); setLinkedRevision(undefined); setLinkedPending(undefined);
+    setCloseWarning(false);
+    onClose();
+  };
+  const requestDiscard = () => {
+    if (!inlineDirty && !linkedDirty) { discardAndClose(); return; }
+    requestConfirm({ title: t('Discard unsaved changes to {name}?', { name: activeRow?.scenarioName ?? '' }), actionLabel: t('Discard changes'), detail: t('Unsaved edits to this case will be lost.'), onConfirm: discardAndClose });
+  };
   const updateCollection = (patch: Partial<AdversarialCaseCollectionState>, resetPage = true) => onCollectionChange(normalizeAdversarialCaseCollectionState({ ...collection, ...patch, ...(resetPage ? { page: 0 } : {}) }));
   const filterCount = Number(Boolean(collection.query.trim())) + Number(collection.mode !== 'all') + Number(collection.source !== 'all') + Number(collection.tag !== 'all') + Number(collection.sort !== 'sourceOrder');
   const testRunActive = testOperation?.state === 'running' || testOperation?.state === 'cancelling';
   return <div className="adversarial-case-collection">
     <div className="adversarial-case-toolbar">
-      <label className="adversarial-case-search"><span className="sr-only">{t('Search adversarial cases')}</span><input type="search" value={collection.query} placeholder={t('Search cases by name, ID, tag, or rule')} aria-label={t('Search adversarial cases')} onChange={(event) => updateCollection({ query: event.target.value })} /></label>
+      <label className="adversarial-case-search case-list-search"><span>{t('Search cases')}</span><input type="search" value={collection.query} placeholder={t('Case name, ID, tag, or rule')} onChange={(event) => updateCollection({ query: event.target.value })} /></label>
       <label><span className="sr-only">{t('Case mode')}</span><select aria-label={t('Case mode')} value={collection.mode} onChange={(event) => updateCollection({ mode: event.target.value as AdversarialCaseModeFilter })}><option value="all">{t('All modes')}</option><option value="singleTurn">{t('Single turn')}</option><option value="multiTurn">{t('Multi-turn')}</option></select></label>
       <label><span className="sr-only">{t('Case source')}</span><select aria-label={t('Case source')} value={rows.some((row) => row.sourceKey === collection.source) ? collection.source : 'all'} onChange={(event) => updateCollection({ source: event.target.value })}><option value="all">{t('All sources')}</option><option value="inline">{t('Inline')}</option>{sourceOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <details className="adversarial-case-more-filters"><summary>{t(collection.tag !== 'all' || collection.sort !== 'sourceOrder' ? 'Filters active' : 'More filters')}</summary><div>
@@ -1118,45 +1199,30 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEdito
       <button type="button" className="adversarial-case-clear" disabled={!filterCount} onClick={() => onCollectionChange({ ...DEFAULT_ADVERSARIAL_CASE_COLLECTION, pageSize: collection.pageSize })}>{t('Clear')}{filterCount ? ` (${formatNumber(filterCount)})` : ''}</button>
     </div>
     <div className="adversarial-case-collection-status"><span>{t('{filtered} of {total} cases', { filtered: formatNumber(filtered.length), total: formatNumber(rows.length) })}</span>{catalog?.truncated && <span className="is-warning">{t('Only the first {count} linked cases are shown to protect performance.', { count: formatNumber(catalog.entries.length) })}</span>}</div>
+    {profileId && <SelectAllCases rows={filtered} profileId={profileId} kind="adversarial" selectedCaseKeys={selectedCaseKeys} onToggleCase={onToggleCase} testRunActive={testRunActive} vscodeFeatures={vscodeFeatures} filtered={Boolean(collection.query.trim()) || collection.mode !== 'all' || collection.source !== 'all' || collection.tag !== 'all'} />}
     {catalog?.issues.length ? <details className="adversarial-catalog-issues"><summary>{t('{count} linked source issues', { count: formatNumber(catalog.issues.length) })}</summary><ul>{catalog.issues.map((issue) => <li key={`${issue.sourcePath}:${issue.message}`}><code>{linkedSuiteLabel(issue.sourcePath)}</code><span>{issue.message}</span></li>)}</ul></details> : null}
-    <div className="adversarial-case-table-wrap" tabIndex={0} aria-label={t('Adversarial case settings table')}><table className="adversarial-case-table">
-      <caption className="sr-only">{t('Adversarial case settings')}</caption>
-      <thead><tr><th scope="col">{t('Case')}</th><th scope="col">{t('Run')}</th><th scope="col">{t('Source')}</th><th scope="col">{t('Mode')}</th><th scope="col">{t('Turns')}</th><th scope="col">{t('Repetitions')}</th><th scope="col">{t('Timeout')}</th><th scope="col">{t('Prohibitions')}</th><th scope="col">{t('Actions')}</th></tr></thead>
-      <tbody>{visible.map((row) => {
-        const scenario = row.scenario;
-        const index = row.index;
-        const expanded = expandedCaseId === row.key || (row.source === 'inline' && expandedCaseId === row.scenarioId);
-        const editorId = `adversarial-case-detail-${row.key.replace(/[^a-z0-9-]/giu, '-')}`;
-        return <React.Fragment key={row.key}>
-          <tr className={expanded ? 'is-expanded' : undefined}>
-            <th scope="row"><span>{row.scenarioName}</span><code>{row.scenarioId}</code>{captureNeedsReview(row.capture, row.tags) && <small className="capture-review-badge">{t('Needs review')}</small>}{row.tags.length ? <small>{row.tags.join(', ')}</small> : null}</th>
-            <td className="adversarial-case-table__run"><button type="button" className="primary" aria-label={captureNeedsReview(row.capture, row.tags) ? t('Review case {name} before running', { name: row.scenarioName }) : t('Run case {name}', { name: row.scenarioName })} disabled={testRunActive || captureNeedsReview(row.capture, row.tags)} aria-busy={testOperation?.action === 'runCase' && testRunActive && testOperation.detail === row.scenarioId} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}) })}>{t(testOperation?.action === 'runCase' && testRunActive && testOperation.detail === row.scenarioId ? 'Running…' : 'Run')}</button></td>
-            <td><span className={`adversarial-case-source adversarial-case-source--${row.source}`} title={row.sourcePath ? linkedSuiteLabel(row.sourcePath) : undefined}>{row.sourceLabel}</span></td>
-            <td>{t(row.mode === 'multiTurn' ? 'Multi-turn' : 'Single turn')}</td>
-            <td>{t('{current} / {maximum}', { current: formatNumber(row.turns), maximum: formatNumber(row.maxTurns) })}</td>
-            <td>{formatNumber(row.repetitions)}</td>
-            <td>{formatDuration(row.timeoutMs)}</td>
-            <td><span className="adversarial-case-table__rules">{row.rules}</span></td>
-            <td><div className="adversarial-case-table__actions">{scenario && index !== undefined ? <><button type="button" aria-expanded={expanded} aria-controls={editorId} onClick={() => onToggle(row.key)}>{t(expanded ? 'Close editor' : 'Edit')}</button><IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={() => onDelete(index, scenario)} /></> : row.sourcePath ? <><button type="button" aria-expanded={expanded} aria-controls={editorId} onClick={() => requestLinkedCase(row)}>{t(expanded ? 'Close editor' : 'Edit')}</button><IconButton type="button" icon={vscodeFeatures ? 'go-to-file' : 'export'} label={vscodeFeatures ? t('Open linked source {name}', { name: row.sourceLabel }) : t('Export imported copy')} onClick={() => onOpenSource(row.sourcePath!)} /></> : null}</div></td>
-          </tr>
-          {expanded && scenario && index !== undefined && <tr className="adversarial-case-table__editor-row"><td colSpan={9}><div id={editorId}><ScenarioEditor scenario={scenario} index={index} onChange={(value) => onChange(index, value)} onDestructiveChange={(value, label) => onDestructiveChange(index, value, label)} onDelete={() => onDelete(index, scenario)} /></div></td></tr>}
-          {expanded && row.source === 'linked' && row.sourcePath && <tr className="adversarial-case-table__editor-row"><td colSpan={9}><div id={editorId} className="linked-case-editor">
-            <div className="linked-case-editor__notice"><ProductIcon name={vscodeFeatures ? 'link' : 'file-code'} /><div><strong>{t(vscodeFeatures ? 'Linked {format} case' : 'Imported {format} case', { format: row.sourcePath.toLocaleLowerCase().endsWith('.csv') ? 'CSV' : 'JSONC' })}</strong><span>{vscodeFeatures ? t('Edits are written to this case in {source}. Suite defaults still apply.', { source: linkedSuiteLabel(row.sourcePath) }) : t('Changes are saved to this browser copy. The original file is unchanged.')}</span></div><button type="button" onClick={() => onOpenSource(row.sourcePath!)}>{t(vscodeFeatures ? 'Open source' : 'Export imported copy')}</button></div>
-            {linkedPending === 'load' && <div className="linked-case-editor__status" role="status"><ProductIcon name="loading" />{t(vscodeFeatures ? 'Loading this case from disk…' : 'Loading this case from browser storage…')}</div>}
-            {linkedMessage && <div className={`linked-case-editor__status is-${linkedMessage.tone}`} role={linkedMessage.tone === 'error' ? 'alert' : 'status'}><ProductIcon name={linkedMessage.tone === 'error' ? 'error' : linkedMessage.tone === 'success' ? 'check' : 'info'} /><span>{linkedMessage.text}</span>{linkedMessage.tone === 'error' && <button type="button" onClick={() => requestLinkedCase(row, true)}>{t('Reload')}</button>}</div>}
-            {linkedDraft && linkedRevision && <>
-              <ScenarioEditor scenario={linkedDraft} index={10_000 + visible.indexOf(row)} identityReadOnly onChange={setLinkedDraft} onDestructiveChange={(value) => setLinkedDraft(value)} />
-              <div className="linked-case-editor__footer">
-                <span>{trusted ? t(linkedDirty ? (vscodeFeatures ? 'Unsaved changes in the linked source.' : 'Unsaved changes in the imported copy.') : (vscodeFeatures ? 'No unsaved linked-source changes.' : 'No unsaved imported-copy changes.')) : t('Trust this workspace to save linked-source changes.')}</span>
-                <div><button type="button" disabled={!linkedDirty || linkedPending === 'save'} onClick={() => { setLinkedDraft(linkedOriginal ? cloneScenario(linkedOriginal) : linkedDraft); setLinkedMessage(undefined); }}>{t('Discard changes')}</button><button type="button" className="primary" disabled={!trusted || !linkedDirty || linkedPending === 'save'} onClick={() => { if (!linkedTarget) return; setLinkedPending('save'); linkedResponseBaseline.current = linkedCaseEditor; setLinkedMessage({ tone: 'info', text: t(vscodeFeatures ? 'Saving and verifying the linked case…' : 'Saving imported case…') }); post({ type: 'adversarial.case.save', sourcePath: linkedTarget.sourcePath, scenarioId: linkedTarget.scenarioId, expectedRevision: linkedRevision, scenario: linkedDraft }); }}>{linkedPending === 'save' ? t('Saving…') : t(vscodeFeatures ? 'Save linked case' : 'Save imported case')}</button></div>
-              </div>
-            </>}
-          </div></td></tr>}
-        </React.Fragment>;
-      })}</tbody>
-    </table></div>
+    <div className="adversarial-case-list" role="list" aria-label={t('Adversarial case settings')}>{visible.map((row) => {
+      const blockReason = caseSelectionBlockReason(row, vscodeFeatures);
+      return <div className="adversarial-case-item" role="listitem" key={row.key}>
+      {profileId && onToggleCase && <label className="test-case-select"><input type="checkbox" aria-label={blockReason ? `${t('Select case {name}', { name: row.scenarioName })}. ${blockReason}` : t('Select case {name}', { name: row.scenarioName })} checked={selectedCaseKeys?.has(testCaseKey({ profileId, suiteId: row.suiteId, scenarioId: row.scenarioId, kind: 'adversarial' })) ?? false} disabled={testRunActive || Boolean(blockReason)} onChange={() => onToggleCase({ profileId, suiteId: row.suiteId, scenarioId: row.scenarioId, kind: 'adversarial' })} /></label>}
+      <button type="button" className="adversarial-case-item__main" aria-label={blockReason ? `${row.scenarioName}. ${blockReason}` : row.scenarioName} onClick={() => row.source === 'linked' ? requestLinkedCase(row) : onToggle(row.key)}><strong>{row.scenarioName}</strong><code>{row.scenarioId}</code><span className="case-row-meta">{row.sourceLabel} · {t(row.mode === 'multiTurn' ? 'Multi-turn' : 'Single turn')} · {t('Repetitions')} {formatNumber(row.repetitions)}{row.tags.length ? ` · ${row.tags.join(', ')}` : ''}</span>{blockReason && <small className="test-case-block-reason">{blockReason}</small>}</button>
+      <div className="adversarial-case-item__actions"><IconButton type="button" icon="debug-start" label={blockReason ? `${row.scenarioName}: ${blockReason}` : t('Run case {name}', { name: row.scenarioName })} disabled={testRunActive || Boolean(blockReason)} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}) })} />{row.sourcePath && <IconButton type="button" icon={vscodeFeatures ? 'go-to-file' : 'export'} label={vscodeFeatures ? t('Open linked source {name}', { name: row.sourceLabel }) : t('Export imported copy')} onClick={() => onOpenSource(row.sourcePath!)} />}<IconButton type="button" icon="trash" label={row.sourcePath ? t(vscodeFeatures ? 'Delete case {name} from source file' : 'Delete case {name} from browser copy', { name: row.scenarioName }) : t('Delete scenario {name}', { name: row.scenarioName })} disabled={readOnly || Boolean(row.sourcePath && (!row.revision || !trusted))} onClick={() => row.scenario && row.index !== undefined ? onDelete(row.index, row.scenario) : row.sourcePath && row.revision ? requestConfirm({ title: t(vscodeFeatures ? 'Delete case {name} from source file?' : 'Delete case {name} from browser copy?', { name: row.scenarioName }), actionLabel: t('Delete case'), detail: t(vscodeFeatures ? 'This changes {source}. You can undo the file edit in VS Code.' : 'This changes only the copy stored in this browser. The original file is unchanged.', { source: linkedSuiteLabel(row.sourcePath) }), onConfirm: () => post({ type: 'adversarial.case.delete', sourcePath: row.sourcePath!, scenarioId: row.scenarioId, expectedRevision: row.revision! }) }) : undefined} /></div>
+    </div>; })}</div>
+    {activeRow && <CaseEditorOverlay title={activeRow.scenarioName} context={`${activeRow.scenarioId} · ${activeRow.sourceLabel}`} onRequestClose={requestClose} footer={<>
+      {closeWarning && <span className="case-editor-dialog__warning" role="alert">{t('Unsaved changes')}</span>}
+      {!readOnly && activeRow.source === 'inline' && inlineDraft && <><button type="button" onClick={requestDiscard}>{t('Discard changes')}</button><button type="button" className="primary" onClick={() => { if (activeRow.index === undefined) return; onChange(activeRow.index, inlineDraft); setInlineDraft(undefined); setInlineOriginal(undefined); setInlineDraftKey(undefined); setCloseWarning(false); onClose(); }}>{t('Save')}</button></>}
+      {!readOnly && activeRow.source === 'linked' && linkedDraft && linkedRevision && <><button type="button" onClick={requestDiscard} disabled={linkedPending === 'save'}>{t('Discard changes')}</button><button type="button" className="primary" disabled={!trusted || !linkedDirty || linkedPending === 'save'} onClick={() => { if (!linkedTarget) return; setLinkedPending('save'); linkedResponseBaseline.current = linkedCaseEditor; setLinkedMessage({ tone: 'info', text: t(vscodeFeatures ? 'Saving and verifying the linked case…' : 'Saving imported case…') }); post({ type: 'adversarial.case.save', sourcePath: linkedTarget.sourcePath, scenarioId: linkedTarget.scenarioId, expectedRevision: linkedRevision, scenario: linkedDraft }); }}>{linkedPending === 'save' ? t('Saving…') : t(vscodeFeatures ? 'Save linked case' : 'Save imported case')}</button></>}
+    </>}>
+      {activeRow.source === 'inline' && inlineDraft && activeRow.index !== undefined && <fieldset className="test-case-readonly-fieldset" disabled={readOnly}><ScenarioEditor scenario={inlineDraft} index={activeRow.index} onChange={setInlineDraft} onDestructiveChange={setInlineDraft} /></fieldset>}
+      {activeRow.source === 'linked' && activeRow.sourcePath && <div className="linked-case-editor"><div className="linked-case-editor__notice"><ProductIcon name={vscodeFeatures ? 'link' : 'file-code'} /><div><strong>{t(vscodeFeatures ? 'Linked {format} case' : 'Imported {format} case', { format: activeRow.sourcePath.toLocaleLowerCase().endsWith('.csv') ? 'CSV' : 'JSONC' })}</strong></div><button type="button" onClick={() => onOpenSource(activeRow.sourcePath!)}>{t(vscodeFeatures ? 'Open source' : 'Export imported copy')}</button></div>
+        {linkedPending === 'load' && <div className="linked-case-editor__status" role="status"><ProductIcon name="loading" />{t(vscodeFeatures ? 'Loading this case from disk…' : 'Loading this case from browser storage…')}</div>}
+        {linkedMessage && <div className={`linked-case-editor__status is-${linkedMessage.tone}`} role={linkedMessage.tone === 'error' ? 'alert' : 'status'}><ProductIcon name={linkedMessage.tone === 'error' ? 'error' : linkedMessage.tone === 'success' ? 'check' : 'info'} /><span>{linkedMessage.text}</span>{linkedMessage.tone === 'error' && <button type="button" onClick={() => linkedDirty ? requestConfirm({ title: t('Reload case {name} and discard unsaved changes?', { name: activeRow.scenarioName }), actionLabel: t('Reload'), detail: t('Unsaved edits to this case will be lost.'), onConfirm: () => requestLinkedCase(activeRow, true) }) : requestLinkedCase(activeRow, true)}>{t('Reload')}</button>}</div>}
+        {linkedDraft && linkedRevision && <fieldset className="test-case-readonly-fieldset" disabled={readOnly}><ScenarioEditor scenario={linkedDraft} index={10_000} identityReadOnly onChange={setLinkedDraft} onDestructiveChange={setLinkedDraft} /></fieldset>}
+      </div>}
+    </CaseEditorOverlay>}
     {!visible.length && <div className="settings-empty settings-empty--action"><span>{t('No cases match the current filters.')}</span><button type="button" onClick={() => onCollectionChange({ ...DEFAULT_ADVERSARIAL_CASE_COLLECTION, pageSize: collection.pageSize })}>{t('Clear filters')}</button></div>}
-    <div className="adversarial-case-pagination" aria-label={t('Case pages')}><label>{t('Rows per page')}<select value={collection.pageSize} onChange={(event) => updateCollection({ pageSize: Number(event.target.value) as 25 | 50 | 100 })}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label><span>{t('Page {current} of {total}', { current: formatNumber(page + 1), total: formatNumber(pageCount) })}</span><div><IconButton type="button" icon="arrow-left" label={t('Previous page')} disabled={page === 0} onClick={() => updateCollection({ page: page - 1 }, false)} /><IconButton type="button" icon="arrow-right" label={t('Next page')} disabled={page >= pageCount - 1} onClick={() => updateCollection({ page: page + 1 }, false)} /></div></div>
+    <CollectionPagination page={page} pageCount={pageCount} start={filtered.length ? page * collection.pageSize + 1 : 0} end={Math.min(filtered.length, (page + 1) * collection.pageSize)} total={filtered.length} onPage={(nextPage) => updateCollection({ page: nextPage }, false)} pageSize={collection.pageSize} onPageSize={(nextPageSize) => updateCollection({ pageSize: nextPageSize })} />
+    {confirmationDialog}
   </div>;
 }
 
@@ -1187,29 +1253,59 @@ interface ContractCaseRow {
   index?: number;
   sourcePath?: string;
   suiteId?: string;
+  revision?: string;
 }
 
-function ContractCaseList({ rows, expandedCaseId, onExpandedCaseIdChange, linkedCaseEditor, trusted, vscodeFeatures, post, testOperation, onInlineChange, onInlineDestructiveChange, onInlineDelete }: {
+function ContractCaseList({ rows, editorRows = rows, profileId, selectedCaseKeys, onToggleCase, expandedCaseId, onExpandedCaseIdChange, linkedCaseEditor, trusted, vscodeFeatures, readOnly = false, post, testOperation, onInlineChange, onInlineDelete }: {
   rows: ContractCaseRow[];
+  editorRows?: ContractCaseRow[];
+  profileId?: string;
+  selectedCaseKeys?: ReadonlySet<string>;
+  onToggleCase?: (identity: TestCaseIdentity) => void;
   expandedCaseId?: string;
   onExpandedCaseIdChange: (id: string | undefined) => void;
   linkedCaseEditor?: LinkedContractCaseEditorState;
   trusted: boolean;
   vscodeFeatures: boolean;
+  readOnly?: boolean;
   post: SettingsWorkspacePost;
   testOperation?: TestOperationSnapshot;
   onInlineChange: (index: number, value: ScenarioDefinition) => void;
-  onInlineDestructiveChange: (index: number, value: ScenarioDefinition, label: string) => void;
-  onInlineDelete: (index: number, scenario: ScenarioDefinition) => void;
+  onInlineDelete: (index: number, scenario: ScenarioDefinition, afterDelete: () => void) => void;
 }): React.JSX.Element {
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
   const [linkedTarget, setLinkedTarget] = useState<{ sourcePath: string; scenarioId: string }>();
   const [linkedDraft, setLinkedDraft] = useState<ScenarioDefinition>();
   const [linkedOriginal, setLinkedOriginal] = useState<ScenarioDefinition>();
   const [linkedRevision, setLinkedRevision] = useState<string>();
   const [linkedPending, setLinkedPending] = useState<'load' | 'save'>();
   const [linkedMessage, setLinkedMessage] = useState<{ tone: 'info' | 'success' | 'error'; text: string }>();
+  const [inlineDraft, setInlineDraft] = useState<ScenarioDefinition>();
+  const [inlineOriginal, setInlineOriginal] = useState<ScenarioDefinition>();
+  const [inlineDraftKey, setInlineDraftKey] = useState<string>();
+  const [closeWarning, setCloseWarning] = useState(false);
   const responseBaseline = useRef<LinkedContractCaseEditorState | undefined>(undefined);
   const linkedDirty = Boolean(linkedDraft && linkedOriginal && JSON.stringify(linkedDraft) !== JSON.stringify(linkedOriginal));
+  const activeRow = editorRows.find((row) => row.key === expandedCaseId || (row.source === 'inline' && row.scenarioId === expandedCaseId));
+  useEffect(() => {
+    if (activeRow?.source !== 'linked' || !activeRow.sourcePath || (linkedTarget?.sourcePath === activeRow.sourcePath && linkedTarget.scenarioId === activeRow.scenarioId)) return;
+    setLinkedTarget({ sourcePath: activeRow.sourcePath, scenarioId: activeRow.scenarioId });
+    setLinkedDraft(undefined); setLinkedOriginal(undefined); setLinkedRevision(undefined); setLinkedMessage(undefined); setLinkedPending('load');
+    responseBaseline.current = linkedCaseEditor;
+    post({ type: 'contract.case.request', sourcePath: activeRow.sourcePath, scenarioId: activeRow.scenarioId });
+  }, [activeRow?.key, activeRow?.scenarioId, activeRow?.sourcePath, activeRow?.source, linkedTarget?.sourcePath, linkedTarget?.scenarioId, linkedCaseEditor, post]);
+  useEffect(() => {
+    if (!activeRow || activeRow.source !== 'inline' || !activeRow.scenario || inlineDraftKey === activeRow.key) return;
+    const next = cloneScenario(activeRow.scenario);
+    setInlineDraft(next); setInlineOriginal(cloneScenario(next)); setInlineDraftKey(activeRow.key); setCloseWarning(false);
+  }, [activeRow, inlineDraftKey]);
+  const inlineDirty = Boolean(inlineDraft && inlineOriginal && JSON.stringify(inlineDraft) !== JSON.stringify(inlineOriginal));
+  const requestClose = () => { if (linkedPending === 'save' || inlineDirty || linkedDirty) { setCloseWarning(true); return; } onExpandedCaseIdChange(undefined); setInlineDraft(undefined); setInlineOriginal(undefined); setInlineDraftKey(undefined); setCloseWarning(false); };
+  const discardAndClose = () => { setInlineDraft(undefined); setInlineOriginal(undefined); setInlineDraftKey(undefined); setLinkedDraft(undefined); setLinkedOriginal(undefined); setLinkedRevision(undefined); setLinkedPending(undefined); setCloseWarning(false); onExpandedCaseIdChange(undefined); };
+  const requestDiscard = () => {
+    if (!inlineDirty && !linkedDirty) { discardAndClose(); return; }
+    requestConfirm({ title: t('Discard unsaved changes to {name}?', { name: activeRow?.scenarioName ?? '' }), actionLabel: t('Discard changes'), detail: t('Unsaved edits to this case will be lost.'), onConfirm: discardAndClose });
+  };
   const testRunActive = testOperation?.state === 'running' || testOperation?.state === 'cancelling';
   useEffect(() => {
     if (!linkedTarget || !linkedCaseEditor || linkedCaseEditor === responseBaseline.current) return;
@@ -1245,21 +1341,29 @@ function ContractCaseList({ rows, expandedCaseId, onExpandedCaseIdChange, linked
     onExpandedCaseIdChange(row.key);
     post({ type: 'contract.case.request', sourcePath: row.sourcePath, scenarioId: row.scenarioId });
   };
-  return <div className="automation-scenario-list" role="list">{rows.map((row, visibleIndex) => {
+  return <div className="automation-scenario-list" role="list">{rows.map((row) => {
     const expanded = expandedCaseId === row.key || (row.source === 'inline' && expandedCaseId === row.scenarioId);
-    const flags = [row.comparison ? t('Comparison') : '', row.performance ? t('Performance') : '', row.faults ? t('Fault Lab') : ''].filter(Boolean);
+    const flags = [row.comparison ? t('Comparison') : '', row.performance ? t('Performance') : '', row.faults ? t('Network fault simulation') : ''].filter(Boolean);
+    const blockReason = caseSelectionBlockReason(row, vscodeFeatures);
     return <div className={`automation-scenario-row ${expanded ? 'is-expanded' : ''}`} role="listitem" key={row.key}>
-      <button type="button" className="automation-scenario-row__main" aria-label={row.scenarioName} aria-expanded={expanded} onClick={() => toggle(row)}><span><strong>{row.scenarioName}</strong><code>{row.scenarioId}</code>{captureNeedsReview(row.capture, row.tags) && <small className="capture-review-badge">{t('Needs review')}</small>}</span><span className="automation-scenario-row__summary"><small className={`adversarial-case-source adversarial-case-source--${row.source}`}>{row.sourceLabel}</small><small>{t('{steps} steps · {assertions} assertions', { steps: formatNumber(row.turns), assertions: formatNumber(row.assertions) })}{flags.length ? ` · ${flags.join(' · ')}` : ''}</small></span></button>
-      <IconButton type="button" icon="debug-start" label={captureNeedsReview(row.capture, row.tags) ? t('Review scenario {name} before running', { name: row.scenarioName }) : t('Run scenario {name}', { name: row.scenarioName })} disabled={testRunActive || captureNeedsReview(row.capture, row.tags)} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}), kind: 'contract' })} />
-      {expanded && row.scenario && row.index !== undefined && <div className="automation-scenario-editor"><ScenarioEditor scenario={row.scenario} index={row.index} onChange={(value) => onInlineChange(row.index!, value)} onDestructiveChange={(value, label) => onInlineDestructiveChange(row.index!, value, label)} onDelete={() => onInlineDelete(row.index!, row.scenario!)} /></div>}
-      {expanded && row.source === 'linked' && row.sourcePath && <div className="automation-scenario-editor linked-case-editor">
-        <div className="linked-case-editor__notice"><ProductIcon name={vscodeFeatures ? 'link' : 'file-code'} /><div><strong>{t(vscodeFeatures ? 'Linked {format} test case' : 'Imported {format} test case', { format: row.sourcePath.toLocaleLowerCase().endsWith('.csv') ? 'CSV' : 'JSONC' })}</strong><span>{vscodeFeatures ? t('Edits are written to {source}; the Profile keeps only a safe reference.', { source: linkedSuiteLabel(row.sourcePath) }) : t('Changes are saved to this browser copy. The original file is unchanged.')}</span></div><button type="button" onClick={() => post({ type: 'contract.openLinkedSuite', path: row.sourcePath! })}>{t(vscodeFeatures ? 'Open source' : 'Export imported copy')}</button></div>
-        {linkedPending === 'load' && <div className="linked-case-editor__status" role="status"><ProductIcon name="loading" />{t(vscodeFeatures ? 'Loading this case from disk…' : 'Loading this case from browser storage…')}</div>}
-        {linkedMessage && <div className={`linked-case-editor__status is-${linkedMessage.tone}`} role={linkedMessage.tone === 'error' ? 'alert' : 'status'}><ProductIcon name={linkedMessage.tone === 'error' ? 'error' : linkedMessage.tone === 'success' ? 'check' : 'info'} /><span>{linkedMessage.text}</span>{linkedMessage.tone === 'error' && <button type="button" onClick={() => toggle(row, true)}>{t('Reload')}</button>}</div>}
-        {linkedDraft && linkedRevision && <><ScenarioEditor scenario={linkedDraft} index={20_000 + visibleIndex} identityReadOnly onChange={setLinkedDraft} onDestructiveChange={setLinkedDraft} /><div className="linked-case-editor__footer"><span>{trusted ? t(linkedDirty ? (vscodeFeatures ? 'Unsaved changes in the linked source.' : 'Unsaved changes in the imported copy.') : (vscodeFeatures ? 'No unsaved linked-source changes.' : 'No unsaved imported-copy changes.')) : t('Trust this workspace to save linked-source changes.')}</span><div><button type="button" disabled={!linkedDirty || linkedPending === 'save'} onClick={() => { setLinkedDraft(linkedOriginal ? cloneScenario(linkedOriginal) : linkedDraft); setLinkedMessage(undefined); }}>{t('Discard changes')}</button><button type="button" className="primary" disabled={!trusted || !linkedDirty || linkedPending === 'save'} onClick={() => { if (!linkedTarget) return; setLinkedPending('save'); responseBaseline.current = linkedCaseEditor; setLinkedMessage({ tone: 'info', text: t(vscodeFeatures ? 'Saving and verifying the linked test case…' : 'Saving imported test case…') }); post({ type: 'contract.case.save', sourcePath: linkedTarget.sourcePath, scenarioId: linkedTarget.scenarioId, expectedRevision: linkedRevision, scenario: linkedDraft }); }}>{linkedPending === 'save' ? t('Saving…') : t(vscodeFeatures ? 'Save linked case' : 'Save imported test case')}</button></div></div></>}
-      </div>}
+      {profileId && onToggleCase && <label className="test-case-select"><input type="checkbox" aria-label={blockReason ? `${t('Select case {name}', { name: row.scenarioName })}. ${blockReason}` : t('Select case {name}', { name: row.scenarioName })} checked={selectedCaseKeys?.has(testCaseKey({ profileId, suiteId: row.suiteId, scenarioId: row.scenarioId, kind: 'contract' })) ?? false} disabled={testRunActive || Boolean(blockReason)} onChange={() => onToggleCase({ profileId, suiteId: row.suiteId, scenarioId: row.scenarioId, kind: 'contract' })} /></label>}
+      <button type="button" className="automation-scenario-row__main" aria-label={blockReason ? `${row.scenarioName}. ${blockReason}` : row.scenarioName} aria-expanded={expanded} onClick={() => toggle(row)}><strong>{row.scenarioName}</strong><code>{row.scenarioId}</code><span className="case-row-meta">{row.sourceLabel} · {t('{steps} steps · {assertions} assertions', { steps: formatNumber(row.turns), assertions: formatNumber(row.assertions) })}{flags.length ? ` · ${flags.join(' · ')}` : ''}</span>{blockReason && <small className="test-case-block-reason">{blockReason}</small>}</button>
+      <div className="automation-scenario-row__actions"><IconButton type="button" icon="debug-start" label={blockReason ? `${row.scenarioName}: ${blockReason}` : t('Run case {name}', { name: row.scenarioName })} disabled={testRunActive || Boolean(blockReason)} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}), kind: 'contract' })} />
+      {row.sourcePath && <IconButton type="button" icon={vscodeFeatures ? 'go-to-file' : 'export'} label={vscodeFeatures ? t('Open linked source {name}', { name: row.sourceLabel }) : t('Export imported copy')} onClick={() => post({ type: 'contract.openLinkedSuite', path: row.sourcePath! })} />}
+      <IconButton type="button" icon="trash" label={row.sourcePath ? t(vscodeFeatures ? 'Delete case {name} from source file' : 'Delete case {name} from browser copy', { name: row.scenarioName }) : t('Delete scenario {name}', { name: row.scenarioName })} disabled={readOnly || Boolean(row.sourcePath && (!row.revision || !trusted))} onClick={() => row.scenario && row.index !== undefined ? onInlineDelete(row.index, row.scenario, () => onExpandedCaseIdChange(undefined)) : row.sourcePath && row.revision ? requestConfirm({ title: t(vscodeFeatures ? 'Delete case {name} from source file?' : 'Delete case {name} from browser copy?', { name: row.scenarioName }), actionLabel: t('Delete case'), detail: t(vscodeFeatures ? 'This changes {source}. You can undo the file edit in VS Code.' : 'This changes only the copy stored in this browser. The original file is unchanged.', { source: linkedSuiteLabel(row.sourcePath) }), onConfirm: () => post({ type: 'contract.case.delete', sourcePath: row.sourcePath!, scenarioId: row.scenarioId, expectedRevision: row.revision! }) }) : undefined} /></div>
     </div>;
-  })}</div>;
+  })}{activeRow && <CaseEditorOverlay title={activeRow.scenarioName} context={`${activeRow.scenarioId} · ${activeRow.sourceLabel}`} onRequestClose={requestClose} footer={<>
+    {closeWarning && <span className="case-editor-dialog__warning" role="alert">{t('Unsaved changes')}</span>}
+    {!readOnly && activeRow.source === 'inline' && inlineDraft && <><button type="button" onClick={requestDiscard}>{t('Discard changes')}</button><button type="button" className="primary" onClick={() => { if (activeRow.index === undefined) return; onInlineChange(activeRow.index, inlineDraft); setInlineDraft(undefined); setInlineOriginal(undefined); setInlineDraftKey(undefined); onExpandedCaseIdChange(undefined); }}>{t('Save')}</button></>}
+    {!readOnly && activeRow.source === 'linked' && linkedDraft && linkedRevision && <><button type="button" disabled={linkedPending === 'save'} onClick={requestDiscard}>{t('Discard changes')}</button><button type="button" className="primary" disabled={!trusted || !linkedDirty || linkedPending === 'save'} onClick={() => { if (!linkedTarget) return; setLinkedPending('save'); responseBaseline.current = linkedCaseEditor; setLinkedMessage({ tone: 'info', text: t(vscodeFeatures ? 'Saving and verifying the linked test case…' : 'Saving imported test case…') }); post({ type: 'contract.case.save', sourcePath: linkedTarget.sourcePath, scenarioId: linkedTarget.scenarioId, expectedRevision: linkedRevision, scenario: linkedDraft }); }}>{linkedPending === 'save' ? t('Saving…') : t(vscodeFeatures ? 'Save linked case' : 'Save imported test case')}</button></>}
+  </>}>
+    {activeRow.source === 'inline' && inlineDraft && activeRow.index !== undefined && <fieldset className="test-case-readonly-fieldset" disabled={readOnly}><ScenarioEditor scenario={inlineDraft} index={activeRow.index} vscodeFeatures={vscodeFeatures} onChange={setInlineDraft} onDestructiveChange={setInlineDraft} /></fieldset>}
+    {activeRow.source === 'linked' && activeRow.sourcePath && <div className="linked-case-editor"><div className="linked-case-editor__notice"><ProductIcon name={vscodeFeatures ? 'link' : 'file-code'} /><div><strong>{t(vscodeFeatures ? 'Linked {format} test case' : 'Imported {format} test case', { format: activeRow.sourcePath.toLocaleLowerCase().endsWith('.csv') ? 'CSV' : 'JSONC' })}</strong></div><button type="button" onClick={() => post({ type: 'contract.openLinkedSuite', path: activeRow.sourcePath! })}>{t(vscodeFeatures ? 'Open source' : 'Export imported copy')}</button></div>
+      {linkedPending === 'load' && <div className="linked-case-editor__status" role="status"><ProductIcon name="loading" />{t(vscodeFeatures ? 'Loading this case from disk…' : 'Loading this case from browser storage…')}</div>}
+      {linkedMessage && <div className={`linked-case-editor__status is-${linkedMessage.tone}`} role={linkedMessage.tone === 'error' ? 'alert' : 'status'}><ProductIcon name={linkedMessage.tone === 'error' ? 'error' : linkedMessage.tone === 'success' ? 'check' : 'info'} /><span>{linkedMessage.text}</span>{linkedMessage.tone === 'error' && <button type="button" onClick={() => linkedDirty ? requestConfirm({ title: t('Reload case {name} and discard unsaved changes?', { name: activeRow.scenarioName }), actionLabel: t('Reload'), detail: t('Unsaved edits to this case will be lost.'), onConfirm: () => toggle(activeRow, true) }) : toggle(activeRow, true)}>{t('Reload')}</button>}</div>}
+      {linkedDraft && linkedRevision && <fieldset className="test-case-readonly-fieldset" disabled={readOnly}><ScenarioEditor scenario={linkedDraft} index={20_000} identityReadOnly vscodeFeatures={vscodeFeatures} onChange={setLinkedDraft} onDestructiveChange={setLinkedDraft} /></fieldset>}
+    </div>}
+  </CaseEditorOverlay>}{confirmationDialog}</div>;
 }
 
 function contractAssertionCount(scenario: ScenarioDefinition): number { return (scenario.assertions?.length ?? 0) + scenario.steps.reduce((sum, step) => sum + (step.assertions?.length ?? 0), 0); }
@@ -1330,6 +1434,7 @@ function reliabilityVerdictText(verdict: NonNullable<AdversarialResultSummary['r
 }
 
 function QualityRubricEditor({ rubric, index, onChange, onDelete }: { rubric: QualityRubricDefinition; index: number; onChange: (value: QualityRubricDefinition) => void; onDelete: () => void }): React.JSX.Element {
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
   const addCriterion = () => {
     const ordinal = rubric.criteria.length + 1;
     const id = uniqueId(new Set(rubric.criteria.map((criterion) => criterion.id)), `criterion-${ordinal}`);
@@ -1349,32 +1454,35 @@ function QualityRubricEditor({ rubric, index, onChange, onDelete }: { rubric: Qu
         <SettingField label={t('Criterion ID')} id={`quality-criterion-id-${index}-${criterionIndex}`}><PatchInput id={`quality-criterion-id-${index}-${criterionIndex}`} value={criterion.id} onCommit={(id) => onChange({ ...rubric, criteria: replaceAt(rubric.criteria, criterionIndex, { ...criterion, id }) })} required spellCheck={false} /></SettingField>
         <SettingField label={t('Evaluation guidance')} id={`quality-criterion-description-${index}-${criterionIndex}`} wide><PatchInput id={`quality-criterion-description-${index}-${criterionIndex}`} value={criterion.description} onCommit={(description) => onChange({ ...rubric, criteria: replaceAt(rubric.criteria, criterionIndex, { ...criterion, description }) })} multiline rows={2} required /></SettingField>
       </div>
-      <button type="button" disabled={rubric.criteria.length === 1} onClick={() => onChange({ ...rubric, criteria: rubric.criteria.filter((_, index) => index !== criterionIndex) })}>{t('Delete criterion')}</button>
+      <button type="button" disabled={rubric.criteria.length === 1} onClick={() => requestConfirm({ title: t('Delete criterion {name}', { name: criterion.label || criterion.id }), actionLabel: t('Delete'), onConfirm: () => onChange({ ...rubric, criteria: rubric.criteria.filter((_, index) => index !== criterionIndex) }) })}>{t('Delete criterion')}</button>
     </article>)}</div>
+    {confirmationDialog}
   </article>;
 }
 
-function ScenarioEditor({ scenario, index, onChange, onDestructiveChange, onDelete, identityReadOnly = false }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void; onDestructiveChange: (value: ScenarioDefinition, label: string) => void; onDelete?: () => void; identityReadOnly?: boolean }): React.JSX.Element {
+function ScenarioEditor({ scenario, index, onChange, onDestructiveChange, onDelete, identityReadOnly = false, vscodeFeatures = true }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void; onDestructiveChange: (value: ScenarioDefinition, label: string) => void; onDelete?: () => void; identityReadOnly?: boolean; vscodeFeatures?: boolean }): React.JSX.Element {
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
   const addStep = () => {
     const ordinal = scenario.steps.length + 1;
     const id = uniqueId(new Set(scenario.steps.map((step) => step.id)), `step-${ordinal}`);
     onChange({ ...scenario, steps: [...scenario.steps, { id, name: t('Message {number}', { number: formatNumber(ordinal) }), input: '', ...(scenario.adversarial ? {} : { assertions: [{ path: 'turn.state', operator: 'equals' as const, value: 'completed' }] }) }], ...(scenario.adversarial ? { adversarial: { ...scenario.adversarial, mode: 'multiTurn', maxTurns: Math.max(scenario.adversarial.maxTurns ?? 1, ordinal) } } : {}) });
   };
-  return <article className="scenario-editor" aria-labelledby={`scenario-editor-title-${index}`}>
-    <header className="scenario-editor__header"><div><strong id={`scenario-editor-title-${index}`}>{scenario.name || scenario.id}</strong><code>{scenario.id}</code></div><div><IconButton type="button" icon="add" label={t('Add step to {name}', { name: scenario.name || scenario.id })} onClick={addStep} />{onDelete && <IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={onDelete} />}</div></header>
+  return <article className="scenario-editor" aria-label={scenario.name || scenario.id}>
     {captureNeedsReview(scenario.capture, scenario.tags) && <div className="capture-review-callout" role="status"><ProductIcon name="warning" /><div><strong>{t('Review required')}</strong><span>{t('This draft was captured from {source}. Check every user message and test condition before enabling it.', { source: scenario.capture ? t(localizeHumanized(scenario.capture.source)) : t('captured source') })}</span></div><button type="button" className="primary" onClick={() => onChange(markCaptureReady(scenario))}>{t('Mark ready')}</button></div>}
     <div className="settings-form-grid scenario-editor__identity">
       <SettingField label={t('Scenario name')} id={`scenario-name-${index}`}><PatchInput id={`scenario-name-${index}`} value={scenario.name} onCommit={(value) => onChange({ ...scenario, name: value })} required /></SettingField>
       <SettingField label={t('Scenario ID')} id={`scenario-id-${index}`} hint={t(identityReadOnly ? 'The linked case ID remains stable; edit it in the source file if needed.' : 'Lowercase letters, numbers, and hyphens.')}><PatchInput id={`scenario-id-${index}`} value={scenario.id} onCommit={(value) => onChange({ ...scenario, id: value })} required readOnly={identityReadOnly} spellCheck={false} /></SettingField>
       <SettingField label={t('Description')} id={`scenario-description-${index}`} wide><PatchInput id={`scenario-description-${index}`} value={scenario.description ?? ''} onCommit={(value) => onChange({ ...scenario, description: value || undefined })} multiline rows={2} /></SettingField>
       {scenario.adversarial && <ListPatchField label={t('Tags')} id={`scenario-tags-${index}`} value={scenario.tags ?? []} placeholder={t('One tag per line')} onCommit={(tags) => onChange({ ...scenario, tags: tags.length ? tags : undefined })} wide />}
-      <JsonPatchField label={t('Scenario controls (JSON)')} id={`scenario-controls-${index}`} value={scenario.controls ?? {}} hint={t('Applied only to this test run. Secret controls are not accepted.')} onCommit={(value) => onChange({ ...scenario, controls: isRecord(value) && Object.keys(value).length ? value : undefined })} />
     </div>
-    {scenario.adversarial ? <AdversarialCaseEditor scenario={scenario} index={index} onChange={onChange} /> : <><ScenarioComparisonEditor scenario={scenario} index={index} onChange={onChange} /><ScenarioFaultEditor scenario={scenario} index={index} onChange={onChange} /></>}
     <div className="scenario-steps">
-      {scenario.steps.map((step, stepIndex) => <ScenarioStepEditor key={`${step.id}-${stepIndex}`} step={step} scenarioIndex={index} stepIndex={stepIndex} adversarial={Boolean(scenario.adversarial)} onChange={(value) => onChange({ ...scenario, steps: replaceAt(scenario.steps, stepIndex, value) })} onDestructiveChange={(value, label) => onDestructiveChange({ ...scenario, steps: replaceAt(scenario.steps, stepIndex, value) }, label)} onDelete={() => onDestructiveChange({ ...scenario, steps: scenario.steps.filter((_, itemIndex) => itemIndex !== stepIndex) }, t('Deleted step {name}.', { name: step.name?.trim() || step.id }))} canDelete={scenario.steps.length > 1} />)}
+      <div className="scenario-steps__heading"><strong>{t('Conversation steps')}</strong><div><button type="button" onClick={addStep}>{t('Add step')}</button>{onDelete && <IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={onDelete} />}</div></div>
+      {scenario.steps.map((step, stepIndex) => <ScenarioStepEditor key={`${step.id}-${stepIndex}`} step={step} scenarioIndex={index} stepIndex={stepIndex} adversarial={Boolean(scenario.adversarial)} onChange={(value) => onChange({ ...scenario, steps: replaceAt(scenario.steps, stepIndex, value) })} onDestructiveChange={(value, label) => onDestructiveChange({ ...scenario, steps: replaceAt(scenario.steps, stepIndex, value) }, label)} onDelete={() => requestConfirm({ title: t('Delete step {name}', { name: step.name?.trim() || step.id }), actionLabel: t('Delete'), detail: t('This removes the step from the editor. Save the case to apply the change.'), onConfirm: () => onDestructiveChange({ ...scenario, steps: scenario.steps.filter((_, itemIndex) => itemIndex !== stepIndex) }, t('Deleted step {name}.', { name: step.name?.trim() || step.id })) })} canDelete={scenario.steps.length > 1} />)}
     </div>
-    {!scenario.adversarial && <AssertionsEditor idPrefix={`scenario-${index}-final`} title={t('Final assertions')} assertions={scenario.assertions ?? []} onChange={(value) => onChange({ ...scenario, assertions: value.length ? value : undefined })} onDeleteAt={(assertionIndex) => onDestructiveChange({ ...scenario, assertions: scenario.assertions?.filter((_, itemIndex) => itemIndex !== assertionIndex) }, t('Deleted assertion.'))} />}
+    {!scenario.adversarial && <AssertionsEditor idPrefix={`scenario-${index}-final`} title={t('Final assertions')} assertions={scenario.assertions ?? []} onChange={(value) => onChange({ ...scenario, assertions: value.length ? value : undefined })} onDeleteAt={(assertionIndex) => requestConfirm({ title: t('Delete assertion {name}', { name: scenario.assertions?.[assertionIndex]?.path || String(assertionIndex + 1) }), actionLabel: t('Delete'), detail: t('This removes the assertion from the editor. Save the case to apply the change.'), onConfirm: () => onDestructiveChange({ ...scenario, assertions: scenario.assertions?.filter((_, itemIndex) => itemIndex !== assertionIndex) }, t('Deleted assertion.')) })} />}
+    {scenario.adversarial ? <AdversarialCaseEditor scenario={scenario} index={index} onChange={onChange} /> : <><ScenarioComparisonEditor scenario={scenario} index={index} onChange={onChange} /><ScenarioFaultEditor scenario={scenario} index={index} vscodeFeatures={vscodeFeatures} onChange={onChange} /></>}
+    <details className="scenario-controls-disclosure" open={Boolean(scenario.controls && Object.keys(scenario.controls).length)}><summary>{t('Advanced controls')}</summary><div><JsonPatchField label={t('Scenario controls (JSON)')} id={`scenario-controls-${index}`} value={scenario.controls ?? {}} hint={t('Applied only to this test run. Secret controls are not accepted.')} onCommit={(value) => onChange({ ...scenario, controls: isRecord(value) && Object.keys(value).length ? value : undefined })} /></div></details>
+    {confirmationDialog}
   </article>;
 }
 
@@ -1413,7 +1521,7 @@ function AdversarialForbidEditor({ idPrefix, value, onChange, additional = false
   </fieldset>;
 }
 
-function ScenarioFaultEditor({ scenario, index, onChange }: { scenario: ScenarioDefinition; index: number; onChange: (value: ScenarioDefinition) => void }): React.JSX.Element {
+function ScenarioFaultEditor({ scenario, index, vscodeFeatures, onChange }: { scenario: ScenarioDefinition; index: number; vscodeFeatures: boolean; onChange: (value: ScenarioDefinition) => void }): React.JSX.Element {
   const enabled = Boolean(scenario.faults);
   const update = (field: keyof NonNullable<ScenarioDefinition['faults']>, value: number | undefined) => {
     const faults = { ...(scenario.faults ?? {}) };
@@ -1421,9 +1529,12 @@ function ScenarioFaultEditor({ scenario, index, onChange }: { scenario: Scenario
     onChange({ ...scenario, faults: Object.keys(faults).length ? faults : undefined });
   };
   return <details className="scenario-advanced" open={enabled}>
-    <summary>{t('Fault Lab')}</summary>
+    <summary>{t('Network fault simulation')}{!vscodeFeatures && <span className="scenario-advanced__availability">{t('VS Code only')}</span>}</summary>
     <div className="scenario-advanced__content">
-      <SettingCheckbox id={`scenario-faults-enabled-${index}`} label={t('Inject deterministic transport faults')} checked={enabled} onChange={(checked) => onChange({ ...scenario, faults: checked ? { disconnectAfterEvents: 1 } : undefined })} />
+      <p className="settings-field-hint">{t('Simulate delays, HTTP errors, disconnections, and malformed stream events during this test.')}</p>
+      {!vscodeFeatures && <p className="settings-field-hint">{t('Network fault simulation runs only in the VS Code extension. Existing settings are shown but cannot be changed here.')}</p>}
+      <fieldset className="scenario-fault-fields" disabled={!vscodeFeatures}>
+      <SettingCheckbox id={`scenario-faults-enabled-${index}`} label={t('Enable network fault simulation')} checked={enabled} onChange={(checked) => onChange({ ...scenario, faults: checked ? { disconnectAfterEvents: 1 } : undefined })} />
       {scenario.faults ? <div className="settings-form-grid">
         <NumberSettingField label={t('Request delay (ms)')} id={`scenario-fault-request-delay-${index}`} value={scenario.faults.delayBeforeRequestMs} placeholder="0" min={0} max={30000} onCommit={(value) => update('delayBeforeRequestMs', value)} />
         <NumberSettingField label={t('Chunk delay (ms)')} id={`scenario-fault-chunk-delay-${index}`} value={scenario.faults.delayPerChunkMs} placeholder="0" min={0} max={30000} onCommit={(value) => update('delayPerChunkMs', value)} />
@@ -1431,6 +1542,7 @@ function ScenarioFaultEditor({ scenario, index, onChange }: { scenario: Scenario
         <NumberSettingField label={t('Disconnect after event')} id={`scenario-fault-disconnect-${index}`} value={scenario.faults.disconnectAfterEvents} placeholder="3" min={1} max={10000} onCommit={(value) => update('disconnectAfterEvents', value)} />
         <NumberSettingField label={t('Corrupt event')} id={`scenario-fault-corrupt-${index}`} value={scenario.faults.corruptEventAt} placeholder="2" min={1} max={10000} onCommit={(value) => update('corruptEventAt', value)} />
       </div> : null}
+      </fieldset>
     </div>
   </details>;
 }
@@ -1488,15 +1600,20 @@ function ScenarioComparisonEditor({ scenario, index, onChange }: { scenario: Sce
 }
 
 function ScenarioStepEditor({ step, scenarioIndex, stepIndex, adversarial, onChange, onDestructiveChange, onDelete, canDelete }: { step: ScenarioStepDefinition; scenarioIndex: number; stepIndex: number; adversarial: boolean; onChange: (value: ScenarioStepDefinition) => void; onDestructiveChange: (value: ScenarioStepDefinition, label: string) => void; onDelete: () => void; canDelete: boolean }): React.JSX.Element {
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
   const prefix = `scenario-${scenarioIndex}-step-${stepIndex}`;
+  const stepTitle = step.name?.trim() || t('Message {number}', { number: formatNumber(stepIndex + 1) });
   return <section className="scenario-step" aria-labelledby={`${prefix}-title`}>
-    <header><div><span className="scenario-step__index">{formatNumber(stepIndex + 1)}</span><strong id={`${prefix}-title`}>{step.name?.trim() || step.id}</strong></div><IconButton type="button" icon="trash" label={t('Delete step {name}', { name: step.name?.trim() || step.id })} onClick={onDelete} disabled={!canDelete} /></header>
+    <header><div><strong id={`${prefix}-title`}>{stepTitle}</strong></div><IconButton type="button" icon="trash" label={t('Delete step {name}', { name: stepTitle })} onClick={onDelete} disabled={!canDelete} /></header>
+    <div className="scenario-step__body">
     <div className="settings-form-grid">
       <SettingField label={t('Step name')} id={`${prefix}-name`}><PatchInput id={`${prefix}-name`} value={step.name ?? ''} onCommit={(value) => onChange({ ...step, name: value || undefined })} /></SettingField>
       <SettingField label={t('Step ID')} id={`${prefix}-id`}><PatchInput id={`${prefix}-id`} value={step.id} onCommit={(value) => onChange({ ...step, id: value })} required spellCheck={false} /></SettingField>
       <SettingField label={t('User message')} id={`${prefix}-input`} wide><PatchInput id={`${prefix}-input`} value={step.input} onCommit={(value) => onChange({ ...step, input: value })} multiline rows={3} required /></SettingField>
     </div>
-    {adversarial ? <AdversarialForbidEditor idPrefix={`${prefix}-additional`} value={step.additionalForbid ?? {}} additional onChange={(additionalForbid) => onChange({ ...step, additionalForbid: hasAdversarialForbid(additionalForbid) ? additionalForbid : undefined })} /> : <AssertionsEditor idPrefix={prefix} title={t('Step assertions')} assertions={step.assertions ?? []} onChange={(value) => onChange({ ...step, assertions: value.length ? value : undefined })} onDeleteAt={(assertionIndex) => onDestructiveChange({ ...step, assertions: step.assertions?.filter((_, itemIndex) => itemIndex !== assertionIndex) }, t('Deleted assertion.'))} />}
+    {adversarial ? <AdversarialForbidEditor idPrefix={`${prefix}-additional`} value={step.additionalForbid ?? {}} additional onChange={(additionalForbid) => onChange({ ...step, additionalForbid: hasAdversarialForbid(additionalForbid) ? additionalForbid : undefined })} /> : <AssertionsEditor idPrefix={prefix} title={t('Step assertions')} assertions={step.assertions ?? []} onChange={(value) => onChange({ ...step, assertions: value.length ? value : undefined })} onDeleteAt={(assertionIndex) => requestConfirm({ title: t('Delete assertion {name}', { name: step.assertions?.[assertionIndex]?.path || String(assertionIndex + 1) }), actionLabel: t('Delete'), detail: t('This removes the assertion from the editor. Save the case to apply the change.'), onConfirm: () => onDestructiveChange({ ...step, assertions: step.assertions?.filter((_, itemIndex) => itemIndex !== assertionIndex) }, t('Deleted assertion.')) })} />}
+    </div>
+    {confirmationDialog}
   </section>;
 }
 

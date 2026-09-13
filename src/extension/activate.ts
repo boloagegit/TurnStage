@@ -14,7 +14,7 @@ import {
 } from './views/profileTreeProvider';
 import { configureL10n } from './l10n';
 import type { DisplayLanguagePreference } from './displayLanguage';
-import { confirmRestartSession } from './confirmRestartSession';
+import { confirmClearConversation, confirmRestartSession } from './confirmRestartSession';
 import { ScenarioTestController } from './testing/scenarioTestController';
 import type { ScenarioEvidenceLocation } from '../shared/types';
 import { VisualRegressionService } from './testing/visualRegression';
@@ -163,7 +163,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       { label: '$(list-tree) ' + vscode.l10n.t('Debug: Raw Events'), description: vscode.l10n.t('Raw stream evidence'), destination: { pane: 'debug', tab: 'Raw Events' } },
       { label: '$(checklist) ' + vscode.l10n.t('Tests: Results'), description: vscode.l10n.t('Functional outcomes and evidence'), destination: { pane: 'tests', section: 'results' } },
       { label: '$(list-selection) ' + vscode.l10n.t('Tests: Scenarios'), description: vscode.l10n.t('Conversation contracts and execution'), destination: { pane: 'tests', section: 'scenarios' } },
-      { label: '$(server-process) ' + vscode.l10n.t('Tests: Campaigns'), description: vscode.l10n.t('Bounded batch execution'), destination: { pane: 'tests', section: 'campaigns' } },
       { label: '$(beaker) ' + vscode.l10n.t('Red Team: Results'), description: vscode.l10n.t('Latest outcomes and evidence'), destination: { pane: 'adversarial', section: 'results' } },
       { label: '$(table) ' + vscode.l10n.t('Red Team: Cases'), description: vscode.l10n.t('Adversarial case catalog'), destination: { pane: 'adversarial', section: 'cases' } },
       { label: '$(server-process) ' + vscode.l10n.t('Red Team: Campaigns'), description: vscode.l10n.t('Bounded batch execution'), destination: { pane: 'adversarial', section: 'campaigns' } },
@@ -181,7 +180,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   command('startSession', async (item?: ProfileTreeItem | vscode.Uri) => { const uri = asUri(item) ?? activeCustomEditorUri(); if (!uri) { void showNotification('error', vscode.l10n.t('Open a profile in the TurnStage editor first.')); return; } const controller = await openAndWaitForController(editor, uri); if (!controller) { void showNotification('error', vscode.l10n.t('The TurnStage profile editor did not become ready in time.')); return; } if (!canStartNetwork(controller.profile.opening?.mode)) return; await controller.startSession(); });
   command('abortRequest', async (item?: ProfileTreeItem | vscode.Uri) => editor.getController(asUri(item))?.abort());
   command('newConversation', async (item?: ProfileTreeItem | vscode.Uri) => { const controller = editor.getController(asUri(item) ?? activeCustomEditorUri()); if (!controller || !canStartNetwork(controller.profile.opening?.mode) || !await confirmRestartSession()) return; await controller.newConversation(); });
-  command('clearConversation', (item?: ProfileTreeItem | vscode.Uri) => editor.getController(asUri(item))?.clearConversation());
+  command('clearConversation', async (item?: ProfileTreeItem | vscode.Uri) => { const controller = editor.getController(asUri(item)); if (controller && await confirmClearConversation()) controller.clearConversation(); });
   command('openAsText', async (item?: ProfileTreeItem | vscode.Uri) => { const uri = asUri(item) ?? activeCustomEditorUri(); if (uri) await vscode.commands.executeCommand('vscode.openWith', uri, 'default'); });
   command('validateProfile', async (item?: ProfileTreeItem | vscode.Uri) => { await validateUri(asUri(item), diagnostics); await duplicateDiagnostics.refresh(); });
   command('selectEnvironment', async (item?: ProfileTreeItem | vscode.Uri) => { if (!requireWorkspaceTrust()) return; const uri = asUri(item); if (!uri) return; await selectEnvironment(uri, environments); });

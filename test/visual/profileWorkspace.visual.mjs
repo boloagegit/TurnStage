@@ -34,6 +34,15 @@ assert.ok(address && typeof address === 'object');
 const browser = await chromium.launch(executablePath ? { headless: true, executablePath } : { headless: true });
 
 async function assertRedTeamTabVisual(navigation, label) {
+  const border = await navigation.evaluate((element) => {
+    const nav = element.getBoundingClientRect();
+    const panel = element.closest('.red-team-panel')?.getBoundingClientRect();
+    const primaryTabs = element.closest('.debug-pane')?.querySelector('.right-pane-tabs')?.getBoundingClientRect();
+    return { topWidth: getComputedStyle(element).borderTopWidth, gap: primaryTabs ? nav.top - primaryTabs.bottom : undefined, left: nav.left, right: nav.right, panelLeft: panel?.left, panelRight: panel?.right };
+  });
+  assert.equal(border.topWidth, '0px', `${label}: the sub-tabs must not double the primary divider`);
+  assert.ok(border.gap !== undefined && border.gap >= 0 && border.gap <= 2, `${label}: primary and sub-tabs must touch without an empty band; received ${border.gap}px`);
+  assert.ok(Math.abs(border.left - border.panelLeft) <= 1 && Math.abs(border.right - border.panelRight) <= 1, `${label}: the sub-tabs must span the full panel`);
   const selected = navigation.getByRole('tab', { selected: true });
   await selected.hover();
   const style = await selected.evaluate((element) => {
@@ -169,12 +178,12 @@ try {
   assert.equal(await sessionTools.getByRole('button', { name: 'Restart session' }).locator('.codicon-debug-restart').count(), 1, 'Restart session must use the specific VS Code restart Codicon');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Debug is the default right-panel mode');
   assert.equal(await page.getByRole('tab', { name: 'Network' }).getAttribute('aria-selected'), 'true', 'Network is the default Debug view for a new Webview state');
-  assert.equal(await page.getByRole('tab', { name: 'Tests' }).getAttribute('aria-selected'), 'false', 'Tests remains directly available beside Debug');
+  assert.equal(await page.getByRole('tab', { name: 'Tests', exact: true }).getAttribute('aria-selected'), 'false', 'Tests remains directly available beside Debug');
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'false', 'Red Team remains directly available beside Tests');
   assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'false', 'Configure remains directly available beside Debug');
   await page.getByRole('tab', { name: 'Debug' }).focus();
   await page.keyboard.press('ArrowRight');
-  assert.equal(await page.getByRole('tab', { name: 'Tests' }).getAttribute('aria-selected'), 'true', 'Right Arrow switches to Tests');
+  assert.equal(await page.getByRole('tab', { name: 'Tests', exact: true }).getAttribute('aria-selected'), 'true', 'Right Arrow switches to Tests');
   await page.keyboard.press('ArrowRight');
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'A second Right Arrow switches to Red Team');
   await page.keyboard.press('ArrowRight');
@@ -182,7 +191,7 @@ try {
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Red Team');
   await page.keyboard.press('ArrowLeft');
-  assert.equal(await page.getByRole('tab', { name: 'Tests' }).getAttribute('aria-selected'), 'true', 'A second Left Arrow switches back to Tests');
+  assert.equal(await page.getByRole('tab', { name: 'Tests', exact: true }).getAttribute('aria-selected'), 'true', 'A second Left Arrow switches back to Tests');
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Debug');
   await page.screenshot({ path: resolve(artifactDirectory, 'wide-dark.png'), fullPage: true });
@@ -445,10 +454,10 @@ try {
   assert.equal(await page.getByLabel('Evaluation guidance').inputValue(), 'The response directly addresses the requested task without unrelated content.', 'Quality criteria must expose concrete evaluation guidance');
   await page.locator('.quality-rubric-editor').screenshot({ path: resolve(artifactDirectory, 'advisory-quality-rubric-dark.png') });
   await page.screenshot({ path: resolve(artifactDirectory, 'scenario-contract-settings-dark.png'), fullPage: true });
-  await page.getByRole('tab', { name: 'Tests' }).click();
-  await page.getByRole('heading', { level: 1, name: 'Automated testing' }).waitFor();
+  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).waitFor();
   const automationNavigation = page.getByRole('tablist', { name: 'Test sections' });
-  assert.equal(await automationNavigation.getByRole('tab').count(), 3, 'Tests must expose Results, Cases, and Campaigns');
+  assert.deepEqual(await automationNavigation.getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('aria-label')?.split(':')[0])), ['Cases', 'Results'], 'Tests must place Cases before Results and keep groups out of the primary tabs');
   await assertInlineInset(automationNavigation, page.locator('.right-pane-panel'), 0, 'Tests section tabs');
   await assertRedTeamTabVisual(automationNavigation, 'Automation dark theme');
   assert.equal(await page.getByRole('heading', { name: 'Latest test results' }).count(), 1, 'Tests opens on functional automation results');
@@ -511,31 +520,54 @@ try {
   await page.screenshot({ path: resolve(artifactDirectory, 'automation-results-narrow-dark.png'), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 900 });
   await automationReview.getByRole('button', { name: 'Close evidence review' }).click();
-  await page.getByRole('tab', { name: 'Tests' }).click();
-  await page.getByRole('heading', { level: 1, name: 'Automated testing' }).waitFor();
+  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).waitFor();
   await automationNavigation.getByRole('tab', { name: /Cases/ }).click();
   assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 1, 'Scenario execution must live beside the authored contracts');
   await page.getByText('Linked multi-turn contract', { exact: true }).waitFor();
   assert.equal(await page.locator('.automation-scenario-row').count(), 2, 'Inline and linked non-adversarial conversation contracts belong in Tests');
   assert.equal(await page.getByText('Linked regression', { exact: true }).count(), 1, 'A linked contract must identify its source suite without exposing its prompt');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-cases-list-dark.png') });
+  await page.getByRole('button', { name: 'Delete case Linked multi-turn contract from source file' }).click();
+  const linkedContractConfirmation = page.getByRole('alertdialog', { name: 'Delete case Linked multi-turn contract from source file?' });
+  assert.ok((await linkedContractConfirmation.innerText()).includes('regression.tests.jsonc'), 'Linked-case deletion must name the source file');
+  await page.screenshot({ path: resolve(artifactDirectory, 'confirm-delete-linked-contract-dark.png') });
+  await linkedContractConfirmation.getByRole('button', { name: 'Cancel' }).click();
   await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
-  assert.equal(await page.locator('.scenario-editor').count(), 1, 'Expanding a contract must reveal exactly one editor');
+  assert.equal(await page.getByRole('dialog', { name: 'Slow stream contract' }).count(), 1, 'Selecting a contract must open one TurnStage-wide editor');
+  await page.locator('.scenario-step').first().waitFor();
   assert.equal(await page.locator('.scenario-step').count(), 1, 'The contract editor must keep its configured turn compact');
+  assert.equal(await page.locator('.scenario-step > header').count(), 1, 'The contract step must use the shared editor heading surface');
   assert.equal(await page.locator('.assertion-row').count(), 3, 'The contract editor must render step and final assertions');
   assert.equal(await page.locator('.scenario-advanced[open]').count(), 1, 'Configured baseline comparison must remain expanded');
   assert.equal(await page.locator('.scenario-budget__row').count(), 9, 'Every supported performance metric must be configurable');
-  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-scenarios-dark.png') });
-  await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-scenarios-dark.png') });
+  await page.getByRole('button', { name: 'Delete assertion' }).first().click();
+  const assertionConfirmation = page.getByRole('alertdialog', { name: /Delete assertion/ });
+  await assertionConfirmation.waitFor();
+  assert.equal(await assertionConfirmation.getByRole('button', { name: 'Cancel' }).evaluate((element) => element === document.activeElement), true, 'Cancel must receive initial focus');
+  assert.equal(await assertionConfirmation.evaluate((element) => Number(getComputedStyle(element.closest('.confirm-action-overlay')).zIndex) > Number(getComputedStyle(document.querySelector('.case-editor-overlay')).zIndex)), true, 'Confirmation must appear above the case editor');
+  await page.screenshot({ path: resolve(artifactDirectory, 'confirm-delete-assertion-dark.png') });
+  await assertionConfirmation.getByRole('button', { name: 'Cancel' }).click();
+  assert.equal(await page.locator('.assertion-row').count(), 3, 'Cancel must preserve all assertions in the draft');
+  await page.getByRole('button', { name: 'Close editor' }).click();
+  await page.getByRole('button', { name: 'Delete scenario Slow stream contract' }).click();
+  const caseConfirmation = page.getByRole('alertdialog', { name: 'Delete scenario Slow stream contract' });
+  await caseConfirmation.waitFor();
+  await page.screenshot({ path: resolve(artifactDirectory, 'confirm-delete-test-case-dark.png') });
+  await caseConfirmation.getByRole('button', { name: 'Cancel' }).click();
+  assert.equal(await page.getByRole('button', { name: 'Slow stream contract', exact: true }).count(), 1, 'Cancel must retain the test case in the list');
   await page.getByRole('button', { name: 'Linked multi-turn contract', exact: true }).click();
   await page.getByText('Linked JSONC test case', { exact: true }).waitFor();
   await page.locator('.linked-case-editor .scenario-editor').waitFor();
   assert.equal(await page.locator('.scenario-step').count(), 2, 'A linked multi-turn contract must load only after selection and preserve its turns');
   assert.equal(await page.getByRole('button', { name: 'Save linked case' }).isDisabled(), true, 'An unchanged linked case must not offer an unnecessary write');
-  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-linked-scenario-dark.png') });
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-linked-scenario-dark.png') });
+  await page.getByRole('button', { name: 'Close editor' }).click();
   await page.getByRole('tab', { name: 'Red Team' }).click();
-  await page.getByRole('heading', { level: 1, name: 'Adversarial testing' }).waitFor();
+  await page.getByRole('tablist', { name: 'Red Team sections' }).waitFor();
   const redTeamNavigation = page.getByRole('tablist', { name: 'Red Team sections' });
-  assert.equal(await redTeamNavigation.getByRole('tab').count(), 4, 'Red Team must expose four stable sub-tabs for campaigns, cases, results, and timeline');
+  assert.deepEqual(await redTeamNavigation.getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('aria-label')?.split(':')[0])), ['Cases', 'Results', 'Campaigns', 'Timeline'], 'Red Team must put Cases before Results, followed by Campaigns and Timeline');
   assert.ok((await redTeamNavigation.innerText()).includes('Campaigns') && (await redTeamNavigation.innerText()).includes('Timeline'), 'Red Team landmarks must use recognizable section names');
   await assertRedTeamTabVisual(redTeamNavigation, 'Dark theme');
   await redTeamNavigation.screenshot({ path: resolve(artifactDirectory, 'red-team-section-navigation-dark.png') });
@@ -571,6 +603,11 @@ try {
   await page.getByRole('button', { name: 'Run all' }).click();
   assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'test.runAll'))).type, 'test.runAll', 'Cases must own the primary Run all action');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-cases-dark.png') });
+  await page.getByRole('button', { name: 'Delete case Linked case 1 from source file' }).click();
+  const linkedRedTeamConfirmation = page.getByRole('alertdialog', { name: 'Delete case Linked case 1 from source file?' });
+  assert.ok((await linkedRedTeamConfirmation.innerText()).includes('security-regression.adversarial.csv'), 'Red-team linked-case deletion must name the source file');
+  await page.screenshot({ path: resolve(artifactDirectory, 'confirm-delete-linked-red-team-dark.png') });
+  await linkedRedTeamConfirmation.getByRole('button', { name: 'Cancel' }).click();
   const linkedCsv = page.getByText('.vscode/turnstage/tests/security-regression.adversarial.csv', { exact: true });
   await linkedCsv.scrollIntoViewIfNeeded();
   assert.equal(await linkedCsv.count(), 1, 'Red Team must show a directly linked CSV source without copying it into Profile JSONC');
@@ -578,41 +615,49 @@ try {
   assert.equal(await openLinkedCsv.locator('.codicon-go-to-file').count(), 1, 'Linked suites must expose a distinct open-file Codicon');
   await openLinkedCsv.click();
   assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'adversarial.openLinkedSuite'))).path, '.vscode/turnstage/tests/security-regression.adversarial.csv', 'Open linked suite must send the exact linked path');
-  assert.equal(await page.getByRole('button', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' }).locator('.codicon-trash').count(), 1, 'Open and unlink must use distinguishable icons');
+  assert.equal(await page.getByRole('button', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' }).locator('.codicon-remove').count(), 1, 'Unlink must use a remove icon rather than the case-delete trash icon');
+  await page.getByRole('button', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' }).click();
+  const unlinkConfirmation = page.getByRole('alertdialog', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' });
+  await unlinkConfirmation.waitFor();
+  assert.ok((await unlinkConfirmation.innerText()).includes('The source file is not deleted.'), 'Unlink confirmation must distinguish unlinking from file deletion');
+  await page.screenshot({ path: resolve(artifactDirectory, 'confirm-unlink-suite-dark.png') });
+  await unlinkConfirmation.getByRole('button', { name: 'Cancel' }).click();
+  assert.equal(await page.getByRole('button', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' }).count(), 1, 'Cancel must keep the suite linked');
   assert.equal(await page.locator('button:visible', { hasText: 'Link suite' }).count(), 1, 'Bulk source linking must use one visible format-neutral action');
   await page.locator('.adversarial-linked-suites').screenshot({ path: resolve(artifactDirectory, 'linked-adversarial-csv-dark.png') });
   await page.getByText('31 of 31 cases', { exact: true }).waitFor();
-  const adversarialCaseTable = page.locator('.adversarial-case-table');
-  assert.equal(await adversarialCaseTable.locator('tbody > tr').count(), 25, 'The unified catalog must mount only the first page for a large case list');
+  const adversarialCaseList = page.locator('.adversarial-case-list');
+  assert.equal(await adversarialCaseList.locator('.adversarial-case-item').count(), 25, 'The unified catalog must mount only the first page for a large case list');
   assert.equal(await page.getByText('Page 1 of 2', { exact: true }).count(), 1, 'Large case catalogs must expose their current page');
   await page.getByRole('button', { name: 'Next page' }).click();
-  assert.equal(await adversarialCaseTable.getByText('Linked case 30', { exact: true }).count(), 1, 'The next page must expose later linked cases');
+  assert.equal(await adversarialCaseList.getByText('Linked case 30', { exact: true }).count(), 1, 'The next page must expose later linked cases');
   await page.locator('.adversarial-case-collection').screenshot({ path: resolve(artifactDirectory, 'adversarial-case-catalog-page-2-dark.png') });
   await page.getByRole('button', { name: 'Previous page' }).click();
-  await page.getByRole('searchbox', { name: 'Search adversarial cases' }).fill('linked-case-30');
+  await page.getByRole('searchbox', { name: 'Search cases' }).fill('linked-case-30');
   await page.getByText('1 of 31 cases', { exact: true }).waitFor();
   assert.equal(await page.getByText('1 of 31 cases', { exact: true }).count(), 1, 'Case search must narrow the full unified catalog');
-  assert.equal(await adversarialCaseTable.locator('tbody > tr').count(), 1, 'A filtered catalog must mount only matching rows');
-  await adversarialCaseTable.getByRole('button', { name: 'Run case Linked case 30' }).click();
+  assert.equal(await adversarialCaseList.locator('.adversarial-case-item').count(), 1, 'A filtered catalog must mount only matching rows');
+  await adversarialCaseList.getByRole('button', { name: 'Run case Linked case 30' }).click();
   const runCaseMessage = await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'test.runCase'));
   assert.deepEqual({ scenarioId: runCaseMessage.scenarioId, suiteId: runCaseMessage.suiteId }, { scenarioId: 'linked-case-30', suiteId: 'security-regression' }, 'A case row must run the exact linked suite case');
-  await adversarialCaseTable.getByRole('button', { name: 'Edit', exact: true }).click();
+  await adversarialCaseList.getByRole('button', { name: 'Linked case 30', exact: true }).click();
   const linkedCaseEditor = page.locator('.linked-case-editor');
   await linkedCaseEditor.getByLabel('Scenario name').waitFor();
   assert.equal(await linkedCaseEditor.getByLabel('Scenario ID').isEditable(), false, 'Linked case identity must remain stable in the bounded UI editor');
   assert.equal(await linkedCaseEditor.locator('.scenario-step').count(), 1, 'Linked case editor must load only the selected case from disk');
   await linkedCaseEditor.getByLabel('Scenario name').fill('Linked case 30 edited');
   await linkedCaseEditor.getByLabel('Scenario name').press('Tab');
-  await linkedCaseEditor.getByRole('button', { name: 'Save linked case' }).waitFor({ state: 'visible' });
-  assert.equal(await linkedCaseEditor.getByRole('button', { name: 'Save linked case' }).isEnabled(), true, 'Linked case save must become available after a structured edit');
-  await linkedCaseEditor.getByRole('button', { name: 'Save linked case' }).click();
+  await page.getByRole('button', { name: 'Save linked case' }).waitFor({ state: 'visible' });
+  assert.equal(await page.getByRole('button', { name: 'Save linked case' }).isEnabled(), true, 'Linked case save must become available after a structured edit');
+  await page.getByRole('button', { name: 'Save linked case' }).click();
   await linkedCaseEditor.getByText('Linked case saved and verified from disk.').waitFor();
   assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'adversarial.case.save'))).scenario.name, 'Linked case 30 edited', 'Linked editor must save the structured case with its source revision');
   await linkedCaseEditor.screenshot({ path: resolve(artifactDirectory, 'linked-case-editor-dark.png') });
   await linkedCaseEditor.getByRole('button', { name: 'Open source' }).click();
   assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'adversarial.openLinkedSuite'))).path, '.vscode/turnstage/tests/security-regression.adversarial.csv', 'Linked catalog rows must open their exact source');
+  await page.getByRole('button', { name: 'Close editor' }).click();
   await page.locator('.adversarial-case-collection').screenshot({ path: resolve(artifactDirectory, 'adversarial-case-catalog-search-dark.png') });
-  await page.getByRole('searchbox', { name: 'Search adversarial cases' }).fill('');
+  await page.getByRole('searchbox', { name: 'Search cases' }).fill('');
   const runningPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await runningPage.goto(`${url}?section=scenario-tests&campaignStatus=running`);
   await runningPage.getByRole('tab', { name: 'Red Team' }).click();
@@ -624,17 +669,19 @@ try {
   assert.equal(await runningCampaign.getByRole('button', { name: 'Cancel run' }).count(), 1, 'A running campaign must expose a distinct cancellation action');
   await runningCampaign.screenshot({ path: resolve(artifactDirectory, 'campaign-running-dark.png') });
   await runningPage.close();
-  assert.equal(await page.getByRole('table').count(), 1, 'Red Team must present case settings in a compact table');
-  await page.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  assert.equal(await page.locator('.adversarial-case-list').count(), 1, 'Red Team must present cases in a compact list');
+  await page.locator('.adversarial-case-item__main').first().click();
+  await page.locator('.adversarial-case-editor').waitFor();
   assert.equal(await page.locator('.adversarial-case-editor').count(), 1, 'Adversarial configuration must expose its bounded case editor');
   assert.equal(await page.locator('.scenario-step').count(), 2, 'The expanded adversarial row must expose both configured turns');
   assert.equal(await page.getByRole('spinbutton', { name: 'Repetitions', exact: true }).inputValue(), '5', 'Adversarial configuration must expose the case repetition count');
   assert.equal(await page.getByRole('checkbox', { name: 'Stop remaining turns after an attack succeeds' }).isChecked(), true, 'Turn-level stopping must remain distinct from repetition fail-fast');
   assert.equal(await page.getByRole('checkbox', { name: 'Stop remaining repetitions after an attack succeeds (incomplete sample)' }).isChecked(), false, 'Repetition fail-fast must remain explicit and off unless configured');
   await page.getByRole('spinbutton', { name: 'Repetitions', exact: true }).scrollIntoViewIfNeeded();
-  const settingsMainScroll = await page.locator('.settings-main').evaluate((element) => ({ scrollLeft: element.scrollLeft, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, panelWidth: element.querySelector('.settings-panel')?.getBoundingClientRect().width, tableWrapWidth: element.querySelector('.adversarial-case-table-wrap')?.getBoundingClientRect().width }));
-  assert.equal(settingsMainScroll.scrollLeft, 0, `Focusing a wide adversarial table field must not horizontally shift the entire settings pane: ${JSON.stringify(settingsMainScroll)}`);
-  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-repetitions-dark.png') });
+  const settingsMainScroll = await page.locator('.settings-main').evaluate((element) => ({ scrollLeft: element.scrollLeft, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }));
+  assert.equal(settingsMainScroll.scrollLeft, 0, `Focusing the case editor must not horizontally shift the settings pane: ${JSON.stringify(settingsMainScroll)}`);
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-repetitions-dark.png') });
+  await page.getByRole('button', { name: 'Close editor' }).click();
   await redTeamNavigation.getByRole('tab', { name: /Results:/ }).click();
   assert.equal(await page.getByRole('heading', { name: 'Latest adversarial results' }).count(), 1, 'Scenario configuration must expose the compact latest-result list');
   const adversarialResults = page.locator('.adversarial-result-table');
@@ -656,6 +703,7 @@ try {
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-export-menu-dark.png') });
   await page.getByLabel('Export adversarial results', { exact: true }).click();
   assert.equal(await page.locator('.debug-pane').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Red Team configuration must not overflow the right pane horizontally');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'red-team-results-tab-dark.png') });
   await adversarialResults.scrollIntoViewIfNeeded();
   assert.equal(await adversarialResults.locator('tbody > tr').count(), 2, 'Latest results must render one compact semantic row per result');
   assert.equal(await adversarialResults.getByRole('columnheader', { name: 'Case' }).count(), 1, 'The result table must label its case column');
@@ -724,13 +772,14 @@ try {
   await page.locator('.evidence-review').waitFor({ state: 'hidden' });
   assert.equal(await page.locator('#right-pane-debug-tab').getAttribute('aria-selected'), 'true', 'Closing Evidence Review must preserve the current Debug context');
   await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-closed-dark.png'), fullPage: true });
-  await page.getByRole('tab', { name: 'Tests' }).click();
+  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
   await page.getByRole('tab', { name: /Cases/ }).click();
   if ((await page.getByRole('button', { name: 'Slow stream contract', exact: true }).getAttribute('aria-expanded')) !== 'true') await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
   await page.locator('.scenario-advanced').filter({ hasText: 'Compare & performance' }).scrollIntoViewIfNeeded();
   assert.equal(await page.locator('.scenario-target-grid fieldset').count(), 2, 'Baseline and candidate targets must both render in the GUI');
   assert.equal(await page.locator('.scenario-budget').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Performance budgets must not overflow the embedded settings pane');
-  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'scenario-comparison-performance-dark.png') });
+  await page.screenshot({ path: resolve(artifactDirectory, 'scenario-comparison-performance-dark.png') });
+  await page.getByRole('button', { name: 'Close editor' }).click();
   await page.getByRole('tab', { name: 'Configure' }).click();
   await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('general');
   await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
@@ -742,9 +791,8 @@ try {
   await displayName.fill('Slow SSE Visual Proof');
   await displayName.blur();
   await page.getByRole('button', { name: 'Open JSONC' }).click();
-  await page.getByRole('button', { name: 'Validate' }).click();
-  assert.deepEqual(await page.evaluate(() => globalThis.__turnstageMessages.slice(-2).map((message) => message.type)), ['profile.openAsText', 'profile.validate'], 'Configuration toolbar actions must reach the host protocol');
-  await page.locator('.operation-status').filter({ hasText: 'Profile is valid.' }).waitFor();
+  assert.equal(await page.evaluate(() => globalThis.__turnstageMessages.at(-1)?.type), 'profile.openAsText', 'Configuration toolbar must retain the JSONC source action');
+  assert.equal(await page.getByRole('button', { name: 'Validate', exact: true }).count(), 0, 'Automatic Profile validation does not need a duplicate manual action');
   await page.getByRole('tab', { name: 'Debug' }).click();
   await page.getByRole('tab', { name: 'Raw Events' }).waitFor();
   assert.equal(await page.locator('[data-message-id="assistant-1"][data-selected="true"]').count(), 1, 'Returning to Debug restores the linked message selection');
@@ -943,22 +991,22 @@ try {
   await page.reload();
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'Runs' }).getAttribute('aria-selected'), 'true', 'A saved inspector tab must win over the Profile initial Metrics tab after Webview recreation');
-  await page.getByRole('tab', { name: 'Tests' }).click();
+  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
   await page.getByRole('button', { name: 'Select test result Steady response contract' }).click();
   await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').selectedAutomationResultKey === 'visual-contract-evidence-2');
   await page.getByRole('tab', { name: 'Debug' }).click();
-  await page.getByRole('tab', { name: 'Tests' }).click();
+  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
   assert.equal(await page.getByRole('button', { name: 'Select test result Steady response contract' }).getAttribute('aria-pressed'), 'true', 'The selected test result must survive switching away from Tests');
   await page.reload();
   await waitForProfile();
-  assert.equal(await page.getByRole('tab', { name: 'Tests' }).getAttribute('aria-selected'), 'true', 'The saved Tests workspace must survive Webview recreation');
+  assert.equal(await page.getByRole('tab', { name: 'Tests', exact: true }).getAttribute('aria-selected'), 'true', 'The saved Tests workspace must survive Webview recreation');
   assert.equal(await page.getByRole('button', { name: 'Select test result Steady response contract' }).getAttribute('aria-pressed'), 'true', 'The selected test result must survive Webview recreation');
   await page.setViewportSize({ width: 1000, height: 600 });
   await page.getByRole('tab', { name: 'Red Team' }).click();
   await page.getByRole('tab', { name: /Cases:/ }).click();
-  const adversarialTable = page.locator('.adversarial-case-table');
-  await adversarialTable.getByRole('button', { name: 'Edit', exact: true }).first().click();
-  await adversarialTable.getByRole('button', { name: 'Close editor', exact: true }).waitFor();
+  const adversarialList = page.locator('.adversarial-case-list');
+  await adversarialList.locator('.adversarial-case-item__main').first().click();
+  await page.getByRole('button', { name: 'Close editor', exact: true }).waitFor();
   const appliedRedTeamScroll = await page.locator('.red-team-workspace .settings-main').evaluate((element) => { element.scrollTop = Math.min(560, element.scrollHeight - element.clientHeight); element.dispatchEvent(new globalThis.Event('scroll', { bubbles: true })); return element.scrollTop; });
   assert.ok(appliedRedTeamScroll > 0, 'The representative Red Team viewport must have a real reading position to restore');
   await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').rightPaneMode === 'adversarial');
@@ -969,8 +1017,9 @@ try {
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'The saved right-panel mode must survive recreation');
   assert.equal(await page.getByRole('tab', { name: /Cases:/ }).getAttribute('aria-selected'), 'true', 'The saved Red Team sub-tab must survive recreation');
-  assert.equal(await page.locator('.adversarial-case-table').getByRole('button', { name: 'Close editor', exact: true }).count(), 1, 'The expanded adversarial case must survive recreation');
-  assert.equal(await page.locator('.red-team-workspace .settings-main').evaluate((element) => element.scrollTop), savedRedTeamScroll, 'The Red Team reading position must survive recreation');
+  assert.equal(await page.getByRole('dialog').count(), 1, 'The selected adversarial case editor must survive recreation');
+  const restoredRedTeamScroll = await page.locator('.red-team-workspace .settings-main').evaluate((element) => element.scrollTop);
+  assert.ok(restoredRedTeamScroll > 0 && restoredRedTeamScroll <= savedRedTeamScroll, 'The Red Team reading position must remain in the case list after its responsive reflow');
 
   await page.goto(url);
   await waitForProfile();
@@ -981,12 +1030,43 @@ try {
   assert.equal(await page.locator('.profile-identity').count(), 0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, 'Narrow layout must not overflow horizontally');
   await page.screenshot({ path: resolve(artifactDirectory, 'narrow-dark.png'), fullPage: true });
+  await page.setViewportSize({ width: 1292, height: 900 });
+  await page.goto(`${url}?split=72`);
+  await waitForProfile();
+  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: /Cases/ }).click();
+  await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
+  const narrowAssertions = await page.locator('.scenario-editor').evaluate((editor) => ({
+    editorWidth: editor.clientWidth,
+    assertionWidths: [...editor.querySelectorAll('.assertion-list')].map((list) => ({ client: list.clientWidth, scroll: list.scrollWidth })),
+    rowColumns: getComputedStyle(editor.querySelector('.assertion-row')).gridTemplateColumns,
+  }));
+  assert.ok(narrowAssertions.assertionWidths.every((item) => item.scroll <= item.client + 1), 'Narrow test assertions must fit inside the case editor');
+  assert.ok(narrowAssertions.editorWidth > 608, 'The case popup must use the full TurnStage viewport instead of the narrow right pane');
+  assert.ok(narrowAssertions.rowColumns.trim().split(/\s+/).length >= 1, 'Test assertions must retain a usable editor layout');
+  await page.locator('.scenario-step > header').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: resolve(artifactDirectory, 'narrow-test-case-dark.png') });
+  await page.getByRole('button', { name: 'Close editor' }).click();
+  await page.getByRole('tab', { name: 'Red Team' }).click();
+  const narrowRedTeamNavigation = page.getByRole('tablist', { name: 'Red Team sections' });
+  assert.equal((await narrowRedTeamNavigation.evaluate((navigation) => getComputedStyle(navigation).gridTemplateColumns)).trim().split(/\s+/).length, 2, 'Narrow Red Team sub-tabs must use two columns');
+  await assertRedTeamTabVisual(narrowRedTeamNavigation, 'Narrow Red Team');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'narrow-red-team-tabs-dark.png') });
 
   await page.setViewportSize({ width: 320, height: 900 });
-  await page.reload();
+  await page.goto(url);
   await waitForProfile();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, 'Extra-narrow layout must not overflow horizontally');
   assert.equal(await page.getByRole('region', { name: 'Responsive chat preview' }).count(), 1, 'Extra-narrow workspace keeps the Chat surface available');
+  await page.getByRole('tab', { name: 'Red Team' }).click();
+  await page.getByRole('tablist', { name: 'Red Team sections' }).getByRole('tab', { name: /Cases/ }).click();
+  await page.locator('.adversarial-case-item__main').first().click();
+  await page.getByRole('dialog').waitFor();
+  await page.locator('.case-editor-dialog .scenario-editor').waitFor();
+  assert.equal(await page.locator('.case-editor-dialog').evaluate((dialog) => Math.round(dialog.getBoundingClientRect().width)), 320, 'At 320px the case editor must use the TurnStage viewport without clipping');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, 'The extra-narrow case popup must not overflow horizontally');
+  await page.screenshot({ path: resolve(artifactDirectory, 'extra-narrow-case-editor-dark.png') });
+  await page.getByRole('button', { name: 'Close editor' }).click();
   await page.screenshot({ path: resolve(artifactDirectory, 'extra-narrow-dark.png'), fullPage: true });
 
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -1074,7 +1154,7 @@ try {
   await page.emulateMedia({ forcedColors: 'none' });
   await page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' }).click();
 
-  await page.getByRole('tab', { name: 'Tests' }).click();
+  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
   await page.getByRole('tab', { name: /Results/ }).click();
   await page.getByRole('heading', { name: 'Latest test results' }).waitFor();
   await assertRedTeamTabVisual(page.getByRole('tablist', { name: 'Test sections' }), 'Automation light theme');
@@ -1225,7 +1305,7 @@ try {
 
   const capturePage = await browser.newPage({ viewport: { width: 960, height: 720 } });
   await capturePage.goto(`${url}?capturedDraft=true`);
-  await capturePage.getByRole('tab', { name: 'Tests' }).click();
+  await capturePage.getByRole('tab', { name: 'Tests', exact: true }).click();
   await capturePage.getByRole('tab', { name: /Cases/ }).click();
   const capturedDraft = capturePage.getByRole('button', { name: 'Captured release probe', exact: true });
   await capturedDraft.waitFor();
@@ -1241,10 +1321,30 @@ try {
   await capturePage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'captured-test-review-narrow-dark.png') });
   await capturePage.close();
 
+  const capturedListPage = await browser.newPage({ viewport: { width: 1292, height: 720 } });
+  await capturedListPage.goto(`${url}?capturedDraft=true&split=72`);
+  await capturedListPage.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await capturedListPage.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: /Cases/ }).click();
+  const longCapturedRow = capturedListPage.locator('.automation-scenario-row').filter({ has: capturedListPage.getByRole('button', { name: 'Please search for relevant material and cite it', exact: true }) });
+  await longCapturedRow.waitFor();
+  const capturedListLayout = await longCapturedRow.evaluate((row) => {
+    const main = row.querySelector('.automation-scenario-row__main').getBoundingClientRect();
+    const title = row.querySelector('.automation-scenario-row__main strong').getBoundingClientRect();
+    const id = row.querySelector('.automation-scenario-row__main code').getBoundingClientRect();
+    const source = row.querySelector('.adversarial-case-source').getBoundingClientRect();
+    const details = row.querySelector('.case-row-meta').getBoundingClientRect();
+    return { width: main.width, titleBottom: title.bottom, idBottom: id.bottom, sourceTop: source.top, sourceLeft: source.left, sourceRight: source.right, detailsTop: details.top, mainLeft: main.left, mainRight: main.right };
+  });
+  assert.ok(capturedListLayout.width < 250, `The regression must exercise a narrow right pane: ${JSON.stringify(capturedListLayout)}`);
+  assert.ok(capturedListLayout.sourceTop >= capturedListLayout.idBottom - 1 && capturedListLayout.detailsTop >= capturedListLayout.sourceTop, `A long captured-case source must follow the title and ID without overlap: ${JSON.stringify(capturedListLayout)}`);
+  assert.ok(capturedListLayout.sourceLeft >= capturedListLayout.mainLeft - 1 && capturedListLayout.sourceRight <= capturedListLayout.mainRight + 1, `A long source label must stay inside the case button: ${JSON.stringify(capturedListLayout)}`);
+  await capturedListPage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'captured-test-list-narrow-dark.png') });
+  await capturedListPage.close();
+
   for (const localeCase of [
-    { locale: 'zh-TW', tabs: ['除錯', '測試', '紅隊測試', '設定'], results: '最新測試結果', review: '檢視測試結果', openEvidence: '開啟證據', cases: '測試案例', contracts: '對話契約', campaigns: '測試活動', addCampaign: '新增測試活動', artifact: 'automation-results-zh-tw-dark.png' },
-    { locale: 'ja-JP', tabs: ['デバッグ', 'テスト', 'レッドチーム', '設定'], results: '最新のテスト結果', review: 'テスト結果を確認', openEvidence: '証拠を開く', cases: 'ケース', contracts: '会話コントラクト', campaigns: 'キャンペーン', addCampaign: 'キャンペーンを追加', artifact: 'automation-results-ja-dark.png' },
-    { locale: 'ko-KR', tabs: ['디버그', '테스트', '레드 팀', '설정'], results: '최신 테스트 결과', review: '테스트 결과 검토', openEvidence: '증거 열기', cases: '케이스', contracts: '대화 계약', campaigns: '캠페인', addCampaign: '캠페인 추가', artifact: 'automation-results-ko-dark.png' },
+    { locale: 'zh-TW', tabs: ['除錯', '測試', '紅隊測試', '設定'], results: '最新測試結果', review: '檢視測試結果', openEvidence: '開啟證據', cases: '測試案例', contracts: '測試案例', removedGroup: '測試組合', artifact: 'automation-results-zh-tw-dark.png' },
+    { locale: 'ja-JP', tabs: ['デバッグ', 'テスト', 'レッドチーム', '設定'], results: '最新のテスト結果', review: 'テスト結果を確認', openEvidence: '証拠を開く', cases: 'ケース', contracts: 'テストケース', removedGroup: 'テストグループ', artifact: 'automation-results-ja-dark.png' },
+    { locale: 'ko-KR', tabs: ['디버그', '테스트', '레드 팀', '설정'], results: '최신 테스트 결과', review: '테스트 결과 검토', openEvidence: '증거 열기', cases: '케이스', contracts: '테스트 케이스', removedGroup: '테스트 그룹', artifact: 'automation-results-ko-dark.png' },
   ]) {
     const localePage = await browser.newPage({ viewport: { width: 720, height: 900 } });
     await localePage.goto(`${url}?locale=${encodeURIComponent(localeCase.locale)}`);
@@ -1264,11 +1364,10 @@ try {
     const localizedTestNavigation = localePage.getByRole('tablist', { name: localeCase.locale === 'zh-TW' ? '測試區段' : localeCase.locale === 'ja-JP' ? 'テストセクション' : '테스트 섹션' });
     await localizedTestNavigation.getByRole('tab', { name: new RegExp(localeCase.cases) }).click();
     await localePage.getByRole('heading', { name: localeCase.contracts }).waitFor();
-    assert.equal(await localePage.getByText('Conversation contracts', { exact: true }).count(), 0, `${localeCase.locale}: the Cases heading must not fall back to English`);
-    await localizedTestNavigation.getByRole('tab', { name: new RegExp(localeCase.campaigns) }).click();
-    await localePage.getByRole('heading', { name: localeCase.campaigns }).waitFor();
-    assert.equal(await localePage.getByRole('button', { name: localeCase.addCampaign, exact: true }).count(), 1, `${localeCase.locale}: campaign actions must be translated`);
-    assert.equal(await localePage.getByText('Test campaigns', { exact: true }).count(), 0, `${localeCase.locale}: the Campaigns heading must not fall back to English`);
+    assert.equal(await localePage.getByText('Test cases', { exact: true }).count(), 0, `${localeCase.locale}: the Cases heading must not fall back to English`);
+    assert.equal(await localizedTestNavigation.getByRole('tab').count(), 2, `${localeCase.locale}: only Cases and Results belong in primary navigation`);
+    assert.equal(await localePage.getByText(localeCase.removedGroup, { exact: true }).count(), 0, `${localeCase.locale}: test groups must not appear in Tests`);
+    assert.equal(await localePage.getByText('Test groups', { exact: true }).count(), 0, `${localeCase.locale}: test groups must not fall back to English`);
     await localePage.close();
   }
 

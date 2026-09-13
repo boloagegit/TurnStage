@@ -14,7 +14,8 @@ const iconSource = readFileSync(resolve(root, 'src/webview/Icon.tsx'), 'utf8');
 
 describe('Inspector keyboard helpers', () => {
   it('keeps every Copilot-labelled action behind the VS Code capability flag', () => {
-    for (const label of ['Ask Copilot to diagnose this configuration', 'Summarize with Copilot', 'Diagnose profile with Copilot', 'Diagnose with Copilot', 'Advisory quality review']) {
+    expect(settingsSource).toContain("{vscodeFeatures && <button type=\"button\" onClick={() => post({ type: 'copilot.profileDoctor' })}>{t('Diagnose profile with Copilot')}</button>}");
+    for (const label of ['Ask Copilot to diagnose this configuration', 'Summarize with Copilot', 'Diagnose with Copilot', 'Advisory quality review']) {
       const labelIndex = settingsSource.indexOf(`{t('${label}')}`);
       const start = settingsSource.lastIndexOf('<button', labelIndex);
       const end = settingsSource.indexOf('>', start);

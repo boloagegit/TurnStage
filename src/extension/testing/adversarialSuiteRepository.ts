@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { sha256Hex } from '../../shared/sha256';
 import type { AdversarialSuiteDefinition, ScenarioDefinition } from '../../shared/types';
 import { isSafeAdversarialSuitePath } from './adversarialSuite';
 import { parseAdversarialSource } from './adversarialSource';
@@ -9,6 +10,7 @@ const MAX_SUITE_BYTES = 5 * 1024 * 1024;
 export interface LoadedAdversarialSuite {
   uri: vscode.Uri;
   path: string;
+  revision: string;
   suite: AdversarialSuiteDefinition;
   scenarios: ScenarioDefinition[];
 }
@@ -23,7 +25,8 @@ export async function loadAdversarialSuite(profileUri: vscode.Uri, path: string,
   if ((await vscode.workspace.fs.stat(uri)).size > MAX_SUITE_BYTES) throw new Error(`Adversarial suite ${path} exceeds the 5 MB limit.`);
   const bytes = await vscode.workspace.fs.readFile(uri);
   if (bytes.byteLength > MAX_SUITE_BYTES) throw new Error(`Adversarial suite ${path} exceeds the 5 MB limit.`);
-  const parsed = parseAdversarialSource(external ? uri.path : path, new TextDecoder().decode(bytes));
+  const text = new TextDecoder().decode(bytes);
+  const parsed = parseAdversarialSource(external ? uri.path : path, text);
   if (!parsed.suite || parsed.issues.length) throw new Error(parsed.issues.join('\n') || `Adversarial suite ${path} is empty.`);
-  return { uri, path, suite: parsed.suite, scenarios: parsed.scenarios };
+  return { uri, path, revision: sha256Hex(text), suite: parsed.suite, scenarios: parsed.scenarios };
 }

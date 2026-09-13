@@ -17,7 +17,7 @@ import { resolveDisplayLanguage, textDirection } from '../displayLanguage';
 import { profileEditorTitle } from './profileEditorTitle';
 import { EventBatcher } from '../runtime/eventBatcher';
 import { logAt, startLogOperation } from '../logging';
-import { confirmRestartSession } from '../confirmRestartSession';
+import { confirmClearConversation, confirmRestartSession } from '../confirmRestartSession';
 import { builtInEnvironment } from '../config/defaultEnvironment';
 import { VisualRegressionService } from '../testing/visualRegression';
 import { adversarialCsvTemplate, parseAdversarialCsv, serializeAdversarialCsv } from '../testing/adversarialCsv';
@@ -32,12 +32,12 @@ import type { ScenarioTestController } from '../testing/scenarioTestController';
 import { parseAdversarialJsonl, serializeAdversarialJsonl, serializeCampaignResultsJsonl } from '../testing/adversarialJsonl';
 import { ExternalAdversarialSuiteRepository, isExternalAdversarialSuiteReference } from '../testing/externalAdversarialSuite';
 import { loadLinkedAdversarialCaseCatalog } from '../testing/adversarialCatalog';
-import { appendLinkedAdversarialCase, LinkedAdversarialCaseConflictError, loadEditableLinkedAdversarialCase, saveEditableLinkedAdversarialCase } from '../testing/linkedAdversarialCase';
-import { contractCsvTemplate } from '../testing/contractCsv';
+import { appendLinkedAdversarialCase, deleteLinkedAdversarialCase, LinkedAdversarialCaseConflictError, loadEditableLinkedAdversarialCase, saveEditableLinkedAdversarialCase } from '../testing/linkedAdversarialCase';
+import { contractCsvTemplate, serializeContractCsv } from '../testing/contractCsv';
 import { loadLinkedContractCaseCatalog } from '../testing/contractCatalog';
-import { createContractSuite, isSafeContractSuitePath, serializeContractSuite } from '../testing/contractSuite';
+import { createContractSuite, isSafeContractSuitePath, serializeContractSuite, validateContractSuite } from '../testing/contractSuite';
 import { parseContractSource } from '../testing/contractSource';
-import { appendLinkedContractCase, LinkedContractCaseConflictError, loadEditableLinkedContractCase, saveEditableLinkedContractCase } from '../testing/linkedContractCase';
+import { appendLinkedContractCase, deleteLinkedContractCase, LinkedContractCaseConflictError, loadEditableLinkedContractCase, saveEditableLinkedContractCase } from '../testing/linkedContractCase';
 import { SessionDeltaTracker } from '../../shared/sessionDelta';
 import { isBlockedLifecycleCommand } from '../../shared/vscodeCommandPolicy';
 import { buildCapturedScenario, captureEffectOptions, type CaptureKind } from '../testing/scenarioCapture';
@@ -305,6 +305,24 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           const latestTestOperation = this.latestTestOperations.get(documentKey);
           if (latestTestOperation) await post({ type: 'test.operation', operation: latestTestOperation });
           if (this.scenarioTests) await post({ type: 'campaign.dashboard', dashboard: await this.scenarioTests.getCampaignDashboard(document.uri) });
+          if (this.scenarioTests) await post({ type: 'test.history', ...(await this.scenarioTests.getTestHistory(document.uri)) });
+          return;
+        }
+        if (message.type === 'test.history.request') {
+          if (!this.scenarioTests) throw new Error(localize('Test runtime is unavailable.'));
+          await post({ type: 'test.history', ...(await this.scenarioTests.getTestHistory(document.uri)) }, message.requestId);
+          return;
+        }
+        if (message.type === 'test.history.clear') {
+          if (!this.scenarioTests) throw new Error(localize('Test runtime is unavailable.'));
+          await this.scenarioTests.clearTestHistory(document.uri, message.kind);
+          await post({ type: 'test.history', ...(await this.scenarioTests.getTestHistory(document.uri)) }, message.requestId);
+          return;
+        }
+        if (message.type === 'test.baseline.accept') {
+          if (!this.scenarioTests) throw new Error(localize('Test runtime is unavailable.'));
+          await this.scenarioTests.acceptTestBaseline(document.uri, message.runId);
+          await post({ type: 'test.history', ...(await this.scenarioTests.getTestHistory(document.uri)) }, message.requestId);
           return;
         }
         if (message.type === 'profile.openAsText') { await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default'); return; }
@@ -354,6 +372,18 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           }
           return;
         }
+        if (message.type === 'contract.case.delete') {
+          if (!vscode.workspace.isTrusted) { await post({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Deleting a linked case requires a trusted workspace.'), conflict: false }, message.requestId); return; }
+          const profile = this.codec.parse(document.getText()).profile;
+          if (!profile || !canOpenLinkedContractSuite(profile, message.sourcePath)) { await post({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Only a safe test suite linked by this Profile can be edited.'), conflict: false }, message.requestId); return; }
+          const execution = this.linkedCaseWriteChain.then(() => deleteLinkedContractCase({ profileUri: document.uri, sourcePath: message.sourcePath, scenarioId: message.scenarioId, expectedRevision: message.expectedRevision, resolveExternal: (reference) => this.externalAdversarialSuites.resolve(document.uri, reference) }));
+          this.linkedCaseWriteChain = execution.then(() => undefined, () => undefined);
+          this.pendingLinkedCaseWrites.add(execution);
+          try { await execution; contractCatalogCache = undefined; await post({ type: 'contract.case.deleted', sourcePath: message.sourcePath, scenarioId: message.scenarioId }, message.requestId); await postContractCatalog(true); }
+          catch (error) { await post({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: boundedEditorMessage(error), conflict: error instanceof LinkedContractCaseConflictError }, message.requestId); }
+          finally { this.pendingLinkedCaseWrites.delete(execution); }
+          return;
+        }
         if (message.type === 'contract.case.save') {
           if (!vscode.workspace.isTrusted) { await post({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Saving a linked suite requires a trusted workspace.'), conflict: false }, message.requestId); return; }
           const profile = this.codec.parse(document.getText()).profile;
@@ -383,7 +413,8 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         if (message.type === 'contract.file') {
           if (!vscode.workspace.isTrusted) throw new Error(localize('This action requires a trusted workspace. Profile editing and fixture replay remain available.'));
           const operation = await this.handleContractFile(document, message.action);
-          const artifact = message.action === 'csvTemplate' && operation.status === 'completed' && operation.path ? registerArtifact(vscode.Uri.parse(operation.path)) : undefined;
+          const exportAction = ['exportJsonc', 'exportCsv', 'csvTemplate'].includes(message.action);
+          const artifact = exportAction && operation.status === 'completed' && operation.path ? registerArtifact(vscode.Uri.parse(operation.path)) : undefined;
           await post({ type: 'contract.operation', action: message.action, ...operation, ...(artifact ? { artifactId: artifact.artifactId, path: artifact.path } : {}) }, message.requestId);
           return;
         }
@@ -408,6 +439,18 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           } catch (error) {
             await post({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: boundedEditorMessage(error), conflict: error instanceof LinkedAdversarialCaseConflictError }, message.requestId);
           }
+          return;
+        }
+        if (message.type === 'adversarial.case.delete') {
+          if (!vscode.workspace.isTrusted) { await post({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Deleting a linked case requires a trusted workspace.'), conflict: false }, message.requestId); return; }
+          const profile = this.codec.parse(document.getText()).profile;
+          if (!profile || !canOpenLinkedAdversarialSuite(profile, message.sourcePath)) { await post({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: localize('Only a safe suite linked by this Profile can be edited.'), conflict: false }, message.requestId); return; }
+          const execution = this.linkedCaseWriteChain.then(() => deleteLinkedAdversarialCase({ profileUri: document.uri, sourcePath: message.sourcePath, scenarioId: message.scenarioId, expectedRevision: message.expectedRevision, resolveExternal: (reference) => this.externalAdversarialSuites.resolve(document.uri, reference) }));
+          this.linkedCaseWriteChain = execution.then(() => undefined, () => undefined);
+          this.pendingLinkedCaseWrites.add(execution);
+          try { await execution; catalogCache = undefined; await post({ type: 'adversarial.case.deleted', sourcePath: message.sourcePath, scenarioId: message.scenarioId }, message.requestId); await postAdversarialCatalog(true); }
+          catch (error) { await post({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: boundedEditorMessage(error), conflict: error instanceof LinkedAdversarialCaseConflictError }, message.requestId); }
+          finally { this.pendingLinkedCaseWrites.delete(execution); }
           return;
         }
         if (message.type === 'adversarial.case.save') {
@@ -460,11 +503,11 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
           return;
         }
-        if (message.type === 'test.runAll' || message.type === 'test.runContracts' || message.type === 'test.runCase' || message.type === 'test.rerun') {
+        if (message.type === 'test.runAll' || message.type === 'test.runContracts' || message.type === 'test.runCase' || message.type === 'test.runSelection' || message.type === 'test.history.rerun' || message.type === 'test.rerun') {
           if (!this.scenarioTests) throw new Error(localize('Test runtime is unavailable.'));
           const current = this.latestTestOperations.get(documentKey);
           if (current?.state === 'running' || current?.state === 'cancelling') throw new Error(localize('A TurnStage test run is already active.'));
-          const action: TestOperationAction = message.type === 'test.runAll' ? 'runAll' : message.type === 'test.runContracts' ? 'runContracts' : message.type === 'test.runCase' ? 'runCase' : message.status === 'failed' ? 'rerunFailed' : message.status === 'unstable' ? 'rerunUnstable' : 'rerunIncomplete';
+          const action: TestOperationAction = message.type === 'test.runAll' ? 'runAll' : message.type === 'test.runContracts' ? 'runContracts' : message.type === 'test.runCase' ? 'runCase' : message.type === 'test.runSelection' || message.type === 'test.history.rerun' ? 'runSelection' : message.status === 'failed' ? 'rerunFailed' : message.status === 'unstable' ? 'rerunUnstable' : 'rerunIncomplete';
           const detail = message.type === 'test.runCase' ? message.scenarioId : undefined;
           await postTestOperation({ action, state: 'running', ...(detail ? { detail } : {}) }, message.requestId);
           let progress: TestOperationSnapshot['progress'];
@@ -480,8 +523,13 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
                 ? await this.scenarioTests.runContracts(document.uri, onProgress)
               : message.type === 'test.runCase'
                 ? await this.scenarioTests.runCase(document.uri, message.scenarioId, message.suiteId, onProgress, message.kind)
+                : message.type === 'test.runSelection'
+                  ? await this.scenarioTests.runCases(document.uri, message.cases, onProgress)
+                : message.type === 'test.history.rerun'
+                  ? await this.scenarioTests.rerunHistory(document.uri, message.runId, onProgress, message.kind)
                 : await this.scenarioTests.rerunLatest(document.uri, message.status, onProgress);
             await postTestOperation({ action, state, ...(detail ? { detail } : {}), ...(progress ? { progress } : {}) }, message.requestId);
+            await post({ type: 'test.history', ...(await this.scenarioTests.getTestHistory(document.uri)) }, message.requestId);
           } catch (error) {
             await postTestOperation({ action, state: 'failed', ...(detail ? { detail } : {}), ...(progress ? { progress } : {}) }, message.requestId);
             throw error;
@@ -506,6 +554,14 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           const uri = message.evidenceId
             ? await this.scenarioTests.exportEvidenceReport(message.evidenceId, message.format)
             : await this.scenarioTests.exportLastReport(message.format);
+          if (!uri) return;
+          await post({ type: 'test.exported', kind: 'report', ...registerArtifact(uri) }, message.requestId);
+          if (message.format === 'html') await vscode.env.openExternal(uri);
+          return;
+        }
+        if (message.type === 'test.history.export') {
+          if (!this.scenarioTests) throw new Error(localize('Test runtime is unavailable.'));
+          const uri = await this.scenarioTests.exportRunReport(document.uri, message.runId, message.format);
           if (!uri) return;
           await post({ type: 'test.exported', kind: 'report', ...registerArtifact(uri) }, message.requestId);
           if (message.format === 'html') await vscode.env.openExternal(uri);
@@ -697,7 +753,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           case 'request.send': await controller.send(message.text, message.interaction); break;
           case 'request.abort': await controller.abort(); break;
           case 'conversation.new': if (await confirmRestartSession()) await controller.newConversation(); break;
-          case 'conversation.clear': controller.clearConversation(); break;
+          case 'conversation.clear': if (await confirmClearConversation()) controller.clearConversation(); break;
           case 'history.remote.apply': controller.applyRemoteSession(message.conversationId); break;
           case 'citation.open': { const citation = controller.snapshot.messages.flatMap((item) => item.citations).find((item) => item.id === message.citationId); if (citation) await this.uriPolicy.open(citation, controller.profile, controller.profileUri); break; }
           case 'uri.open': await this.uriPolicy.open({ id: `markdown-link-${message.requestId}`, kind: 'url', uri: message.uri }, controller.profile, controller.profileUri); break;
@@ -879,12 +935,24 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private async handleContractFile(document: vscode.TextDocument, action: Extract<WebviewMessage, { type: 'contract.file' }>['action']): Promise<{ status: 'completed' | 'cancelled'; detail: string; path?: string }> {
     const profile = this.codec.parse(document.getText()).profile;
     if (!profile) throw new Error(localize('Profile could not be parsed.'));
-    if (action === 'importJsonc') throw new Error(localize('Importing a browser-local suite copy is available only in TurnStage Web.'));
+    if (action === 'importJsonc' || action === 'importCsv') throw new Error(localize('Importing a browser-local suite copy is available only in TurnStage Web.'));
     if (action === 'csvTemplate') {
       const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file('turnstage-tests-template.csv'), filters: { CSV: ['csv'] } });
       if (!uri) return cancelledOperation();
       await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(contractCsvTemplate()));
       return completedOperation(localize('Test CSV template exported.'), uri);
+    }
+    if (action === 'exportJsonc' || action === 'exportCsv') {
+      const scenarios = (profile.tests?.scenarios ?? []).filter((scenario) => !scenario.adversarial);
+      if (!scenarios.length) throw new Error(localize('This profile has no inline test cases to export.'));
+      const suite = createContractSuite('profile-tests', `${profile.name} tests`, scenarios);
+      const issues = validateContractSuite(suite);
+      if (issues.length) throw new Error(issues.slice(0, 20).map((issue) => `${issue.path}: ${issue.message}`).join('\n'));
+      const csv = action === 'exportCsv';
+      const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`${profile.id}.tests.${csv ? 'csv' : 'jsonc'}`), filters: csv ? { CSV: ['csv'] } : { JSONC: ['jsonc'] } });
+      if (!uri) return cancelledOperation();
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(csv ? serializeContractCsv(scenarios) : serializeContractSuite(suite)));
+      return completedOperation(localize('Exported {count} test cases.', { count: String(scenarios.length) }), uri);
     }
     const selected = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { [localize('Test Suites')]: ['jsonc', 'json', 'csv'] }, openLabel: localize('Link Test Suite') });
     const uri = selected?.[0];
@@ -1129,7 +1197,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     if (actionId === 'message.retry') { await controller.retry(); return; }
     if (actionId === 'request.abort') { await controller.abort(); return; }
     if (actionId === 'conversation.new') { if (await confirmRestartSession()) await controller.newConversation(); return; }
-    if (actionId === 'conversation.clear') { controller.clearConversation(); return; }
+    if (actionId === 'conversation.clear') { if (await confirmClearConversation()) controller.clearConversation(); return; }
     const action = message?.actions.find((item) => item.id === actionId || item.actionId === actionId);
     if (!action) throw new Error(localize('The selected response action is no longer available.'));
     if (action.confirm) {
@@ -1149,7 +1217,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     }
     if (action.actionId === 'request.abort') { await controller.abort(); return; }
     if (action.actionId === 'conversation.new') { if (await confirmRestartSession()) await controller.newConversation(); return; }
-    if (action.actionId === 'conversation.clear') { controller.clearConversation(); return; }
+    if (action.actionId === 'conversation.clear') { if (await confirmClearConversation()) controller.clearConversation(); return; }
     if (action.actionId === 'citation.open') {
       const citationId = typeof payload.citationId === 'string' ? payload.citationId : undefined;
       const citation = message?.citations.find((item) => item.id === citationId);

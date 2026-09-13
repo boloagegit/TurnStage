@@ -25,7 +25,7 @@ describe('linked functional case catalog', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('bounds the Webview catalog and excludes prompt and assertion values', async () => {
-    const scenarios = Array.from({ length: 120 }, (_, index): ScenarioDefinition => ({
+    const scenarios = Array.from({ length: 500 }, (_, index): ScenarioDefinition => ({
       id: `case-${index + 1}`, name: `Case ${index + 1}`, tags: ['release'],
       steps: [{ id: 'turn-1', input: `PRIVATE PROMPT ${index + 1}`, assertions: [{ path: 'assistant.text', operator: 'contains', value: `PRIVATE ASSERTION ${index + 1}` }] }],
     }));
@@ -40,7 +40,7 @@ describe('linked functional case catalog', () => {
     const catalog = await loadLinkedContractCaseCatalog(vscode.Uri.parse('file:///workspace/profile.turnstage.jsonc'), profile);
 
     expect(catalog.entries).toHaveLength(MAX_LINKED_CONTRACT_CATALOG_ENTRIES);
-    expect(catalog).toMatchObject({ total: 120, truncated: true, issues: [] });
+    expect(catalog).toMatchObject({ total: 500, truncated: false, issues: [] });
     expect(JSON.stringify(catalog)).not.toContain('PRIVATE PROMPT');
     expect(JSON.stringify(catalog)).not.toContain('PRIVATE ASSERTION');
   });

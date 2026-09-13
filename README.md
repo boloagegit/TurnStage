@@ -79,7 +79,7 @@ pass.
    server let you explore without a real service or credential.
 4. Inspect the same turn in **Network**, **Raw Events**, and **Normalized
    Events**.
-5. Open **Tests** or **Red Team**, add a case, run it, and select **Open
+5. Open **General tests** or **Red Team**, add a case, run it, and select **Open
    evidence** on the result.
 
 For an existing API, use **TurnStage: Create Profile from cURL**. TurnStage
@@ -173,14 +173,14 @@ Extract `turnstage-web-<version>.zip` behind any static Linux web server. The ar
    Contracts** provides the same deterministic extension-owned entry point for
    automation.
 7. Open the Profile's **Tests** tab to author and run conversation contracts,
-   inspect functional/comparison/performance results, and manage bounded
-   campaigns. Small cases can stay inline; use **Link suite** for an existing
+   inspect functional/comparison/performance results, and select several cases
+   for a bounded run. Small cases can stay inline; use **Link suite** for an existing
    `.tests.jsonc`, `.tests.json`, or CSV file without copying it into the
    Profile. Report, advisory-review, and visual-regression defaults remain
    under **Configure Profile → Test settings**. Run
    **TurnStage: Export Contract Test Report** to save the latest sanitized
    results manually.
-8. Add known red-team regressions in the Profile's **Red Team** tab. Link a
+8. Add known red-team regressions under **Red Team → Cases**. Link a
    workspace-relative JSONC or CSV source for portable Git-managed cases, or
    explicitly select an external file when the suite must remain elsewhere.
    External links are local, Profile-bound authorizations and are not portable
@@ -427,10 +427,11 @@ out of the chat surface by default and remain available in Debug data. A
 backend `usage.updated` message part is likewise hidden in Chat unless
 `ui.components.usage.visible` is explicitly enabled.
 
-The test workspace keeps Chat on the left and provides **Debug**, **Tests**,
-**Red Team**, and **Configure** as four modes of the right pane. Tests separates
-functional contract results and execution from adversarial outcomes, with
-search and 25-row paging for large suites. Configure exposes the same
+The test workspace keeps Chat on the left and provides **Debug**, **General tests**,
+**Red Team**, and **Configure** as four modes of the right pane. Each testing
+mode has its own **Cases** and **Results** tabs. General and
+Red Team judgments remain distinct while sharing selection and metadata-only
+run history. Search and bounded paging keep large suites responsive. Configure exposes the same
 eight profile sections as the command-driven configuration flow: General,
 Opening & Flow, Request, Stream & Mapping, Chat UI, Test settings, History & Errors,
 and Security. Every GUI edit is applied as a
@@ -439,7 +440,7 @@ profile file remains the source of truth and VS Code Undo/Redo continues to
 work. Configure shows pushed saved/dirty and validation state without polling,
 and keeps Save, Open JSONC, Validate, and first-issue navigation in its compact
 toolbar. **TurnStage: Go to…** provides native Quick Pick navigation to Chat,
-Debug, Tests, Red Team, or common Configure destinations.
+Debug, General tests, Red Team, or common Configure destinations.
 
 Debug's **Network** tab presents every Opening, Conversation Stream attempt,
 retry, and Stop request as a compact request list. Selecting a row exposes

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.28.0
+
+- Reworked General tests and Red Team into consistent in-place case and result views with searchable, selectable cases, clearer unavailable-case reasons, and direct access to completed results.
+- Added per-Profile test run history, baseline comparison, non-passing-case reruns, and complete-run exports. Clearing history requires confirmation and does not remove detailed evidence.
+- Added General-test JSONC/CSV import and export alongside Red Team suite formats, plus linked-case source editing and guarded deletion in VS Code. Web keeps imported files as browser-local copies and never changes the source file.
+- Fixed execution of cases in Profiles opened outside the configured discovery folder and removed duplicate schema matches for authorized external suite links.
+- Compatibility: existing Profiles and suite formats remain supported. VS Code-only test capabilities stay unavailable in Web; linked files outside the workspace require local authorization on each machine.
+
 ## 0.27.0
 
 - Made standalone Web testing capability-aware: workspace file linking,

@@ -46,6 +46,9 @@ import { logAt, startLogOperation } from '../logging';
 import type { TestOperationProgress } from '../../shared/protocol';
 import { ExternalAdversarialSuiteRepository } from './externalAdversarialSuite';
 import { isScenarioReady } from './scenarioCapture';
+import { resolveTestSelection, testCaseKey, type TestCaseIdentity } from '../../shared/testSelection';
+import { createTestRunHistoryRecord, nonPassingCases, type CompletedTestRunCase, type TestRunHistoryRecord } from '../../shared/testRunHistory';
+import { TestRunHistoryRepository } from './testRunHistoryRepository';
 
 type TestData =
   | { type: 'profile'; uri: vscode.Uri; profileId: string }
@@ -95,11 +98,14 @@ interface ScenarioRunScope {
   /** Throws when the final immutable execution snapshot is stale. */
   validateIntegrity?: (material: ScenarioIntegrityMaterial) => void;
   progress?: (progress: TestOperationProgress) => void;
+  manualHistory?: boolean;
+  sourceRunId?: string;
 }
 
 interface CompletedScenario {
   record: ScenarioExecutionRecord;
   profileUri: vscode.Uri;
+  kind: 'contract' | 'adversarial';
   suiteId?: string;
   reporting?: ScenarioReportingDefinition;
   evidenceId?: string;
@@ -148,8 +154,11 @@ export interface ScenarioControllerRunSummary {
   profileId: string;
   suiteId?: string;
   scenarioId: string;
+  kind: 'contract' | 'adversarial';
   scenarioName: string;
   outcome: AdversarialResultSummary['outcome'] | 'passed' | 'failed' | 'error';
+  durationMs?: number;
+  completedAttempts?: number;
   stability?: NonNullable<AdversarialResultSummary['repetitions']>['stability'];
   counts?: NonNullable<AdversarialResultSummary['repetitions']>['counts'];
   sampleComplete?: boolean;
@@ -201,11 +210,14 @@ export class ScenarioTestController implements vscode.Disposable {
   private readonly reports: ScenarioReportService;
   private readonly runGroups: ScenarioRunGroupRepository;
   private readonly campaigns: CampaignRepository;
+  private readonly testHistory: TestRunHistoryRepository;
   private readonly externalAdversarialSuites: ExternalAdversarialSuiteRepository;
   private readonly resultsEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; results: AdversarialResultSummary[]; automationResults: AutomationResultSummary[] }>();
   readonly onDidChangeResults = this.resultsEmitter.event;
   private readonly campaignEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; dashboard: CampaignDashboardV1 }>();
   readonly onDidChangeCampaigns = this.campaignEmitter.event;
+  private readonly historyEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; profileId: string; runs: TestRunHistoryRecord[]; baselineRunId?: string }>();
+  readonly onDidChangeTestHistory = this.historyEmitter.event;
   private readonly campaignProgressEmitter = new vscode.EventEmitter<CampaignProgressEvent>();
   readonly onDidChangeCampaignProgress = this.campaignProgressEmitter.event;
   private readonly latestResults = new Map<string, AdversarialResultSummary[]>();
@@ -213,6 +225,7 @@ export class ScenarioTestController implements vscode.Disposable {
   private latestRunSummaries: ScenarioControllerRunSummary[] = [];
   private refreshing?: Promise<void>;
   private activeManualRun?: vscode.CancellationTokenSource;
+  private manualProfileUri?: vscode.Uri;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -225,6 +238,7 @@ export class ScenarioTestController implements vscode.Disposable {
     this.reports = new ScenarioReportService(output, visualRegression, String(context.extension.packageJSON.version ?? 'unknown'), copilotArtifacts);
     this.runGroups = new ScenarioRunGroupRepository(context, output);
     this.campaigns = new CampaignRepository(context, output);
+    this.testHistory = new TestRunHistoryRepository(context);
     this.externalAdversarialSuites = new ExternalAdversarialSuiteRepository(context);
     this.controller = vscode.tests.createTestController('turnstage.contracts', localize('TurnStage Conversation Contracts'));
     this.controller.resolveHandler = async () => this.refresh();
@@ -235,10 +249,37 @@ export class ScenarioTestController implements vscode.Disposable {
     watcher.onDidCreate(refresh);
     watcher.onDidChange(refresh);
     watcher.onDidDelete(refresh);
-    context.subscriptions.push(watcher, vscode.workspace.onDidSaveTextDocument((document) => { if (/\.(?:turnstage\.(?:json|jsonc)|adversarial\.(?:json|jsonc|csv))$/iu.test(document.uri.path)) refresh(); }));
+    context.subscriptions.push(watcher, vscode.workspace.onDidSaveTextDocument((document) => { if (/\.(?:turnstage\.(?:json|jsonc)|adversarial\.(?:json|jsonc|csv))$/iu.test(document.uri.path)) refresh(); }), vscode.workspace.onDidCloseTextDocument((document) => {
+      if (document.uri.toString() !== this.manualProfileUri?.toString()) return;
+      this.manualProfileUri = undefined;
+      refresh();
+    }));
   }
 
-  dispose(): void { this.activeManualRun?.cancel(); this.resultsEmitter.dispose(); this.campaignEmitter.dispose(); this.campaignProgressEmitter.dispose(); this.controller.dispose(); }
+  dispose(): void { this.activeManualRun?.cancel(); this.resultsEmitter.dispose(); this.campaignEmitter.dispose(); this.historyEmitter.dispose(); this.campaignProgressEmitter.dispose(); this.controller.dispose(); }
+
+  async getTestHistory(uri: vscode.Uri): Promise<{ profileId: string; runs: TestRunHistoryRecord[]; baselineRunId?: string }> {
+    const entry = await this.profiles.read(uri);
+    if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
+    const runs = (await this.testHistory.list(entry.profile.id)).map((run) => ({ ...run, cases: run.cases.map((item) => ({ ...item, evidenceAvailable: Boolean(item.evidenceId && this.evidence.has(item.evidenceId)) })) }));
+    const baselineRunId = (await this.testHistory.baseline(entry.profile.id))?.id;
+    return { profileId: entry.profile.id, runs, ...(baselineRunId ? { baselineRunId } : {}) };
+  }
+
+  async acceptTestBaseline(uri: vscode.Uri, runId: string): Promise<void> {
+    const entry = await this.profiles.read(uri);
+    if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
+    await this.testHistory.acceptBaseline(entry.profile.id, runId);
+    this.historyEmitter.fire({ uri, ...(await this.getTestHistory(uri)) });
+  }
+
+  async clearTestHistory(uri: vscode.Uri, kind: 'contract' | 'adversarial'): Promise<void> {
+    if (this.activeManualRun) throw new Error('Stop the active test run before clearing its history.');
+    const entry = await this.profiles.read(uri);
+    if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
+    await this.testHistory.clear(entry.profile.id, kind);
+    this.historyEmitter.fire({ uri, ...(await this.getTestHistory(uri)) });
+  }
 
   async refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
@@ -249,6 +290,26 @@ export class ScenarioTestController implements vscode.Disposable {
   getEvidence(id: string): TestEvidenceReference | undefined { return this.evidence.get(id); }
   hasReport(): boolean { return this.reports.hasRecords(); }
   exportLastReport(format: ScenarioReportFormat): Promise<vscode.Uri | undefined> { return this.reports.exportLast(format); }
+  async exportRunReport(uri: vscode.Uri, runId: string, format: ScenarioReportFormat): Promise<vscode.Uri | undefined> {
+    const entry = await this.profiles.read(uri);
+    if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
+    const run = (await this.testHistory.list(entry.profile.id)).find((item) => item.id === runId);
+    if (!run) throw new Error('The selected test run is no longer available.');
+    const records: ScenarioExecutionRecord[] = run.cases.map((item) => {
+      const reference = item.evidenceId ? this.evidence.get(item.evidenceId) : undefined;
+      if (item.evidenceId && !reference?.result) throw new Error('Some evidence for this test run has expired. Export was cancelled rather than mixing in another run.');
+      return {
+        profileId: run.profileId,
+        profileName: entry.profile!.name,
+        scenarioId: `${item.kind}/${item.suiteId ?? 'inline'}/${item.scenarioId}`,
+        scenarioName: item.name,
+        status: !item.outcome || item.completedAttempts < item.requestedAttempts ? 'error' : item.outcome === 'passed' || item.outcome === 'resisted' ? 'passed' : item.outcome === 'failed' || item.outcome === 'attackSucceeded' ? 'failed' : 'error',
+        ...(reference?.result ? { result: reference.result } : {}),
+      };
+    });
+    if (run.status !== 'completed' && records.every((record) => record.status === 'passed')) records.push({ profileId: run.profileId, profileName: entry.profile.name, scenarioId: 'run-status', scenarioName: `Run ${run.status}`, status: 'error' });
+    return this.reports.exportRecords(format, records, `turnstage-run-${runId}`);
+  }
   exportEvidenceReport(evidenceId: string, format: ScenarioReportFormat): Promise<vscode.Uri | undefined> {
     const reference = this.evidence.get(evidenceId);
     if (!reference?.result?.adversarial) throw new Error(localize('This test evidence is no longer available. Run the scenario again.'));
@@ -425,31 +486,45 @@ export class ScenarioTestController implements vscode.Disposable {
 
   async runAdversarial(uri: vscode.Uri, onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
     if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
-    const uriKey = uri.toString();
-    const matches = (await this.describeTests(false)).filter((item) => item.kind === 'case' && item.uri === uriKey && item.adversarial === true);
-    if (!matches.length) throw new Error(localize('No adversarial cases are available for this profile.'));
+    const matches = resolveTestSelection(await this.manualCaseDescriptors(uri), { kind: 'adversarial' });
     return this.runManualSelection(matches.map((item) => item.id), onProgress);
   }
 
   async runContracts(uri: vscode.Uri, onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
     if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
-    const uriKey = uri.toString();
-    const matches = (await this.describeTests(false)).filter((item) => item.kind === 'case' && item.uri === uriKey && item.adversarial !== true);
-    if (!matches.length) throw new Error(localize('No conversation contract scenarios are available for this profile.'));
+    const matches = resolveTestSelection(await this.manualCaseDescriptors(uri), { kind: 'contract' });
     return this.runManualSelection(matches.map((item) => item.id), onProgress);
   }
 
   async runCase(uri: vscode.Uri, scenarioId: string, suiteId?: string, onProgress?: (progress: TestOperationProgress) => void, kind: 'adversarial' | 'contract' = 'adversarial'): Promise<'completed' | 'cancelled'> {
     if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
-    const uriKey = uri.toString();
-    const matches = (await this.describeTests(false)).filter((item) => item.kind === 'case'
-      && item.uri === uriKey
-      && item.caseId === scenarioId
-      && (kind === 'adversarial' ? item.adversarial === true : item.adversarial !== true)
-      && item.suiteId === suiteId);
-    if (!matches.length) throw new Error(localize(kind === 'adversarial' ? 'This adversarial case is no longer available. Refresh the cases and try again.' : 'This conversation contract is no longer available. Refresh the scenarios and try again.'));
-    if (matches.length > 1) throw new Error(localize('More than one adversarial case matches this selection. Use Test Explorer to choose the exact case.'));
+    const descriptors = await this.manualCaseDescriptors(uri);
+    const matches = resolveTestSelection(descriptors, { cases: [{ profileId: descriptors[0]?.profileId ?? '', scenarioId, suiteId, kind }] });
     return this.runManualSelection([matches[0]!.id], onProgress);
+  }
+
+  async runCases(uri: vscode.Uri, cases: readonly TestCaseIdentity[], onProgress?: (progress: TestOperationProgress) => void, sourceRunId?: string): Promise<'completed' | 'cancelled'> {
+    if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
+    const descriptors = await this.manualCaseDescriptors(uri);
+    const matches = resolveTestSelection(descriptors, { cases });
+    return this.runManualSelection(matches.map((item) => item.id), onProgress, sourceRunId);
+  }
+
+  async rerunHistory(uri: vscode.Uri, runId: string, onProgress?: (progress: TestOperationProgress) => void, kind?: 'contract' | 'adversarial'): Promise<'completed' | 'cancelled'> {
+    const history = await this.getTestHistory(uri);
+    const record = history.runs.find((item) => item.id === runId);
+    if (!record) throw new Error('The selected test run is no longer available.');
+    const cases = nonPassingCases(record).filter((item) => kind === undefined || item.kind === kind);
+    if (!cases.length) throw new Error('The selected test run has no non-passing cases.');
+    return this.runCases(uri, cases, onProgress, runId);
+  }
+
+  private async manualCaseDescriptors(uri: vscode.Uri): Promise<Array<Omit<ScenarioControllerTestDescriptor, 'kind'> & TestCaseIdentity & { ready: true }>> {
+    this.manualProfileUri = uri;
+    if (this.refreshing) await this.refreshing;
+    return (await this.describeTests(false))
+      .filter((item) => item.kind === 'case' && item.uri === uri.toString() && item.caseId !== undefined)
+      .map((item) => ({ ...item, scenarioId: item.caseId!, kind: item.adversarial ? 'adversarial' as const : 'contract' as const, ready: true as const }));
   }
 
   async rerunLatest(uri: vscode.Uri, status: 'failed' | 'unstable' | 'incomplete', onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
@@ -460,11 +535,11 @@ export class ScenarioTestController implements vscode.Disposable {
         ? result.repetitions?.stability === 'unstable'
         : result.repetitions?.sampleComplete === false);
     if (!latest.length) throw new Error(`No latest ${status} TurnStage results are available for this profile.`);
-    const wanted = new Set(latest.map((result) => result.scenarioId));
+    const wanted = new Set(latest.map((result) => testCaseKey({ profileId: result.profileId, suiteId: result.suiteId, scenarioId: result.scenarioId, kind: 'adversarial' })));
     const itemIds: string[] = [];
     const visit = (item: vscode.TestItem): void => {
       const data = this.metadata.get(item);
-      if (data?.type === 'scenario' && data.uri.toString() === uri.toString() && wanted.has(data.scenarioId)) itemIds.push(item.id);
+      if (data?.type === 'scenario' && data.uri.toString() === uri.toString() && wanted.has(testCaseKey({ profileId: data.profileId, suiteId: data.suiteId, scenarioId: data.scenarioId, kind: data.adversarial ? 'adversarial' : 'contract' }))) itemIds.push(item.id);
       item.children.forEach(visit);
     };
     this.controller.items.forEach(visit);
@@ -472,7 +547,7 @@ export class ScenarioTestController implements vscode.Disposable {
     const cancellation = new vscode.CancellationTokenSource();
     this.activeManualRun = cancellation;
     try {
-      const snapshot = await this.runSelection({ itemIds }, cancellation.token, { progress: onProgress });
+      const snapshot = await this.runSelection({ itemIds }, cancellation.token, { progress: onProgress, manualHistory: true });
       return snapshot.cancelled ? 'cancelled' : 'completed';
     } finally {
       if (this.activeManualRun === cancellation) this.activeManualRun = undefined;
@@ -486,12 +561,12 @@ export class ScenarioTestController implements vscode.Disposable {
     return true;
   }
 
-  private async runManualSelection(itemIds: readonly string[], onProgress?: (progress: TestOperationProgress) => void): Promise<'completed' | 'cancelled'> {
+  private async runManualSelection(itemIds: readonly string[], onProgress?: (progress: TestOperationProgress) => void, sourceRunId?: string): Promise<'completed' | 'cancelled'> {
     if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
     const cancellation = new vscode.CancellationTokenSource();
     this.activeManualRun = cancellation;
     try {
-      const snapshot = await this.runSelection({ itemIds }, cancellation.token, { progress: onProgress });
+      const snapshot = await this.runSelection({ itemIds }, cancellation.token, { progress: onProgress, manualHistory: true, sourceRunId });
       return snapshot.cancelled ? 'cancelled' : 'completed';
     } finally {
       if (this.activeManualRun === cancellation) this.activeManualRun = undefined;
@@ -513,7 +588,31 @@ export class ScenarioTestController implements vscode.Disposable {
       throw new Error(`The selected TurnStage tests exceed the safety budget of ${attemptCap} attempts and ${requestCap} requests.`);
     }
     scope.validateIntegrity?.(integrityMaterialFromPrepared(prepared));
-    return this.run(request, token, selection, scope, prepared);
+    if (!scope.manualHistory) return this.run(request, token, selection, scope, prepared);
+    if (!prepared.length || prepared.some((item) => item.job.stepIndex !== undefined)) throw new Error('A manual run needs at least one complete test case.');
+    const startedAt = Date.now();
+    let snapshot: ScenarioRunSnapshot | undefined;
+    let failure: unknown;
+    try {
+      snapshot = await this.run(request, token, selection, scope, prepared);
+    } catch (error) {
+      failure = error;
+    }
+    const first = prepared[0]!.loaded;
+    const planned = prepared.map(({ job, loaded }) => ({ profileId: job.profileId, suiteId: job.suiteId, scenarioId: job.scenarioId, kind: loaded.scenario.adversarial ? 'adversarial' as const : 'contract' as const, name: loaded.scenario.name, scenario: loaded.scenario, environment: usedScenarioEnvironments(loaded) }));
+    const completed: CompletedTestRunCase[] = (snapshot?.summaries ?? []).map((summary) => {
+      return { profileId: summary.profileId, suiteId: summary.suiteId, scenarioId: summary.scenarioId, kind: summary.kind, outcome: summary.outcome, completedAttempts: summary.completedAttempts ?? 1, durationMs: summary.durationMs ?? 0, evidenceId: summary.evidenceId };
+    });
+    const record = createTestRunHistoryRecord({ id: crypto.randomUUID(), profileId: first.profile.id, startedAt, finishedAt: Date.now(), status: failure ? 'failed' : snapshot?.cancelled ? 'cancelled' : 'completed', runner: 'vscode', profile: first.profile, environment: first.environment, sourceRunId: scope.sourceRunId, cases: planned, completed });
+    try {
+      await this.testHistory.save(record);
+      this.historyEmitter.fire({ uri: prepared[0]!.job.uri, ...(await this.getTestHistory(prepared[0]!.job.uri)) });
+    } catch (error) {
+      if (!failure) throw error;
+      logAt(this.output, 'error', () => `[test-history] save failed type=${error instanceof Error ? error.name : 'Error'}`);
+    }
+    if (failure) throw failure;
+    return snapshot!;
   }
 
   async previewSelection(selection: ScenarioRunSelection): Promise<ScenarioRunPreview> {
@@ -626,7 +725,7 @@ export class ScenarioTestController implements vscode.Disposable {
   }
 
   private async discover(): Promise<void> {
-    const entries = (await this.profiles.discover()).filter((entry) => !entry.overridden && ((entry.profile?.tests?.scenarios?.length ?? 0) > 0 || (entry.profile?.tests?.contractSuites?.length ?? 0) > 0 || (entry.profile?.tests?.adversarialSuites?.length ?? 0) > 0));
+    const entries = (await this.profiles.discoverIncluding(this.manualProfileUri)).filter((entry) => !entry.overridden && ((entry.profile?.tests?.scenarios?.length ?? 0) > 0 || (entry.profile?.tests?.contractSuites?.length ?? 0) > 0 || (entry.profile?.tests?.adversarialSuites?.length ?? 0) > 0));
     const roots: vscode.TestItem[] = [];
     for (const entry of entries) {
       if (!entry.profile) continue;
@@ -714,6 +813,8 @@ export class ScenarioTestController implements vscode.Disposable {
   }
 
   private async prepareCampaign(uri: vscode.Uri, campaignId: string): Promise<{ profile: TurnStageProfile; definition: TestCampaignDefinition; plan: CampaignPlanV1 }> {
+    this.manualProfileUri = uri;
+    if (this.refreshing) await this.refreshing;
     const entry = await this.profiles.read(uri);
     if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
     const definition = entry.profile.tests?.campaigns?.find((item) => item.id === campaignId);
@@ -887,8 +988,11 @@ export class ScenarioTestController implements vscode.Disposable {
         profileId: item.record.profileId,
         suiteId: item.suiteId,
         scenarioId: item.record.scenarioId,
+        kind: item.kind,
         scenarioName: item.record.scenarioName,
         outcome: item.record.result?.adversarial?.outcome ?? (item.record.status === 'passed' ? 'passed' : item.record.status === 'failed' ? 'failed' : 'error'),
+        durationMs: item.record.result?.durationMs,
+        completedAttempts: item.record.result?.repetitions?.completedAttempts ?? (item.record.status === 'error' ? 0 : 1),
         stability: item.record.result?.repetitions?.stability,
         counts: item.record.result?.repetitions?.counts,
         sampleComplete: item.record.result?.repetitions?.sampleComplete,
@@ -1167,7 +1271,19 @@ export class ScenarioTestController implements vscode.Disposable {
           result = { ...single, checks, passed: single.passed && checks.every((check) => check.passed) };
         }
       }
-      if (token.isCancellationRequested) { run.skipped(job.item); return; }
+      if (token.isCancellationRequested) {
+        run.skipped(job.item);
+        const evidenceId = this.storeEvidence({ evidence: result.evidence, result, location: { kind: 'profile', path: 'tests' }, uri: job.uri }, protectEvidence);
+        runEvidenceIds.push(evidenceId);
+        return {
+          record: { profileId: loaded.profile.id, profileName: loaded.profile.name, scenarioId: loaded.scenario.id, scenarioName: loaded.scenario.name, scenarioTags: loaded.scenario.tags, result, status: 'error' },
+          profileUri: job.uri,
+          kind: loaded.scenario.adversarial ? 'adversarial' : 'contract',
+          suiteId: job.suiteId,
+          reporting: loaded.profile.tests?.reporting,
+          evidenceId,
+        };
+      }
       // Attempt evidence IDs remain attached to the repetition summary, while the
       // case-level ID must retain the aggregate result so stability diagnostics
       // can see the requested and completed sample instead of one attempt only.
@@ -1196,6 +1312,7 @@ export class ScenarioTestController implements vscode.Disposable {
       return {
         record: { profileId: loaded.profile.id, profileName: loaded.profile.name, scenarioId: loaded.scenario.id, scenarioName: loaded.scenario.name, scenarioTags: loaded.scenario.tags, result, status: result.adversarial ? adversarialRecordStatus(result.adversarial.outcome) : result.passed ? 'passed' : 'failed' },
         profileUri: job.uri,
+        kind: loaded.scenario.adversarial ? 'adversarial' : 'contract',
         suiteId: job.suiteId,
         reporting: loaded.profile.tests?.reporting,
         evidenceId,
@@ -1204,7 +1321,7 @@ export class ScenarioTestController implements vscode.Disposable {
       const message = error instanceof Error ? error.message : String(error);
       run.errored(job.item, new vscode.TestMessage(message), Date.now() - startedAt);
       run.appendOutput(`ERROR ${job.item.label}: ${message}\r\n`, undefined, job.item);
-      return { record: { profileId: 'profile-error', profileName: 'profile', scenarioId: job.scenarioId, scenarioName: job.item.label, status: 'error' }, profileUri: job.uri };
+      return { record: { profileId: job.profileId, profileName: loaded.profile.name, scenarioId: job.scenarioId, scenarioName: job.item.label, status: 'error' }, profileUri: job.uri, suiteId: job.suiteId, kind: loaded.scenario.adversarial ? 'adversarial' : 'contract' };
     } finally {
       await session?.disposeAndWait();
     }
@@ -1396,6 +1513,16 @@ function selectEnvironment(environments: readonly TurnStageEnvironment[], id: st
   if (environment) return environment;
   if (id === builtIn.id) return builtIn;
   throw new Error(localize('Environment "{environment}" was not found.', { environment: id }));
+}
+function usedScenarioEnvironments(loaded: LoadedScenario): TurnStageEnvironment[] {
+  const comparison = loaded.scenario.comparison;
+  const ids = comparison
+    ? [comparison.baseline.environment ?? loaded.profile.environment, comparison.candidate.environment ?? loaded.profile.environment]
+    : [loaded.environment.id];
+  return [...new Map(ids.map((id) => {
+    const environment = selectEnvironment(loaded.environments, id);
+    return [environment.id, environment] as const;
+  })).values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 function reportGroups(completed: readonly CompletedScenario[]): ConfiguredReportGroup[] {
   const groups = new Map<string, ConfiguredReportGroup>();

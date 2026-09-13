@@ -30,4 +30,24 @@ describe('ArtifactStore', () => {
     expect(await store.clearProfile('runs', 'profile-a')).toBe(1);
     expect(await store.list('runs')).toMatchObject([{ id: 'run-b' }]);
   });
+
+  it('clears one test type atomically while preserving other history, evidence, and profiles', async () => {
+    const store = new ArtifactStore();
+    const general = { id: 'general', cases: [{ kind: 'contract' }] };
+    const red = { id: 'red', cases: [{ kind: 'adversarial' }] };
+    const mixed = { id: 'mixed', cases: [{ kind: 'contract' }, { kind: 'adversarial' }] };
+    for (const run of [general, red, mixed]) await store.put('runs', { id: `test-batch:clear-a:${run.id}`, profileId: 'clear-a', kind: 'test-batch', name: run.id, updatedAt: 1, value: run });
+    await store.put('runs', { id: 'test-batch:clear-b:general', profileId: 'clear-b', kind: 'test-batch', name: 'Other profile', updatedAt: 1, value: general });
+    await store.put('runs', { id: 'test-baseline:clear-a', profileId: 'clear-a', kind: 'test-baseline', name: 'Baseline', updatedAt: 1, value: { runId: 'general' } });
+    await store.put('evidence', { id: 'clear-evidence', profileId: 'clear-a', kind: 'contract', name: 'Evidence', updatedAt: 1, value: {} });
+
+    await store.clearTestHistory('clear-a', 'contract');
+
+    expect(await store.get('runs', 'test-batch:clear-a:general')).toBeUndefined();
+    expect((await store.get<typeof mixed>('runs', 'test-batch:clear-a:mixed'))?.value.cases).toEqual([{ kind: 'adversarial' }]);
+    expect(await store.get('runs', 'test-batch:clear-a:red')).toBeTruthy();
+    expect(await store.get('runs', 'test-batch:clear-b:general')).toBeTruthy();
+    expect(await store.get('runs', 'test-baseline:clear-a')).toBeUndefined();
+    expect(await store.get('evidence', 'clear-evidence')).toBeTruthy();
+  });
 });

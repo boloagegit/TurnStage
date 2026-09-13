@@ -5,6 +5,7 @@ import { formatNumber, localizeHumanized, t } from './i18n';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
 import { JsonSyntax } from './JsonViewer';
+import { useConfirmAction } from './ConfirmAction';
 import { DEFAULT_MESSAGE_ACTIONS, resolveMessageActionVisibility, resolveStreaming, type MessageActionId } from './uiConfig';
 
 type Post = (message: WebviewPayload) => void;
@@ -198,11 +199,15 @@ function createOpeningBlock(kind: OpeningResponseBlockKind, id: string): Opening
 }
 
 function OpeningResponseBlockCard({ block, index, count, onChange, onMove, onDelete }: { block: OpeningResponseBlockDefinition; index: number; count: number; onChange: (block: OpeningResponseBlockDefinition) => void; onMove: (direction: -1 | 1) => void; onDelete: () => void }): React.JSX.Element {
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
   const [expanded, setExpanded] = useState(index === 0);
-  const changeKind = (kind: OpeningResponseBlockKind) => onChange({ ...createOpeningBlock(kind, block.id), label: block.label, path: block.path, emptyPolicy: block.emptyPolicy });
+  const changeKind = (kind: OpeningResponseBlockKind) => {
+    if (kind === block.kind) return;
+    requestConfirm({ title: t('Change response block {name} type?', { name: block.label || block.id }), actionLabel: t('Change type'), detail: t('Settings specific to the current block type will be replaced.'), onConfirm: () => onChange({ ...createOpeningBlock(kind, block.id), label: block.label, path: block.path, emptyPolicy: block.emptyPolicy }) });
+  };
   const update = (value: Partial<OpeningResponseBlockDefinition>) => onChange({ ...block, ...value } as OpeningResponseBlockDefinition);
   return <article className="opening-response-block">
-    <header><button type="button" className="opening-response-block__toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}><ProductIcon name={expanded ? 'chevron-down' : 'chevron-right'} /><span><strong>{block.label || openingBlockKindLabel(block.kind)}</strong><code>{block.id} · {openingBlockKindLabel(block.kind)}</code></span></button><div><IconButton type="button" icon="arrow-up" label={t('Move block up')} disabled={index === 0} onClick={() => onMove(-1)} /><IconButton type="button" icon="arrow-down" label={t('Move block down')} disabled={index === count - 1} onClick={() => onMove(1)} /><IconButton type="button" icon="trash" label={t('Delete response block')} onClick={onDelete} /></div></header>
+    <header><button type="button" className="opening-response-block__toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}><ProductIcon name={expanded ? 'chevron-down' : 'chevron-right'} /><span><strong>{block.label || openingBlockKindLabel(block.kind)}</strong><code>{block.id} · {openingBlockKindLabel(block.kind)}</code></span></button><div><IconButton type="button" icon="arrow-up" label={t('Move block up')} disabled={index === 0} onClick={() => onMove(-1)} /><IconButton type="button" icon="arrow-down" label={t('Move block down')} disabled={index === count - 1} onClick={() => onMove(1)} /><IconButton type="button" icon="trash" label={t('Delete response block')} onClick={() => requestConfirm({ title: t('Delete response block {name}', { name: block.label || block.id }), actionLabel: t('Delete'), onConfirm: onDelete })} /></div></header>
     {expanded && <div className="form-grid opening-response-block__fields">
       <Field label={t('Block type')}><select aria-label={t('Block type')} value={block.kind} onChange={(event) => changeKind(event.target.value as OpeningResponseBlockKind)}>{openingBlockKinds.map((kind) => <option value={kind} key={kind}>{openingBlockKindLabel(kind)}</option>)}</select></Field>
       <Field label={t('Block ID')}><PatchText aria-label={t('Block ID')} value={block.id} spellCheck={false} onCommit={(id) => update({ id })} /></Field>
@@ -227,16 +232,19 @@ function OpeningResponseBlockCard({ block, index, count, onChange, onMove, onDel
       </>}
       {block.kind === 'json' && <Field label={t('JSON details')}><Checkbox label={t('Collapsed by default')} checked={block.defaultCollapsed ?? true} onChange={(defaultCollapsed) => onChange({ ...block, defaultCollapsed })} /></Field>}
     </div>}
+    {confirmationDialog}
   </article>;
 }
 
 function OpeningResponseFieldsEditor({ fields, onChange }: { fields: OpeningResponseFieldDefinition[]; onChange: (fields: OpeningResponseFieldDefinition[]) => void }): React.JSX.Element {
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
   const replace = (index: number, field: OpeningResponseFieldDefinition) => onChange(fields.map((item, itemIndex) => itemIndex === index ? field : item));
   const add = () => { const id = uniqueId(fields.map((field) => field.id), 'field'); onChange([...fields, { id, label: t('Field'), path: '$.value', format: 'text' }]); };
-  return <div className="opening-response-fields"><div className="opening-response-fields__heading"><span>{fields.length === 1 ? t('{count} field', { count: formatNumber(fields.length) }) : t('{count} fields', { count: formatNumber(fields.length) })}</span><button type="button" disabled={fields.length >= 20} onClick={add}>{t('Add field')}</button></div>{fields.map((field, index) => <div className="opening-response-field" key={`${field.id}-${index}`}><PatchText aria-label={t('Field ID')} value={field.id} spellCheck={false} onCommit={(id) => replace(index, { ...field, id })} /><PatchText aria-label={t('Field label')} value={field.label} onCommit={(label) => replace(index, { ...field, label })} /><PatchText aria-label={t('Field path')} value={field.path} spellCheck={false} onCommit={(path) => replace(index, { ...field, path })} /><select aria-label={t('Field format')} value={field.format ?? 'text'} onChange={(event) => replace(index, { ...field, format: event.target.value as OpeningResponseFieldDefinition['format'] })}>{(['text', 'number', 'datetime', 'percent'] as const).map((format) => <option key={format} value={format}>{localizeHumanized(format)}</option>)}</select><IconButton type="button" icon="trash" label={t('Delete field')} onClick={() => onChange(fields.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</div>;
+  return <div className="opening-response-fields"><div className="opening-response-fields__heading"><span>{fields.length === 1 ? t('{count} field', { count: formatNumber(fields.length) }) : t('{count} fields', { count: formatNumber(fields.length) })}</span><button type="button" disabled={fields.length >= 20} onClick={add}>{t('Add field')}</button></div>{fields.map((field, index) => <div className="opening-response-field" key={`${field.id}-${index}`}><PatchText aria-label={t('Field ID')} value={field.id} spellCheck={false} onCommit={(id) => replace(index, { ...field, id })} /><PatchText aria-label={t('Field label')} value={field.label} onCommit={(label) => replace(index, { ...field, label })} /><PatchText aria-label={t('Field path')} value={field.path} spellCheck={false} onCommit={(path) => replace(index, { ...field, path })} /><select aria-label={t('Field format')} value={field.format ?? 'text'} onChange={(event) => replace(index, { ...field, format: event.target.value as OpeningResponseFieldDefinition['format'] })}>{(['text', 'number', 'datetime', 'percent'] as const).map((format) => <option key={format} value={format}>{localizeHumanized(format)}</option>)}</select><IconButton type="button" icon="trash" label={t('Delete field')} onClick={() => requestConfirm({ title: t('Delete field {name}', { name: field.label || field.id }), actionLabel: t('Delete'), onConfirm: () => onChange(fields.filter((_, itemIndex) => itemIndex !== index)) })} /></div>)}{confirmationDialog}</div>;
 }
 
 function VariantCard({ index, variant, post, onDelete }: { index: number; variant: RequestVariant; post: Post; onDelete: (index: number) => void }): React.JSX.Element {
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
   const [bodyText, setBodyText] = useState(() => JSON.stringify(variant.body ?? {}, null, 2));
   const [bodyError, setBodyError] = useState('');
   const condition = variant.when ?? {};
@@ -254,7 +262,7 @@ function VariantCard({ index, variant, post, onDelete }: { index: number; varian
     }
   };
   return <article className="variant-card">
-    <header><div><span className="variant-kind">{t(key === 'first-turn' ? 'First Turn' : key === 'continuation' ? 'Continuation' : 'Request Variant')}</span><strong>{variant.id || t('Variant {number}', { number: formatNumber(index + 1) })}</strong></div><button className="danger-subtle" onClick={() => onDelete(index)}>{t('Delete variant')}</button></header>
+    <header><div><span className="variant-kind">{t(key === 'first-turn' ? 'First Turn' : key === 'continuation' ? 'Continuation' : 'Request Variant')}</span><strong>{variant.id || t('Variant {number}', { number: formatNumber(index + 1) })}</strong></div><button className="danger-subtle" onClick={() => requestConfirm({ title: t('Delete variant {name}', { name: variant.id || formatNumber(index + 1) }), actionLabel: t('Delete'), onConfirm: () => onDelete(index) })}>{t('Delete variant')}</button></header>
     <div className="form-grid variant-fields">
       <Field label={t('Variant ID')} error={!variant.id.trim() ? t('A variant ID is required.') : undefined}><PatchText aria-label={t('Variant ID')} value={variant.id} required onCommit={(value) => patch(['id'], value)} /></Field>
       <Field label={t('Condition summary')} hint={t('The first matching variant wins. Leave Path blank to use an unconditional variant.')}><PatchText aria-label={t('Variant condition path')} value={condition.path ?? ''} placeholder="conversation.id" onCommit={(value) => patch(['when', 'path'], value || undefined)} /></Field>
@@ -263,6 +271,7 @@ function VariantCard({ index, variant, post, onDelete }: { index: number; varian
       <Field label={t('Headers (JSON)')} hint={t('Variant headers override matching base request headers.')} wide><JsonPatchEditor ariaLabel={t('Variant headers JSON')} value={variant.headers ?? {}} onCommit={(value) => patch(['headers'], value)} /></Field>
       <Field label={t('Body (JSON)')} hint={t('No JavaScript expressions are evaluated. Template references are data values.')} wide error={bodyError}><textarea aria-label={t('Variant body JSON')} className="code-input" rows={8} value={bodyText} spellCheck={false} aria-invalid={Boolean(bodyError)} onChange={(event) => setBodyText(event.target.value)} onBlur={applyBody} /><button className="apply-inline" onClick={applyBody}>{t('Apply body JSON')}</button></Field>
     </div>
+    {confirmationDialog}
   </article>;
 }
 
@@ -348,6 +357,7 @@ export function parseSampleEvent(text: string, protocol: MappingTestInput['proto
 }
 
 function MappingCard({ rule, index, count, post, onMove, onDelete }: { rule: MappingRule; index: number; count: number; post: Post; onMove: (index: number, direction: -1 | 1) => void; onDelete: (index: number) => void }): React.JSX.Element {
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
   const [emitText, setEmitText] = useState(() => JSON.stringify(rule.emit, null, 2));
   const [emitError, setEmitError] = useState('');
   const [matchValue, setMatchValue] = useState(() => formatValue(rule.match.value));
@@ -365,7 +375,7 @@ function MappingCard({ rule, index, count, post, onMove, onDelete }: { rule: Map
   };
   const applyEmit = () => { try { const parsed = JSON.parse(emitText) as unknown; if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || typeof (parsed as Record<string, unknown>).type !== 'string') throw new Error(t('Emit must be an object with a string “{key}”.', { key: 'type' })); setEmitError(''); patch(['emit'], parsed); } catch (error) { setEmitError(error instanceof Error ? error.message : t('Enter valid JSON.')); } };
   return <article className="mapping-card">
-    <header><div className="mapping-title"><span className="rule-number">{formatNumber(index + 1)}</span><div><strong>{rule.id}</strong><span>{rule.match.event ?? rule.match.path ?? t('Any event')} → {String(rule.emit.type)}</span></div></div><div className="rule-actions"><IconButton icon="arrow-up" label={t('Move {id} up', { id: rule.id })} disabled={index === 0} onClick={() => onMove(index, -1)} /><IconButton icon="arrow-down" label={t('Move {id} down', { id: rule.id })} disabled={index === count - 1} onClick={() => onMove(index, 1)} /><button className="danger-subtle" onClick={() => onDelete(index)}>{t('Delete')}</button></div></header>
+    <header><div className="mapping-title"><span className="rule-number">{formatNumber(index + 1)}</span><div><strong>{rule.id}</strong><span>{rule.match.event ?? rule.match.path ?? t('Any event')} → {String(rule.emit.type)}</span></div></div><div className="rule-actions"><IconButton icon="arrow-up" label={t('Move {id} up', { id: rule.id })} disabled={index === 0} onClick={() => onMove(index, -1)} /><IconButton icon="arrow-down" label={t('Move {id} down', { id: rule.id })} disabled={index === count - 1} onClick={() => onMove(index, 1)} /><button className="danger-subtle" onClick={() => requestConfirm({ title: t('Delete mapping rule {name}', { name: rule.id }), actionLabel: t('Delete'), onConfirm: () => onDelete(index) })}>{t('Delete')}</button></div></header>
     <div className="form-grid mapping-fields">
       <Field label={t('Rule ID')} error={!rule.id.trim() ? t('A rule ID is required.') : undefined}><PatchText aria-label={t('Rule ID')} value={rule.id} required onCommit={(value) => patch(['id'], value)} /></Field>
       <Field label={t('SSE event')} hint={t('Optional event name, such as {message} or {done}.', { message: 'message', done: 'done' })}><PatchText aria-label={t('SSE event name')} value={rule.match.event ?? ''} onCommit={(value) => patch(['match', 'event'], value || undefined)} /></Field>
@@ -379,6 +389,7 @@ function MappingCard({ rule, index, count, post, onMove, onDelete }: { rule: Map
       </> : null}
       <Field label={t('Emit object (JSON)')} hint={t('Must include a string {key}. Paths extract values from the raw event.', { key: 'type' })} wide error={emitError}><textarea aria-label={t('Mapping emit JSON')} className="code-input" rows={7} value={emitText} spellCheck={false} aria-invalid={Boolean(emitError)} onChange={(event) => setEmitText(event.target.value)} onBlur={applyEmit} /><button className="apply-inline" onClick={applyEmit}>{t('Apply emit JSON')}</button></Field>
     </div>
+    {confirmationDialog}
   </article>;
 }
 
@@ -455,6 +466,7 @@ function MessageActionsEditor({ profile, post }: { profile: TurnStageProfile; po
 }
 
 function MessageTagsEditor({ profile, post }: { profile: TurnStageProfile; post: Post }): React.JSX.Element {
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
   const rules = profile.ui?.messageTags ?? [];
   const patch = (value: MessageTagRule[]) => post({ type: 'profile.patch', path: ['ui', 'messageTags'], value });
   const update = (index: number, values: Partial<MessageTagRule>) => patch(rules.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, ...values } : rule));
@@ -466,7 +478,7 @@ function MessageTagsEditor({ profile, post }: { profile: TurnStageProfile; post:
   };
   return <section className="config-section"><div className="section-heading"><div><h3>{t('Message tags')}</h3><p>{t('Add deterministic labels from a message or its correlated events. Rules are bounded and do not use regular expressions.')}</p></div><button type="button" disabled={rules.length >= 20} onClick={add}>{t('Add tag rule')}</button></div>
     {rules.length ? <div className="message-tag-rule-list">{rules.map((rule, index) => <article className="message-tag-rule" key={`${rule.id}-${index}`}>
-      <div className="message-tag-rule__identity"><input aria-label={t('Tag label')} value={rule.label} maxLength={48} onChange={(event) => update(index, { label: event.target.value })} /><IconButton type="button" icon="trash" label={t('Delete tag rule {label}', { label: rule.label })} onClick={() => patch(rules.filter((_item, ruleIndex) => ruleIndex !== index))} /></div>
+      <div className="message-tag-rule__identity"><input aria-label={t('Tag label')} value={rule.label} maxLength={48} onChange={(event) => update(index, { label: event.target.value })} /><IconButton type="button" icon="trash" label={t('Delete tag rule {label}', { label: rule.label })} onClick={() => requestConfirm({ title: t('Delete tag rule {label}', { label: rule.label || rule.id }), actionLabel: t('Delete'), onConfirm: () => patch(rules.filter((_item, ruleIndex) => ruleIndex !== index)) })} /></div>
       <div className="message-tag-rule__condition">
         <label><span>{t('Source')}</span><select aria-label={t('Tag source')} value={rule.source} onChange={(event) => update(index, { source: event.target.value as MessageTagRule['source'] })}><option value="message">{t('Message')}</option><option value="normalizedEvent">{t('Normalized event')}</option><option value="rawEvent">{t('Raw event')}</option></select></label>
         <label><span>{t('Path')}</span><input aria-label={t('Tag path')} value={rule.path} maxLength={256} placeholder="type" onChange={(event) => update(index, { path: event.target.value })} /></label>
@@ -475,6 +487,7 @@ function MessageTagsEditor({ profile, post }: { profile: TurnStageProfile; post:
         <label><span>{t('Tone')}</span><select aria-label={t('Tag tone')} value={rule.tone ?? 'neutral'} onChange={(event) => update(index, { tone: event.target.value as NonNullable<MessageTagRule['tone']> })}><option value="neutral">{t('Neutral')}</option><option value="info">{t('Info')}</option><option value="success">{t('Success')}</option><option value="warning">{t('Warning')}</option><option value="error">{t('Error')}</option></select></label>
       </div>
     </article>)}</div> : <p className="muted">{t('No message tag rules configured.')}</p>}
+    {confirmationDialog}
   </section>;
 }
 

@@ -53,6 +53,11 @@ export class ProfileRepository {
     }
     return entries;
   }
+  async discoverIncluding(uri?: vscode.Uri): Promise<ProfileEntry[]> {
+    const entries = await this.discover();
+    if (!uri || entries.some((entry) => entry.uri.toString() === uri.toString())) return entries;
+    return [...entries, await this.read(uri)];
+  }
   async read(uri: vscode.Uri, scope = this.scopeOf(uri)): Promise<ProfileEntry> {
     try {
       const openDocument = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString());

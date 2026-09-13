@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "publisher": "turnstage",
   "author": {
     "name": "TurnStage contributors",
@@ -1609,7 +1609,8 @@
     "test:sse": "vitest run --config vitest.config.ts test/sseTransport.test.ts",
     "test:web": "vitest run --config vitest.config.ts test/browserSession.test.ts test/webArtifactStore.test.ts test/webCampaignController.test.ts test/webCatalog.test.ts test/webInsightsController.test.ts test/webProfileBundle.test.ts test/webTestController.test.ts test/webTheme.test.ts",
     "test:integration": "npm run compile && node test/integration/runTest.mjs",
-    "test:visual": "npm run compile && node test/visual/profileWorkspace.visual.mjs",
+    "test:visual": "npm run compile && node test/visual/unifiedTests.visual.mjs",
+    "test:visual:legacy": "npm run compile && node test/visual/profileWorkspace.visual.mjs",
     "benchmark": "vitest bench --config test/benchmark.vitest.config.ts --run",
     "mock-server": "node examples/mock-server/server.mjs",
     "package": "npm run compile && vsce package --no-dependencies",

@@ -20,7 +20,7 @@ import * as vscode from 'vscode';
 import { serializeAdversarialCsv } from '../src/extension/testing/adversarialCsv';
 import { parseAdversarialSource } from '../src/extension/testing/adversarialSource';
 import { serializeAdversarialSuite } from '../src/extension/testing/adversarialSuite';
-import { appendLinkedAdversarialCaseSource, LinkedAdversarialCaseConflictError, loadEditableLinkedAdversarialCase, saveEditableLinkedAdversarialCase, updateLinkedAdversarialCaseSource } from '../src/extension/testing/linkedAdversarialCase';
+import { appendLinkedAdversarialCaseSource, deleteLinkedAdversarialCaseSource, LinkedAdversarialCaseConflictError, loadEditableLinkedAdversarialCase, saveEditableLinkedAdversarialCase, updateLinkedAdversarialCaseSource } from '../src/extension/testing/linkedAdversarialCase';
 import type { AdversarialSuiteDefinition, ScenarioDefinition } from '../src/shared/types';
 
 const first: ScenarioDefinition = {
@@ -34,6 +34,27 @@ const second: ScenarioDefinition = {
 
 describe('linked adversarial case editing', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('deletes only the selected JSONC or CSV case, including the last case', () => {
+    const suite: AdversarialSuiteDefinition = { format: 'turnstage-adversarial-suite', version: 1, id: 'suite', name: 'Suite', cases: [
+      { id: first.id, name: first.name, turns: first.steps, forbid: { urls: true } },
+      { id: second.id, name: second.name, turns: second.steps, forbid: { tools: true } },
+    ] };
+    const sources = [
+      ['tests/security.adversarial.jsonc', serializeAdversarialSuite(suite)],
+      ['tests/security.adversarial.csv', serializeAdversarialCsv([first, second])],
+    ] as const;
+    for (const [path, source] of sources) {
+      const updated = deleteLinkedAdversarialCaseSource(path, source, first.id);
+      expect(parseAdversarialSource(path, updated.text).scenarios.map((item) => item.id)).toEqual([second.id]);
+      const empty = deleteLinkedAdversarialCaseSource(path, updated.text, second.id);
+      expect(parseAdversarialSource(path, empty.text).issues).toEqual([]);
+      expect(parseAdversarialSource(path, empty.text).scenarios).toEqual([]);
+      expect(() => deleteLinkedAdversarialCaseSource(path, empty.text, second.id)).toThrow(/not found/u);
+    }
+    const commented = sources[0][1].replace('"id": "case-two",', '"id": "case-two", // retain unrelated comment');
+    expect(deleteLinkedAdversarialCaseSource(sources[0][0], commented, first.id).text).toContain('// retain unrelated comment');
+  });
 
   it('updates one JSONC case while preserving surrounding comments and unrelated cases', () => {
     const suite: AdversarialSuiteDefinition = {

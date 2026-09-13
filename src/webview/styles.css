@@ -135,6 +135,43 @@ h1 { margin: 0; font-size: var(--ts-type-title); line-height: 1.4; } h2 { margin
 .right-pane-tabs button[aria-selected='true'] { color: var(--vscode-editor-foreground); background: var(--vscode-list-inactiveSelectionBackground); font-weight: 600; }
 .right-pane-panel { min-width: 0; min-height: 0; overflow: hidden; outline: 0; }
 .right-pane-panel > .inspector-content { height: 100%; }
+.unified-test-workspace { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-width: 0; min-height: 0; }
+.unified-test-workspace__toolbar { display: grid; gap: 0; border-bottom: 1px solid var(--vscode-editorGroup-border); background: var(--vscode-editor-background); }
+.unified-test-workspace__sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1px solid var(--vscode-editorGroup-border); }
+.unified-test-workspace__sections button { min-width: 0; min-height: var(--ts-control-height); border: 0; border-radius: 0; color: var(--vscode-descriptionForeground); background: transparent; text-align: center; }
+.unified-test-workspace__sections button[aria-selected='true'] { color: var(--vscode-foreground); background: var(--vscode-list-inactiveSelectionBackground); font-weight: 600; }
+.unified-test-workspace__sections button:hover:not(:disabled) { color: var(--vscode-foreground); background: var(--vscode-list-hoverBackground); }
+.unified-test-workspace__run-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ts-space-2); padding: var(--ts-space-1) var(--ts-pane-inline, var(--ts-space-3)); }
+.unified-test-workspace__run-actions > button { min-height: var(--ts-control-height); }
+.unified-test-workspace__run-actions > [role='alert'] { flex: 1 1 100%; color: var(--vscode-errorForeground); }
+.unified-test-workspace__body { min-width: 0; min-height: 0; overflow-y: auto; }
+.unified-test-workspace .settings-workspace { height: auto; overflow: visible; }
+.unified-test-workspace .settings-main { overflow: visible; }
+.unified-test-workspace .settings-panel { min-height: 0; }
+.unified-test-history { display: grid; gap: var(--ts-space-2); padding: var(--ts-space-3) var(--ts-pane-inline, var(--ts-space-3)); border-bottom: 1px solid var(--vscode-editorGroup-border); }
+.unified-test-history__heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--ts-space-1); }
+.unified-test-history__heading small, .unified-test-history__empty { color: var(--vscode-descriptionForeground); }
+.unified-test-history__empty { margin: 0; }
+.unified-test-history__selector { display: grid; gap: var(--ts-space-1); min-width: 0; }
+.unified-test-history__selector select { width: 100%; min-width: 0; }
+.unified-test-history__detail { display: grid; gap: var(--ts-space-2); min-width: 0; }
+.unified-test-history__summary, .unified-test-history__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ts-space-1) var(--ts-space-3); }
+.unified-test-history__actions { justify-content: space-between; color: var(--vscode-descriptionForeground); }
+.unified-test-history__export { position: relative; }
+.unified-test-history__export > summary { display: flex; align-items: center; min-height: var(--ts-control-height); padding: 0 var(--ts-space-2); border: 1px solid var(--vscode-input-border, var(--vscode-editorGroup-border)); cursor: pointer; list-style: none; }
+.unified-test-history__export > summary::-webkit-details-marker { display: none; }
+.unified-test-history__export > div { position: absolute; z-index: 8; inset-block-start: calc(100% + 2px); inset-inline-end: 0; display: grid; min-width: 8rem; padding: var(--ts-space-1); border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border)); background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); }
+.unified-test-history__export > div button { text-align: start; }
+.unified-test-history__cases { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--vscode-editorGroup-border); }
+.unified-test-history__cases li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--ts-space-1) var(--ts-space-2); min-width: 0; padding: var(--ts-space-1) 0; border-bottom: 1px solid var(--vscode-editorGroup-border); }
+.unified-test-history__case-name { flex: 1 1 9rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unified-history-cases { display: grid; gap: var(--ts-space-2); min-width: 0; }
+.unified-history-cases__search { display: grid; gap: var(--ts-space-1); min-width: 0; }
+.unified-history-cases__search input { width: 100%; min-width: 0; }
+.unified-history-cases__identity { display: grid; gap: 2px; flex: 1 1 9rem; min-width: 0; }
+.unified-history-cases__identity small { overflow: hidden; color: var(--vscode-descriptionForeground); text-overflow: ellipsis; white-space: nowrap; }
+.unified-history-cases__pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--ts-space-1); }
+.unified-history-cases__pagination span { color: var(--vscode-descriptionForeground); font-size: var(--ts-type-small); }
 @container (max-width: 34em) { .right-pane-heading > span { display: none; } }
 .webview-toolbar-menu { position: fixed; z-index: 100; display: grid; gap: 1px; padding: var(--ts-space-1); border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border)); border-radius: 2px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, .28)); }
 .webview-toolbar-menu button { display: flex; align-items: center; justify-content: flex-start; gap: var(--ts-space-2); width: 100%; border-color: transparent; background: transparent; color: var(--vscode-menu-foreground, var(--vscode-foreground)); text-align: start; }

@@ -160,11 +160,8 @@ export function serializeScenarioJUnit(records: readonly ScenarioExecutionRecord
     const className = escapeXml(`turnstage.${record.profileId}`);
     const failures = record.result ? [...record.result.steps.flatMap((step) => step.checks), ...record.result.checks].filter((check) => !check.passed).map((check) => check.id) : [];
     let outcome = '';
-    if (record.result?.adversarial?.outcome === 'attackSucceeded') outcome = `<failure message="Adversarial attack succeeded">${escapeXml(failures.join('\n'))}</failure>`;
-    else if (record.result?.adversarial?.outcome === 'indeterminate') outcome = `<error message="Adversarial result indeterminate">${escapeXml(failures.join('\n'))}</error>`;
-    else if (record.result?.adversarial?.outcome === 'infrastructureError') outcome = `<error message="Adversarial infrastructure error">${escapeXml(failures.join('\n'))}</error>`;
-    else if (record.status === 'failed') outcome = `<failure message="Conversation contract failed">${escapeXml(failures.join('\n'))}</failure>`;
-    else if (record.status === 'error') outcome = '<error message="Conversation contract execution error" />';
+    if (record.status === 'error') outcome = `<error message="${record.result?.adversarial?.outcome === 'indeterminate' ? 'Adversarial result indeterminate' : record.result?.adversarial?.outcome === 'infrastructureError' ? 'Adversarial infrastructure error' : 'Conversation contract execution error'}">${escapeXml(failures.join('\n'))}</error>`;
+    else if (record.status === 'failed') outcome = `<failure message="${record.result?.adversarial?.outcome === 'attackSucceeded' ? 'Adversarial attack succeeded' : 'Conversation contract failed'}">${escapeXml(failures.join('\n'))}</failure>`;
     else if (record.status === 'skipped') outcome = '<skipped />';
     return `  <testcase classname="${className}" name="${name}" time="${duration}">${outcome}</testcase>`;
   }).join('\n');

@@ -213,9 +213,7 @@ describe('Webview DOM behavior', () => {
       primaryLocation: { kind: 'message', messageId: 'assistant-1' }, availableLocations: [{ kind: 'message', messageId: 'assistant-1' }],
     };
     render(<AdversarialWorkspace profile={profile} post={vi.fn()} testResults={[result]} activeSection="cases" vscodeFeatures={false} />);
-    const doctor = screen.getByRole('button', { name: 'Diagnose profile with Copilot' }) as HTMLButtonElement;
-    expect(doctor.disabled).toBe(true);
-    expect(doctor.title).toBe('Available only in the VS Code extension');
+    expect(screen.queryByRole('button', { name: 'Diagnose profile with Copilot' })).toBeNull();
 
     cleanup();
     const view = render(<AdversarialWorkspace profile={profile} post={vi.fn()} testResults={[result]} activeSection="results" vscodeFeatures={false} />);
@@ -1085,12 +1083,69 @@ describe('Webview DOM behavior', () => {
     ] });
   });
 
-  it('adds and runs a conversation contract through the Tests workspace', async () => {
+  it('confirms removal of opening blocks and mapping rules before patching the Profile', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const block = { id: 'usage', label: 'Usage', kind: 'meter' as const, path: '$.usage', valuePath: '$.used', maxPath: '$.limit' };
+    const configured: TurnStageProfile = { ...profile, opening: { mode: 'request', response: { messagePath: '$.message', blocks: [block] } } };
+    render(<SettingsWorkspace section="opening-flow" onSectionChange={vi.fn()} profile={configured} post={post} />);
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Block type' }), 'status');
+    let confirmation = screen.getByRole('alertdialog', { name: 'Change response block Usage type?' });
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['opening', 'response', 'blocks'] }));
+    await user.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
+    expect((screen.getByRole('combobox', { name: 'Block type' }) as HTMLSelectElement).value).toBe('meter');
+    await user.click(screen.getByRole('button', { name: 'Delete response block' }));
+    confirmation = screen.getByRole('alertdialog', { name: 'Delete response block Usage' });
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['opening', 'response', 'blocks'] }));
+    await user.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('button', { name: 'Delete response block' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Delete response block' }));
+    confirmation = screen.getByRole('alertdialog', { name: 'Delete response block Usage' });
+    await user.click(within(confirmation).getByRole('button', { name: 'Delete' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['opening', 'response', 'blocks'], value: [] });
+
+    cleanup();
+    post.mockClear();
+    const withMapping: TurnStageProfile = { ...profile, stream: { ...profile.stream, mappings: [{ id: 'message-text', match: { event: 'message' }, emit: { type: 'content.text.delta', text: { path: '$.text' } } }] } };
+    render(<SettingsWorkspace section="stream-mapping" onSectionChange={vi.fn()} profile={withMapping} post={post} />);
+    await user.click(screen.getByRole('button', { name: 'Delete', exact: true }));
+    confirmation = screen.getByRole('alertdialog', { name: 'Delete mapping rule message-text' });
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['stream', 'mappings'] }));
+    await user.click(within(confirmation).getByRole('button', { name: 'Delete' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['stream', 'mappings'], value: [] });
+  });
+
+  it('keeps only cases and results in Tests even when the Profile has a saved campaign', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [], campaigns: [{ id: 'release', name: 'Release safety', selectors: { caseIds: ['case-a'] }, runPolicy: { repetitions: 1 } }] } };
+    function Harness(): React.JSX.Element {
+      const [section, setSection] = useState<'results' | 'scenarios'>('results');
+      return <AutomationWorkspace profile={configured} post={post} activeSection={section} onActiveSectionChange={setSection} vscodeFeatures={false} />;
+    }
+    render(<Harness />);
+
+    const navigation = screen.getByRole('tablist', { name: 'Test sections' });
+    expect(within(navigation).getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual(['Cases: 0', 'Results: 0']);
+    expect(screen.queryByText('Run deterministic conversation contracts and inspect bounded evidence without mixing them with adversarial outcomes.')).toBeNull();
+    expect(screen.getByText('No test results yet. Run a test case to see results here.')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'View test cases' }));
+    expect(screen.getByRole('heading', { name: 'Test cases' })).toBeTruthy();
+    expect(screen.queryByText('Keep small cases inline or import a JSONC suite copy. Imported files are stored in this browser and do not stay linked to the original.')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Test groups' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Advanced: test groups/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add test group' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Preview plan' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Run', exact: true })).toBeNull();
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['tests', 'campaigns'] }));
+  });
+
+  it('adds and runs one conversation contract through the Tests workspace', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
     render(<AutomationWorkspace activeSection="scenarios" profile={profile} post={post} />);
 
-    await user.click(screen.getAllByRole('button', { name: 'Add scenario' })[0]!);
+    await user.click(screen.getAllByRole('button', { name: 'Add case' })[0]!);
     expect(post).toHaveBeenCalledWith(expect.objectContaining({
       type: 'profile.patch',
       path: ['tests', 'scenarios'],
@@ -1099,10 +1154,24 @@ describe('Webview DOM behavior', () => {
     const configured = { ...profile, tests: { scenarios: [{ id: 'contract-1', name: 'Contract 1', steps: [{ id: 'turn-1', input: 'Hello' }] }] } } as TurnStageProfile;
     cleanup();
     render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} />);
-    await user.click(screen.getByRole('button', { name: 'Run all' }));
-    expect(post).toHaveBeenCalledWith({ type: 'test.runContracts' });
-    await user.click(screen.getByRole('button', { name: 'Run scenario Contract 1' }));
+    expect(screen.queryByRole('button', { name: 'Run all' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Run case Contract 1' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.runCase', scenarioId: 'contract-1', kind: 'contract' });
+  });
+
+  it('shows a readable step title and disables unsupported fault simulation in Web', async () => {
+    const user = userEvent.setup();
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [{ id: 'agent-tools', name: 'Agent tools', faults: { disconnectAfterEvents: 1 }, steps: [{ id: 'agent-turn', input: 'Search' }] }] } };
+    render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={vi.fn()} vscodeFeatures={false} />);
+
+    expect(screen.queryByRole('button', { name: 'Run all' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Agent tools: This case needs the VS Code extension.' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Agent tools. This case needs the VS Code extension.' }));
+    expect(screen.getByRole('region', { name: 'Message 1' })).toBeTruthy();
+    expect((screen.getByRole('textbox', { name: 'Step ID' }) as HTMLInputElement).value).toBe('agent-turn');
+    await user.click(screen.getByText('Network fault simulation', { selector: 'summary' }));
+    expect((screen.getByRole('checkbox', { name: 'Enable network fault simulation' }).closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
+    expect(screen.getByText('VS Code only')).toBeTruthy();
   });
 
   it('keeps captured drafts out of execution until they are reviewed', async () => {
@@ -1115,11 +1184,12 @@ describe('Webview DOM behavior', () => {
     }] } };
     render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} />);
 
-    expect((screen.getByRole('button', { name: 'Run all' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Review scenario Captured contract before running' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText('Needs review')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Captured contract' }));
+    expect(screen.queryByRole('button', { name: 'Run all' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Captured contract: Review this case before selecting it.' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Review this case before selecting it.')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Captured contract. Review this case before selecting it.' }));
     await user.click(screen.getByRole('button', { name: 'Mark ready' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(post).toHaveBeenCalledWith(expect.objectContaining({
       type: 'profile.patch', path: ['tests', 'scenarios'],
       value: [expect.objectContaining({ tags: ['captured'], capture: expect.objectContaining({ status: 'ready' }) })],
@@ -1138,6 +1208,48 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByText('Contract 100')).toBeTruthy();
   });
 
+  it('uses only the primary and section tabs to label test workspaces', () => {
+    const post = vi.fn();
+    const { container, rerender } = render(<AutomationWorkspace activeSection="scenarios" profile={profile} post={post} />);
+    expect(screen.getByRole('tablist', { name: 'Test sections' })).toBeTruthy();
+    expect(container.querySelector('.settings-header')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Automated testing' })).toBeNull();
+
+    rerender(<AdversarialWorkspace activeSection="cases" profile={profile} post={post} />);
+    expect(screen.getByRole('tablist', { name: 'Red Team sections' })).toBeTruthy();
+    expect(container.querySelector('.settings-header')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Adversarial testing' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Validate' })).toBeNull();
+  });
+
+  it('saves an automation case directly from the full-screen editor and discards separate drafts', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [{ id: 'contract-a', name: 'Contract A', steps: [{ id: 'turn-1', input: 'Hello' }] }] } };
+    render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} />);
+
+    await user.click(screen.getByRole('button', { name: 'Contract A' }));
+    expect(screen.getByRole('dialog', { name: 'Contract A' })).toBeTruthy();
+    await user.clear(screen.getByLabelText('Scenario name'));
+    await user.type(screen.getByLabelText('Scenario name'), 'Discarded A');
+    await user.click(screen.getByRole('button', { name: 'Discard changes' }));
+    let discardConfirmation = screen.getByRole('alertdialog', { name: 'Discard unsaved changes to Contract A?' });
+    await user.click(within(discardConfirmation).getByRole('button', { name: 'Cancel' }));
+    expect((screen.getByLabelText('Scenario name') as HTMLInputElement).value).toBe('Discarded A');
+    await user.click(screen.getByRole('button', { name: 'Discard changes' }));
+    discardConfirmation = screen.getByRole('alertdialog', { name: 'Discard unsaved changes to Contract A?' });
+    await user.click(within(discardConfirmation).getByRole('button', { name: 'Discard changes' }));
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch' }));
+
+    await user.click(screen.getByRole('button', { name: 'Contract A' }));
+    expect((screen.getByLabelText('Scenario name') as HTMLInputElement).value).toBe('Contract A');
+    await user.clear(screen.getByLabelText('Scenario name'));
+    await user.type(screen.getByLabelText('Scenario name'), 'Saved A');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['tests', 'scenarios'], value: [expect.objectContaining({ name: 'Saved A' })] }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('lists linked functional cases without loading prompts and routes stable suite actions', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
@@ -1153,9 +1265,9 @@ describe('Webview DOM behavior', () => {
     render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} trusted linkedCaseCatalog={linkedCaseCatalog} />);
 
     expect(screen.getByText('Linked contract')).toBeTruthy();
-    expect(screen.getByText('2 steps · 3 assertions · Comparison · Performance')).toBeTruthy();
+    expect(screen.getByText('Regression suite · 2 steps · 3 assertions · Comparison · Performance')).toBeTruthy();
     expect(document.body.textContent).not.toContain('PRIVATE LINKED PROMPT');
-    await user.click(screen.getByRole('button', { name: 'Run scenario Linked contract' }));
+    await user.click(screen.getByRole('button', { name: 'Run case Linked contract' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.runCase', scenarioId: 'linked-contract', suiteId: 'regression-suite', kind: 'contract' });
     await user.click(screen.getByRole('button', { name: 'Linked contract' }));
     expect(post).toHaveBeenCalledWith({ type: 'contract.case.request', sourcePath: 'tests/regression.tests.jsonc', scenarioId: 'linked-contract' });
@@ -1220,18 +1332,27 @@ describe('Webview DOM behavior', () => {
   it('disables VS Code-only suite actions in Web while preserving browser imports', async () => {
     const user = userEvent.setup();
     const post = vi.fn();
-    render(<AutomationWorkspace activeSection="scenarios" profile={profile} post={post} trusted vscodeFeatures={false} />);
+    const configured = { ...profile, tests: { scenarios: [{ id: 'normal', name: 'Normal', steps: [{ id: 'turn-one', input: 'Hello' }] }] } } as TurnStageProfile;
+    render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} trusted vscodeFeatures={false} />);
 
-    await user.click(screen.getByLabelText('More test suite actions'));
+    await user.click(screen.getByLabelText('More case actions'));
+    await user.click(screen.getByText('Add cases from file'));
     const importCopy = screen.getByRole('button', { name: 'Import JSONC copy' });
     const linkSuites = screen.getAllByRole('button', { name: 'Link suite' });
     const refreshSuites = screen.getByRole('button', { name: 'Refresh linked suites' });
-    expect(linkSuites).toHaveLength(2);
+    expect(linkSuites).toHaveLength(1);
     expect(linkSuites.every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
     expect(linkSuites.every((button) => button.getAttribute('title') === 'Available only in the VS Code extension')).toBe(true);
     expect((refreshSuites as HTMLButtonElement).disabled).toBe(true);
     await user.click(importCopy);
     expect(post).toHaveBeenCalledWith({ type: 'contract.file', action: 'importJsonc' });
+    await user.click(screen.getByRole('button', { name: 'Import CSV' }));
+    expect(post).toHaveBeenCalledWith({ type: 'contract.file', action: 'importCsv' });
+    await user.click(screen.getByText('Export cases'));
+    await user.click(screen.getByRole('button', { name: 'Export cases (JSONC)' }));
+    expect(post).toHaveBeenCalledWith({ type: 'contract.file', action: 'exportJsonc' });
+    await user.click(screen.getByRole('button', { name: 'Export cases (CSV)' }));
+    expect(post).toHaveBeenCalledWith({ type: 'contract.file', action: 'exportCsv' });
     expect(post).not.toHaveBeenCalledWith({ type: 'contract.file', action: 'linkSuite' });
   });
 
@@ -1241,6 +1362,8 @@ describe('Webview DOM behavior', () => {
     const configured = { ...profile, tests: { scenarios: [{ id: 'case-1', name: 'Case 1', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } }] } } as TurnStageProfile;
     render(<AdversarialWorkspace profile={configured} post={post} activeSection="cases" vscodeFeatures={false} />);
 
+    await user.click(screen.getByLabelText('More case actions'));
+    await user.click(screen.getByText('Add cases from file'));
     const linkSuite = screen.getByRole('button', { name: 'Link suite' });
     const refreshCases = screen.getByRole('button', { name: 'Refresh linked cases' });
     expect((linkSuite as HTMLButtonElement).disabled).toBe(true);
@@ -1266,17 +1389,20 @@ describe('Webview DOM behavior', () => {
     }
     const { container } = render(<Harness />);
 
+    await user.click(screen.getByLabelText('More case actions'));
+    await user.click(screen.getByText('Add cases from file'));
     await user.click(screen.getByRole('button', { name: 'Import CSV' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'importCsv' });
     await user.click(screen.getByRole('button', { name: 'Import JSONL' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'importJsonl' });
-    await user.click(screen.getByRole('button', { name: 'Link suite' }));
+    await user.click(screen.getAllByRole('button', { name: 'Link suite' })[0]!);
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'linkSuite' });
     await user.click(screen.getAllByRole('button', { name: 'Add case' })[0]!);
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['tests', 'scenarios'], value: [expect.objectContaining({ id: 'adversarial-1', adversarial: expect.objectContaining({ mode: 'singleTurn', timeoutMs: 60000 }) })] }));
     await user.click(screen.getByRole('button', { name: 'Diagnose profile with Copilot' }));
     expect(post).toHaveBeenCalledWith({ type: 'copilot.profileDoctor' });
     const redTeamNavigation = screen.getByRole('tablist', { name: 'Red Team sections' });
+    expect(within(redTeamNavigation).getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual(['Cases: 0', 'Results: 1', 'Campaigns: 0', 'Timeline: —']);
     expect(within(redTeamNavigation).getByRole('tab', { name: 'Campaigns: 0' })).toBeTruthy();
     expect(within(redTeamNavigation).getByRole('tab', { name: 'Cases: 0' })).toBeTruthy();
     await user.click(within(redTeamNavigation).getByRole('tab', { name: 'Results: 1' }));
@@ -1312,17 +1438,16 @@ describe('Webview DOM behavior', () => {
     const { container } = render(<Harness />);
 
     expect(screen.getByRole('tab', { name: 'Cases: 100' })).toBeTruthy();
-    expect(container.querySelectorAll('.adversarial-case-table tbody > tr').length).toBe(25);
+    expect(container.querySelectorAll('.adversarial-case-item').length).toBe(25);
     expect(screen.getByText('100 of 100 cases')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Run all' }));
-    expect(post).toHaveBeenCalledWith({ type: 'test.runAll' });
+    expect(screen.queryByRole('button', { name: 'Run all' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Next page' }));
     expect(screen.getByText('Case 26')).toBeTruthy();
     expect(screen.getByText('Page 2 of 4')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Run case Case 26' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.runCase', scenarioId: 'case-26', suiteId: 'security' });
-    await user.type(screen.getByRole('searchbox', { name: 'Search adversarial cases' }), 'case-100');
-    expect(container.querySelectorAll('.adversarial-case-table tbody > tr').length).toBe(1);
+    await user.type(screen.getByRole('searchbox', { name: 'Search cases' }), 'case-100');
+    expect(container.querySelectorAll('.adversarial-case-item').length).toBe(1);
     expect(screen.getByText('Case 100')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Open linked source Security suite' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.openLinkedSuite', path: 'tests/security.adversarial.csv' });
@@ -1338,7 +1463,7 @@ describe('Webview DOM behavior', () => {
     const common = { profile: linkedProfile, post, activeSection: 'cases' as const, linkedCaseCatalog: catalog, trusted: true };
     const { rerender } = render(<AdversarialWorkspace {...common} />);
 
-    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    await user.click(screen.getByRole('button', { name: 'Prompt boundary' }));
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.case.request', sourcePath: detail.sourcePath, scenarioId: 'case-1' });
     expect(screen.getByRole('status').textContent).toContain('Loading this case from disk');
     rerender(<AdversarialWorkspace {...common} linkedCaseEditor={{ status: 'loaded', detail }} />);
@@ -1356,7 +1481,37 @@ describe('Webview DOM behavior', () => {
     rerender(<AdversarialWorkspace {...common} linkedCaseEditor={{ status: 'error', sourcePath: detail.sourcePath, scenarioId: 'case-1', message: 'stale', conflict: true }} />);
     expect(screen.getByRole('alert').textContent).toContain('changed outside TurnStage');
     await user.click(screen.getByRole('button', { name: 'Reload' }));
+    let reloadConfirmation = screen.getByRole('alertdialog', { name: 'Reload case Prompt boundary and discard unsaved changes?' });
+    await user.click(within(reloadConfirmation).getByRole('button', { name: 'Cancel' }));
+    expect(post).not.toHaveBeenLastCalledWith({ type: 'adversarial.case.request', sourcePath: detail.sourcePath, scenarioId: 'case-1' });
+    await user.click(screen.getByRole('button', { name: 'Reload' }));
+    reloadConfirmation = screen.getByRole('alertdialog', { name: 'Reload case Prompt boundary and discard unsaved changes?' });
+    await user.click(within(reloadConfirmation).getByRole('button', { name: 'Reload' }));
     expect(post).toHaveBeenLastCalledWith({ type: 'adversarial.case.request', sourcePath: detail.sourcePath, scenarioId: 'case-1' });
+  });
+
+  it('keeps inline Red Team edits in one modal draft until saved or discarded', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [{ id: 'case-a', name: 'Case A', steps: [{ id: 'turn-1', input: 'Hello' }], adversarial: { forbid: { urls: true }, repetitions: 5 } }] } };
+    render(<AdversarialWorkspace profile={configured} post={post} activeSection="cases" />);
+    await user.click(screen.getByRole('button', { name: 'Case A' }));
+    expect(screen.getByRole('dialog', { name: 'Case A' })).toBeTruthy();
+    const name = screen.getByLabelText('Scenario name');
+    await user.clear(name); await user.type(name, 'Edited A'); await user.tab();
+    await user.click(screen.getByRole('button', { name: 'Close editor' }));
+    expect(screen.getByRole('alert').textContent).toContain('Unsaved changes');
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Discard changes' }));
+    const discardConfirmation = screen.getByRole('alertdialog', { name: 'Discard unsaved changes to Case A?' });
+    await user.click(within(discardConfirmation).getByRole('button', { name: 'Discard changes' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch' }));
+    await user.click(screen.getByRole('button', { name: 'Case A' }));
+    expect((screen.getByLabelText('Scenario name') as HTMLInputElement).value).toBe('Case A');
+    await user.clear(screen.getByLabelText('Scenario name')); await user.type(screen.getByLabelText('Scenario name'), 'Saved A');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['tests', 'scenarios'], value: [expect.objectContaining({ name: 'Saved A' })] }));
   });
 
   it('bounds 500 Red Team results and keeps its sub-tabs keyboard navigable', async () => {
@@ -1385,12 +1540,11 @@ describe('Webview DOM behavior', () => {
 
     expect(container.querySelectorAll('.adversarial-result-table tbody > tr')).toHaveLength(25);
     expect(screen.getByText('Showing 1–25 of 500')).toBeTruthy();
-    const resultsTab = screen.getByRole('tab', { name: 'Results: 500' });
-    resultsTab.focus();
+    const casesTab = screen.getByRole('tab', { name: 'Cases: 0' });
+    casesTab.focus();
     await user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('tab', { name: 'Cases: 0' }).getAttribute('aria-selected')).toBe('true');
-    expect(screen.getByRole('tabpanel').id).toBe('red-team-cases');
-    await user.click(screen.getByRole('tab', { name: 'Results: 500' }));
+    expect(screen.getByRole('tab', { name: 'Results: 500' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tabpanel').id).toBe('red-team-results');
     await user.click(screen.getByRole('button', { name: 'Next page' }));
     expect(screen.getByText('Case 26')).toBeTruthy();
     await user.type(screen.getByRole('searchbox', { name: 'Search results' }), 'case-500');
@@ -1409,7 +1563,7 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'adversarial.openLinkedSuite', path: 'tests/safety.adversarial.csv' });
     expect(screen.getByRole('button', { name: 'Unlink suite tests/safety.adversarial.csv' })).toBeTruthy();
     expect(screen.getByRole('status').textContent).toContain('Running all adversarial cases');
-    expect((screen.getByRole('button', { name: 'Running all…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Running all…' })).toBeNull();
     rerender(<AdversarialWorkspace profile={linked} post={post} activeSection="results" testOperation={operation} />);
     expect(screen.getByRole('status').textContent).toContain('Running all adversarial cases');
     expect(screen.getByRole('status').textContent).toContain('24 / 100 cases · 31 / 120 attempts');
@@ -1428,7 +1582,7 @@ describe('Webview DOM behavior', () => {
     const { container, rerender } = render(<AdversarialWorkspace {...common} activeSection="cases" scrollTop={480} />);
     const scrollContainer = container.querySelector('.settings-main') as HTMLDivElement;
 
-    expect(screen.getByRole('button', { name: 'Close editor' }).getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('dialog', { name: 'Restored case' })).toBeTruthy();
     expect(scrollContainer.scrollTop).toBe(480);
     scrollContainer.scrollTop = 640;
     fireEvent.scroll(scrollContainer);
@@ -1614,9 +1768,81 @@ describe('Webview DOM behavior', () => {
     const configured = { ...profile, tests: { scenarios: [{ id: 'case-1', name: 'Delete me', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } }] } } as TurnStageProfile;
     render(<AdversarialWorkspace profile={configured} post={post} activeSection="cases" />);
     await user.click(screen.getByRole('button', { name: 'Delete scenario Delete me' }));
+    let confirmation = screen.getByRole('alertdialog', { name: 'Delete scenario Delete me' });
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch' }));
+    expect(document.activeElement).toBe(within(confirmation).getByRole('button', { name: 'Cancel' }));
+    await user.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch' }));
+    await user.click(screen.getByRole('button', { name: 'Delete scenario Delete me' }));
+    confirmation = screen.getByRole('alertdialog', { name: 'Delete scenario Delete me' });
+    await user.click(within(confirmation).getByRole('button', { name: 'Delete' }));
     expect(screen.getByRole('status').textContent).toContain('Deleted case Delete me.');
     await user.click(screen.getByRole('button', { name: 'Undo' }));
     expect(post).toHaveBeenLastCalledWith({ type: 'profile.patch', path: ['tests', 'scenarios'], value: configured.tests!.scenarios });
+  });
+
+  it('requires confirmation before unlinking a suite', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [], adversarialSuites: ['tests/safety.adversarial.csv'] } };
+    render(<AdversarialWorkspace profile={configured} post={post} activeSection="cases" />);
+    await user.click(screen.getByRole('button', { name: 'Unlink suite tests/safety.adversarial.csv' }));
+    const confirmation = screen.getByRole('alertdialog', { name: 'Unlink suite tests/safety.adversarial.csv' });
+    expect(within(confirmation).getByText('The source file is not deleted.', { exact: false })).toBeTruthy();
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch' }));
+    await user.click(within(confirmation).getByRole('button', { name: 'Unlink' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['tests', 'adversarialSuites'], value: [] });
+  });
+
+  it('confirms deletion of an automation case before patching its Profile', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [{ id: 'contract-1', name: 'Contract 1', steps: [{ id: 'turn-1', input: 'Hello' }] }] } };
+    render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} />);
+    await user.click(screen.getByRole('button', { name: 'Contract 1' }));
+    await user.click(screen.getByRole('button', { name: 'Delete scenario Contract 1' }));
+    let confirmation = screen.getByRole('alertdialog', { name: 'Delete scenario Contract 1' });
+    await user.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('dialog', { name: 'Contract 1' })).toBeTruthy();
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch' }));
+    await user.click(screen.getByRole('button', { name: 'Delete scenario Contract 1' }));
+    confirmation = screen.getByRole('alertdialog', { name: 'Delete scenario Contract 1' });
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch' }));
+    await user.click(within(confirmation).getByRole('button', { name: 'Delete' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['tests', 'scenarios'], value: [] });
+    expect(screen.getByRole('status').textContent).toContain('Deleted scenario Contract 1.');
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(post).toHaveBeenLastCalledWith({ type: 'profile.patch', path: ['tests', 'scenarios'], value: configured.tests!.scenarios });
+  });
+
+  it('labels linked-case deletion by its actual source and waits for confirmation', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const revision = 'a'.repeat(64);
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [], contractSuites: ['tests/regression.tests.jsonc'] } };
+    const catalog = { entries: [{ sourcePath: 'tests/regression.tests.jsonc', revision, suiteId: 'suite', suiteName: 'Suite', scenarioId: 'case-a', scenarioName: 'Case A', tags: [], turns: 1, assertions: 0, comparison: false, performance: false, faults: false }], total: 1, truncated: false, issues: [] };
+    render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} linkedCaseCatalog={catalog} trusted />);
+    await user.click(screen.getByRole('button', { name: 'Delete case Case A from source file' }));
+    const confirmation = screen.getByRole('alertdialog', { name: 'Delete case Case A from source file?' });
+    expect(within(confirmation).getByText(/tests\/regression.tests.jsonc/u)).toBeTruthy();
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'contract.case.delete' }));
+    await user.click(within(confirmation).getByRole('button', { name: 'Delete case' }));
+    expect(post).toHaveBeenCalledWith({ type: 'contract.case.delete', sourcePath: 'tests/regression.tests.jsonc', scenarioId: 'case-a', expectedRevision: revision });
+  });
+
+  it('deletes an imported red-team case from the browser copy, never the original file', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const revision = 'b'.repeat(64);
+    const configured: TurnStageProfile = { ...profile, tests: { scenarios: [] } };
+    const catalog = { entries: [{ sourcePath: 'browser://suite/example/security.csv', revision, suiteId: 'suite', suiteName: 'Suite', scenarioId: 'case-a', scenarioName: 'Case A', tags: [], mode: 'singleTurn' as const, turns: 1, maxTurns: 1, repetitions: 1, timeoutMs: 60_000, prohibit: { content: 0, events: 0, urls: true, ctas: false, tools: false } }], total: 1, truncated: false, issues: [] };
+    render(<AdversarialWorkspace profile={configured} post={post} activeSection="cases" linkedCaseCatalog={catalog} trusted vscodeFeatures={false} />);
+    await user.click(screen.getByRole('button', { name: 'Delete case Case A from browser copy' }));
+    const confirmation = screen.getByRole('alertdialog', { name: 'Delete case Case A from browser copy?' });
+    expect(within(confirmation).getByText(/original file is unchanged/u)).toBeTruthy();
+    await user.click(within(confirmation).getByRole('button', { name: 'Delete case' }));
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.case.delete', sourcePath: 'browser://suite/example/security.csv', scenarioId: 'case-a', expectedRevision: revision });
   });
 
   it('keeps test configuration separate from scenario authoring and performance settings', async () => {
@@ -1645,11 +1871,12 @@ describe('Webview DOM behavior', () => {
     const ttft = screen.getByRole('spinbutton', { name: 'TTFT maximum milliseconds' });
     await user.type(ttft, '900');
     fireEvent.blur(ttft);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(post).toHaveBeenLastCalledWith(expect.objectContaining({
       type: 'profile.patch', path: ['tests', 'scenarios'],
       value: [expect.objectContaining({ performance: { thresholds: { 'metrics.ttft': 900 }, regression: undefined } })],
     }));
-    expect(screen.getAllByRole('spinbutton')).toHaveLength(27);
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect((await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })).violations).toEqual([]);
   });
 
