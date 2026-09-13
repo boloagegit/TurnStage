@@ -722,7 +722,7 @@ function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post,
       {componentVisible(profile, 'messageMetrics') && (showTtft || showTotalDuration || messageMetrics.length > 0) && <MessageMetrics message={message} metrics={messageMetrics} showTtft={showTtft} showTotalDuration={showTotalDuration} />}
       {messageActions.length > 0 && <footer className={`mobile-chat-preview__message-toolbar mobile-chat-preview__message-toolbar--${messageActionVisibility}`} role="group" aria-label={t('Message actions')}>
         {messageActions.map((actionId) => actionId === 'message.inspectRaw'
-          ? <IconButton key={actionId} icon="target" label={feedback?.actionId === actionId ? feedback.message : t(message.role === 'user' ? 'Inspect request' : 'Inspect message')} type="button" aria-pressed={selected} onClick={() => onSelectMessage?.(message.id)} />
+          ? <IconButton key={actionId} icon="search" label={feedback?.actionId === actionId ? feedback.message : t(message.role === 'user' ? 'Inspect request' : 'Inspect message')} type="button" aria-pressed={selected} onClick={() => onSelectMessage?.(message.id)} />
           : actionId === 'message.copy'
             ? <IconButton key={actionId} icon={feedback?.actionId === actionId ? feedback.status === 'success' ? 'check' : feedback.status === 'error' ? 'warning' : 'copy' : 'copy'} label={feedback?.actionId === actionId ? feedback.message : t('Copy')} type="button" onClick={() => { reportFeedback(actionId, 'pending', t('Copying message…')); post({ type: 'action.invoke', actionId, sourceMessageId: message.id }); }} />
             : actionId === 'message.retry'

@@ -126,8 +126,8 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       }
       case 'form.cancel': break;
       case 'request.abort': await session.abort(); break;
-      case 'conversation.clear': session.clear(); break;
-      case 'conversation.new': await session.newConversation(); break;
+      case 'conversation.clear': if (confirmSessionChange('clear')) session.clear(); break;
+      case 'conversation.new': if (confirmSessionChange('restart')) await session.newConversation(); break;
       case 'run.import': await importRun(message.requestId); break;
       case 'run.export': await exportRun(message.runId, message.requestId); break;
       case 'run.delete': if (window.confirm('Delete this browser-local run? This cannot be undone.')) await deleteRun(message.runId); break;
@@ -147,7 +147,13 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       }
       case 'test.runAll': await tests.run('runAll'); break;
       case 'test.runContracts': await tests.run('runContracts'); break;
-      case 'test.runCase': await tests.run('runCase', message.scenarioId, message.kind); break;
+      case 'test.runCase': await tests.run('runCase', message.scenarioId, message.kind, message.suiteId); break;
+      case 'test.runSelection': await tests.runCases(message.cases); break;
+      case 'test.history.rerun': await tests.rerunHistory(message.runId, message.kind); break;
+      case 'test.history.export': await tests.exportRunReport(message.runId, message.format); break;
+      case 'test.history.request': await tests.postHistory(); break;
+      case 'test.history.clear': await tests.clearHistory(message.kind); break;
+      case 'test.baseline.accept': await tests.acceptBaseline(message.runId); break;
       case 'test.rerun': await tests.rerun(message.status); break;
       case 'test.cancel': tests.cancel(); break;
       case 'test.capture': await captureTest(message.source, message.suggestedKind ?? 'contract', message.requestId); break;
@@ -174,8 +180,10 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       case 'adversarial.case.request': await tests.loadCase('adversarial', message.sourcePath, message.scenarioId); break;
       case 'contract.case.request': await tests.loadCase('contract', message.sourcePath, message.scenarioId); break;
       case 'adversarial.case.save': await tests.saveCase('adversarial', message.sourcePath, message.scenarioId, message.expectedRevision, message.scenario); break;
+      case 'adversarial.case.delete': await tests.deleteCase('adversarial', message.sourcePath, message.scenarioId, message.expectedRevision); break;
       case 'adversarial.openLinkedSuite': await tests.exportSuite(message.path); break;
       case 'contract.case.save': await tests.saveCase('contract', message.sourcePath, message.scenarioId, message.expectedRevision, message.scenario); break;
+      case 'contract.case.delete': await tests.deleteCase('contract', message.sourcePath, message.scenarioId, message.expectedRevision); break;
       case 'contract.openLinkedSuite': await tests.exportSuite(message.path); break;
       case 'adversarial.file':
         if (message.action === 'csvTemplate') tests.exportTemplate('adversarial');
@@ -190,6 +198,9 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       case 'contract.file':
         if (message.action === 'csvTemplate') tests.exportTemplate('contract');
         else if (message.action === 'importJsonc') await tests.importSuite('contract', 'jsonc');
+        else if (message.action === 'importCsv') await tests.importSuite('contract', 'csv');
+        else if (message.action === 'exportJsonc') await tests.exportSuites('contract', 'jsonc');
+        else if (message.action === 'exportCsv') await tests.exportSuites('contract', 'csv');
         else notifyUnavailable('Linking workspace files is available only in the VS Code extension.', message.requestId);
         break;
       case 'uri.open': openExternalUri(message.uri); break;
@@ -213,6 +224,7 @@ function hydrate(requestId?: string): void {
   post({ type: 'test.results', results: [], automationResults: [] });
   void refreshRuns();
   void campaigns.postDashboard();
+  void tests.postHistory();
 }
 
 function postProfile(): void {
@@ -269,6 +281,7 @@ function selectProfile(id: string): void {
   runSummaries = [];
   session = createSession(active);
   postProfile();
+  void tests.postHistory();
   const current = session.current;
   post({ type: 'session.snapshot', snapshot: current.snapshot, runs: runSummaries, networkEntries: [] });
   void refreshRuns();
@@ -518,13 +531,30 @@ function exportActive(): void {
 }
 
 function deleteActive(): void {
-  if (active.builtIn || profiles.length <= 1 || !window.confirm(`Delete ${active.name}?`)) return;
+  if (active.builtIn || profiles.length <= 1) return;
+  const locale = normalizeLocale(preferences.locale ?? navigator.language);
+  const restoresOfficial = officialProfiles.some((item) => item.id === active.id);
+  const message = restoresOfficial
+    ? locale === 'zh-TW' ? `還原官方設定檔「${active.name}」？\n\n目前瀏覽器中的個人修改會被移除。` : locale === 'ja' ? `公式プロファイル「${active.name}」に戻しますか？\n\nこのブラウザー内の変更は削除されます。` : locale === 'ko' ? `공식 프로필 "${active.name}"(으)로 복원할까요?\n\n이 브라우저에 저장된 개인 변경 사항이 제거됩니다.` : `Restore the official Profile "${active.name}"?\n\nBrowser-local changes to this Profile will be removed.`
+    : locale === 'zh-TW' ? `刪除設定檔「${active.name}」？\n\n此瀏覽器中的設定檔會被移除。` : locale === 'ja' ? `プロファイル「${active.name}」を削除しますか？\n\nこのブラウザーに保存されたプロファイルは削除されます。` : locale === 'ko' ? `프로필 "${active.name}"을(를) 삭제할까요?\n\n이 브라우저에 저장된 프로필이 제거됩니다.` : `Delete Profile "${active.name}"?\n\nThis browser-local Profile will be removed.`;
+  if (!window.confirm(message)) return;
   const deletedId = active.id;
   const localProfiles = profiles.filter((item) => !item.builtIn && item.id !== deletedId);
   profiles = mergeCatalogEntries(officialProfiles, localProfiles);
   active = profiles.find((item) => item.id === deletedId) ?? profiles[0]!;
   persistLibrary();
   selectProfile(active.id);
+}
+
+function confirmSessionChange(action: 'clear' | 'restart'): boolean {
+  const locale = normalizeLocale(preferences.locale ?? navigator.language);
+  const messages = {
+    'zh-TW': action === 'clear' ? '清除目前對話？\n\n訊息、對話 ID、網路請求與事件資料都會移除；錄製的執行記錄會保留。' : '開始新對話？\n\n目前訊息、對話 ID 與事件資料會清除；錄製的執行記錄會保留。',
+    ja: action === 'clear' ? '現在の会話を消去しますか？\n\nメッセージ、会話 ID、通信履歴、イベントデータが削除されます。記録済みの実行履歴は残ります。' : '新しい会話を始めますか？\n\n現在のメッセージ、会話 ID、イベントデータが削除されます。記録済みの実行履歴は残ります。',
+    ko: action === 'clear' ? '현재 대화를 지울까요?\n\n메시지, 대화 ID, 네트워크 기록 및 이벤트 데이터가 제거됩니다. 저장된 실행 기록은 유지됩니다.' : '새 대화를 시작할까요?\n\n현재 메시지, 대화 ID 및 이벤트 데이터가 제거됩니다. 저장된 실행 기록은 유지됩니다.',
+    en: action === 'clear' ? 'Clear the current conversation?\n\nMessages, conversation ID, network entries, and event data will be removed. Recorded runs are kept.' : 'Start a new conversation?\n\nCurrent messages, conversation ID, and event data will be cleared. Recorded runs are kept.',
+  };
+  return window.confirm(messages[locale as keyof typeof messages] ?? messages.en);
 }
 
 function persistLibrary(): void {
@@ -564,8 +594,8 @@ async function invokeAction(actionId: string, sourceMessageId: string | undefine
   }
   if (actionId === 'message.retry') { const text = [...session.current.snapshot.messages].reverse().find((item) => item.role === 'user')?.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text).join(''); if (text) await session.send(text, { kind: 'retry', sourceMessageId }); return; }
   if (actionId === 'request.abort') { await session.abort(); return; }
-  if (actionId === 'conversation.new') { await session.newConversation(); return; }
-  if (actionId === 'conversation.clear') { session.clear(); return; }
+  if (actionId === 'conversation.new') { if (confirmSessionChange('restart')) await session.newConversation(); return; }
+  if (actionId === 'conversation.clear') { if (confirmSessionChange('clear')) session.clear(); return; }
   const action = source?.actions.find((item) => item.id === actionId || item.actionId === actionId);
   if (!action) throw new Error('The selected response action is no longer available.');
   if (action.confirm && !window.confirm(`${action.confirm.title}\n\n${action.confirm.message ?? ''}`)) return;
@@ -616,7 +646,6 @@ function ProfileLibrary(): React.JSX.Element {
       {secretNames.length > 0 && <details className="secret-editor"><summary>{labels.secrets}</summary>{secretNames.map((name) => <label key={name}>{name}<input type="password" autoComplete="off" value={secrets.get(name) ?? ''} placeholder={labels.memoryOnly} onChange={(event) => { if (event.target.value) secrets.set(name, event.target.value); else secrets.delete(name); renderSecrets((value) => value + 1); }} /></label>)}</details>}
       {active.builtIn && <p className="catalog-note">{labels.officialReadOnly}</p>}
       {catalog.warning ? <p className="catalog-note catalog-note--warning" role="status" title={catalog.warning}>{labels.catalogFallback}</p> : <p className="catalog-note">{labels.catalog}: {catalog.catalogId} · {catalog.revision}</p>}
-      <p>{labels.storage}</p>
     </footer>
   </div>;
 }

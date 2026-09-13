@@ -34,6 +34,17 @@ describe('scenario profile JSON Schema', () => {
     for (const name of ['scenarioAdversarial', 'adversarialForbid', 'adversarialContentRule', 'sourceBinding']) expect(schema.$defs[name]?.additionalProperties).toBe(false);
   });
 
+  it('matches each authorized external suite reference against exactly one schema branch', () => {
+    const properties = schema.$defs.tests!.properties as Record<string, { items: { oneOf: Array<{ pattern: string; minLength: number; maxLength: number }> } }>;
+    for (const [name, fileName] of [['contractSuites', 'smoke.tests.csv'], ['adversarialSuites', 'smoke.adversarial.csv']] as const) {
+      const variants = properties[name]!.items.oneOf;
+      const matches = (value: string) => variants.filter((variant) => value.length >= variant.minLength && value.length <= variant.maxLength && new RegExp(variant.pattern, 'u').test(value)).length;
+      expect(matches(fileName)).toBe(1);
+      expect(matches(`external:3c822818-81d4-4706-b441-a200bbcaa7e9:${fileName}`)).toBe(1);
+      expect(matches(`../${fileName}`)).toBe(0);
+    }
+  });
+
   it('ships a closed standalone schema for linked functional suites', () => {
     const contractSchema = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'resources', 'schemas', 'turnstage-contract-suite.schema.json'), 'utf8')) as {
       properties?: Record<string, unknown>;

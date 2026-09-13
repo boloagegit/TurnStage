@@ -51,7 +51,7 @@ describe('Profile Configuration surface', () => {
   it('provides a bounded scenario builder through one supported JSONC patch path', () => {
     expect(workspaceSource).toContain("active.id === 'scenario-tests'");
     expect(workspaceSource).toContain("patch(['tests', 'scenarios'], next)");
-    expect(workspaceSource).toContain('Conversation contracts');
+    expect(workspaceSource).toContain("t('Test cases')");
     expect(workspaceSource).toContain('Built-in state invariants still run.');
     expect(workspaceSource).toContain('disabled={!canDelete}');
     expect(workspaceStyles).toContain('.scenario-editor');

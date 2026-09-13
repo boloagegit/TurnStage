@@ -9,7 +9,7 @@ import * as vscode from 'vscode';
 import { serializeContractCsv } from '../src/extension/testing/contractCsv';
 import { parseContractSource } from '../src/extension/testing/contractSource';
 import { createContractSuite, serializeContractSuite } from '../src/extension/testing/contractSuite';
-import { appendLinkedContractCaseSource, LinkedContractCaseConflictError, loadEditableLinkedContractCase, saveEditableLinkedContractCase, updateLinkedContractCaseSource } from '../src/extension/testing/linkedContractCase';
+import { appendLinkedContractCaseSource, deleteLinkedContractCaseSource, LinkedContractCaseConflictError, loadEditableLinkedContractCase, saveEditableLinkedContractCase, updateLinkedContractCaseSource } from '../src/extension/testing/linkedContractCase';
 import type { ScenarioDefinition } from '../src/shared/types';
 
 const first: ScenarioDefinition = { id: 'case-one', name: 'Case one', steps: [{ id: 'turn-one', input: 'Prompt one', assertions: [{ path: 'assistant.text', operator: 'exists' }] }] };
@@ -17,6 +17,23 @@ const second: ScenarioDefinition = { id: 'case-two', name: 'Case two', steps: [{
 
 describe('linked functional case editing', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('deletes only the selected JSONC or CSV case, including the last case', () => {
+    const sources = [
+      ['tests/functional.tests.jsonc', serializeContractSuite(createContractSuite('suite', 'Suite', [first, second]))],
+      ['tests/functional.csv', serializeContractCsv([first, second])],
+    ] as const;
+    for (const [path, source] of sources) {
+      const updated = deleteLinkedContractCaseSource(path, source, first.id);
+      expect(parseContractSource(path, updated.text).scenarios.map((item) => item.id)).toEqual([second.id]);
+      const empty = deleteLinkedContractCaseSource(path, updated.text, second.id);
+      expect(parseContractSource(path, empty.text).issues).toEqual([]);
+      expect(parseContractSource(path, empty.text).scenarios).toEqual([]);
+      expect(() => deleteLinkedContractCaseSource(path, empty.text, second.id)).toThrow(/not found/u);
+    }
+    const commented = sources[0][1].replace('"id": "case-two",', '"id": "case-two", // retain unrelated comment');
+    expect(deleteLinkedContractCaseSource(sources[0][0], commented, first.id).text).toContain('// retain unrelated comment');
+  });
 
   it('updates one JSONC case while preserving suite and unrelated-case comments', () => {
     const source = serializeContractSuite(createContractSuite('functional-suite', 'Functional suite', [first, second]))

@@ -22,6 +22,13 @@ describe('localization catalogs', () => {
     }
   });
 
+  it('calls Profile 設定檔 in every Traditional Chinese manifest and host message', () => {
+    for (const catalog of ['package.nls.zh-tw.json', 'l10n/bundle.l10n.zh-tw.json']) {
+      const translated = Object.values(json(catalog));
+      expect(translated.filter((value) => value.replace(/\(command:[^)]+\)/gu, '').includes('Profile'))).toEqual([]);
+    }
+  });
+
   it('covers Extension Host localization literals in both bundles', () => {
     const hostSources = sourceFiles(resolve(root, 'src/extension')).map((path) => readFileSync(path, 'utf8')).join('\n');
     const english = json('l10n/bundle.l10n.json');
@@ -37,6 +44,7 @@ describe('localization catalogs', () => {
       'src/webview/main.tsx',
       'src/webview/MobileChatPreview.tsx',
       'src/webview/SettingsWorkspace.tsx',
+      'src/webview/ConfirmAction.tsx',
       'src/webview/configEditors.tsx'
     ].map((path) => readFileSync(resolve(root, path), 'utf8')).join('\n');
     const catalogSource = readFileSync(resolve(root, 'src/webview/i18n.ts'), 'utf8');
@@ -67,9 +75,19 @@ describe('localization catalogs', () => {
 
   it('does not fall back to English across the automated testing workspace', () => {
     const messages = [
-      'Functional, regression, comparison, and performance automation.',
-      'Run deterministic conversation contracts and inspect bounded evidence without mixing them with adversarial outcomes.',
-      'Deterministic contract, comparison, and performance outcomes from this Extension Host session.',
+      'Set up tests and review results.',
+      'Results from tests run in this session.',
+      'No test results yet. Run a test case to see results here.',
+      'View test cases',
+      'Test cases',
+      'Network fault simulation',
+      'VS Code only',
+      'Message {number}',
+      'Simulate delays, HTTP errors, disconnections, and malformed stream events during this test.',
+      'Network fault simulation runs only in the VS Code extension. Existing settings are shown but cannot be changed here.',
+      'Enable network fault simulation',
+      'Cases using network fault simulation require the VS Code extension.',
+      'Cases using network fault simulation require the VS Code extension. Run all is unavailable in Web until those settings are removed.',
       'Review test result',
       'Test result navigation',
       'Previous test result',
@@ -84,12 +102,11 @@ describe('localization catalogs', () => {
       'Page {current} of {total}',
       'Linked suites',
       'Inline',
-      'Keep small cases inline or link a JSONC/CSV suite. Full prompts load only when you edit a case.',
       'Test campaigns',
       'Create a bounded, repeatable selection of existing cases. Campaign history stores metadata only; raw prompts and evidence remain session-scoped.',
       'Add campaign',
       'Repetitions per adversarial case',
-      'Conversation contracts run once; adversarial cases use this sample size.',
+      'Standard test cases run once; red-team cases use this repetition count.',
       'Concurrent cases',
       'Cases may run in parallel. Turns and repeated attempts within one case remain sequential.',
       'Case IDs',
@@ -113,6 +130,28 @@ describe('localization catalogs', () => {
       'Delete campaign',
       'Attack succeeded',
       'Resisted',
+    ];
+    for (const supportedLocale of ['zh-TW', 'ja-JP', 'ko-KR']) {
+      setLocale(supportedLocale);
+      for (const message of messages) expect(t(message), `${supportedLocale}: ${message}`).not.toBe(message);
+    }
+  });
+
+  it('translates the test selection and result navigation in every supported locale', () => {
+    const messages = [
+      'General tests', 'Red Team', 'Search cases', 'Case name, ID, tag, or suite', 'Case name, ID, tag, or rule',
+      'More case actions', 'Select all selectable cases ({selectable}/{total})', 'Select matching cases ({selectable}/{total})',
+      'View test results', 'Clear run history?', 'Clear history', 'Author adversarial cases',
+      'This clears the current test type’s run history for this Profile. Its baseline is removed if included. Other test history and evidence remain. This cannot be undone.',
+      'Review this case before selecting it.', 'Add a case name.', 'Add a test message.',
+      'Add the message for step {number}.', 'This case needs the VS Code extension.', 'No test cases yet.',
+      'No cases match the current search.', 'Search run cases',
+      'Add case', 'Import', 'Export', 'More', 'Search cases by name, ID, tag, or rule',
+      'All modes', 'All sources', 'More filters', '{filtered} of {total} cases',
+      'Single turn', 'Multi-turn', 'Repetitions', 'Case mode', 'Case source',
+      'Rows per page', 'Run case {name}', 'Delete scenario {name}',
+      '{cases} cases · {attempts} attempts · up to {requests} requests',
+      'Previous page', 'Next page', 'Case pages', 'Result pages',
     ];
     for (const supportedLocale of ['zh-TW', 'ja-JP', 'ko-KR']) {
       setLocale(supportedLocale);

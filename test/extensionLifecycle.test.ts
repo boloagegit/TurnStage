@@ -125,6 +125,12 @@ describe('Extension host editor lifecycle', () => {
     expect(editorSource).toContain("case 'conversation.new': if (await confirmRestartSession())");
   });
 
+  it('requires confirmation before clearing a conversation from commands or Webview actions', () => {
+    expect(activateSource).toContain("if (controller && await confirmClearConversation()) controller.clearConversation()");
+    expect(editorSource).toContain("case 'conversation.clear': if (await confirmClearConversation()) controller.clearConversation()");
+    expect(editorSource.match(/if \(await confirmClearConversation\(\)\) controller\.clearConversation\(\)/g)).toHaveLength(3);
+  });
+
   it('registers a native Test Explorer controller and a bounded failure-evidence command', () => {
     expect(scenarioTestSource).toContain("vscode.tests.createTestController('turnstage.contracts'");
     expect(scenarioTestSource).toContain('createRunProfile');
@@ -144,7 +150,7 @@ describe('Extension host editor lifecycle', () => {
     expect(scenarioTestSource).toContain('async runAdversarial(uri: vscode.Uri');
     expect(scenarioTestSource).toContain('async runContracts(uri: vscode.Uri');
     expect(scenarioTestSource).toContain('async runCase(uri: vscode.Uri');
-    expect(scenarioTestSource).toContain('item.adversarial === true');
+    expect(scenarioTestSource).toContain("resolveTestSelection(await this.manualCaseDescriptors(uri), { kind: 'adversarial' })");
     expect(activateSource).toContain("command('exportTestReport'");
     expect(scenarioTestSource).toContain('ScenarioReportService');
     expect(scenarioReportSource).toContain("format: SCENARIO_REPORT_FORMAT");

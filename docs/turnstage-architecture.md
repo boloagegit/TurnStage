@@ -126,7 +126,7 @@ workspace state, are bound to the exact Profile URI, retain at most 100 entries,
 and fail closed when missing. Batch workers are limited by
 `turnstage.adversarialConcurrency` (1–8, default 3); each case still owns an
 isolated `SessionController` and whole-case timeout. The Red Team Webview catalog
-receives at most 100 structural case summaries and never receives linked prompts
+receives at most 500 structural case summaries and never receives linked prompts
 or rule values.
 
 The last 100 Scenario evidence records are cached only in Extension Host
@@ -434,10 +434,9 @@ profiles come from the configured workspace glob; user profiles come from
 Test and seven settings sections; selecting a child opens the same Custom
 Editor and the host sends `workspace.section` to select its surface. There is
 no duplicate navigation sidebar inside the Webview. **Test** places a device
-chat preview on the left and a resizable right pane with Debug, Tests, Red Team,
-and Configure modes. Tests owns deterministic contract authoring, execution,
-results, and bounded campaign access; Red Team owns adversarial cases and
-four-state outcomes. The
+chat preview on the left and a resizable right pane with Debug, General tests,
+Red Team, and Configure modes. Both testing modes have their own Cases and Results
+tabs; case selection and history views stay separate by type. The
 preview provides Responsive plus Mobile (375×812, 390×844, 430×932), Tablet
 (768×1024, 1024×768), and Web (1280×720, 1440×900) sizes. Mobile and Tablet
 retain device chrome; Web uses a centered readable conversation column. Every

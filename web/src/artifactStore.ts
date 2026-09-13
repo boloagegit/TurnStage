@@ -1,3 +1,5 @@
+import { clearTestRunHistoryKind, type TestRunHistoryRecord } from '../../src/shared/testRunHistory';
+
 export type ArtifactStoreName = 'suites' | 'runs' | 'evidence' | 'campaigns' | 'visualBaselines';
 
 export interface StoredArtifact<T = unknown> {
@@ -32,6 +34,11 @@ export class ArtifactStore {
     return values.sort((left, right) => right.updatedAt - left.updatedAt);
   }
 
+  async keys(store: ArtifactStoreName, profileId: string): Promise<IDBValidKey[]> {
+    const database = await this.open();
+    return transaction(database, store, 'readonly', (objectStore) => objectStore.index('profileId').getAllKeys(profileId)) as Promise<IDBValidKey[]>;
+  }
+
   async delete(store: ArtifactStoreName, id: string): Promise<void> {
     const database = await this.open();
     await transaction(database, store, 'readwrite', (objectStore) => objectStore.delete(id));
@@ -49,6 +56,33 @@ export class ArtifactStore {
       tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction was aborted.'));
     });
     return records.length;
+  }
+
+  async clearTestHistory(profileId: string, kind: 'contract' | 'adversarial'): Promise<void> {
+    const database = await this.open();
+    await new Promise<void>((resolve, reject) => {
+      const tx = database.transaction('runs', 'readwrite');
+      const objectStore = tx.objectStore('runs');
+      const request = objectStore.index('profileId').getAll(profileId);
+      request.onsuccess = () => {
+        const artifacts = request.result as StoredArtifact[];
+        const batches = artifacts.filter((item): item is StoredArtifact<TestRunHistoryRecord> => item.kind === 'test-batch');
+        const baseline = artifacts.find((item) => item.id === `test-baseline:${profileId}`);
+        const baselineRunId = (baseline?.value as { runId?: string } | undefined)?.runId;
+        const cleared = clearTestRunHistoryKind(batches.map((item) => item.value), kind, baselineRunId);
+        const retained = new Map(cleared.runs.map((run) => [run.id, run]));
+        for (const item of batches) {
+          const run = retained.get(item.value.id);
+          if (!run) objectStore.delete(item.id);
+          else if (run.cases.length !== item.value.cases.length) objectStore.put({ ...item, value: run });
+        }
+        if (baseline && !cleared.baselineRunId) objectStore.delete(baseline.id);
+      };
+      request.onerror = () => reject(request.error ?? new Error('Could not read test history.'));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error('Could not clear test history.'));
+      tx.onabort = () => reject(tx.error ?? new Error('Test history clear was aborted.'));
+    });
   }
 
   private open(): Promise<IDBDatabase> {

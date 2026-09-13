@@ -85,6 +85,22 @@ describe('ProfileRepository management', () => {
     ]);
   });
 
+  it('includes an explicitly opened Profile outside the configured glob without duplicating discovered files', async () => {
+    const repository = new ProfileRepository();
+    const discoveredUri = new mock.Uri('/workspace/.vscode/turnstage/profiles/default.turnstage.jsonc');
+    const looseUri = new mock.Uri('/workspace/loose.turnstage.jsonc');
+    const discovered = { uri: discoveredUri, scope: 'workspace' as const, profile: { version: 1, id: 'default', name: 'Default' } };
+    const loose = { uri: looseUri, scope: 'workspace' as const, profile: { version: 1, id: 'loose', name: 'Loose' } };
+    vi.spyOn(repository, 'discover').mockResolvedValue([discovered] as never);
+    const read = vi.spyOn(repository, 'read').mockResolvedValue(loose as never);
+
+    expect(await repository.discoverIncluding(looseUri as never)).toEqual([discovered, loose]);
+    expect(read).toHaveBeenCalledOnce();
+    expect(await repository.discoverIncluding(discoveredUri as never)).toEqual([discovered]);
+    expect(await repository.discoverIncluding()).toEqual([discovered]);
+    expect(read).toHaveBeenCalledOnce();
+  });
+
   it('imports a profile into user storage without requiring a workspace target', async () => {
     const source = new mock.Uri('/downloads/shared.json');
     mock.files.set(source.path, encode('{ "version": 1, "id": "shared", "name": "Shared" }'));

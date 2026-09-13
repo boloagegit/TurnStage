@@ -1,5 +1,15 @@
 import assert from 'node:assert/strict';
 import * as vscode from 'vscode';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { deleteLinkedContractCase, loadEditableLinkedContractCase } from '../../../src/extension/testing/linkedContractCase';
+import { deleteLinkedAdversarialCase, loadEditableLinkedAdversarialCase } from '../../../src/extension/testing/linkedAdversarialCase';
+import { parseContractSource } from '../../../src/extension/testing/contractSource';
+import { parseAdversarialSource } from '../../../src/extension/testing/adversarialSource';
+import { TestRunHistoryRepository } from '../../../src/extension/testing/testRunHistoryRepository';
+import { testCaseKey } from '../../../src/shared/testSelection';
+import { TEST_RUN_HISTORY_FORMAT, TEST_RUN_HISTORY_VERSION, type TestRunHistoryRecord } from '../../../src/shared/testRunHistory';
 
 /**
  * The integration suite deliberately uses only public VS Code APIs. It runs
@@ -35,12 +45,63 @@ export async function run(): Promise<void> {
 
   await assertProfileDiscovery(profileUri);
   await assertConversationContractReports(workspaceRoot);
+  await assertScopedTestHistoryClear();
   await assertCopilotToolBoundary(workspaceRoot);
   await assertCustomEditorAndTextFallback(profileUri, process.env.TURNSTAGE_MOCK_BASE_URL);
   await assertReplayCloseReopenLifecycle();
   await assertDiagnostics(profileDirectory, profileUri);
   await assertFileDiscoveryAfterCreateAndChange(profileDirectory);
+  if (vscode.workspace.isTrusted) await assertLinkedCaseDeleteAndUndo(profileUri);
   await assertWorkspaceTrustBehavior(profileDirectory);
+}
+
+async function assertScopedTestHistoryClear(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), 'turnstage-test-history-'));
+  try {
+    const uri = vscode.Uri.file(directory);
+    const repository = new TestRunHistoryRepository({ storageUri: uri, globalStorageUri: uri } as vscode.ExtensionContext);
+    const profileId = 'history-integration';
+    const makeCase = (kind: 'contract' | 'adversarial') => ({ profileId, scenarioId: kind, kind, key: testCaseKey({ profileId, scenarioId: kind, kind }), name: kind, definitionDigest: 'a'.repeat(64), environmentDigest: 'b'.repeat(64), requestedAttempts: 1, completedAttempts: 1, outcome: kind === 'contract' ? 'passed' as const : 'resisted' as const });
+    const run = (id: string, cases: TestRunHistoryRecord['cases']): TestRunHistoryRecord => ({ format: TEST_RUN_HISTORY_FORMAT, version: TEST_RUN_HISTORY_VERSION, id, profileId, startedAt: 1, finishedAt: 2, status: 'completed', runner: 'vscode', evaluatorVersion: 1, profileDigest: 'c'.repeat(64), environmentDigest: 'd'.repeat(64), cases });
+    await repository.save(run('mixed', [makeCase('contract'), makeCase('adversarial')]));
+    await repository.save(run('red-only', [makeCase('adversarial')]));
+    await repository.acceptBaseline(profileId, 'red-only');
+    await repository.clear(profileId, 'adversarial');
+    assert.deepEqual((await repository.list(profileId)).map((item) => [item.id, item.cases.map((testCase) => testCase.kind)]), [['mixed', ['contract']]]);
+    assert.equal(await repository.baseline(profileId), undefined, 'Clearing the baseline run removes its baseline marker');
+    await repository.clear(profileId, 'contract');
+    assert.deepEqual(await repository.list(profileId), []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function assertLinkedCaseDeleteAndUndo(profileUri: vscode.Uri): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders![0]!.uri;
+  for (const item of [
+    { path: '.vscode/turnstage/tests/integration.tests.jsonc', id: 'integration-linked-contract', kind: 'contract' as const },
+    { path: '.vscode/turnstage/tests/integration.adversarial.csv', id: 'integration-csv-resistance', kind: 'adversarial' as const },
+  ]) {
+    const uri = vscode.Uri.joinPath(workspaceRoot, ...item.path.split('/'));
+    const original = await readText(uri);
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
+    const detail = item.kind === 'contract'
+      ? await loadEditableLinkedContractCase(profileUri, item.path, item.id)
+      : await loadEditableLinkedAdversarialCase(profileUri, item.path, item.id);
+    if (item.kind === 'contract') await deleteLinkedContractCase({ profileUri, sourcePath: item.path, scenarioId: item.id, expectedRevision: detail.revision });
+    else await deleteLinkedAdversarialCase({ profileUri, sourcePath: item.path, scenarioId: item.id, expectedRevision: detail.revision });
+    const deletedText = await readText(uri);
+    const parsed = item.kind === 'contract' ? parseContractSource(item.path, deletedText) : parseAdversarialSource(item.path, deletedText);
+    assert.ok(!parsed.scenarios.some((scenario) => scenario.id === item.id), `Deleting a ${item.kind} case must write the source file`);
+    assert.equal((activeTabInput() as vscode.TabInputText | undefined)?.uri?.toString(), uri.toString(), 'Undo must target the linked source editor');
+    await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+    assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), uri.toString(), 'Undo must focus the linked source text editor');
+    await vscode.commands.executeCommand('undo');
+    const restored = await vscode.workspace.openTextDocument(uri);
+    assert.equal(restored.getText(), original, `VS Code Undo must restore the ${item.kind} source edit`);
+    assert.equal(await restored.save(), true);
+    assert.equal(await readText(uri), original, `The restored ${item.kind} source must save correctly`);
+  }
 }
 
 async function assertRegisteredCommands(): Promise<void> {

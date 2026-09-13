@@ -84,7 +84,7 @@ describe('external adversarial suite grants', () => {
     const profileUri = vscode.Uri.parse('file:///workspace/profile.turnstage.jsonc');
     const suiteUri = vscode.Uri.parse('file:///outside/security.csv');
     const reference = await repository.grant(profileUri, suiteUri);
-    const scenarios = Array.from({ length: 120 }, (_, index) => ({ id: `case-${index + 1}`, name: `Case ${index + 1}`, tags: ['scale'], steps: [{ id: 'turn-1', input: `secret prompt ${index + 1}` }], adversarial: { repetitions: 3, forbid: { urls: true, content: ['private marker'] } } }));
+    const scenarios = Array.from({ length: 500 }, (_, index) => ({ id: `case-${index + 1}`, name: `Case ${index + 1}`, tags: ['scale'], steps: [{ id: 'turn-1', input: `secret prompt ${index + 1}` }], adversarial: { repetitions: 3, forbid: { urls: true, content: ['private marker'] } } }));
     const csv = serializeAdversarialCsv(scenarios);
     vi.mocked(vscode.workspace.fs.stat).mockResolvedValue({ size: csv.length } as never);
     vi.mocked(vscode.workspace.fs.readFile).mockResolvedValue(new TextEncoder().encode(csv));
@@ -92,8 +92,8 @@ describe('external adversarial suite grants', () => {
     const catalog = await loadLinkedAdversarialCaseCatalog(profileUri, { version: 1, id: 'profile', name: 'Profile', conversation: { send: { method: 'POST', url: 'https://example.test', variants: [] } }, stream: { transport: 'sse', mappings: [] }, tests: { scenarios: [], adversarialSuites: [reference] } }, (value) => repository.resolve(profileUri, value));
 
     expect(catalog.entries).toHaveLength(MAX_LINKED_CASE_CATALOG_ENTRIES);
-    expect(catalog.total).toBe(120);
-    expect(catalog.truncated).toBe(true);
+    expect(catalog.total).toBe(500);
+    expect(catalog.truncated).toBe(false);
     expect(JSON.stringify(catalog)).not.toContain('secret prompt');
     expect(JSON.stringify(catalog)).not.toContain('private marker');
     expect(catalog.entries[0]).toMatchObject({ scenarioId: 'case-1', repetitions: 3, prohibit: { content: 1, urls: true } });

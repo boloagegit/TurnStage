@@ -73,7 +73,7 @@ The current UI includes these performance-conscious choices:
   collapsible element;
 - read-only JSON inspectors share a memoized bounded formatter and tokenized
   syntax view with local search rather than introducing an editor runtime;
-- linked adversarial discovery sends at most 100 prompt-free case summaries and
+- linked adversarial discovery sends at most 500 prompt-free case summaries and
   loads only the selected case body for structured editing;
 - message text/markdown deltas are merged into one part per type by the
   reducer;

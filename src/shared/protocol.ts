@@ -45,7 +45,7 @@ export type TestCaptureSource =
   | { kind: 'run'; runId: string }
   | { kind: 'evidence'; evidenceId: string };
 
-export type TestOperationAction = 'runAll' | 'runContracts' | 'runCase' | 'rerunFailed' | 'rerunUnstable' | 'rerunIncomplete';
+export type TestOperationAction = 'runAll' | 'runContracts' | 'runCase' | 'runSelection' | 'rerunFailed' | 'rerunUnstable' | 'rerunIncomplete';
 export type TestOperationState = 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
 export interface TestOperationProgress {
   totalCases: number;
@@ -61,6 +61,7 @@ export interface TestOperationSnapshot { action: TestOperationAction; state: Tes
 /** Bounded, prompt-free metadata for browsing linked adversarial cases in the Webview. */
 export interface LinkedAdversarialCaseSummary {
   sourcePath: string;
+  revision?: string;
   suiteId: string;
   suiteName: string;
   scenarioId: string;
@@ -91,6 +92,7 @@ export interface LinkedAdversarialCaseDetail {
 /** Bounded, prompt-free metadata for browsing linked functional test cases. */
 export interface LinkedContractCaseSummary {
   sourcePath: string;
+  revision?: string;
   suiteId: string;
   suiteName: string;
   scenarioId: string;
@@ -157,14 +159,22 @@ export type WebviewMessage = Envelope & (
   | { type: 'adversarial.catalog.request'; force?: boolean }
   | { type: 'adversarial.case.request'; sourcePath: string; scenarioId: string }
   | { type: 'adversarial.case.save'; sourcePath: string; scenarioId: string; expectedRevision: string; scenario: ScenarioDefinition }
-  | { type: 'contract.file'; action: 'importJsonc' | 'linkSuite' | 'csvTemplate' }
+  | { type: 'adversarial.case.delete'; sourcePath: string; scenarioId: string; expectedRevision: string }
+  | { type: 'contract.file'; action: 'importJsonc' | 'importCsv' | 'linkSuite' | 'exportJsonc' | 'exportCsv' | 'csvTemplate' }
   | { type: 'contract.openLinkedSuite'; path: string }
   | { type: 'contract.catalog.request'; force?: boolean }
   | { type: 'contract.case.request'; sourcePath: string; scenarioId: string }
   | { type: 'contract.case.save'; sourcePath: string; scenarioId: string; expectedRevision: string; scenario: ScenarioDefinition }
+  | { type: 'contract.case.delete'; sourcePath: string; scenarioId: string; expectedRevision: string }
   | { type: 'test.runAll' }
   | { type: 'test.runContracts' }
   | { type: 'test.runCase'; scenarioId: string; suiteId?: string; kind?: 'adversarial' | 'contract' }
+  | { type: 'test.runSelection'; cases: import('./testSelection').TestCaseIdentity[] }
+  | { type: 'test.history.rerun'; runId: string; kind?: 'contract' | 'adversarial' }
+  | { type: 'test.history.export'; runId: string; format: 'json' | 'junit' | 'html' }
+  | { type: 'test.history.request' }
+  | { type: 'test.history.clear'; kind: 'contract' | 'adversarial' }
+  | { type: 'test.baseline.accept'; runId: string }
   | { type: 'test.rerun'; status: 'failed' | 'unstable' | 'incomplete' }
   | { type: 'test.cancel' }
   | { type: 'test.timeline.open'; evidenceId: string }
@@ -210,14 +220,17 @@ export type HostMessage = Envelope & (
   | { type: 'adversarial.catalog'; catalog: AdversarialCaseCatalog }
   | { type: 'adversarial.case.loaded'; detail: LinkedAdversarialCaseDetail }
   | { type: 'adversarial.case.saved'; detail: LinkedAdversarialCaseDetail }
+  | { type: 'adversarial.case.deleted'; sourcePath: string; scenarioId: string }
   | { type: 'adversarial.case.error'; sourcePath: string; scenarioId: string; message: string; conflict: boolean }
-  | { type: 'contract.operation'; action: 'importJsonc' | 'linkSuite' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string; artifactId?: string }
+  | { type: 'contract.operation'; action: 'importJsonc' | 'importCsv' | 'linkSuite' | 'exportJsonc' | 'exportCsv' | 'csvTemplate'; status: 'completed' | 'cancelled'; detail: string; path?: string; artifactId?: string }
   | { type: 'contract.catalog'; catalog: ContractCaseCatalog }
   | { type: 'contract.case.loaded'; detail: LinkedContractCaseDetail }
   | { type: 'contract.case.saved'; detail: LinkedContractCaseDetail }
+  | { type: 'contract.case.deleted'; sourcePath: string; scenarioId: string }
   | { type: 'contract.case.error'; sourcePath: string; scenarioId: string; message: string; conflict: boolean }
   | { type: 'test.operation'; operation: TestOperationSnapshot }
   | { type: 'test.results'; results: AdversarialResultSummary[]; automationResults?: AutomationResultSummary[] }
+  | { type: 'test.history'; profileId: string; runs: import('./testRunHistory').TestRunHistoryRecord[]; baselineRunId?: string }
   | { type: 'campaign.dashboard'; dashboard: CampaignDashboardV1 }
   | { type: 'campaign.preview'; campaignId: string; selectedCases: number; plannedAttempts: number; plannedRequests: number; maximumDurationMs: number; maxConcurrency: number; warnings: string[] }
   | { type: 'campaign.exported'; path: string; artifactId: string }
@@ -318,18 +331,25 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   if (!isRecord(value) || !hasEnvelope(value, instanceId)) return false;
   const message = value;
   switch (message.type) {
-    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'profile.duplicate': case 'profile.save': case 'profile.openFirstIssue': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'testExplorer.open': case 'test.runAll': case 'test.runContracts': case 'test.cancel': case 'test.evidenceBundle.export': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
+    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'profile.duplicate': case 'profile.save': case 'profile.openFirstIssue': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'testExplorer.open': case 'test.runAll': case 'test.runContracts': case 'test.cancel': case 'test.evidenceBundle.export': case 'test.history.request': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
     case 'adversarial.catalog.request': return message.force === undefined || typeof message.force === 'boolean';
     case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
     case 'adversarial.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
     case 'adversarial.case.request': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId);
     case 'adversarial.case.save': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId) && isRevision(message.expectedRevision) && isRecord(message.scenario) && isStructuredValue(message.scenario, MAX_HOST_VALUE_NODES);
-    case 'contract.file': return message.action === 'importJsonc' || message.action === 'linkSuite' || message.action === 'csvTemplate';
+    case 'adversarial.case.delete': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId) && isRevision(message.expectedRevision);
+    case 'contract.file': return ['importJsonc', 'importCsv', 'linkSuite', 'exportJsonc', 'exportCsv', 'csvTemplate'].includes(String(message.action));
     case 'contract.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
     case 'contract.catalog.request': return message.force === undefined || typeof message.force === 'boolean';
     case 'contract.case.request': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId);
     case 'contract.case.save': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId) && isRevision(message.expectedRevision) && isRecord(message.scenario) && isStructuredValue(message.scenario, MAX_HOST_VALUE_NODES);
+    case 'contract.case.delete': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId) && isRevision(message.expectedRevision);
     case 'test.runCase': return isBoundedId(message.scenarioId) && (message.suiteId === undefined || isBoundedId(message.suiteId)) && (message.kind === undefined || message.kind === 'adversarial' || message.kind === 'contract');
+    case 'test.runSelection': return Array.isArray(message.cases) && message.cases.length > 0 && message.cases.length <= 500 && message.cases.every((item) => isRecord(item) && isBoundedId(item.profileId) && isBoundedId(item.scenarioId) && (item.suiteId === undefined || isBoundedId(item.suiteId)) && (item.kind === 'contract' || item.kind === 'adversarial'));
+    case 'test.history.rerun': return isBoundedId(message.runId) && (message.kind === undefined || message.kind === 'contract' || message.kind === 'adversarial');
+    case 'test.history.export': return isBoundedId(message.runId) && ['json', 'junit', 'html'].includes(String(message.format));
+    case 'test.history.clear': return message.kind === 'contract' || message.kind === 'adversarial';
+    case 'test.baseline.accept': return isBoundedId(message.runId);
     case 'test.rerun': return ['failed', 'unstable', 'incomplete'].includes(String(message.status));
     case 'test.timeline.open': return isBoundedString(message.evidenceId);
     case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
@@ -384,18 +404,21 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'adversarial.operation': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path) && optionalBoundedString(message.artifactId);
     case 'adversarial.catalog': return isAdversarialCaseCatalog(message.catalog);
     case 'adversarial.case.loaded': case 'adversarial.case.saved': return isLinkedAdversarialCaseDetail(message.detail);
+    case 'adversarial.case.deleted': return isBoundedString(message.sourcePath, 4096) && isBoundedId(message.scenarioId);
     case 'adversarial.case.error': return isBoundedString(message.sourcePath, 4096) && isBoundedId(message.scenarioId) && isBoundedString(message.message, 4096) && typeof message.conflict === 'boolean';
-    case 'contract.operation': return (message.action === 'importJsonc' || message.action === 'linkSuite' || message.action === 'csvTemplate') && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path) && optionalBoundedString(message.artifactId);
+    case 'contract.operation': return ['importJsonc', 'importCsv', 'linkSuite', 'exportJsonc', 'exportCsv', 'csvTemplate'].includes(String(message.action)) && (message.status === 'completed' || message.status === 'cancelled') && isBoundedString(message.detail, MAX_TEXT_LENGTH) && optionalBoundedString(message.path) && optionalBoundedString(message.artifactId);
     case 'contract.catalog': return isContractCaseCatalog(message.catalog);
     case 'contract.case.loaded': case 'contract.case.saved': return isLinkedContractCaseDetail(message.detail);
+    case 'contract.case.deleted': return isBoundedString(message.sourcePath, 4096) && isBoundedId(message.scenarioId);
     case 'contract.case.error': return isBoundedString(message.sourcePath, 4096) && isBoundedId(message.scenarioId) && isBoundedString(message.message, 4096) && typeof message.conflict === 'boolean';
     case 'test.operation': return isRecord(message.operation)
-      && ['runAll', 'runContracts', 'runCase', 'rerunFailed', 'rerunUnstable', 'rerunIncomplete'].includes(String(message.operation.action))
+      && ['runAll', 'runContracts', 'runCase', 'runSelection', 'rerunFailed', 'rerunUnstable', 'rerunIncomplete'].includes(String(message.operation.action))
       && ['running', 'cancelling', 'completed', 'cancelled', 'failed'].includes(String(message.operation.state))
       && optionalBoundedString(message.operation.detail)
       && (message.operation.progress === undefined || isTestOperationProgress(message.operation.progress));
     case 'test.results': return isAdversarialResults(message.results) && isStructuredValue(message.results, MAX_HOST_VALUE_NODES)
       && (message.automationResults === undefined || (isAutomationResults(message.automationResults) && isStructuredValue(message.automationResults, MAX_HOST_VALUE_NODES)));
+    case 'test.history': return isBoundedId(message.profileId) && Array.isArray(message.runs) && message.runs.length <= 21 && isStructuredValue(message.runs, MAX_HOST_VALUE_NODES) && (message.baselineRunId === undefined || isBoundedId(message.baselineRunId));
     case 'campaign.dashboard': return isRecord(message.dashboard) && isStructuredValue(message.dashboard, MAX_HOST_VALUE_NODES);
     case 'campaign.preview': return isBoundedString(message.campaignId) && [message.selectedCases, message.plannedAttempts, message.plannedRequests, message.maximumDurationMs, message.maxConcurrency].every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0) && Array.isArray(message.warnings) && message.warnings.length <= 100 && message.warnings.every((entry) => isBoundedString(entry, 4096));
     case 'campaign.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedId(message.artifactId);
@@ -423,6 +446,7 @@ function isAdversarialCaseCatalog(value: unknown): boolean {
   if (!Array.isArray(value.issues) || value.issues.length > 100 || !value.issues.every((issue) => isRecord(issue) && isBoundedString(issue.sourcePath, 4096) && isBoundedString(issue.message, 4096))) return false;
   return value.entries.every((entry) => isRecord(entry)
     && [entry.sourcePath, entry.suiteId, entry.suiteName, entry.scenarioId, entry.scenarioName].every((item) => isBoundedString(item, 4096))
+    && (entry.revision === undefined || isRevision(entry.revision))
     && Array.isArray(entry.tags) && entry.tags.length <= 20 && entry.tags.every((tag) => isBoundedString(tag, 64))
     && (entry.capture === undefined || isScenarioCapture(entry.capture))
     && (entry.mode === 'singleTurn' || entry.mode === 'multiTurn')
@@ -446,6 +470,7 @@ function isContractCaseCatalog(value: unknown): boolean {
   if (!Array.isArray(value.issues) || value.issues.length > 100 || !value.issues.every((entry) => isRecord(entry) && isBoundedString(entry.sourcePath, 4096) && isBoundedString(entry.message, 4096))) return false;
   return value.entries.every((entry) => isRecord(entry)
     && [entry.sourcePath, entry.suiteId, entry.suiteName, entry.scenarioId, entry.scenarioName].every((item) => isBoundedString(item, 4096))
+    && (entry.revision === undefined || isRevision(entry.revision))
     && Array.isArray(entry.tags) && entry.tags.length <= 20 && entry.tags.every((tag) => isBoundedString(tag, 64))
     && (entry.capture === undefined || isScenarioCapture(entry.capture))
     && boundedNonNegativeInteger(entry.turns, 100)

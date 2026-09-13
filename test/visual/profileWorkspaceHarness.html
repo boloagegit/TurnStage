@@ -28,6 +28,7 @@
       --vscode-button-secondaryBackground: #313131;
       --vscode-button-secondaryForeground: #cccccc;
       --vscode-button-secondaryHoverBackground: #3c3c3c;
+      --vscode-errorForeground: #f14c4c;
       --vscode-icon-foreground: #c5c5c5;
       --vscode-toolbar-hoverBackground: #2a2d2e;
       --vscode-list-hoverBackground: #2a2d2e;
@@ -302,6 +303,7 @@
     const contractCatalog = {
       entries: [{
         sourcePath: '.vscode/turnstage/tests/regression.tests.jsonc',
+        revision: 'c'.repeat(64),
         suiteId: 'linked-regression',
         suiteName: 'Linked regression',
         scenarioId: 'linked-multi-turn-contract',
@@ -312,14 +314,28 @@
         comparison: false,
         performance: true,
         faults: false
-      }],
-      total: 1,
+      }, ...(query.get('capturedDraft') === 'true' ? [{
+        sourcePath: '.vscode/turnstage/tests/captured.tests.jsonc',
+        revision: 'd'.repeat(64),
+        suiteId: 'captured-contract',
+        suiteName: 'Captured contract cases',
+        scenarioId: 'please-search-for-relevant-material',
+        scenarioName: 'Please search for relevant material and cite it',
+        tags: ['captured'],
+        turns: 1,
+        assertions: 1,
+        comparison: false,
+        performance: false,
+        faults: false
+      }] : [])],
+      total: query.get('capturedDraft') === 'true' ? 2 : 1,
       truncated: false,
       issues: []
     };
     const adversarialCatalog = {
       entries: Array.from({ length: 30 }, (_, index) => ({
         sourcePath: '.vscode/turnstage/tests/security-regression.adversarial.csv',
+        revision: 'a'.repeat(64),
         suiteId: 'security-regression',
         suiteName: 'Security regression',
         scenarioId: `linked-case-${String(index + 1).padStart(2, '0')}`,

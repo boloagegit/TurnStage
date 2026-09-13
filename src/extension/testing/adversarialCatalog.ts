@@ -3,7 +3,7 @@ import type { AdversarialCaseCatalog, LinkedAdversarialCaseSummary } from '../..
 import type { ScenarioDefinition, TurnStageProfile } from '../../shared/types';
 import { loadAdversarialSuite } from './adversarialSuiteRepository';
 
-export const MAX_LINKED_CASE_CATALOG_ENTRIES = 100;
+export const MAX_LINKED_CASE_CATALOG_ENTRIES = 500;
 
 /**
  * Load only enough linked-suite metadata to fill the Webview catalog. Prompts,
@@ -25,7 +25,7 @@ export async function loadLinkedAdversarialCaseCatalog(
       const loaded = await loadAdversarialSuite(profileUri, sourcePath, resolveExternal);
       total += loaded.scenarios.length;
       const remaining = MAX_LINKED_CASE_CATALOG_ENTRIES - entries.length;
-      entries.push(...loaded.scenarios.slice(0, remaining).map((scenario) => summarizeLinkedCase(sourcePath, loaded.suite.id, loaded.suite.name, scenario)));
+      entries.push(...loaded.scenarios.slice(0, remaining).map((scenario) => ({ ...summarizeLinkedCase(sourcePath, loaded.suite.id, loaded.suite.name, scenario), revision: loaded.revision })));
       if (loaded.scenarios.length > remaining) truncated = true;
     } catch (error) {
       issues.push({ sourcePath, message: boundedMessage(error) });

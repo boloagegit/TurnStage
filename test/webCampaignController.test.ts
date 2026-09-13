@@ -21,4 +21,20 @@ describe('WebCampaignController', () => {
     expect(posted).toContainEqual(expect.objectContaining({ type: 'campaign.preview', campaignId: 'smoke', selectedCases: 1, plannedAttempts: 1 }));
     expect(posted).toContainEqual({ type: 'campaign.dashboard', dashboard: { profileId: id, campaigns: [{ definition: profile.tests!.campaigns![0] }] } });
   });
+
+  it('never includes captured drafts in a saved execution scope', async () => {
+    const id = `campaign-draft-${crypto.randomUUID()}`;
+    const profile: TurnStageProfile = { version: 1, id, name: 'Draft scope', conversation: { send: { method: 'POST', url: 'https://example.test' } }, stream: { transport: 'sse', mappings: [] }, tests: { scenarios: [
+      { id: 'ready', name: 'Ready', tags: ['smoke'], steps: [{ id: 'turn', input: 'ready' }] },
+      { id: 'draft', name: 'Draft', tags: ['smoke', 'needs-review'], steps: [{ id: 'turn', input: 'draft' }] },
+    ], campaigns: [{ id: 'smoke', name: 'Smoke', selectors: { tags: ['smoke'] } }] } };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    const posted: HostPayload[] = [];
+    const post = (payload: HostPayload) => posted.push(payload);
+    const tests = new WebTestController(() => profile, () => environment, new Map(), post);
+    const campaigns = new WebCampaignController(() => profile, tests, post);
+
+    await campaigns.preview('smoke');
+    expect(posted).toContainEqual(expect.objectContaining({ type: 'campaign.preview', selectedCases: 1 }));
+  });
 });

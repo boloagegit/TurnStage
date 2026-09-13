@@ -29,6 +29,7 @@ export interface SaveLinkedAdversarialCaseInput {
 }
 
 export type AppendLinkedAdversarialCaseInput = Omit<SaveLinkedAdversarialCaseInput, 'scenarioId' | 'expectedRevision'>;
+export type DeleteLinkedAdversarialCaseInput = Pick<SaveLinkedAdversarialCaseInput, 'profileUri' | 'sourcePath' | 'scenarioId' | 'expectedRevision' | 'resolveExternal'>;
 
 export class LinkedAdversarialCaseConflictError extends Error {
   constructor() {
@@ -75,6 +76,44 @@ export async function appendLinkedAdversarialCase(input: AppendLinkedAdversarial
   const saved = editableCaseFromText(input.sourcePath, await readBoundedSource(uri, input.sourcePath), input.scenario.id);
   if (saved.revision !== updated.revision) throw new LinkedAdversarialCaseConflictError();
   return saved;
+}
+
+export async function deleteLinkedAdversarialCase(input: DeleteLinkedAdversarialCaseInput): Promise<void> {
+  if (!REVISION_PATTERN.test(input.expectedRevision)) throw new Error('The linked suite revision is invalid. Refresh the case list before deleting.');
+  const uri = resolveSuiteUri(input.profileUri, input.sourcePath, input.resolveExternal);
+  const source = await readBoundedSource(uri, input.sourcePath);
+  if (digest(source) !== input.expectedRevision) throw new LinkedAdversarialCaseConflictError();
+  const document = await vscode.workspace.openTextDocument(uri);
+  if (document.getText() !== source) throw new LinkedAdversarialCaseConflictError();
+  const updated = deleteLinkedAdversarialCaseSource(input.sourcePath, source, input.scenarioId);
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(uri, new vscode.Range(document.positionAt(0), document.positionAt(source.length)), updated.text);
+  if (!await vscode.workspace.applyEdit(edit) || !await document.save()) throw new Error('Could not save the deleted red-team case. Check the source file before retrying.');
+  if (digest(await readBoundedSource(uri, input.sourcePath)) !== updated.revision) throw new LinkedAdversarialCaseConflictError();
+}
+
+export function deleteLinkedAdversarialCaseSource(path: string, text: string, scenarioId: string): { text: string; revision: string } {
+  const parsed = parseAdversarialSource(path, text);
+  if (!parsed.suite || parsed.issues.length) throw new Error(parsed.issues.join('\n') || `Adversarial suite ${path} is invalid.`);
+  const index = parsed.suite.cases.findIndex((item) => item.id === scenarioId && item.enabled !== false);
+  if (index < 0) throw new Error(`Linked red-team case ${scenarioId} was not found.`);
+  const updatedText = /\.csv$/iu.test(path)
+    ? deleteCsvCase(text, scenarioId)
+    : applyEdits(text, modify(text, ['cases', index], undefined, { formattingOptions: { insertSpaces: true, tabSize: 2, eol: text.includes('\r\n') ? '\r\n' : '\n' } }));
+  const verified = parseAdversarialSource(path, updatedText);
+  if (!verified.suite || verified.issues.length || verified.suite.cases.some((item) => item.id === scenarioId)) throw new Error(verified.issues.join('\n') || 'The red-team suite could not be verified after deletion.');
+  return { text: updatedText, revision: digest(updatedText) };
+}
+
+function deleteCsvCase(text: string, scenarioId: string): string {
+  const bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  const rows = parseCsvRows(bom ? text.slice(1) : text);
+  const index = rows[0]?.findIndex((cell) => cell.trim().toLocaleLowerCase() === 'case_id') ?? -1;
+  if (index < 0) throw new Error('CSV is missing case_id.');
+  const remaining = rows.slice(1).filter((row) => spreadsheetText(row[index] ?? '') !== scenarioId);
+  if (remaining.length === rows.length - 1) throw new Error(`Linked red-team case ${scenarioId} was not found.`);
+  return `${bom}${[rows[0]!, ...remaining].map((row) => row.map(csvCell).join(',')).join(newline)}${newline}`;
 }
 
 export function appendLinkedAdversarialCaseSource(path: string, text: string, scenario: ScenarioDefinition): { text: string; revision: string } {

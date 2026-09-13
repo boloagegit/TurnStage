@@ -45,6 +45,10 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'adversarial.case.save', sourcePath: 'tests/safety.adversarial.csv', scenarioId: 'case-1', expectedRevision: 'stale', scenario: linkedScenario }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'contract.file', action: 'linkSuite' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'contract.file', action: 'importJsonc' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'contract.file', action: 'importCsv' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'contract.file', action: 'exportJsonc' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'contract.file', action: 'exportCsv' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'contract.file', action: 'exportJsonl' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'contract.catalog.request', force: true }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'contract.case.save', sourcePath: 'tests/regression.csv', scenarioId: 'case-1', expectedRevision: 'b'.repeat(64), scenario: { id: 'case-1', name: 'Case 1', steps: [{ id: 'turn-1', input: 'hello' }] } }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.runCase', scenarioId: 'case-1', suiteId: 'safety' }, 'editor-1')).toBe(true);
@@ -53,6 +57,10 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'test.runCase', scenarioId: 'case-1', kind: 'unknown' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.runCase', scenarioId: '', suiteId: 'safety' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.runCase', scenarioId: 'case-1', suiteId: '' }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'test.history.rerun', runId: 'run-1', kind: 'contract' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.history.clear', kind: 'contract' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.history.clear', kind: 'unknown' }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'test.history.rerun', runId: 'run-1', kind: 'unknown' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'conversation' } }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'run', runId: 'run-1' }, suggestedKind: 'contract' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'run', runId: 'run-1', evidenceId: 'smuggled' } }, 'editor-1')).toBe(false);

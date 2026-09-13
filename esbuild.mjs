@@ -8,7 +8,7 @@ const common = { bundle: true, sourcemap: !production, minify: production, logLe
 const builds = [
   { ...common, entryPoints: ['src/extension/activate.ts'], outfile: 'dist/extension.js', platform: 'node', format: 'cjs', mainFields: ['module', 'main'], external: ['vscode'], target: 'node20' },
   { ...common, entryPoints: ['src/webview/main.tsx'], outfile: 'dist/webview.js', platform: 'browser', format: 'iife', target: 'es2022' },
-  { ...common, entryPoints: ['test/integration/suite/index.ts'], outfile: 'dist/test/index.js', platform: 'node', format: 'cjs', external: ['vscode'], target: 'node20', minify: false },
+  { ...common, entryPoints: ['test/integration/suite/index.ts'], outfile: 'dist/test/index.js', platform: 'node', format: 'cjs', mainFields: ['module', 'main'], external: ['vscode'], target: 'node20', minify: false },
   { ...common, entryPoints: ['src/cli/main.ts'], outfile: 'dist/cli.js', platform: 'node', format: 'cjs', mainFields: ['module', 'main'], target: 'node20', define: { __TURNSTAGE_VERSION__: JSON.stringify(packageJson.version) }, banner: { js: '#!/usr/bin/env node' } }
 ];
 
