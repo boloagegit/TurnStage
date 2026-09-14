@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.30.4
+
+- Web no longer sends a conversation request through an unrelated Environment when the selected Profile references one that is missing. Switching Profiles or starting a new conversation cancels obsolete work, so late opening or stream responses cannot overwrite the current session.
+- Web Network now retains bounded, redacted response previews for normal conversation streams and HTTP failures. Browser sessions now honor bounded pre-stream reconnect and configured remote stop requests; long event, message, and Network histories are capped. Control values marked `workspace` or `global` persist in this browser origin, `resetOnNewConversation` is honored, and `secret` controls remain page-memory only and outside visible snapshots.
+- Existing version-1 Profiles and VSIX behavior are unchanged; no migration is needed. Browser TLS and CORS enforcement still apply, and the optional fixed `/api/` proxy remains the only built-in server-side forwarding route.
+
 ## 0.30.3
 
 - Web now records bounded opening-response bodies and HTTP errors in the Network inspector, including failed responses such as HTTP 400. Known session secrets and sensitive response headers remain redacted.

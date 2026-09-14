@@ -46,6 +46,7 @@ describe('BrowserSession', () => {
     expect(state.snapshot.normalizedEvents.map((event) => event.type)).toEqual(['conversation.started', 'progress.updated', 'content.text.delta', 'stream.completed']);
     expect(state.snapshot.messages.find((message) => message.role === 'assistant')?.parts).toContainEqual({ type: 'progress', text: 'Working', status: 'completed' });
     expect(state.networkEntries[0]).toMatchObject({ status: 200, state: 'completed', eventCount: 4 });
+    expect(state.networkEntries[0]?.responseBodyPreview).toContain('Browser result');
     expect(states.length).toBeGreaterThan(3);
   });
 
@@ -59,6 +60,141 @@ describe('BrowserSession', () => {
     expect(session.current.snapshot.turnState).toBe('failed');
     expect(session.current.snapshot.errors[0]?.message).toContain('CORS');
     expect(session.current.snapshot.errors[0]?.message).toContain('TLS certificate trust');
+  });
+
+  it('does not silently use another environment when the selected Profile environment is missing', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const session = new BrowserSession({ ...profile, environment: 'company-uat' }, environment, new Map(), () => undefined);
+
+    await session.start();
+    await session.send('Hello', { kind: 'manual' });
+
+    expect(session.current.snapshot.sessionState).toBe('failed');
+    expect(session.current.snapshot.errors[0]).toMatchObject({ type: 'MissingEnvironment' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('ignores an old opening response after changing the Profile', async () => {
+    let resolveOld: (response: Response) => void = () => undefined;
+    const fetch = vi.fn().mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValueOnce(new Response('{"message":"New opening"}', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    const oldProfile = { ...profile, opening: { mode: 'request' as const, request: { method: 'GET' as const, url: 'https://example.test/old' } } };
+    const newProfile = { ...oldProfile, opening: { mode: 'request' as const, request: { method: 'GET' as const, url: 'https://example.test/new' } } };
+    const session = new BrowserSession(oldProfile, environment, new Map(), () => undefined);
+
+    const first = session.start();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    session.updateProfile(newProfile, environment);
+    await session.start();
+    resolveOld(new Response('{"message":"Old opening"}', { status: 200 }));
+    await first;
+
+    expect(session.current.snapshot.opening?.message).toBe('New opening');
+    expect(session.current.networkEntries).toHaveLength(1);
+  });
+
+  it('records a failed stream response and redacts known secrets and sensitive headers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"bad test-secret"}', { status: 400, headers: { 'set-cookie': 'session=test-secret', 'x-debug': 'test-secret' } })));
+    const session = new BrowserSession(profile, environment, new Map([['api', 'test-secret']]), () => undefined);
+    await session.start();
+
+    await session.send('Hello', { kind: 'manual' });
+
+    expect(session.current.snapshot.turnState).toBe('failed');
+    expect(session.current.networkEntries[0]?.responseBodyPreview).toContain('bad ••••••••');
+    expect(session.current.networkEntries[0]?.responseHeaders?.['set-cookie']).not.toContain('test-secret');
+    expect(session.current.networkEntries[0]?.responseHeaders?.['x-debug']).not.toContain('test-secret');
+  });
+
+  it('never publishes a known secret echoed across response chunks', async () => {
+    const stream = new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(new TextEncoder().encode('event: message\ndata: {"text":"test-'));
+      controller.enqueue(new TextEncoder().encode('secret"}\n\nevent: done\ndata: {}\n\n'));
+      controller.close();
+    } });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(stream, { status: 200 })));
+    const states: BrowserSessionState[] = [];
+    const session = new BrowserSession(profile, environment, new Map([['api', 'test-secret']]), (state) => states.push(state));
+    await session.start();
+
+    await session.send('Hello', { kind: 'manual' });
+
+    expect(JSON.stringify(states)).not.toContain('test-secret');
+    expect(JSON.stringify(session.current)).not.toContain('test-secret');
+    expect(session.current.networkEntries[0]?.responseBodyPreview).toContain('••••••••');
+  });
+
+  it('retries configured pre-stream HTTP failures within the configured limit', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response('busy', { status: 503 }))
+      .mockResolvedValueOnce(new Response('event: done\ndata: {}\n\n', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    const retryProfile: TurnStageProfile = { ...profile, conversation: { send: { ...profile.conversation.send, reconnect: { maxAttempts: 1, baseDelayMs: 0, retryOnStatuses: [503] } } } };
+    const session = new BrowserSession(retryProfile, environment, new Map(), () => undefined);
+    await session.start();
+
+    await session.send('Hello', { kind: 'manual' });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(session.current.snapshot.turnState).toBe('completed');
+    expect(session.current.networkEntries[0]?.attempt).toBe(2);
+    expect(session.current.snapshot.metrics.reconnectCount).toBe(1);
+  });
+
+  it('sends the configured remote stop after aborting an active stream', async () => {
+    const fetch = vi.fn().mockImplementationOnce((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))))
+      .mockResolvedValueOnce(new Response('{"stopped":true}', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    const stopProfile: TurnStageProfile = { ...profile, conversation: { ...profile.conversation, stop: { strategy: 'abortThenRequest', request: { method: 'POST', url: '${env.baseUrl}/stop' }, requiredContext: ['turn.clientRequestId'] } } };
+    const session = new BrowserSession(stopProfile, environment, new Map(), () => undefined);
+    await session.start();
+    const running = session.send('Hello', { kind: 'manual' });
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+
+    await session.abort();
+    await running;
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(session.current.networkEntries.at(-1)).toMatchObject({ kind: 'stop', status: 200, state: 'completed' });
+    expect(session.current.snapshot.turnState).toBe('aborted');
+  });
+
+  it('persists non-secret controls by Profile, resets requested values, and never exposes secret controls', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) });
+    const controlProfile: TurnStageProfile = { ...profile, controls: [
+      { id: 'mode', type: 'select', label: 'Mode', options: [{ label: 'A', value: 'a' }, { label: 'B', value: 'b' }], default: 'a', persist: 'global' },
+      { id: 'fresh', type: 'text', label: 'Fresh', default: 'base', persist: 'workspace', resetOnNewConversation: true },
+      { id: 'token', type: 'text', label: 'Token', persist: 'secret' },
+    ] };
+    const session = new BrowserSession(controlProfile, environment, new Map(), () => undefined);
+    session.setControl('mode', 'b');
+    session.setControl('fresh', 'changed');
+    session.setControl('token', 'private-token');
+    expect(session.current.snapshot.controls).toEqual({ mode: 'b', fresh: 'changed' });
+    expect(JSON.stringify([...values.values()])).not.toContain('private-token');
+
+    await session.newConversation();
+
+    expect(session.current.snapshot.controls).toEqual({ mode: 'b', fresh: 'base' });
+    const reloaded = new BrowserSession(controlProfile, environment, new Map(), () => undefined);
+    expect(reloaded.current.snapshot.controls).toEqual({ mode: 'b', fresh: 'base' });
+    expect(values.size).toBe(1);
+  });
+
+  it('bounds long-lived raw event history without resetting per-turn sequence numbers', async () => {
+    const body = `${'event: unused\ndata: {}\n\n'.repeat(5001)}event: done\ndata: {}\n\n`;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })));
+    const session = new BrowserSession(profile, environment, new Map(), () => undefined);
+    await session.start();
+
+    await session.send('Hello', { kind: 'manual' });
+
+    expect(session.current.snapshot.turnState).toBe('completed');
+    expect(session.current.snapshot.rawEvents).toHaveLength(5000);
+    expect(session.current.snapshot.droppedEventCount).toBe(2);
+    expect(session.current.snapshot.rawEvents.at(-1)?.turnSequence).toBe(5002);
   });
 
   it('uses a legacy VS Code invalid-certificate flag without blocking browser opening or messages', async () => {
