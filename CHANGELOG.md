@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.30.3
+
+- Web now records bounded opening-response bodies and HTTP errors in the Network inspector, including failed responses such as HTTP 400. Known session secrets and sensitive response headers remain redacted.
+- Web opening requests now use the same starter and response-block normalization as the VSIX, so supported choices and configured opening information render consistently. Profile format is unchanged; a rejected upstream request still needs its endpoint or payload corrected.
+
 ## 0.30.2
 
 - Removed TurnStage Web's extra connection-confirmation popups for opening and conversation requests, including same-origin `/api/` and external targets. Browser TLS and CORS protections remain in force.

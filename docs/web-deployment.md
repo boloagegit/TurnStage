@@ -156,6 +156,8 @@ The optional `serve.py` or Nginx `/api/` route is different: the browser connect
 
 Web does not show an additional TurnStage connection approval prompt. Selecting a Profile may automatically send its configured opening request; sending a message uses its configured conversation URL and credentials. Only install or select Profiles from sources you trust. Browser TLS and CORS checks still apply, and HTTP does not protect credentials in transit.
 
+The Web Network inspector records opening responses, including bounded previews of non-successful HTTP responses, so a failed opening can be distinguished from a missing browser request. A non-2xx response from the `/api/` upstream is not converted into a successful opening; inspect its status and Response tab to correct the upstream path or request format.
+
 TurnStage Web cannot disable TLS verification or silently use a system proxy. If an existing VS Code Profile contains `tls.allowInvalidCertificates`, Web ignores that flag and lets the browser enforce normal certificate checks; HTTP `/api/` routes do not need that flag. Profiles, Environments, and display preferences use versioned browser `localStorage`; this includes plaintext credentials written into Profile or Environment JSON. Optional `${secret.*}` values are kept only in page memory and are cleared on refresh. Larger suites, runs, evidence, campaigns, and visual baselines use IndexedDB.
 
 ## Compatibility boundary

@@ -86,6 +86,64 @@ describe('BrowserSession', () => {
     expect(session.current.requestPreview).not.toHaveProperty('tls');
   });
 
+  it('records a bounded opening response and renders VS Code-compatible starters and response blocks', async () => {
+    const openingProfile: TurnStageProfile = {
+      ...profile,
+      opening: {
+        mode: 'request', request: { method: 'GET', url: 'http://127.0.0.1:9095/api/opening' },
+        response: { blocks: [{ id: 'status', kind: 'status', path: '$.status', valuePath: '$.message' }] },
+      },
+    };
+    const body = JSON.stringify({ message: 'Welcome', options: ['First question', { label: 'Second question', prompt: 'Ask second' }], status: { message: 'Available' }, debugEcho: 'test-secret' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200, headers: { 'content-type': 'application/json', 'set-cookie': 'session=value' } })));
+    const session = new BrowserSession(openingProfile, environment, new Map([['api', 'test-secret']]), () => undefined);
+
+    await session.start();
+
+    expect(session.current.snapshot.sessionState).toBe('ready');
+    expect(session.current.snapshot.opening).toMatchObject({
+      message: 'Welcome',
+      starters: [{ label: 'First question', prompt: 'First question', behavior: 'send' }, { label: 'Second question', prompt: 'Ask second', behavior: 'send' }],
+      blocks: [{ id: 'status', kind: 'status', value: 'Available' }],
+    });
+    expect(session.current.networkEntries[0]).toMatchObject({ kind: 'opening', state: 'completed', status: 200, transferredBytes: new TextEncoder().encode(body).length });
+    expect(session.current.networkEntries[0]?.responseBodyPreview).toContain('Welcome');
+    expect(session.current.networkEntries[0]?.responseBodyPreview).not.toContain('test-secret');
+    expect(session.current.networkEntries[0]?.responseHeaders?.['set-cookie']).not.toContain('session=value');
+  });
+
+  it('keeps the opening error response visible in Network when the upstream returns HTTP 400', async () => {
+    const openingProfile: TurnStageProfile = {
+      ...profile,
+      opening: { mode: 'request', request: { method: 'POST', url: 'http://127.0.0.1:9095/api/opening' } },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"invalid request"}', { status: 400, headers: { 'content-type': 'application/json' } })));
+    const session = new BrowserSession(openingProfile, environment, new Map(), () => undefined);
+
+    await session.start();
+
+    expect(session.current.snapshot.sessionState).toBe('failed');
+    expect(session.current.snapshot.errors[0]?.message).toContain('HTTP 400');
+    expect(session.current.networkEntries[0]).toMatchObject({ kind: 'opening', state: 'failed', status: 400, error: { status: 400 } });
+    expect(session.current.networkEntries[0]?.responseBodyPreview).toContain('invalid request');
+  });
+
+  it('bounds oversized opening responses and marks the Network preview as truncated', async () => {
+    const openingProfile: TurnStageProfile = {
+      ...profile,
+      opening: { mode: 'request', request: { method: 'GET', url: 'http://127.0.0.1:9095/api/opening' } },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('x'.repeat(1024 * 1024 + 1), { status: 200 })));
+    const session = new BrowserSession(openingProfile, environment, new Map(), () => undefined);
+
+    await session.start();
+
+    expect(session.current.snapshot.sessionState).toBe('failed');
+    expect(session.current.snapshot.errors[0]?.message).toContain('maximum allowed size');
+    expect(session.current.networkEntries[0]?.responseBodyTruncated).toBe(true);
+    expect(session.current.networkEntries[0]?.responseBodyPreview?.length).toBeLessThanOrEqual(64 * 1024);
+  });
+
   it('lets the browser reject untrusted HTTPS instead of claiming to disable certificate checks', async () => {
     const tlsProfile: TurnStageProfile = {
       ...profile,
