@@ -104,6 +104,44 @@ describe('BrowserSession', () => {
     expect(session.current.networkEntries[0]?.state).toBe('failed');
   });
 
+  it('does not ask permission for opening requests to the Web app own origin', async () => {
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('window', { location: { origin: 'http://web.example:9095' }, confirm });
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ message: 'Ready' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    const sameOriginProfile: TurnStageProfile = {
+      ...profile,
+      opening: { mode: 'request', request: { method: 'GET', url: 'http://web.example:9095/api/opening' } },
+    };
+
+    await new BrowserSession(sameOriginProfile, environment, new Map(), () => undefined).start();
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('does not interrupt external opening or secret-bearing messages with a browser confirmation', async () => {
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('window', { location: { origin: 'http://web.example:9095' }, confirm });
+    const fetch = vi.fn(async (url: string | URL | Request) => String(url).endsWith('/opening')
+      ? new Response(JSON.stringify({ message: 'Ready' }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : new Response('event: done\ndata: {}\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    vi.stubGlobal('fetch', fetch);
+    const externalProfile: TurnStageProfile = {
+      ...profile,
+      opening: { mode: 'request', request: { method: 'GET', url: 'https://external.example/opening' } },
+      conversation: { send: { ...profile.conversation.send, url: 'http://external.example/stream', headers: { authorization: 'Bearer ${secret.api}' } } },
+    };
+    const session = new BrowserSession(externalProfile, environment, new Map([['api', 'test-token']]), () => undefined);
+
+    await session.start();
+    await session.send('Hello', { kind: 'manual' });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(session.current.snapshot.turnState).toBe('completed');
+  });
+
   it('replays recorded raw events through the shared mapping and reducer path', async () => {
     const recorded = new BrowserSession(profile, environment, new Map(), () => undefined);
     const run: LocalRun = {

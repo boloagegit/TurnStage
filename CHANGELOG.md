@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.30.2
+
+- Removed TurnStage Web's extra connection-confirmation popups for opening and conversation requests, including same-origin `/api/` and external targets. Browser TLS and CORS protections remain in force.
+
 ## 0.30.1
 
 - Web no longer blocks opening and conversation requests solely because a shared VS Code Profile contains `tls.allowInvalidCertificates`. The browser still validates HTTPS certificates and does not bypass certificate errors.
