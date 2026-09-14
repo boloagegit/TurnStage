@@ -34,7 +34,6 @@ type BridgeApi = { postMessage(message: unknown): void; getState(): VsCodeApiSta
 
 const codec = new ProfileCodec();
 const validator = new ProfileValidator();
-const defaultEnvironment = codec.parse(environmentRaw).profile as unknown as TurnStageEnvironment;
 const bundledProfiles = new Map([['basic-sse-chat', basicRaw], ['agent-flow', agentRaw], ['enterprise-chat', enterpriseRaw]]);
 const bundledEnvironments = new Map([['local', environmentRaw]]);
 const preferences = loadPreferences();
@@ -83,7 +82,7 @@ async function bootstrap(): Promise<void> {
   profiles = mergeCatalogEntries(officialProfiles, loadProfiles());
   active = profiles.find((item) => item.id === preferences.activeProfileId) ?? profiles[0]!;
   environments = mergeCatalogEntries(officialEnvironments, loadEnvironments());
-  activeEnvironmentItem = environments.find((item) => item.id === (activeProfile().environment ?? preferences.activeEnvironmentId)) ?? environments[0]!;
+  activeEnvironmentItem = environmentFor(activeProfile());
   session = createSession(active);
   tests = new WebTestController(() => activeProfile(), () => activeEnvironment(), secrets, post);
   campaigns = new WebCampaignController(() => activeProfile(), tests, post);
@@ -95,6 +94,7 @@ async function bootstrap(): Promise<void> {
 function createSession(item: StoredProfile): BrowserSession {
   const profile = codec.parse(item.raw).profile ?? fallbackProfile(item);
   const next = new BrowserSession(profile, activeEnvironment(), secrets, (state) => {
+    if (session !== next) return;
     post({ type: 'session.snapshot', snapshot: state.snapshot, runs: runSummaries, requestPreview: state.requestPreview, networkEntries: state.networkEntries });
     void retainCompletedRun(profile, state);
   });
@@ -251,9 +251,9 @@ function patchProfile(path: Array<string | number>, value: unknown): void {
   active = { ...draft, id: profile.id, name: profile.name, raw, updatedAt: Date.now() };
   profiles = replaceProfile(profiles, previousId, active);
   persistLibrary();
-  const selectedEnvironment = environments.find((item) => item.id === profile.environment);
-  if (selectedEnvironment) activeEnvironmentItem = selectedEnvironment;
+  activeEnvironmentItem = environmentFor(profile);
   session.updateProfile(profile, activeEnvironment());
+  void session.start();
   postProfile();
   onLibraryChanged?.();
 }
@@ -274,9 +274,9 @@ function diagnostics(raw: string): Array<{ severity: 'error' | 'warning'; messag
 function selectProfile(id: string): void {
   const selected = profiles.find((item) => item.id === id);
   if (!selected) return;
+  session?.dispose();
   active = selected;
-  const selectedEnvironment = environments.find((item) => item.id === activeProfile().environment);
-  if (selectedEnvironment) activeEnvironmentItem = selectedEnvironment;
+  activeEnvironmentItem = environmentFor(activeProfile());
   preferences.activeProfileId = active.id;
   preferences.activeEnvironmentId = activeEnvironmentItem.id;
   savePreferences(preferences);
@@ -593,7 +593,14 @@ function ProfileLibrary(): React.JSX.Element {
 }
 
 function activeProfile(): TurnStageProfile { return codec.parse(active.raw).profile ?? fallbackProfile(active); }
-function activeEnvironment(): TurnStageEnvironment { return parseEnvironment(activeEnvironmentItem.raw) ?? defaultEnvironment; }
+function activeEnvironment(): TurnStageEnvironment { return parseEnvironment(activeEnvironmentItem.raw) ?? { version: 1, id: '__invalid_environment__', name: 'Invalid environment', variables: {} }; }
+function environmentFor(profile: TurnStageProfile): StoredEnvironment {
+  const id = profile.environment ?? preferences.activeEnvironmentId;
+  const selected = environments.find((item) => item.id === id) ?? (!profile.environment ? environments[0] : undefined);
+  if (selected) return selected;
+  const missing = { version: 1, id: `__missing_environment__:${id ?? 'none'}`, name: 'Missing environment', variables: {} };
+  return { id: missing.id, name: missing.name, raw: JSON.stringify(missing), updatedAt: 0 };
+}
 function parseEnvironment(raw: string): TurnStageEnvironment | undefined {
   const value = codec.parse(raw).profile as unknown as Partial<TurnStageEnvironment> | undefined;
   return value && Number.isInteger(value.version) && typeof value.id === 'string' && value.id.trim() && typeof value.name === 'string' && value.name.trim() && value.variables && typeof value.variables === 'object' && !Array.isArray(value.variables)

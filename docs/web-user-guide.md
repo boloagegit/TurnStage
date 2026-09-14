@@ -4,13 +4,13 @@
 
 ## 開始使用
 
-1. 使用公司提供的 Web 位址開啟 TurnStage Web（可為內網 `http://伺服器IP:8080/`）；若要在自己的電腦預覽解壓縮的 Web 包，請依 [Web 部署手冊的本機預覽步驟](web-deployment.md#preview-the-extracted-archive-locally) 啟動本機 HTTP 服務。不要直接以 `file://` 開啟 `index.html`。使用 HTTP 時，網路上的資料與明文憑證沒有加密保護；詳見 [HTTP 部署說明](web-deployment.md#serve-by-ip-over-ordinary-http)。
+1. 使用公司提供的 Web 位址開啟 TurnStage Web（例如內網 `http://伺服器IP:9095/`）；若要在自己的電腦預覽解壓縮的 Web 包，請依 [Web 部署手冊的本機預覽步驟](web-deployment.md#preview-the-extracted-archive-locally) 啟動本機 HTTP 服務。不要直接以 `file://` 開啟 `index.html`。使用 HTTP 時，網路上的資料與明文憑證沒有加密保護；詳見 [HTTP 部署說明](web-deployment.md#serve-by-ip-over-ordinary-http)。
 2. 從左側清單選擇一個設定檔。
 3. 確認畫面上方顯示的連線狀態。
 4. 在聊天輸入框送出一筆不含敏感資料的測試訊息。
 5. 從右側的「除錯」、「測試」或「紅隊測試」頁籤檢查請求、事件、結果與證據。
 
-瀏覽器會直接連線到目標 API。公司 Linux Web Server 只提供靜態網頁，不會代替瀏覽器轉送 API 請求。
+預設由瀏覽器直接連線到設定檔指定的 API。若部署人員使用 ZIP 附帶的 `serve.py` 並設定 `--upstream`，只有指向同一個 Web 位址下 `/api/` 的請求才會由 Web Server 轉送到固定上游；其他 IP 或連接埠仍由瀏覽器直接連線，必須符合瀏覽器的網路、TLS 與 CORS 規則。
 
 ## 辨識 Profile 來源
 
@@ -92,6 +92,7 @@ TurnStage Web 的資料以網站來源（scheme、host、port）隔離：
 - 較大的測試套件、執行記錄、Evidence、Campaign 與視覺 baseline 保存在 IndexedDB。
 - 官方 Catalog 不會寫入上述瀏覽器儲存空間。
 - 直接寫入 Profile 或 Environment 的 credential 會存在 `localStorage`；`${secret.*}` 的 session 值只存在頁面記憶體。
+- 設定控制中標示 `workspace` 或 `global` 的值依設定檔 ID 保存在此網站來源的瀏覽器儲存空間；`none` 不會保存，`secret` 只保留在此頁記憶體，且不會出現在對話快照。標示「新對話時重設」的控制在開始新對話後恢復預設值。
 
 改用另一個瀏覽器、無痕視窗、電腦、網域或連接埠時，不會自動看到原本資料。清除網站資料也會移除本機資料。變更網址或清除資料前，請先匯出需要保留的 Profile、Environment、測試案例與證據。
 
@@ -111,6 +112,8 @@ TurnStage Web 的資料以網站來源（scheme、host、port）隔離：
 - 允許需要的 HTTP method 與 request headers。
 
 TurnStage Web 不能停用瀏覽器的 TLS 驗證，也不能繞過 CORS。
+
+若設定檔指定的 Environment 不存在，Web 會阻止送出請求並顯示缺少環境的錯誤，不會改用另一個 Environment。請匯入包含對應 Environment 的可攜設定檔，或請部署管理者補上官方 Environment。右側「網路」可查看開場與一般訊息的狀態碼，以及有長度上限、會遮蔽已知憑證的回應預覽。設定檔若配置重連，僅在串流尚未收到資料前依限制重試；按停止時，若設定檔配置遠端停止請求，瀏覽器會在本機中止後嘗試送出，失敗會顯示警告。
 
 ### 重新整理後 session secret 消失
 
