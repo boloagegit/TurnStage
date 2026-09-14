@@ -696,7 +696,7 @@ function enforceBrowserTls(request: PreparedRequest): PreparedRequest {
 }
 
 function browserErrorMessage(error: unknown): string {
-  if (error instanceof TypeError) return `${error.message} Check browser connectivity, TLS certificate trust, and CORS for this target.`;
+  if (error instanceof TypeError) return `${error.message} The browser did not provide an HTTP response. Check the request URL in Network and the browser console for the specific cause.`;
   return error instanceof Error ? error.message : String(error);
 }
 

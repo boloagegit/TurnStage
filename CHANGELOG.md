@@ -1,12 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.32.0
 
+- VS Code no longer asks for an extra TurnStage confirmation solely because a trusted Profile's configured opening request targets a remote host, including Profiles opened from Downloads. Restricted Mode still blocks requests; sending known secrets over non-loopback HTTP or disabling TLS verification still requires consent. Review downloaded Profiles before opening them because configured openings can run automatically.
 - Markdown-mapped assistant responses now render GitHub-style Markdown together with static HTML, including line breaks, tables, and images, in both VS Code and Web. Existing plain-text mappings remain literal text.
 - External response images load automatically with no referrer. Scripts, event handlers, embedded documents, forms, inline CSS, and unsafe URL schemes are removed; browser CORS and certificate validation for API requests are unchanged.
 - Profiles can independently disable HTML or Markdown rendering with `ui.responseContent.html` and `ui.responseContent.markdown`. Both default to enabled; existing Profiles and text-mapped responses retain their behavior.
 - Web sidebar now searches and filters Profiles and supports browser-local folders, including official Profile display organization without changing server files. Narrow layouts can open the full library as a drawer.
 - Web case-import menus close after choosing a file format, and narrow general-test and Red Team result tables use a readable stacked layout instead of clipping action buttons.
+- Browser-local Profiles open directly in an editable JSONC view with syntax highlighting, section navigation, search, and line numbers. Invalid JSONC or an invalid Profile is rejected without replacing the saved copy; deployment-managed defaults remain read-only and offer a duplicate-to-edit action.
+- Visual-baseline save and comparison work in Web without a blocked `data:` fetch, and capture and network-failure notices are localized. Preview controls, test panes, sidebar disclosures, and dropdown arrows have aligned spacing across Web and VS Code. Unassigned local Profiles now appear before custom folders so an empty folder cannot appear to contain them.
+- Compatibility: existing Profile, Environment, and test-suite formats are unchanged. Web still cannot bypass browser TLS or CORS checks, and editing a browser-local Profile does not update the server's default file.
 
 ## 0.31.0
 

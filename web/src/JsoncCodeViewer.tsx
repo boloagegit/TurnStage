@@ -10,6 +10,13 @@ function tokenize(raw: string): Segment[][] {
   for (let kind = scanner.scan(); kind !== SyntaxKind.EOF; kind = scanner.scan()) {
     tokens.push({ offset: scanner.getTokenOffset(), length: scanner.getTokenLength(), kind });
   }
+  const nextMeaningfulKind: Array<SyntaxKind | undefined> = new Array(tokens.length);
+  let nextKind: SyntaxKind | undefined;
+  for (let index = tokens.length - 1; index >= 0; index--) {
+    nextMeaningfulKind[index] = nextKind;
+    const kind = tokens[index]!.kind;
+    if (kind !== SyntaxKind.Trivia && kind !== SyntaxKind.LineBreakTrivia) nextKind = kind;
+  }
   const lines: Segment[][] = [[]];
   const append = (text: string, kind: Segment['kind']) => {
     for (const [index, piece] of text.split('\n').entries()) {
@@ -20,9 +27,8 @@ function tokenize(raw: string): Segment[][] {
   let cursor = 0;
   tokens.forEach((token, index) => {
     if (token.offset > cursor) append(raw.slice(cursor, token.offset), 'plain');
-    const next = tokens.slice(index + 1).find((item) => item.kind !== SyntaxKind.Trivia && item.kind !== SyntaxKind.LineBreakTrivia);
     let kind: Segment['kind'] = 'plain';
-    if (token.kind === SyntaxKind.StringLiteral) kind = next?.kind === SyntaxKind.ColonToken ? 'key' : 'string';
+    if (token.kind === SyntaxKind.StringLiteral) kind = nextMeaningfulKind[index] === SyntaxKind.ColonToken ? 'key' : 'string';
     else if (token.kind === SyntaxKind.NumericLiteral) kind = 'number';
     else if (token.kind === SyntaxKind.LineCommentTrivia || token.kind === SyntaxKind.BlockCommentTrivia) kind = 'comment';
     else if (token.kind === SyntaxKind.TrueKeyword || token.kind === SyntaxKind.FalseKeyword || token.kind === SyntaxKind.NullKeyword) kind = 'keyword';
@@ -67,11 +73,13 @@ function highlight(segments: Segment[], query: string): React.ReactNode {
   });
 }
 
-export function JsoncCodeViewer({ raw, labels }: { raw: string; labels: { search: string; previous: string; next: string; noMatches: string; matchCount: string; wrap: string; sections: string; overview: string; lines: string } }): React.JSX.Element {
+export function JsoncCodeViewer({ raw, labels, editorRef, onEdit }: { raw: string; labels: { search: string; previous: string; next: string; noMatches: string; matchCount: string; wrap: string; sections: string; overview: string; lines: string }; editorRef?: React.RefObject<HTMLTextAreaElement | null>; onEdit?: (raw: string) => void }): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [matchIndex, setMatchIndex] = useState(0);
   const [wrap, setWrap] = useState(true);
   const codeRef = useRef<HTMLDivElement>(null);
+  const ownEditorRef = useRef<HTMLTextAreaElement>(null);
+  const activeEditorRef = editorRef ?? ownEditorRef;
   const renderedLines = useMemo(() => tokenize(raw), [raw]);
   const outline = useMemo(() => sections(raw), [raw]);
   const matches = useMemo(() => {
@@ -84,17 +92,35 @@ export function JsoncCodeViewer({ raw, labels }: { raw: string; labels: { search
       return found;
     });
   }, [raw, query]);
+  const jumpToLine = (line: number) => {
+    const target = codeRef.current?.querySelector<HTMLElement>(`[data-line="${line}"]`);
+    if (!target || !codeRef.current) return;
+    const top = target.offsetTop - 10;
+    codeRef.current.scrollTop = top;
+    if (onEdit && activeEditorRef.current) activeEditorRef.current.scrollTop = top;
+  };
   useEffect(() => {
-    if (query && matches.length) codeRef.current?.querySelector<HTMLElement>(`[data-line="${matches[0]}"]`)?.scrollIntoView?.({ block: 'start', inline: 'nearest' });
+    if (query && matches.length) jumpToLine(matches[0]!);
   }, [matches, query]);
-  const jumpToLine = (line: number) => codeRef.current?.querySelector<HTMLElement>(`[data-line="${line}"]`)?.scrollIntoView?.({ block: 'start', inline: 'nearest' });
   const moveMatch = (step: number) => {
     if (!matches.length) return;
     const next = (matchIndex + step + matches.length) % matches.length;
     setMatchIndex(next);
     jumpToLine(matches[next]!);
   };
-  const selectSection = (line: number) => jumpToLine(line);
+  const selectSection = (line: number) => {
+    if (onEdit && activeEditorRef.current) {
+      let offset = 0;
+      for (let current = 1; current < line && offset < raw.length; current++) {
+        const next = raw.indexOf('\n', offset);
+        if (next < 0) { offset = raw.length; break; }
+        offset = next + 1;
+      }
+      activeEditorRef.current.focus();
+      activeEditorRef.current.setSelectionRange(offset, offset);
+    }
+    jumpToLine(line);
+  };
   return <div className="jsonc-reader">
     <div className="jsonc-reader-controls">
       <label className="jsonc-search"><span className="visually-hidden">{labels.search}</span><input type="search" value={query} placeholder={labels.search} onChange={(event) => { setQuery(event.target.value); setMatchIndex(0); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); moveMatch(event.shiftKey ? -1 : 1); } }} /></label>
@@ -106,8 +132,9 @@ export function JsoncCodeViewer({ raw, labels }: { raw: string; labels: { search
     <div className="jsonc-reader-body">
       <nav className="jsonc-outline" aria-label={labels.sections}><span>{labels.sections}</span><button type="button" onClick={() => selectSection(1)}>{labels.overview}</button>{outline.map((section) => <button type="button" key={`${section.name}-${section.line}`} onClick={() => selectSection(section.line)} title={section.name}><span>{section.name}</span><small>{section.line}</small></button>)}</nav>
       <label className="jsonc-outline-picker"><span className="visually-hidden">{labels.sections}</span><select defaultValue="1" onChange={(event) => selectSection(Number(event.target.value))}><option value="1">{labels.overview}</option>{outline.map((section) => <option key={`${section.name}-${section.line}`} value={section.line}>{section.name}</option>)}</select></label>
-      <div ref={codeRef} className={`jsonc-code-scroll${wrap ? ' is-wrapped' : ''}`} tabIndex={0} aria-label="JSONC">
-        <div className="jsonc-lines" role="presentation">{renderedLines.map((segments, index) => <div className={`jsonc-line${matches[matchIndex] === index + 1 ? ' is-current-match' : ''}`} data-line={index + 1} key={index}><span className="jsonc-line-number" aria-hidden="true">{index + 1}</span><code>{highlight(segments, query)}</code></div>)}</div>
+      <div ref={codeRef} className={`jsonc-code-scroll${wrap ? ' is-wrapped' : ''}${onEdit ? ' is-editable' : ''}`} tabIndex={onEdit ? -1 : 0} aria-label={onEdit ? undefined : 'JSONC'}>
+        <div className="jsonc-lines" role="presentation" aria-hidden={onEdit ? true : undefined}>{renderedLines.map((segments, index) => <div className={`jsonc-line${matches[matchIndex] === index + 1 ? ' is-current-match' : ''}`} data-line={index + 1} key={index}><span className="jsonc-line-number" aria-hidden="true">{index + 1}</span><code>{highlight(segments, query)}</code></div>)}</div>
+        {onEdit && <textarea ref={activeEditorRef} className="jsonc-edit-textarea" aria-label="JSONC" spellCheck={false} wrap={wrap ? 'soft' : 'off'} value={raw} onChange={(event) => onEdit(event.target.value)} onScroll={(event) => { if (codeRef.current) { codeRef.current.scrollTop = event.currentTarget.scrollTop; codeRef.current.scrollLeft = event.currentTarget.scrollLeft; } }} />}
       </div>
     </div>
   </div>;

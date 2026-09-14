@@ -34,7 +34,13 @@ try {
     localStorage.setItem('turnstage.web.preferences.v1', JSON.stringify({ version: 1, locale: 'en' }));
   });
   await page.goto(url);
-  await page.getByRole('button', { name: /QA Case Profile 001/u }).waitFor();
+  await page.getByRole('button', { name: 'QA Case Profile 001, Local' }).waitFor();
+  const disclosureCentered = (selector) => page.locator(selector).evaluate((element) => {
+    const row = element.getBoundingClientRect();
+    const icon = element.querySelector('.disclosure-chevron').getBoundingClientRect();
+    return Math.abs((row.top + row.height / 2) - (icon.top + icon.height / 2)) < 1;
+  });
+  assert.equal(await disclosureCentered('.sidebar-preferences summary'), true, 'Language and appearance arrow is vertically centered');
   assert.equal(await page.getByRole('searchbox', { name: 'Search profiles' }).count(), 1);
   assert.equal(await page.getByLabel('Filter by source').count(), 1);
   assert.equal(await page.locator('.profile-item').count(), 103);
@@ -46,8 +52,11 @@ try {
   await page.locator('#profile-source-filter').selectOption('all');
   page.once('dialog', (dialog) => dialog.accept('Regression'));
   await page.getByRole('button', { name: 'New folder' }).click();
+  await page.getByRole('button', { name: 'Regression 0' }).waitFor();
+  assert.equal(await page.locator('#profiles-local > :first-child').evaluate((element) => element.classList.contains('profile-item-row')), true, 'Unassigned local profiles appear before empty folders, not underneath them');
   await page.getByRole('button', { name: 'Profile actions: QA Case Profile 099' }).click();
   await page.getByRole('menuitem', { name: 'Move to folder' }).click();
+  assert.equal(await disclosureCentered('.profile-item-folder-toggle'), true, 'Move to folder arrow is vertically centered');
   await page.getByRole('menuitemradio', { name: 'Regression' }).click();
   assert.ok((await page.evaluate(() => JSON.parse(localStorage.getItem('turnstage.web.profileOrganization.v1')))).assignments['qa-099']);
   await page.reload();
@@ -111,7 +120,7 @@ try {
   await nestedPage.route('**/turnstage-catalog.json', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ format: 'turnstage-web-catalog', version: 1, id: 'company', revision: '1', profiles: [{ file: './profiles/Payments/SIT/nested.turnstage.jsonc' }], environments: [{ bundled: 'local' }] }) }));
   await nestedPage.route('**/profiles/Payments/SIT/nested.turnstage.jsonc', (route) => route.fulfill({ contentType: 'application/json', body: nestedProfile }));
   await nestedPage.goto(url);
-  await nestedPage.getByRole('button', { name: /Nested SIT/u }).waitFor({ timeout: 5000 }).catch(async () => { throw new Error(`Nested catalog did not load: ${await nestedPage.locator('.catalog-note').getAttribute('title')}`); });
+  await nestedPage.getByRole('button', { name: /^Nested SIT, /u }).waitFor({ timeout: 5000 }).catch(async (error) => { throw new Error(`Nested catalog did not load: ${await nestedPage.locator('.catalog-note').first().getAttribute('title', { timeout: 500 }).catch(() => 'no catalog warning')}`, { cause: error }); });
   assert.equal(await nestedPage.getByRole('button', { name: 'Payments 1' }).count(), 1);
   assert.equal(await nestedPage.getByRole('button', { name: 'SIT 1' }).count(), 1);
   await nestedPage.screenshot({ path: resolve(output, 'server-nested-defaults.png'), fullPage: true });

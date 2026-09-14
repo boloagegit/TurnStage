@@ -1,5 +1,9 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Test case saved: {name}': '테스트 사례 저장됨: {name}',
+  'No visual baseline for this viewport. Save one first.': '이 미리보기 크기의 시각 기준이 없습니다. 먼저 저장하세요.',
+  'Replace visual baseline for this viewport?': '이 미리보기 크기의 시각 기준을 교체할까요?',
+  'Visual baseline unchanged.': '시각 기준이 변경되지 않았습니다.',
   'View JSONC': 'JSONC 보기',
   'Download chat screenshot': '채팅 스크린샷 다운로드',
   'Downloading chat screenshot…': '채팅 스크린샷 다운로드 중…',

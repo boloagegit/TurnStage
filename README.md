@@ -191,11 +191,14 @@ and plaintext-transport warning. A managed reverse proxy is recommended for
 durable shared deployments.
 
 To provide default Profiles, copy VS Code `*.turnstage.jsonc` files into the
-extracted `profiles/` folder (nested directories appear as nested Web sidebar folders) and their referenced `*.environment.jsonc` files
-into `environments/`, then run `python3 update_profiles.py` from that directory.
+extracted `profiles/` folder. Nested directories appear as nested Web sidebar
+folders. Copy any referenced `*.environment.jsonc` files into `environments/`,
+then run `python3 update_profiles.py` from the extracted directory.
 The included `update_profiles.py` generates `turnstage-catalog.json`; Python
-is not needed while a separate static Web server runs. Users can duplicate an
-default Profile or create, import, edit, and export their own browser-local Profiles. A
+is not needed while a separate static Web server runs. Users can duplicate a
+default Profile or create, import, edit, and export their own browser-local
+Profiles, including direct JSONC editing in the Web app. Default Profiles stay
+read-only until duplicated. A
 portable Profile export includes its referenced Environment and any plaintext
 credentials in those settings. Browser requests pointed at the same-origin
 `/api/` route use the fixed server-side proxy; requests pointed directly at
@@ -588,12 +591,14 @@ fixture replay remains available, but session requests and request-backed
 openings are blocked. The Webview displays a restricted-mode banner. Citation
 opening also requires trust.
 
-Loopback openings remain automatic. The first automatic opening to another host
-asks for consent and shows the destination, method, secret usage, and TLS state.
+Request-backed openings run automatically when a Profile opens in a trusted
+workspace, including Profiles opened from Downloads. Open only Profiles whose
+configured destination and request content you trust. Requests that send known
+secrets over non-loopback HTTP, or disable certificate verification, still ask
+for consent and show the destination, method, secret usage, and TLS state.
 **Allow this Profile** remembers a hashed workspace-local grant; **Allow once**
 does not. Changing the destination, request definition, secret references, or
-TLS mode asks again. Explicit requests that send secrets over non-loopback HTTP,
-or disable certificate verification, use the same consent boundary.
+TLS mode asks again for these higher-risk requests.
 
 Use **TurnStage: Set Secret** to store a value in VS Code SecretStorage. Only
 the Extension Host resolves `${secret.name}`. Request previews redact sensitive

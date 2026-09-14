@@ -146,6 +146,7 @@ function App(): React.JSX.Element {
       else if (message.type === 'test.timeline') { setActiveEvidenceId(message.evidenceId); setActiveTimeline({ evidenceId: message.evidenceId, timeline: message.timeline }); }
       else if (message.type === 'connection.result') setConnectionResult(message.result);
       else if (message.type === 'visual.result') setVisualFeedback(message);
+      else if (message.type === 'visual.error') setVisualFeedback({ operation: message.operation, status: 'error', message: message.message });
       else if (message.type === 'workspaceTrust.changed') setSnapshot((current) => { const next = current ? { ...current, trusted: message.trusted } : current; if (next) snapshotRef.current = next; return next; });
     };
     window.addEventListener('message', listener);

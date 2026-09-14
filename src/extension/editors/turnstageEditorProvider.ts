@@ -818,6 +818,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
             if (!vscode.workspace.isTrusted) throw new Error(localize('This action requires a trusted workspace. Profile editing and fixture replay remain available.'));
             const result = await this.visualRegression.saveBaseline(controller.profile, document.uri, message.viewport, message.dataUrl);
             if (result) await post({ type: 'visual.result', operation: 'baseline', status: 'saved', baselinePath: vscode.workspace.asRelativePath(result.baselineUri) }, message.requestId);
+            else await post({ type: 'visual.error', operation: 'baseline', message: localize('Visual baseline unchanged.') }, message.requestId);
             break;
           }
           case 'visual.compare': {
@@ -842,7 +843,9 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       } catch (error) {
         const type = error instanceof Error ? error.name : 'Error';
         logAt(this.output, 'error', () => `[editor] action=${message.type} type=${type}`);
-        await post({ type: 'request.error', error: { type, message: error instanceof Error ? error.message : String(error) } }, message.requestId);
+        const detail = error instanceof Error ? error.message : String(error);
+        if (message.type === 'visual.baseline.save' || message.type === 'visual.compare') await post({ type: 'visual.error', operation: message.type === 'visual.baseline.save' ? 'baseline' : 'compare', message: detail }, message.requestId);
+        else await post({ type: 'request.error', error: { type, message: detail } }, message.requestId);
         const openOutput = localize('Open TurnStage Output');
         observeBackground(vscode.window.showErrorMessage(localize('TurnStage could not complete {action}.', { action: message.type }), openOutput).then((choice) => { if (choice === openOutput) this.output.show(true); }), 'error-notification');
       }

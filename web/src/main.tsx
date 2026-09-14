@@ -22,9 +22,10 @@ import { applyWebAppearance, bindSystemAppearance } from './theme';
 import { decodeWebProfileBundle, encodeWebProfileBundle } from './profileBundle';
 import { IconButton } from '../../src/webview/Icon';
 import { copyText } from '../../src/webview/clipboardText';
+import { t } from '../../src/webview/i18n';
 import { browserUuid } from './browserCrypto';
 import { loadProfileOrganization, normalizeProfileOrganization, saveProfileOrganization, type ProfileOrganization } from './profileOrganization';
-import { ProfileReferencePanel, type ReferencePage } from './ProfileReferencePanel';
+import { ProfileReferencePanel, type ProfileSourceSaveResult, type ReferencePage } from './ProfileReferencePanel';
 import { profileUrl, requestedProfileId } from './profileUrl';
 import basicRaw from '../../resources/templates/basic-sse-chat.turnstage.jsonc?raw';
 import agentRaw from '../../resources/templates/agent-flow.turnstage.jsonc?raw';
@@ -220,7 +221,9 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       case 'testExplorer.open': notifyUnavailable('VS Code Test Explorer is unavailable in Web. Use the Tests workspace.', message.requestId); break;
     }
   } catch (error) {
-    post({ type: 'request.error', error: { type: 'WebRuntimeError', message: error instanceof Error ? error.message : String(error) } }, message.requestId);
+    const detail = error instanceof Error ? error.message : String(error);
+    if (message.type === 'visual.baseline.save' || message.type === 'visual.compare') post({ type: 'visual.error', operation: message.type === 'visual.baseline.save' ? 'baseline' : 'compare', message: detail }, message.requestId);
+    else post({ type: 'request.error', error: { type: 'WebRuntimeError', message: detail } }, message.requestId);
   }
 }
 
@@ -396,7 +399,7 @@ async function captureTest(source: { kind: 'conversation' } | { kind: 'run'; run
   if (kind === 'adversarial' && !forbidText) return;
   const scenario = buildCapturedScenario({ kind, name: (lastText || `Captured ${kind} case`).slice(0, 120), snapshot, profile: activeProfile(), source, existingIds: existing, ...(forbidText ? { forbid: { content: [forbidText] } } : {}) });
   const sourcePath = await tests.saveCapturedScenario(scenario, kind);
-  post({ type: 'test.captured', detail: `Saved ${scenario.name} to browser-local captured cases.`, kind, scenarioId: scenario.id, sourcePath }, requestId);
+  post({ type: 'test.captured', detail: t('Test case saved: {name}', { name: scenario.name }), kind, scenarioId: scenario.id, sourcePath }, requestId);
   post({ type: 'workspace.navigate', destination: kind === 'adversarial' ? { pane: 'adversarial', section: 'cases' } : { pane: 'tests', section: 'scenarios' } });
 }
 
@@ -476,13 +479,32 @@ function createBlankProfile(): void {
   selectProfile(item.id);
 }
 
-function duplicateProfile(source: StoredProfile): void {
+function duplicateProfile(source: StoredProfile): StoredProfile {
   const item = deriveLocalProfile(source);
   profiles = [...profiles, item];
   persistLibrary();
   selectProfile(item.id);
+  return item;
 }
 function duplicateActive(): void { duplicateProfile(active); }
+
+function saveProfileSource(id: string, raw: string): ProfileSourceSaveResult {
+  const source = profiles.find((item) => item.id === id);
+  if (!source || source.builtIn) return { ok: false, error: 'This Profile is read-only.' };
+  const issues = diagnostics(raw).filter((issue) => issue.severity === 'error');
+  if (issues.length) return { ok: false, error: issues[0]!.message, offset: issues[0]!.offset };
+  const profile = codec.parse(raw).profile;
+  if (!profile) return { ok: false, error: 'Invalid JSONC.' };
+  if (profile.id !== id && profiles.some((item) => item.id === profile.id)) return { ok: false, error: `Profile id ${profile.id} already exists in this browser.` };
+  const updated: StoredProfile = { ...source, id: profile.id, name: profile.name, raw, updatedAt: Date.now() };
+  const next = replaceProfile(profiles, id, updated);
+  try { saveProfiles(next.filter((item) => !item.builtIn)); }
+  catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+  profiles = next;
+  if (active.id === id) selectProfile(updated.id);
+  else onLibraryChanged?.();
+  return { ok: true, id: updated.id, raw };
+}
 
 function exportProfile(item: StoredProfile): void {
   const profile = codec.parse(item.raw).profile ?? fallbackProfile(item);
@@ -574,6 +596,10 @@ async function invokeAction(actionId: string, sourceMessageId: string | undefine
   throw new Error(`Response action ${action.actionId} is unavailable in the browser runtime.`);
 }
 
+function DisclosureChevron(): React.JSX.Element {
+  return <svg className="disclosure-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6.25 3.5 3.5 3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+
 function ProfileLibrary(): React.JSX.Element {
   const [, render] = useState(0);
   const [, renderSecrets] = useState(0);
@@ -594,6 +620,10 @@ function ProfileLibrary(): React.JSX.Element {
   onOpenReference = (page) => { setReferenceProfileId(active.id); setReferencePage(page); };
   const locale = normalizeLocale(preferences.locale ?? navigator.language);
   const labels = useMemo(() => copy(locale), [locale]);
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    document.getElementById('profile-root')?.setAttribute('aria-label', labels.profiles);
+  }, [locale, labels.profiles]);
   useEffect(() => { activeProfileButton.current?.scrollIntoView({ block: 'nearest' }); }, [active.id]);
   useEffect(() => { if (libraryOpen) searchInput.current?.focus(); }, [libraryOpen]);
   useEffect(() => {
@@ -691,7 +721,7 @@ function ProfileLibrary(): React.JSX.Element {
     itemMenuTrigger.current = button;
     setFolderPickerOpen(false);
     const menuHeight = 168;
-    setItemMenu({ id: item.id, top: bounds.bottom + menuHeight > window.innerHeight ? Math.max(8, bounds.top - menuHeight) : bounds.bottom + 4, left: Math.max(8, Math.min(bounds.right - 184, window.innerWidth - 192)) });
+    setItemMenu({ id: item.id, top: bounds.bottom + menuHeight > window.innerHeight ? Math.max(8, bounds.top - menuHeight) : bounds.bottom + 4, left: Math.max(8, Math.min(bounds.right - 210, window.innerWidth - 218)) });
   };
   const menuItem = profiles.find((item) => item.id === itemMenu?.id);
   const referenceItem = profiles.find((item) => item.id === referenceProfileId) ?? active;
@@ -709,7 +739,7 @@ function ProfileLibrary(): React.JSX.Element {
     const collapsed = !normalizedQuery && organization.collapsed.includes(group.id);
     const siblings = organization.folders.filter((folder) => folder.parentId === organization.folders.find((folder) => folder.id === group.customId)?.parentId);
     const siblingIndex = siblings.findIndex((folder) => folder.id === group.customId);
-    return <section className="profile-folder" key={group.id} style={{ '--folder-depth': depth } as React.CSSProperties}><div className="folder-heading"><button className="folder-toggle" aria-expanded={!collapsed} aria-controls={`profiles-${group.id}`} onClick={() => toggleFolder(group.id)}><span aria-hidden="true" className={`codicon codicon-chevron-${collapsed ? 'right' : 'down'}`} /><span className="folder-name" title={group.name}>{group.name}</span><span className="folder-count">{countProfiles(group)}</span></button>{group.customId && <div className="folder-actions"><IconButton className="sidebar-icon" icon="folder-opened" label={`${labels.newSubfolder}: ${group.name}`} disabled={depth >= 8 || organization.folders.length >= 100} onClick={() => createFolder(group.customId)} /><IconButton className="sidebar-icon" icon="arrow-up" label={`${labels.moveFolderUp}: ${group.name}`} disabled={siblingIndex <= 0} onClick={() => moveFolder(group.customId!, -1)} /><IconButton className="sidebar-icon" icon="arrow-down" label={`${labels.moveFolderDown}: ${group.name}`} disabled={siblingIndex >= siblings.length - 1} onClick={() => moveFolder(group.customId!, 1)} /><IconButton className="sidebar-icon" icon="edit" label={`${labels.renameFolder}: ${group.name}`} onClick={() => renameFolder(group.customId!, group.name)} /><IconButton className="sidebar-icon" icon="trash" label={`${labels.deleteFolder}: ${group.name}`} onClick={() => deleteFolder(group.customId!, group.name)} /></div>}</div><div id={`profiles-${group.id}`} hidden={collapsed}>{group.children.filter((child) => hasContent(child) || !normalizedQuery && source === 'all').map((child) => renderGroup(child, depth + 1))}{group.items.map((item) => { const sourceLabel = profileSourceLabel(item, labels); return <div className={`profile-item-row${itemMenu?.id === item.id ? ' menu-open' : ''}`} key={item.id}><button ref={item.id === active.id ? activeProfileButton : undefined} className={`profile-item${item.id === active.id ? ' active' : ''}`} aria-label={`${item.name}, ${sourceLabel}`} aria-current={item.id === active.id ? 'page' : undefined} onClick={() => { setItemMenu(undefined); selectProfile(item.id); setLibraryOpen(false); }}><span className="profile-glyph" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</span><span><strong>{item.name}</strong><small>{sourceLabel}</small></span></button><IconButton className="profile-item-more" icon="ellipsis" label={`${labels.profileActions}: ${item.name}`} aria-haspopup="menu" aria-expanded={itemMenu?.id === item.id} onClick={(event) => openItemMenu(item, event.currentTarget)} /></div>; })}</div></section>;
+    return <section className="profile-folder" key={group.id} style={{ '--folder-depth': depth } as React.CSSProperties}><div className="folder-heading"><button className="folder-toggle" aria-expanded={!collapsed} aria-controls={`profiles-${group.id}`} onClick={() => toggleFolder(group.id)}><span aria-hidden="true" className={`codicon codicon-chevron-${collapsed ? 'right' : 'down'}`} /><span className="folder-name" title={group.name}>{group.name}</span><span className="folder-count">{countProfiles(group)}</span></button>{group.customId && <div className="folder-actions"><IconButton className="sidebar-icon" icon="folder-opened" label={`${labels.newSubfolder}: ${group.name}`} disabled={depth >= 8 || organization.folders.length >= 100} onClick={() => createFolder(group.customId)} /><IconButton className="sidebar-icon" icon="arrow-up" label={`${labels.moveFolderUp}: ${group.name}`} disabled={siblingIndex <= 0} onClick={() => moveFolder(group.customId!, -1)} /><IconButton className="sidebar-icon" icon="arrow-down" label={`${labels.moveFolderDown}: ${group.name}`} disabled={siblingIndex >= siblings.length - 1} onClick={() => moveFolder(group.customId!, 1)} /><IconButton className="sidebar-icon" icon="edit" label={`${labels.renameFolder}: ${group.name}`} onClick={() => renameFolder(group.customId!, group.name)} /><IconButton className="sidebar-icon" icon="trash" label={`${labels.deleteFolder}: ${group.name}`} onClick={() => deleteFolder(group.customId!, group.name)} /></div>}</div><div id={`profiles-${group.id}`} hidden={collapsed}>{group.items.map((item) => { const sourceLabel = profileSourceLabel(item, labels); return <div className={`profile-item-row${itemMenu?.id === item.id ? ' menu-open' : ''}`} key={item.id}><button ref={item.id === active.id ? activeProfileButton : undefined} className={`profile-item${item.id === active.id ? ' active' : ''}`} aria-label={`${item.name}, ${sourceLabel}`} aria-current={item.id === active.id ? 'page' : undefined} onClick={() => { setItemMenu(undefined); selectProfile(item.id); setLibraryOpen(false); }}><span className="profile-glyph" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</span><span><strong>{item.name}</strong><small>{sourceLabel}</small></span></button><IconButton className="profile-item-more" icon="ellipsis" label={`${labels.profileActions}: ${item.name}`} aria-haspopup="menu" aria-expanded={itemMenu?.id === item.id} onClick={(event) => openItemMenu(item, event.currentTarget)} /></div>; })}{group.children.filter((child) => hasContent(child) || !normalizedQuery && source === 'all').map((child) => renderGroup(child, depth + 1))}</div></section>;
   };
   const secretNames = [...new Set([
     ...[...active.raw.matchAll(/\$\{secret\.([A-Za-z0-9_.-]+)\}/gu)].map((match) => match[1]!),
@@ -723,18 +753,30 @@ function ProfileLibrary(): React.JSX.Element {
     <nav aria-label={labels.profiles}>{groups.length === 0 && <p className="library-empty">{labels.noProfilesFound}</p>}{groups.map((group) => renderGroup(group))}</nav>
     <footer>
       <button type="button" className="profile-guide-link" onClick={() => { setReferenceProfileId(active.id); setReferencePage('guide'); }}><span className="codicon codicon-book" aria-hidden="true" />{labels.profileGuide}</button>
-      <details className="sidebar-preferences"><summary><span className="codicon codicon-settings-gear" aria-hidden="true" />{labels.displayPreferences}</summary><div><label>{labels.language}<select value={locale} onChange={(event) => { preferences.locale = event.target.value; savePreferences(preferences); window.location.reload(); }}><option value="en">English</option><option value="zh-TW">繁體中文</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label><label>{labels.theme}<select value={preferences.theme ?? 'system'} onChange={(event) => { preferences.theme = event.target.value as WebThemePreference; savePreferences(preferences); applyWebAppearance(preferences.theme); render((value) => value + 1); }}><option value="system">{labels.themeSystem}</option><option value="dark">{labels.themeDark}</option><option value="light">{labels.themeLight}</option></select></label></div></details>
+      <details className="sidebar-preferences"><summary><span className="codicon codicon-settings-gear" aria-hidden="true" />{labels.displayPreferences}<DisclosureChevron /></summary><div><label>{labels.language}<select value={locale} onChange={(event) => { preferences.locale = event.target.value; savePreferences(preferences); window.location.reload(); }}><option value="en">English</option><option value="zh-TW">繁體中文</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label><label>{labels.theme}<select value={preferences.theme ?? 'system'} onChange={(event) => { preferences.theme = event.target.value as WebThemePreference; savePreferences(preferences); applyWebAppearance(preferences.theme); render((value) => value + 1); }}><option value="system">{labels.themeSystem}</option><option value="dark">{labels.themeDark}</option><option value="light">{labels.themeLight}</option></select></label></div></details>
       {secretNames.length > 0 && <details className="secret-editor"><summary>{labels.secrets}</summary>{secretNames.map((name) => <label key={name}>{name}<input type="password" autoComplete="off" value={secrets.get(name) ?? ''} placeholder={labels.memoryOnly} onChange={(event) => { if (event.target.value) secrets.set(name, event.target.value); else secrets.delete(name); renderSecrets((value) => value + 1); }} /></label>)}</details>}
       {catalog.warning && <p className="catalog-note catalog-note--warning" role="status" title={catalog.warning}>{labels.catalogFallback}</p>}
     </footer>
-    {referencePage && <ProfileReferencePanel page={referencePage} onClose={() => setReferencePage(undefined)} profileName={referenceItem.name} raw={referenceItem.raw} locale={locale} onDownload={() => download(`${referenceItem.id}.turnstage.jsonc`, referenceItem.raw, 'application/json')} onCopy={copyText} />}
+    {referencePage && <ProfileReferencePanel page={referencePage} onClose={() => setReferencePage(undefined)} profileName={referenceItem.name} raw={referenceItem.raw} locale={locale} readOnly={Boolean(referenceItem.builtIn)} onSave={(raw) => {
+      const previousId = referenceItem.id;
+      const result = saveProfileSource(previousId, raw);
+      if (result.ok) {
+        setReferenceProfileId(result.id);
+        if (previousId !== result.id && organization.assignments[previousId]) {
+          const assignments = { ...organization.assignments, [result.id]: organization.assignments[previousId]! };
+          delete assignments[previousId];
+          updateOrganization({ ...organization, assignments });
+        }
+      }
+      return result;
+    }} onDuplicate={() => { const item = duplicateProfile(referenceItem); setReferenceProfileId(item.id); return item; }} onDownload={(value) => download(`${referenceItem.id}.turnstage.jsonc`, value, 'application/json')} onCopy={copyText} />}
     {itemMenu && menuItem && createPortal(
       <div ref={itemMenuRef} className="profile-item-menu" role="menu" aria-label={`${labels.profileActions}: ${menuItem.name}`} style={{ top: itemMenu.top, left: itemMenu.left, maxHeight: Math.max(80, window.innerHeight - itemMenu.top - 8) }} onKeyDown={navigateItemMenu}>
-        <button type="button" role="menuitem" onClick={() => { closeItemMenu(); setReferenceProfileId(menuItem.id); setReferencePage('source'); }}>{labels.viewJsonc}</button>
+        <button type="button" role="menuitem" onClick={() => { closeItemMenu(); setReferenceProfileId(menuItem.id); setReferencePage('source'); }}>{menuItem.builtIn ? labels.viewJsonc : labels.editJsonc}</button>
         <button type="button" role="menuitem" onClick={() => { closeItemMenu(); duplicateProfile(menuItem); }}>{labels.duplicate}</button>
         <button type="button" role="menuitem" onClick={() => { closeItemMenu(); exportProfile(menuItem); }}>{labels.export}</button>
         {!menuItem.builtIn && organization.folders.length > 0 && <>
-          <button type="button" role="menuitem" aria-expanded={folderPickerOpen} onClick={() => setFolderPickerOpen(!folderPickerOpen)}>{labels.moveToFolder} <span aria-hidden="true">{folderPickerOpen ? '⌃' : '⌄'}</span></button>
+          <button type="button" role="menuitem" className="profile-item-folder-toggle" aria-expanded={folderPickerOpen} onClick={() => setFolderPickerOpen(!folderPickerOpen)}>{labels.moveToFolder}<DisclosureChevron /></button>
           {folderPickerOpen && <div className="profile-item-folder-list" role="group" aria-label={labels.moveToFolder}>
             <button type="button" role="menuitemradio" aria-checked={!organization.assignments[menuItem.id]} onClick={() => { assignFolder(menuItem.id, ''); closeItemMenu(); }}>{menuItem.builtIn ? labels.official : labels.browser}</button>
             {organization.folders.map((folder) => <button type="button" key={folder.id} role="menuitemradio" aria-checked={organization.assignments[menuItem.id] === folder.id} title={folderPath(folder.id)} onClick={() => { assignFolder(menuItem.id, folder.id); closeItemMenu(); }}>{folderPath(folder.id)}</button>)}
@@ -808,28 +850,28 @@ function copy(locale: string) {
   const common = locale === 'zh-TW' ? {
     profiles: '設定檔', profileActions: '設定檔動作', newProfile: '新增設定檔', newProfileName: '新設定檔', import: '匯入設定檔',
     official: '預設', browser: '本機', officialCopy: '源自預設設定檔', officialUpdated: '預設設定檔已有新版',
-    duplicate: '複製', export: '匯出', delete: '刪除', reset: '還原預設', profileGuide: '設定檔指南', viewJsonc: '檢視 JSONC', moveToFolder: '移至資料夾',
+    duplicate: '複製', export: '匯出', delete: '刪除', reset: '還原預設', profileGuide: '設定檔指南', viewJsonc: '檢視 JSONC', editJsonc: '編輯 JSONC', moveToFolder: '移至資料夾',
     catalogFallback: '無法載入預設設定檔，已改用內建範本。', language: '顯示語言', theme: '外觀主題', displayPreferences: '語言與外觀', themeSystem: '跟隨系統', themeDark: '深色', themeLight: '淺色',
     secrets: '工作階段密鑰', memoryOnly: '僅保留於記憶體',
     searchProfiles: '搜尋設定檔', filterSource: '篩選來源', allSources: '全部', noProfilesFound: '沒有符合的設定檔', newFolder: '新增資料夾', newSubfolder: '新增子資料夾', moveFolderUp: '上移資料夾', moveFolderDown: '下移資料夾', folderName: '資料夾名稱', folder: '資料夾', renameFolder: '重新命名資料夾', deleteFolder: '刪除資料夾', confirmDeleteFolder: '刪除「{name}」資料夾？其中的設定檔與子資料夾會移到上一層。', closeLibrary: '收合設定檔側欄',
   } : locale === 'ja' ? {
     profiles: 'プロファイル', profileActions: 'プロファイル操作', newProfile: '新規プロファイル', newProfileName: '新規プロファイル', import: 'インポート',
     official: 'デフォルト', browser: 'ローカル', officialCopy: 'デフォルトから作成', officialUpdated: 'デフォルトに更新あり',
-    duplicate: '複製', export: '書き出し', delete: '削除', reset: 'デフォルトに戻す', profileGuide: 'プロファイルガイド', viewJsonc: 'JSONC を表示', moveToFolder: 'フォルダーへ移動',
+    duplicate: '複製', export: '書き出し', delete: '削除', reset: 'デフォルトに戻す', profileGuide: 'プロファイルガイド', viewJsonc: 'JSONC を表示', editJsonc: 'JSONC を編集', moveToFolder: 'フォルダーへ移動',
     catalogFallback: 'デフォルトを読み込めません。内蔵プリセットを使用しています。', language: '表示言語', theme: '外観テーマ', displayPreferences: '言語と外観', themeSystem: 'システム設定', themeDark: 'ダーク', themeLight: 'ライト',
     secrets: 'セッションシークレット', memoryOnly: 'メモリのみ',
     searchProfiles: 'プロファイルを検索', filterSource: '提供元で絞り込み', allSources: 'すべて', noProfilesFound: '該当するプロファイルはありません', newFolder: 'フォルダーを作成', newSubfolder: 'サブフォルダーを作成', moveFolderUp: 'フォルダーを上へ', moveFolderDown: 'フォルダーを下へ', folderName: 'フォルダー名', folder: 'フォルダー', renameFolder: 'フォルダー名を変更', deleteFolder: 'フォルダーを削除', confirmDeleteFolder: '「{name}」フォルダーを削除しますか？プロファイルとサブフォルダーは親フォルダーに移動します。', closeLibrary: 'プロファイル一覧を閉じる',
   } : locale === 'ko' ? {
     profiles: '프로필', profileActions: '프로필 작업', newProfile: '새 프로필', newProfileName: '새 프로필', import: '가져오기',
     official: '기본', browser: '로컬', officialCopy: '기본 프로필에서 생성', officialUpdated: '기본 프로필 업데이트 있음',
-    duplicate: '복제', export: '내보내기', delete: '삭제', reset: '기본값 복원', profileGuide: '프로필 가이드', viewJsonc: 'JSONC 보기', moveToFolder: '폴더로 이동',
+    duplicate: '복제', export: '내보내기', delete: '삭제', reset: '기본값 복원', profileGuide: '프로필 가이드', viewJsonc: 'JSONC 보기', editJsonc: 'JSONC 편집', moveToFolder: '폴더로 이동',
     catalogFallback: '기본 프로필을 불러오지 못했습니다. 내장 프리셋을 사용합니다.', language: '표시 언어', theme: '화면 테마', displayPreferences: '언어 및 화면', themeSystem: '시스템 설정', themeDark: '어둡게', themeLight: '밝게',
     secrets: '세션 비밀', memoryOnly: '메모리에만 저장',
     searchProfiles: '프로필 검색', filterSource: '출처별 필터', allSources: '전체', noProfilesFound: '일치하는 프로필이 없습니다', newFolder: '폴더 만들기', newSubfolder: '하위 폴더 만들기', moveFolderUp: '폴더 위로', moveFolderDown: '폴더 아래로', folderName: '폴더 이름', folder: '폴더', renameFolder: '폴더 이름 변경', deleteFolder: '폴더 삭제', confirmDeleteFolder: '“{name}” 폴더를 삭제할까요? 프로필과 하위 폴더는 상위 폴더로 이동합니다.', closeLibrary: '프로필 목록 닫기',
   } : {
     profiles: 'Profiles', profileActions: 'Profile actions', newProfile: 'New profile', newProfileName: 'New Profile', import: 'Import profile',
     official: 'Default', browser: 'Local', officialCopy: 'Based on default profile', officialUpdated: 'Default profile updated',
-    duplicate: 'Duplicate', export: 'Export', delete: 'Delete', reset: 'Restore default', profileGuide: 'Profile guide', viewJsonc: 'View JSONC', moveToFolder: 'Move to folder',
+    duplicate: 'Duplicate', export: 'Export', delete: 'Delete', reset: 'Restore default', profileGuide: 'Profile guide', viewJsonc: 'View JSONC', editJsonc: 'Edit JSONC', moveToFolder: 'Move to folder',
     catalogFallback: 'Default profiles unavailable. Using bundled presets.', language: 'Display language', theme: 'Appearance theme', displayPreferences: 'Language and appearance', themeSystem: 'Use system setting', themeDark: 'Dark', themeLight: 'Light',
     secrets: 'Session secrets', memoryOnly: 'Memory only',
     searchProfiles: 'Search profiles', filterSource: 'Filter by source', allSources: 'All', noProfilesFound: 'No matching profiles', newFolder: 'New folder', newSubfolder: 'New subfolder', moveFolderUp: 'Move folder up', moveFolderDown: 'Move folder down', folderName: 'Folder name', folder: 'Folder', renameFolder: 'Rename folder', deleteFolder: 'Delete folder', confirmDeleteFolder: 'Delete “{name}”? Profiles and subfolders will move up one level.', closeLibrary: 'Close profile sidebar',

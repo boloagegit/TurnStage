@@ -433,6 +433,7 @@
   "No visual baseline exists for this profile and viewport.": "此設定檔與視窗尺寸尚無視覺基準。",
   "Replace Baseline": "取代基準",
   "Replace the visual baseline for {profile} at {width} × {height}?": "要取代 {profile} 在 {width} × {height} 的視覺基準嗎？",
+  "Visual baseline unchanged.": "視覺基準未變更。",
   "Visual capture is not a PNG image.": "視覺擷取不是 PNG 圖片。",
   "Visual capture is malformed.": "視覺擷取格式錯誤。",
   "Visual capture exceeds the 24 MiB safety limit.": "視覺擷取超過 24 MiB 安全上限。",
