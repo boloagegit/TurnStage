@@ -31,14 +31,26 @@ def scan(root, folder_name, filename_pattern):
     if not folder.is_dir() or folder.is_symlink():
         raise ValueError("Missing or unsafe folder: {}".format(folder))
     paths = []
-    for path in sorted(folder.iterdir(), key=lambda item: item.name):
-        if not path.name.endswith(".jsonc"):
-            continue
-        if (not filename_pattern.fullmatch(path.name) or path.is_symlink() or not path.is_file()
-                or len(path.name.encode("utf-8")) > 200
-                or any(ord(character) < 32 or ord(character) == 127 or character == "\\" for character in path.name)):
-            raise ValueError("Unsupported or unsafe JSONC file: {}".format(path))
-        paths.append(path)
+    for directory, names, filenames in os.walk(str(folder), followlinks=False):
+        names.sort()
+        filenames.sort()
+        for name in names:
+            path = Path(directory) / name
+            if (path.is_symlink() or not path.is_dir() or len(name.encode("utf-8")) > 200
+                    or name in (".", "..") or any(ord(character) < 32 or ord(character) == 127 or character == "\\" for character in name)):
+                raise ValueError("Unsupported or unsafe folder: {}".format(path))
+        for name in filenames:
+            path = Path(directory) / name
+            if not name.endswith(".jsonc") and not path.is_symlink():
+                continue
+            if (not filename_pattern.fullmatch(name) or path.is_symlink() or not path.is_file()
+                    or len(name.encode("utf-8")) > 200
+                    or any(ord(character) < 32 or ord(character) == 127 or character == "\\" for character in name)):
+                raise ValueError("Unsupported or unsafe JSONC file: {}".format(path))
+            paths.append(path)
+    paths.sort(key=lambda path: path.relative_to(folder).parts)
+    if any(len(path.relative_to(folder).parts) > 9 for path in paths):
+        raise ValueError("JSONC folder nesting exceeds eight levels")
     if len(paths) > MAX_ENTRIES:
         raise ValueError("{} contains more than {} JSONC files".format(folder_name, MAX_ENTRIES))
     entries = []
@@ -48,7 +60,8 @@ def scan(root, folder_name, filename_pattern):
             raise ValueError("JSONC file exceeds 512 KiB: {}".format(path))
         content.decode("utf-8")
         digest = hashlib.sha256(content).hexdigest()[:16]
-        entries.append({"file": "./{}/{}".format(folder_name, quote(path.name, safe="-._~")), "version": digest})
+        encoded_path = "/".join(quote(part, safe="-._~") for part in path.relative_to(folder).parts)
+        entries.append({"file": "./{}/{}".format(folder_name, encoded_path), "version": digest})
     return entries
 
 

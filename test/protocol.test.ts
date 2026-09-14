@@ -70,6 +70,10 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'connection.analyze' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.report.export', format: 'html', evidenceId: 'evidence-1' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.report.export', format: 'html', kind: 'contract' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.report.export', format: 'html', kind: 'unknown' }, 'editor-1')).toBe(false);
+    expect(isWebviewMessage({ ...envelope, type: 'test.history.export', runId: 'run-1', format: 'html', kind: 'adversarial' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.history.export', runId: 'run-1', format: 'html', kind: 'unknown' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.report.export', format: 'csv' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidenceBundle.export' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'campaign.cancel', campaignId: 'release' }, 'editor-1')).toBe(true);

@@ -83,6 +83,26 @@ describe('ScenarioReportService', () => {
     expect(mock.writes.at(-1)?.text).not.toContain('Private case');
   });
 
+  it('filters VS Code exports by test type even when the record source is mixed', async () => {
+    const service = new ScenarioReportService({ appendLine: vi.fn() } as never);
+    const records = [
+      { kind: 'contract' as const, profileId: 'test-profile', profileName: 'Private', scenarioId: 'ordinary-case', scenarioName: 'Ordinary', status: 'passed' as const },
+      { kind: 'adversarial' as const, profileId: 'test-profile', profileName: 'Private', scenarioId: 'red-case', scenarioName: 'Red', status: 'failed' as const, reportOutcome: 'attackSucceeded' as const },
+    ];
+    await service.exportRecords('html', records, 'general', 'contract', 'zh-TW');
+    expect(mock.writes.at(-1)?.text).toContain('一般測試報告');
+    expect(mock.writes.at(-1)?.text).toContain('ordinary-case');
+    expect(mock.writes.at(-1)?.text).not.toContain('red-case');
+    await service.exportRecords('html', records, 'red-team', 'adversarial', 'zh-TW');
+    expect(mock.writes.at(-1)?.text).toContain('紅隊測試報告');
+    expect(mock.writes.at(-1)?.text).toContain('red-case');
+    expect(mock.writes.at(-1)?.text).not.toContain('ordinary-case');
+    await service.exportRecords('json', records, 'general', 'contract');
+    expect(mock.writes.at(-1)?.text).not.toContain('red-case');
+    await service.exportRecords('junit', records, 'red-team', 'adversarial');
+    expect(mock.writes.at(-1)?.text).not.toContain('ordinary-case');
+  });
+
   it('exports a new sanitized evidence folder with an offline HTML entry point and manifest', async () => {
     const output = { appendLine: vi.fn() };
     const service = new ScenarioReportService(output as never, undefined, '0.13.0', { snapshot: () => ({ version: 'CopilotArtifactSnapshotV1', sanitized: true, diagnoses: [{ artifactId: 'safe-diagnosis', kind: 'diagnosis', runId: 'copilot-run', profileId: 'safe-profile', summary: 'Bounded timeout evidence.' }], profilePatches: [], qualityReviews: [] }) });

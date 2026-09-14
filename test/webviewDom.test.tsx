@@ -28,6 +28,28 @@ function eventRows(scope: HTMLElement | Document = document): HTMLElement[] {
 }
 
 describe('Webview DOM behavior', () => {
+  it('keeps controls collapsed by default, supports configured expansion, and posts object option values', () => {
+    const selected = { custid: 'C002', bdcun: 'B002' };
+    const controlProfile: TurnStageProfile = { ...profile, controls: [{ id: 'user', type: 'select', label: 'User', default: 'legacy', options: [
+      { label: 'Legacy', value: 'legacy' }, { label: 'User B', value: selected },
+    ] }] };
+    const post = vi.fn();
+    const { container, rerender } = render(<MobileChatPreview {...mobileProps({ profile: controlProfile, post })} />);
+    const details = container.querySelector('.mobile-chat-preview__controls') as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    rerender(<MobileChatPreview {...mobileProps({ profile: { ...controlProfile, ui: { components: { controls: { defaultCollapsed: false } } } }, post })} />);
+    expect(details.open).toBe(true);
+    fireEvent.click(within(details).getByText('Session controls'));
+    expect(details.open).toBe(false);
+    rerender(<MobileChatPreview {...mobileProps({ profile: { ...controlProfile, ui: { components: { controls: { defaultCollapsed: false } } } }, snapshot: { ...snapshot, controls: { user: selected } }, post })} />);
+    expect(details.open).toBe(false);
+    fireEvent.click(within(details).getByText('Session controls'));
+    fireEvent.change(within(details).getByRole('combobox', { name: 'User' }), { target: { value: '1' } });
+    expect(post).toHaveBeenCalledWith({ type: 'control.set', controlId: 'user', value: selected });
+    fireEvent.change(within(details).getByRole('combobox', { name: 'User' }), { target: { value: '0' } });
+    expect(post).toHaveBeenCalledWith({ type: 'control.set', controlId: 'user', value: 'legacy' });
+  });
+
   it('shows the environment in VS Code but keeps the Web toolbar focused on session status', () => {
     const previewProfile = { ...profile, environment: 'sit' };
     const vscode = render(<MobileChatPreview {...mobileProps({ profile: previewProfile })} />);
@@ -1312,7 +1334,7 @@ describe('Webview DOM behavior', () => {
     expect(screen.getByRole('button', { name: 'Select test result Contract 1' }).getAttribute('aria-pressed')).toBe('true');
     await user.click(screen.getByLabelText('Export test results'));
     await user.click(screen.getByRole('button', { name: 'JSON report' }));
-    expect(post).toHaveBeenCalledWith({ type: 'test.report.export', format: 'json' });
+    expect(post).toHaveBeenCalledWith({ type: 'test.report.export', kind: 'contract', format: 'json' });
     await user.type(screen.getByRole('searchbox'), 'missing result');
     rerender(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} trusted automationResults={automationResults} />);
     expect(screen.getByText('Contract 1')).toBeTruthy();
@@ -1346,6 +1368,9 @@ describe('Webview DOM behavior', () => {
     const configured = { ...profile, tests: { scenarios: [{ id: 'normal', name: 'Normal', steps: [{ id: 'turn-one', input: 'Hello' }] }] } } as TurnStageProfile;
     render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} trusted vscodeFeatures={false} />);
 
+    await user.click(screen.getByRole('button', { name: 'Download sample CSV' }));
+    expect(post).toHaveBeenCalledWith({ type: 'contract.file', action: 'csvTemplate' });
+
     await user.click(screen.getByLabelText('More case actions'));
     await user.click(screen.getByText('Add cases from file'));
     const importCopy = screen.getByRole('button', { name: 'Import JSONC copy' });
@@ -1372,6 +1397,9 @@ describe('Webview DOM behavior', () => {
     const post = vi.fn();
     const configured = { ...profile, tests: { scenarios: [{ id: 'case-1', name: 'Case 1', steps: [{ id: 'turn-1', input: 'hello' }], adversarial: { forbid: { urls: true } } }] } } as TurnStageProfile;
     render(<AdversarialWorkspace profile={configured} post={post} activeSection="cases" vscodeFeatures={false} />);
+
+    await user.click(screen.getByRole('button', { name: 'Download sample CSV' }));
+    expect(post).toHaveBeenCalledWith({ type: 'adversarial.file', action: 'csvTemplate' });
 
     await user.click(screen.getByLabelText('More case actions'));
     await user.click(screen.getByText('Add cases from file'));
@@ -1429,7 +1457,7 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } });
     await user.click(container.querySelector('.adversarial-export-actions > summary')!);
     await user.click(screen.getByRole('button', { name: 'HTML report' }));
-    expect(post).toHaveBeenCalledWith({ type: 'test.report.export', format: 'html' });
+    expect(post).toHaveBeenCalledWith({ type: 'test.report.export', kind: 'adversarial', format: 'html' });
     expect((screen.getByRole('button', { name: 'Evidence Bundle' }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(screen.getByRole('button', { name: 'Review timeline' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.timeline.open', evidenceId: 'evidence-1' });
@@ -1915,7 +1943,9 @@ describe('Webview DOM behavior', () => {
     const unavailable = localRun('unavailable');
     const { rerender } = render(<Replay runs={[replayable, unavailable]} active={false} trusted={true} />);
 
-    expect((screen.getByRole('button', { name: 'Import run' }) as HTMLButtonElement).disabled).toBe(false);
+    const importRun = screen.getByRole('button', { name: 'Import run' }) as HTMLButtonElement;
+    expect(importRun.disabled).toBe(false);
+    expect(importRun.querySelector('.codicon-file-add')).not.toBeNull();
     const replayButtons = screen.getAllByRole('button', { name: 'Replay' }) as HTMLButtonElement[];
     expect(replayButtons).toHaveLength(2);
     expect(replayButtons[0]?.disabled).toBe(false);

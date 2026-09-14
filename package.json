@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.30.4",
+  "version": "0.31.0",
   "publisher": "turnstage",
   "author": {
     "name": "TurnStage contributors",
@@ -1610,6 +1610,9 @@
     "test:web": "vitest run --config vitest.config.ts test/browserSession.test.ts test/webArtifactStore.test.ts test/webCampaignController.test.ts test/webCatalog.test.ts test/webInsightsController.test.ts test/webProfileBundle.test.ts test/webTestController.test.ts test/webTheme.test.ts",
     "test:integration": "npm run compile && node test/integration/runTest.mjs",
     "test:visual": "npm run compile && node test/visual/unifiedTests.visual.mjs",
+    "test:visual:rich": "npm run build:all && node test/visual/richContent.visual.mjs",
+    "test:visual:web-library": "npm run build:all && node test/visual/webLibrary.visual.mjs",
+    "test:visual:web-ab": "npm run build:all && node test/visual/webAbServices.visual.mjs",
     "test:visual:legacy": "npm run compile && node test/visual/profileWorkspace.visual.mjs",
     "benchmark": "vitest bench --config test/benchmark.vitest.config.ts --run",
     "mock-server": "node examples/mock-server/server.mjs",
@@ -1624,6 +1627,11 @@
     "pngjs": "^7.0.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
     "undici": "^7.29.0"
   },
   "devDependencies": {

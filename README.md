@@ -39,7 +39,8 @@ Results stay separate from case setup. Pick a previous run, compare it with an
 accepted baseline, rerun cases that did not pass, or export that run. Open a
 failed result to inspect its captured Chat, Network, Raw Events, or Normalized
 Events. Reports include sanitized JSON, JUnit, HTML, and Evidence Bundles for
-local review or CI.
+local review or CI. General and red-team HTML exports are separate, offline
+reports with outcome and duration charts; a run export stays scoped to that run.
 
 ![Synthetic general-test results and run history](media/marketplace/automated-tests.png)
 
@@ -189,12 +190,12 @@ See the [deployment steps](docs/web-deployment.md#one-command-web-and-api-proxy-
 and plaintext-transport warning. A managed reverse proxy is recommended for
 durable shared deployments.
 
-To provide official Profiles, copy VS Code `*.turnstage.jsonc` files into the
-extracted `profiles/` folder and their referenced `*.environment.jsonc` files
+To provide default Profiles, copy VS Code `*.turnstage.jsonc` files into the
+extracted `profiles/` folder (nested directories appear as nested Web sidebar folders) and their referenced `*.environment.jsonc` files
 into `environments/`, then run `python3 update_profiles.py` from that directory.
 The included `update_profiles.py` generates `turnstage-catalog.json`; Python
 is not needed while a separate static Web server runs. Users can duplicate an
-official Profile or create, import, edit, and export their own browser-local Profiles. A
+default Profile or create, import, edit, and export their own browser-local Profiles. A
 portable Profile export includes its referenced Environment and any plaintext
 credentials in those settings. Browser requests pointed at the same-origin
 `/api/` route use the fixed server-side proxy; requests pointed directly at
@@ -623,14 +624,17 @@ POST /v1/chat/stop
 ```
 
 The server emits example SSE events and has deterministic modes selected by
-`x-turnstage-mode` or `body.mode`: `normal`, `slow`, `chunk-split`,
+`x-turnstage-mode` or `body.mode`: `normal`, `rich-html`, `rich-markdown`,
+`rich-mixed`, `rich-complex`, `slow`, `chunk-split`,
 `malformed-json`, `unknown-event`, `partial-error`, `http-401`, `http-500`,
 `idle-timeout`, and `disconnect`. It does not call an LLM. Do not treat the
 example endpoint or `example.com` citation as a production service.
 
-Both starter profiles expose these values as a **Mock Scenario** control in the
-mobile chat preview, so streaming and failure modes can be switched without
-editing request headers or JSON.
+Both starter profiles expose the streaming and failure modes as a **Mock Scenario**
+control. The Agent Flow profile also exposes the four rich-content modes and
+maps responses as Markdown, so static HTML and Markdown can be tested together.
+The Basic SSE Chat profile maps responses as literal text and deliberately does
+not render those rich-content modes.
 
 The Enterprise Chat Contract profile additionally exposes `contract-slow`,
 `contract-error`, `contract-actions`, and `opening-options`. Its mock API

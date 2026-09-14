@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Markdown-mapped assistant responses now render GitHub-style Markdown together with static HTML, including line breaks, tables, and images, in both VS Code and Web. Existing plain-text mappings remain literal text.
+- External response images load automatically with no referrer. Scripts, event handlers, embedded documents, forms, inline CSS, and unsafe URL schemes are removed; browser CORS and certificate validation for API requests are unchanged.
+- Profiles can independently disable HTML or Markdown rendering with `ui.responseContent.html` and `ui.responseContent.markdown`. Both default to enabled; existing Profiles and text-mapped responses retain their behavior.
+- Web sidebar now searches and filters Profiles and supports browser-local folders, including official Profile display organization without changing server files. Narrow layouts can open the full library as a drawer.
+- Web case-import menus close after choosing a file format, and narrow general-test and Red Team result tables use a readable stacked layout instead of clipping action buttons.
+
+## 0.31.0
+
+- Select controls now accept either their existing string values or a flat object of string fields. Request variants can reference fields such as `controls.user.custid` and `controls.user.bdcun` in both VS Code and Web; validated selections persist and restore without changing existing string-valued Profiles.
+- Profiles may set `ui.components.controls.defaultCollapsed` to `false` to open the chat controls initially. Omission keeps the previous collapsed default, and users can still toggle the section.
+- Object option values are constrained to safe, flat string fields. Secret-persisted object fields are included in known-secret redaction. No Profile migration is needed; changing a selected user does not automatically start a new backend conversation.
+
 ## 0.30.4
 
 - Web no longer sends a conversation request through an unrelated Environment when the selected Profile references one that is missing. Switching Profiles or starting a new conversation cancels obsolete work, so late opening or stream responses cannot overwrite the current session.

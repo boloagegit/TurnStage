@@ -19,11 +19,12 @@ import type {
   TurnStageProfile
 } from '../shared/types';
 import { isResponseActionIcon } from '../shared/types';
+import { controlOptionIndex } from '../shared/controlValue';
 import { formatDateTime, formatDuration, formatNumber, t } from './i18n';
 import { IconButton, ProductIcon } from './Icon';
 import { JsonSyntax } from './JsonViewer';
 import { ClipboardButton } from './ClipboardButton';
-import { SafeMarkdown } from './SafeMarkdown';
+import { RichMarkdown } from './RichMarkdown';
 import { captureChatScreenshot, copyChatScreenshotToClipboard } from './chatScreenshot';
 import { resolveComposer, resolveMessageActions, resolveMessageActionVisibility, resolveStreaming, type ResolvedStreaming } from './uiConfig';
 import { advanceGraphemeBoundary, calculateRevealStep, resolveRevealPacing } from './streamingReveal';
@@ -507,7 +508,7 @@ function MobileControls({ profile, snapshot, active, trusted, post }: { profile:
       return next;
     });
   };
-  return <details className="mobile-chat-preview__controls">
+  return <details className="mobile-chat-preview__controls" open={profile.ui?.components?.controls?.defaultCollapsed === false}>
     <summary>{t('Session controls')}</summary>
     <div className="mobile-chat-preview__controls-grid">
       {profile.controls?.map((control) => {
@@ -521,8 +522,11 @@ function MobileControls({ profile, snapshot, active, trusted, post }: { profile:
               <input id={id} type="password" value={secretDrafts[control.id] ?? ''} autoComplete="new-password" disabled={locked} onChange={(event) => setSecretDrafts((current) => ({ ...current, [control.id]: event.target.value }))} />
               <button className="mobile-chat-preview__button" type="submit" disabled={locked}>{t('Apply')}</button>
             </div>
-          </form> : control.type === 'select' ? <select id={id} value={String(value ?? '')} disabled={locked} onChange={(event) => post({ type: 'control.set', controlId: control.id, value: event.target.value })}>
-            {control.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </form> : control.type === 'select' ? <select id={id} value={String(controlOptionIndex(control, value))} disabled={locked} onChange={(event) => {
+            const selected = control.options?.[Number(event.target.value)];
+            if (selected) post({ type: 'control.set', controlId: control.id, value: selected.value });
+          }}>
+            {control.options?.map((option, index) => <option key={index} value={index}>{option.label}</option>)}
           </select> : control.type === 'boolean' ? <input id={id} type="checkbox" checked={Boolean(value)} disabled={locked} onChange={(event) => post({ type: 'control.set', controlId: control.id, value: event.target.checked })} /> : <input id={id} type="text" value={String(value ?? '')} disabled={locked} onChange={(event) => post({ type: 'control.set', controlId: control.id, value: event.target.value })} />}
         </div>;
       })}
@@ -887,7 +891,7 @@ export function resizeComposerTextarea(textarea: HTMLTextAreaElement | null): vo
 
 function MobileMessagePart({ profile, part, messageId, citations, post, trusted, accepted, streaming, streamingActive }: { profile: TurnStageProfile; part: MessagePart; messageId: string; citations: Citation[]; post: PostMessage; trusted: boolean; accepted?: boolean; streaming?: ResolvedStreaming; streamingActive: boolean }): React.JSX.Element | null {
   if (part.type === 'text') return <MobileText text={part.text ?? ''} streaming={streaming} streamingActive={streamingActive} />;
-  if (part.type === 'markdown') return <MobileMarkdown text={part.text ?? ''} post={post} streaming={streaming} streamingActive={streamingActive} />;
+  if (part.type === 'markdown') return <MobileMarkdown text={part.text ?? ''} post={post} streaming={streaming} streamingActive={streamingActive} markdown={profile.ui?.responseContent?.markdown !== false} html={profile.ui?.responseContent?.html !== false} />;
   if (part.type === 'citation-reference') {
     if (!componentVisible(profile, 'citations')) return null;
     const citationId = typeof part.citationId === 'string' ? part.citationId : '';
@@ -917,9 +921,9 @@ function MobileMessagePart({ profile, part, messageId, citations, post, trusted,
   return null;
 }
 
-function MobileMarkdown({ text, post, streaming, streamingActive }: { text: string; post: PostMessage; streaming?: ResolvedStreaming; streamingActive: boolean }): React.JSX.Element {
+function MobileMarkdown({ text, post, streaming, streamingActive, markdown, html }: { text: string; post: PostMessage; streaming?: ResolvedStreaming; streamingActive: boolean; markdown: boolean; html: boolean }): React.JSX.Element {
   const visibleText = useStreamingRevealText(text, streamingActive, streaming);
-  return <div className="mobile-chat-preview__text" data-reveal-mode={streaming?.reveal ?? 'instant'}><SafeMarkdown text={visibleText} copyLabel={t('Copy code')} onOpenLink={(uri) => post({ type: 'uri.open', uri })} />{streamingActive && streaming ? <StreamingIndicator streaming={streaming} /> : null}</div>;
+  return <div className="mobile-chat-preview__text" data-reveal-mode={streaming?.reveal ?? 'instant'}><RichMarkdown text={visibleText} markdown={markdown} html={html} copyLabel={t('Copy code')} onOpenLink={(uri) => post({ type: 'uri.open', uri })} />{streamingActive && streaming ? <StreamingIndicator streaming={streaming} /> : null}</div>;
 }
 
 function MobileText({ text, streaming, streamingActive }: { text: string; streaming?: ResolvedStreaming; streamingActive: boolean }): React.JSX.Element {

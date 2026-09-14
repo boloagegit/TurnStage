@@ -1,4 +1,5 @@
 import type { ControlDefinition, InteractionContext, LocalRun, NetworkExchange, NormalizedEvent, PreparedRequest, RawStreamEvent, ReplaySnapshot, SessionSnapshot, TurnStageEnvironment, TurnStageProfile } from '../../src/shared/types';
+import { controlSecretValues, isControlValue } from '../../src/shared/controlValue';
 import { MappingEngine } from '../../src/extension/mapping/mappingEngine';
 import { RequestBuilder } from '../../src/extension/request/requestBuilder';
 import { getPath } from '../../src/extension/request/templateResolver';
@@ -204,8 +205,8 @@ export class BrowserSession {
   setControl(id: string, value: unknown): void {
     const definition = this.profile.controls?.find((item) => item.id === id);
     if (!definition || !isControlValue(definition, value)) return;
-    if (definition.persist === 'secret') this.secretControls.set(this.controlKey(definition), value);
-    else this.state.snapshot.controls[id] = value;
+    if (definition.persist === 'secret') this.secretControls.set(this.controlKey(definition), structuredClone(value));
+    else this.state.snapshot.controls[id] = structuredClone(value);
     if (definition.persist === 'workspace' || definition.persist === 'global') {
       try { localStorage.setItem(this.controlKey(definition), JSON.stringify({ version: 1, type: definition.type, value })); } catch { /* Private browsing may block storage. */ }
     }
@@ -624,7 +625,7 @@ export class BrowserSession {
   }
 
   private registerSecrets(request: PreparedRequest): void { this.requestSecretValues = [...new Set([...this.requestSecretValues, ...(request.secretValues ?? [])])]; }
-  private publicValue<T>(value: T): T { return redactKnownSecrets(value, [...this.secrets.values(), ...this.requestSecretValues, ...this.secretControls.values()]) as T; }
+  private publicValue<T>(value: T): T { return redactKnownSecrets(value, [...this.secrets.values(), ...this.requestSecretValues, ...[...this.secretControls.values()].flatMap(controlSecretValues)]) as T; }
   private cancelActive(): void {
     this.generation++;
     this.openingAbortController?.abort();
@@ -665,7 +666,7 @@ export class BrowserSession {
           if (stored?.version === 1 && stored.type === control.type && isControlValue(control, stored.value)) value = stored.value;
         } catch { /* Missing or invalid browser storage falls back to the Profile default. */ }
       }
-      return [control.id, value ?? control.default];
+      return [control.id, value ?? (control.default === undefined || isControlValue(control, control.default) ? control.default : undefined)];
     }));
     for (const control of this.profile.controls ?? []) if (control.persist === 'secret' && !this.secretControls.has(this.controlKey(control)) && control.default !== undefined) this.secretControls.set(this.controlKey(control), control.default);
   }
@@ -723,11 +724,6 @@ async function readBoundedOpeningText(response: Response, maxBytes: number): Pro
   }
 }
 
-function isControlValue(definition: ControlDefinition, value: unknown): boolean {
-  if (definition.type === 'boolean') return typeof value === 'boolean';
-  if (typeof value !== 'string') return false;
-  return definition.type !== 'select' || !definition.options?.length || definition.options.some((option) => option.value === value);
-}
 
 function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));

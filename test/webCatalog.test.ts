@@ -103,6 +103,16 @@ describe('TurnStage Web official catalog', () => {
     expect(requested).toEqual(['./turnstage-catalog.json', './environments/sit.environment.jsonc', './profiles/SIT%20%E4%B8%AD%E6%96%87.turnstage.jsonc']);
   });
 
+  it('retains nested server folder paths and rejects path traversal at every level', async () => {
+    const catalog = { format: 'turnstage-web-catalog', version: 1, id: 'company', revision: '1', profiles: [{ file: './profiles/Team%20A/SIT/demo.turnstage.jsonc' }], environments: [{ bundled: 'local' }] };
+    const loaded = await loadOfficialCatalog({ bundledProfiles, bundledEnvironments, parseProfile, parseEnvironment, fetcher: async (input) => new Response(String(input) === './turnstage-catalog.json' ? JSON.stringify(catalog) : bundledProfile) });
+    expect(loaded.profiles[0]?.official?.folderPath).toEqual(['Team A', 'SIT']);
+    for (const path of ['./profiles/../demo.turnstage.jsonc', './profiles/Team%2FA/demo.turnstage.jsonc', './profiles/Team/%5Cdemo.turnstage.jsonc']) {
+      const result = await loadOfficialCatalog({ bundledProfiles, bundledEnvironments, parseProfile, parseEnvironment, fetcher: async (input) => new Response(String(input) === './turnstage-catalog.json' ? JSON.stringify({ ...catalog, profiles: [{ file: path }] }) : bundledProfile) });
+      expect(result.source).toBe('fallback');
+    }
+  });
+
   it('rejects unsafe, unavailable, and oversized folder files without exposing a partial catalog', async () => {
     const base = {
       format: 'turnstage-web-catalog', version: 1, id: 'company', revision: '1',

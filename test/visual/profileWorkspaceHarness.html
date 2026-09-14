@@ -353,7 +353,7 @@
       issues: []
     };
     const dispatch = (message) => window.dispatchEvent(new MessageEvent('message', { data: { ...envelope, ...message } }));
-    window.__turnstageHarness = { snapshot, runs, networkEntries, dispatch };
+    window.__turnstageHarness = { profile, snapshot, runs, networkEntries, dispatch };
     window.__turnstageMessages = [];
     const applyProfilePatch = (path, value) => {
       let target = profile;

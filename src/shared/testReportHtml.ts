@@ -1,0 +1,92 @@
+export type TestReportKind = 'contract' | 'adversarial';
+export type TestReportOutcome = 'passed' | 'failed' | 'error' | 'skipped' | 'resisted' | 'attackSucceeded' | 'indeterminate' | 'infrastructureError' | 'incomplete';
+
+export interface TestReportCase {
+  id: string;
+  profileId?: string;
+  outcome: TestReportOutcome;
+  durationMs?: number;
+  completedAttempts?: number;
+  requestedAttempts?: number;
+  passedChecks?: number;
+  failedChecks?: number;
+  findingCount?: number;
+  stability?: string;
+  facts?: Array<{ label: string; value: string }>;
+  timeline?: Array<{ elapsedMs: number; label: string }>;
+}
+
+export interface TestReportInput {
+  kind: TestReportKind;
+  generatedAt: string;
+  cases: readonly TestReportCase[];
+  locale?: string;
+  runId?: string;
+  runStatus?: string;
+  failureClusters?: Array<{ label: string; count: number }>;
+}
+
+const labels = {
+  en: { contract: 'General test report', adversarial: 'Red team report', report: 'TurnStage report', generated: 'Generated', run: 'Run', status: 'Status', total: 'Cases', passed: 'Passed', failed: 'Failed', error: 'Error', skipped: 'Skipped', resisted: 'Resisted', attackSucceeded: 'Attack succeeded', indeterminate: 'Indeterminate', infrastructureError: 'Infrastructure error', distribution: 'Outcome distribution', duration: 'Slowest cases', durationHint: 'Up to 8 cases with measured duration', cases: 'Case results', case: 'Case', outcome: 'Outcome', attempts: 'Attempts', checks: 'Checks', findings: 'Findings', stability: 'Stability', time: 'Duration', details: 'Details', clusters: 'Failure clusters', timeline: 'Causal timeline', noDuration: 'No measured duration available', noCases: 'No cases in this report', privacy: 'This report contains structural test metadata only. Conversation content, request bodies, headers and secrets are excluded.', incomplete: 'Incomplete', passedChecks: 'passed', failedChecks: 'failed' },
+  'zh-TW': { contract: '一般測試報告', adversarial: '紅隊測試報告', report: 'TurnStage 報告', generated: '產生時間', run: '執行紀錄', status: '狀態', total: '案例', passed: '通過', failed: '失敗', error: '錯誤', skipped: '略過', resisted: '防禦成功', attackSucceeded: '攻擊成功', indeterminate: '無法判定', infrastructureError: '環境錯誤', distribution: '結果分布', duration: '耗時較長的案例', durationHint: '最多顯示 8 個有耗時資料的案例', cases: '案例結果', case: '案例', outcome: '結果', attempts: '執行次數', checks: '檢查', findings: '發現', stability: '穩定性', time: '耗時', details: '詳細資料', clusters: '失敗群組', timeline: '事件時間線', noDuration: '沒有可顯示的耗時資料', noCases: '這份報告沒有案例', privacy: '本報告只含測試結構資料，不含對話內容、請求本文、標頭或密鑰。', incomplete: '未完成', passedChecks: '通過', failedChecks: '失敗' },
+  ja: { contract: '通常テストレポート', adversarial: 'レッドチームテストレポート', report: 'TurnStage レポート', generated: '作成日時', run: '実行', status: '状態', total: 'ケース', passed: '成功', failed: '失敗', error: 'エラー', skipped: 'スキップ', resisted: '防御成功', attackSucceeded: '攻撃成功', indeterminate: '判定不能', infrastructureError: '環境エラー', distribution: '結果の内訳', duration: '所要時間の長いケース', durationHint: '所要時間のあるケースを最大 8 件表示', cases: 'ケース結果', case: 'ケース', outcome: '結果', attempts: '試行', checks: 'チェック', findings: '検出', stability: '安定性', time: '所要時間', details: '詳細', clusters: '失敗グループ', timeline: 'イベントの時系列', noDuration: '所要時間のデータがありません', noCases: 'このレポートにケースはありません', privacy: 'このレポートにはテストの構造的なメタデータのみを含みます。会話、リクエスト本文、ヘッダー、シークレットは含みません。', incomplete: '未完了', passedChecks: '成功', failedChecks: '失敗' },
+  ko: { contract: '일반 테스트 보고서', adversarial: '레드팀 테스트 보고서', report: 'TurnStage 보고서', generated: '생성 시각', run: '실행', status: '상태', total: '사례', passed: '통과', failed: '실패', error: '오류', skipped: '건너뜀', resisted: '방어 성공', attackSucceeded: '공격 성공', indeterminate: '판정 불가', infrastructureError: '환경 오류', distribution: '결과 분포', duration: '오래 걸린 사례', durationHint: '소요 시간이 있는 사례 최대 8개', cases: '사례 결과', case: '사례', outcome: '결과', attempts: '시도', checks: '검사', findings: '발견', stability: '안정성', time: '소요 시간', details: '세부 정보', clusters: '실패 그룹', timeline: '이벤트 타임라인', noDuration: '표시할 소요 시간 데이터가 없습니다', noCases: '이 보고서에 사례가 없습니다', privacy: '이 보고서에는 테스트 구조 메타데이터만 포함됩니다. 대화 내용, 요청 본문, 헤더 및 비밀 정보는 제외됩니다.', incomplete: '미완료', passedChecks: '통과', failedChecks: '실패' },
+} as const;
+
+function reportLocale(value: string | undefined): keyof typeof labels {
+  if (value?.toLowerCase().startsWith('zh')) return 'zh-TW';
+  if (value?.toLowerCase().startsWith('ja')) return 'ja';
+  if (value?.toLowerCase().startsWith('ko')) return 'ko';
+  return 'en';
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+}
+
+function safeNumber(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function duration(value: number | undefined): string {
+  const measured = safeNumber(value);
+  if (measured === undefined) return '—';
+  return measured < 1_000 ? `${Math.round(measured)} ms` : `${(measured / 1_000).toFixed(2)} s`;
+}
+
+const outcomeOrder = {
+  contract: ['passed', 'failed', 'error', 'skipped', 'incomplete'],
+  adversarial: ['resisted', 'attackSucceeded', 'indeterminate', 'infrastructureError', 'incomplete'],
+} as const;
+
+export function renderTestReportHtml(input: TestReportInput): string {
+  const locale = reportLocale(input.locale);
+  const text = labels[locale];
+  const allowed = outcomeOrder[input.kind] as readonly TestReportOutcome[];
+  const cases = input.cases.map((item) => ({ ...item, outcome: allowed.includes(item.outcome) ? item.outcome : input.kind === 'contract' ? 'error' as const : 'incomplete' as const }));
+  const counts = Object.fromEntries(allowed.map((outcome) => [outcome, cases.filter((item) => item.outcome === outcome).length])) as Record<TestReportOutcome, number>;
+  const total = cases.length;
+  const successful = counts[input.kind === 'contract' ? 'passed' : 'resisted'];
+  const headline = input.kind === 'contract' ? text.contract : text.adversarial;
+  const number = new Intl.NumberFormat(locale);
+  const date = Number.isFinite(Date.parse(input.generatedAt)) ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(input.generatedAt)) : input.generatedAt;
+  const legend = allowed.map((outcome) => `<li><span class="swatch swatch-${outcome}" aria-hidden="true"></span><span>${text[outcome]}</span><strong>${number.format(counts[outcome])}</strong></li>`).join('');
+  const segments = total ? allowed.filter((outcome) => counts[outcome]).map((outcome) => `<span class="segment segment-${outcome}" style="width:${(counts[outcome] / total * 100).toFixed(4)}%" title="${text[outcome]}: ${counts[outcome]}"></span>`).join('') : '';
+  const slowest = cases.filter((item) => safeNumber(item.durationMs) !== undefined).sort((a, b) => (b.durationMs ?? 0) - (a.durationMs ?? 0)).slice(0, 8);
+  const longest = Math.max(...slowest.map((item) => item.durationMs ?? 0), 1);
+  const bars = slowest.map((item) => `<li><span class="bar-label" title="${escapeHtml(item.id)}">${escapeHtml(item.id)}</span><span class="bar-track"><span class="bar-fill" style="width:${Math.max((item.durationMs ?? 0) / longest * 100, 1).toFixed(4)}%"></span></span><strong>${duration(item.durationMs)}</strong></li>`).join('');
+  const rows = cases.map((item) => {
+    const attempts = item.requestedAttempts === undefined ? '—' : `${number.format(safeNumber(item.completedAttempts) ?? 0)} / ${number.format(safeNumber(item.requestedAttempts) ?? 0)}`;
+    const checks = item.passedChecks === undefined && item.failedChecks === undefined ? '—' : `${number.format(safeNumber(item.passedChecks) ?? 0)} ${text.passedChecks} · ${number.format(safeNumber(item.failedChecks) ?? 0)} ${text.failedChecks}`;
+    const facts = (item.facts ?? []).slice(0, 20).map((fact) => `<div><dt>${escapeHtml(fact.label)}</dt><dd>${escapeHtml(fact.value)}</dd></div>`).join('');
+    const timeline = (item.timeline ?? []).slice(0, 16).map((entry) => `<li><time>+${duration(entry.elapsedMs)}</time><span>${escapeHtml(entry.label)}</span></li>`).join('');
+    const details = facts || timeline ? `<details><summary>${text.details}</summary>${facts ? `<dl>${facts}</dl>` : ''}${timeline ? `<h4>${text.timeline}</h4><ol>${timeline}</ol>` : ''}</details>` : '';
+    return `<tr><th scope="row"><span class="case-id">${escapeHtml(item.id)}</span>${item.profileId ? `<small>${escapeHtml(item.profileId)}</small>` : ''}${details}</th><td><span class="outcome outcome-${item.outcome}"><span class="swatch swatch-${item.outcome}" aria-hidden="true"></span>${text[item.outcome]}</span></td><td class="numeric">${attempts}</td><td>${input.kind === 'contract' ? checks : item.findingCount === undefined ? '—' : number.format(safeNumber(item.findingCount) ?? 0)}</td><td class="numeric">${duration(item.durationMs)}</td></tr>`;
+  }).join('');
+  const clusters = input.failureClusters?.length ? `<section class="clusters" aria-labelledby="clusters-title"><div class="section-heading"><h2 id="clusters-title">${text.clusters}</h2></div><ul>${input.failureClusters.slice(0, 20).map((item) => `<li><span>${escapeHtml(item.label)}</span><strong>${number.format(safeNumber(item.count) ?? 0)}</strong></li>`).join('')}</ul></section>` : '';
+  return `<!doctype html>\n<html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${headline} · ${text.report}</title><style>${reportStyles()}table{min-width:680px}@media print{table{min-width:0}}</style></head><body><main class="report"><header class="hero"><div><p class="eyebrow">TurnStage / ${text.report}</p><h1>${headline}</h1><p class="meta">${text.generated} <time>${escapeHtml(date)}</time>${input.runId ? ` · ${text.run} <code>${escapeHtml(input.runId)}</code>` : ''}${input.runStatus ? ` · ${text.status} ${escapeHtml(input.runStatus)}` : ''}</p></div><div class="hero-score"><strong>${number.format(successful)}<span> / ${number.format(total)}</span></strong><span>${input.kind === 'contract' ? text.passed : text.resisted}</span></div></header><section class="overview" aria-label="${text.distribution}"><div class="stat"><span>${text.total}</span><strong>${number.format(total)}</strong></div>${allowed.map((outcome) => `<div class="stat"><span>${text[outcome]}</span><strong>${number.format(counts[outcome])}</strong></div>`).join('')}</section><div class="chart-grid"><section class="chart-panel" aria-labelledby="distribution-title"><div class="section-heading"><h2 id="distribution-title">${text.distribution}</h2><span>${number.format(total)} ${text.total}</span></div><figure><div class="distribution" role="img" aria-label="${allowed.map((outcome) => `${text[outcome]} ${counts[outcome]}`).join(' · ')}">${segments}</div><figcaption><ul class="legend">${legend}</ul></figcaption></figure></section><section class="chart-panel" aria-labelledby="duration-title"><div class="section-heading"><div><h2 id="duration-title">${text.duration}</h2><p>${text.durationHint}</p></div></div>${bars ? `<ol class="bars">${bars}</ol>` : `<p class="empty">${text.noDuration}</p>`}</section></div>${clusters}<section class="results" aria-labelledby="results-title"><div class="section-heading"><h2 id="results-title">${text.cases}</h2><span>${number.format(total)} ${text.total}</span></div>${rows ? `<div class="table-scroll"><table><thead><tr><th scope="col">${text.case}</th><th scope="col">${text.outcome}</th><th scope="col">${text.attempts}</th><th scope="col">${input.kind === 'contract' ? text.checks : text.findings}</th><th scope="col">${text.time}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="empty">${text.noCases}</p>`}</section><footer>${text.privacy}</footer></main></body></html>\n`;
+}
+
+function reportStyles(): string {
+  return `:root{color-scheme:light dark;--ink:#172a36;--muted:#526773;--line:#dbe5e9;--surface:#fff;--wash:#f2f6f6;--track:#e7edef;--pass:#1a887b;--fail:#c35645;--warn:#b07b24;--error:#58667a;--bar:#427d91;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--wash);-webkit-font-smoothing:antialiased}main{width:min(1180px,100%);margin:auto;padding:42px 32px 56px}.hero{display:flex;justify-content:space-between;gap:32px;align-items:flex-end;padding:0 0 28px}.eyebrow{margin:0 0 8px;color:var(--bar);font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}h1{margin:0;font-size:clamp(27px,3vw,38px);line-height:1.15;letter-spacing:-.025em}h2{margin:0;font-size:18px;line-height:1.3}h4{margin:14px 0 6px;font-size:13px}.meta{margin:12px 0 0;color:var(--muted);font-size:13px;overflow-wrap:anywhere}.hero-score{display:grid;justify-items:end;min-width:130px}.hero-score strong{font-size:40px;line-height:1.1;font-variant-numeric:tabular-nums}.hero-score strong span{font-size:22px;color:var(--muted)}.hero-score>span{color:var(--muted);font-size:13px}.overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px;margin-bottom:24px}.stat{display:grid;gap:6px;align-content:space-between;min-height:102px;padding:16px;background:var(--surface);border-radius:10px;box-shadow:0 1px 3px #162e3610}.stat span{color:var(--muted);font-size:13px}.stat strong{font-size:27px;line-height:1.1;font-variant-numeric:tabular-nums}.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.chart-panel,.clusters,.results{min-width:0;padding:22px;background:var(--surface);border-radius:12px;box-shadow:0 1px 4px #162e3612}.section-heading{display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-bottom:20px}.section-heading>span,.section-heading p{color:var(--muted);font-size:12px}.section-heading p{margin:3px 0 0}figure{margin:0}.distribution{display:flex;width:100%;height:30px;overflow:hidden;border-radius:7px;background:var(--track)}.segment{min-width:0}.segment-passed,.segment-resisted,.swatch-passed,.swatch-resisted{background:var(--pass)}.segment-failed,.segment-attackSucceeded,.swatch-failed,.swatch-attackSucceeded{background:var(--fail)}.segment-error,.segment-infrastructureError,.swatch-error,.swatch-infrastructureError{background:var(--error)}.segment-skipped,.segment-indeterminate,.swatch-skipped,.swatch-indeterminate{background:var(--warn)}.segment-incomplete,.swatch-incomplete{background:var(--error)}.legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;margin:20px 0 0;padding:0;list-style:none}.legend li{display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:8px;font-size:13px}.legend strong,.bars strong{font-variant-numeric:tabular-nums}.swatch{display:inline-block;width:10px;height:10px;flex:none;border-radius:50%}.bars{display:grid;gap:13px;margin:0;padding:0;list-style:none}.bars li{display:grid;grid-template-columns:minmax(72px,1fr) minmax(80px,2fr) auto;align-items:center;gap:10px;font-size:12px}.bar-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bar-track{height:10px;overflow:hidden;border-radius:99px;background:var(--track)}.bar-fill{display:block;height:100%;border-radius:99px;background:var(--bar)}.bars strong{min-width:58px;text-align:end}.clusters,.results{margin-top:16px}.clusters ul{display:grid;gap:8px;margin:0;padding:0;list-style:none}.clusters li{display:flex;justify-content:space-between;gap:16px;padding:10px 12px;border-radius:6px;background:var(--wash);font-size:13px}.clusters strong{font-variant-numeric:tabular-nums}.table-scroll{overflow:auto}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:12px 10px;text-align:start;vertical-align:top;border-block-end:1px solid var(--line)}thead th{color:var(--muted);font-size:12px;font-weight:600}tbody th{min-width:190px;font-weight:600}tbody tr:last-child th,tbody tr:last-child td{border-block-end:0}.case-id{overflow-wrap:anywhere}tbody th small{display:block;color:var(--muted);font-size:11px;font-weight:400}td.numeric{white-space:nowrap;font-variant-numeric:tabular-nums}.outcome{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}details{margin-top:6px;font-weight:400}summary{width:max-content;color:var(--bar);cursor:pointer}details dl{display:grid;gap:6px;margin:12px 0}details dl div{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px}dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}details ol{display:grid;gap:5px;margin:0;padding-inline-start:20px}details li{display:flex;gap:10px}details time{flex:none;color:var(--muted);font-variant-numeric:tabular-nums}.empty{color:var(--muted)}code{font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}footer{margin-top:28px;max-width:70ch;color:var(--muted);font-size:12px;line-height:1.5}@media(max-width:800px){main{padding:24px 18px}.chart-grid{grid-template-columns:1fr}.overview{grid-template-columns:repeat(3,minmax(0,1fr))}.hero-score strong{font-size:32px}}@media(max-width:520px){main{padding:20px 14px}.hero{align-items:flex-start;gap:16px}.hero-score{min-width:80px}.hero-score strong{font-size:25px}.hero-score strong span{font-size:15px}.overview{grid-template-columns:repeat(2,minmax(0,1fr))}.stat{min-height:80px;padding:13px}.stat strong{font-size:22px}.chart-panel,.clusters,.results{padding:16px}.bars li{grid-template-columns:minmax(58px,1fr) minmax(64px,1.3fr) auto;gap:6px}}@media print{:root{color-scheme:light}body{background:#fff}main{width:100%;padding:0}.chart-panel,.clusters,.results,.stat{box-shadow:none;border:1px solid var(--line);break-inside:avoid}.chart-grid{display:block}.chart-panel+.chart-panel{margin-top:12px}.table-scroll{overflow:visible}table{font-size:11px}thead{display:table-header-group}tr{break-inside:avoid}details{display:none}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}@media(prefers-color-scheme:dark){:root{--ink:#e5eff1;--muted:#a9bec6;--line:#344953;--surface:#14232b;--wash:#0d1a21;--track:#2b3c45;--pass:#51bba8;--fail:#e17f6d;--warn:#e3b25a;--error:#9aacc3;--bar:#78b6c8}}`;
+}

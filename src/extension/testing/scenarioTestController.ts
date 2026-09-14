@@ -290,15 +290,36 @@ export class ScenarioTestController implements vscode.Disposable {
   getEvidence(id: string): TestEvidenceReference | undefined { return this.evidence.get(id); }
   hasReport(): boolean { return this.reports.hasRecords(); }
   exportLastReport(format: ScenarioReportFormat): Promise<vscode.Uri | undefined> { return this.reports.exportLast(format); }
-  async exportRunReport(uri: vscode.Uri, runId: string, format: ScenarioReportFormat): Promise<vscode.Uri | undefined> {
+  async exportLatestKindReport(uri: vscode.Uri, kind: 'contract' | 'adversarial', format: ScenarioReportFormat): Promise<vscode.Uri | undefined> {
+    const entry = await this.profiles.read(uri);
+    if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
+    const profileId = entry.profile.id;
+    const evidenceResult = (id: string | undefined): ScenarioRunResult => {
+      const result = id ? this.evidence.get(id)?.result : undefined;
+      if (!result) throw new Error('Some latest test evidence is no longer available. Run the cases again before exporting.');
+      return result;
+    };
+    const records: ScenarioExecutionRecord[] = kind === 'contract'
+      ? this.getLatestAutomationResults(uri).map((summary) => ({
+        kind, profileId, profileName: entry.profile!.name, scenarioId: summary.scenarioId, scenarioName: summary.scenarioName,
+        status: summary.outcome, result: evidenceResult(summary.evidenceId),
+      }))
+      : this.getLatestResults(uri).map((summary) => ({
+        kind, profileId, profileName: entry.profile!.name, scenarioId: summary.scenarioId, scenarioName: summary.scenarioName,
+        status: adversarialRecordStatus(summary.outcome), reportOutcome: summary.outcome, result: evidenceResult(summary.evidenceId),
+      }));
+    return this.reports.exportRecords(format, records, `turnstage-${kind}-results`, kind, vscode.env.language);
+  }
+  async exportRunReport(uri: vscode.Uri, runId: string, format: ScenarioReportFormat, kind?: 'contract' | 'adversarial'): Promise<vscode.Uri | undefined> {
     const entry = await this.profiles.read(uri);
     if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
     const run = (await this.testHistory.list(entry.profile.id)).find((item) => item.id === runId);
     if (!run) throw new Error('The selected test run is no longer available.');
-    const records: ScenarioExecutionRecord[] = run.cases.map((item) => {
+    const records: ScenarioExecutionRecord[] = run.cases.filter((item) => kind === undefined || item.kind === kind).map((item) => {
       const reference = item.evidenceId ? this.evidence.get(item.evidenceId) : undefined;
       if (item.evidenceId && !reference?.result) throw new Error('Some evidence for this test run has expired. Export was cancelled rather than mixing in another run.');
       return {
+        kind: item.kind,
         profileId: run.profileId,
         profileName: entry.profile!.name,
         scenarioId: `${item.kind}/${item.suiteId ?? 'inline'}/${item.scenarioId}`,
@@ -307,8 +328,9 @@ export class ScenarioTestController implements vscode.Disposable {
         ...(reference?.result ? { result: reference.result } : {}),
       };
     });
-    if (run.status !== 'completed' && records.every((record) => record.status === 'passed')) records.push({ profileId: run.profileId, profileName: entry.profile.name, scenarioId: 'run-status', scenarioName: `Run ${run.status}`, status: 'error' });
-    return this.reports.exportRecords(format, records, `turnstage-run-${runId}`);
+    if (!records.length) throw new Error('The selected test run has no cases of this type.');
+    if (run.status !== 'completed' && records.every((record) => record.status === 'passed')) records.push({ kind, profileId: run.profileId, profileName: entry.profile.name, scenarioId: 'run-status', scenarioName: `Run ${run.status}`, status: 'error' });
+    return this.reports.exportRecords(format, records, `turnstage-run-${runId}${kind ? `-${kind}` : ''}`, kind, vscode.env.language);
   }
   exportEvidenceReport(evidenceId: string, format: ScenarioReportFormat): Promise<vscode.Uri | undefined> {
     const reference = this.evidence.get(evidenceId);

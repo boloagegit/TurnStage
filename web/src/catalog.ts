@@ -15,6 +15,7 @@ export interface CatalogReference {
   entryVersion?: string;
   category?: string;
   tags?: string[];
+  folderPath?: string[];
 }
 
 export interface OfficialCatalogResult {
@@ -151,6 +152,7 @@ async function materializeEntries(
       ...(typeof entry.version === 'string' ? { entryVersion: boundedText(entry.version, `${kind} version`, 120) } : {}),
       ...(typeof entry.category === 'string' ? { category: boundedText(entry.category, `${kind} category`, 80) } : {}),
       ...(entry.tags !== undefined ? { tags: boundedTags(entry.tags, kind) } : {}),
+      ...(file && kind === 'profile' ? { folderPath: catalogFolderPath(file) } : {}),
     };
     return { id: parsed.id, name: parsed.name, raw, builtIn: true, official: reference, updatedAt: 0 };
   }));
@@ -159,11 +161,9 @@ async function materializeEntries(
 async function readCatalogFile(file: string, kind: 'profile' | 'environment', fetcher?: typeof fetch, signal?: AbortSignal): Promise<string> {
   const folder = kind === 'profile' ? './profiles/' : './environments/';
   const suffix = kind === 'profile' ? '.turnstage.jsonc' : '.environment.jsonc';
-  const encodedName = file.startsWith(folder) ? file.slice(folder.length) : '';
-  let decodedName = '';
-  try { decodedName = decodeURIComponent(encodedName); } catch { /* invalid URI encoding */ }
-  const unsafeName = [...decodedName].some((character) => character === '/' || character === '\\' || character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
-  if (!/^[A-Za-z0-9._~%-]+$/u.test(encodedName) || !decodedName.endsWith(suffix) || decodedName.length <= suffix.length || unsafeName) {
+  const segments = safeCatalogSegments(file, folder);
+  const filename = segments?.at(-1) ?? '';
+  if (!filename.endsWith(suffix) || filename.length <= suffix.length) {
     throw new Error(`${kind} file path is not a supported local JSONC path`);
   }
   if (!fetcher) throw new Error(`${kind} file cannot be loaded because Fetch is unavailable`);
@@ -177,6 +177,25 @@ async function readCatalogFile(file: string, kind: 'profile' | 'environment', fe
   const raw = await response.text();
   if (new TextEncoder().encode(raw).byteLength > MAX_ENTRY_BYTES) throw new Error(`${kind} file ${file} exceeds 512 KiB`);
   return raw;
+}
+
+function catalogFolderPath(file: string): string[] {
+  return safeCatalogSegments(file, './profiles/')?.slice(0, -1) ?? [];
+}
+
+function safeCatalogSegments(file: string, prefix: string): string[] | undefined {
+  if (!file.startsWith(prefix) || file.length > 1024) return undefined;
+  const encoded = file.slice(prefix.length).split('/');
+  if (encoded.length < 1 || encoded.length > 9) return undefined;
+  const decoded: string[] = [];
+  for (const segment of encoded) {
+    if (!/^[A-Za-z0-9._~%-]+$/u.test(segment)) return undefined;
+    let value: string;
+    try { value = decodeURIComponent(segment); } catch { return undefined; }
+    if (!value || value === '.' || value === '..' || value.length > 200 || [...value].some((character) => character === '/' || character === '\\' || character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) return undefined;
+    decoded.push(value);
+  }
+  return decoded;
 }
 
 function boundedIdentifier(value: unknown, label: string): string {

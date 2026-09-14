@@ -183,6 +183,30 @@ describe('BrowserSession', () => {
     expect(values.size).toBe(1);
   });
 
+  it('persists an object-valued user choice and sends its fields in Web requests', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) });
+    const fetch = vi.fn(async () => new Response('event: done\ndata: {}\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    vi.stubGlobal('fetch', fetch);
+    const selected = { custid: 'C002', bdcun: 'B002' };
+    const controlProfile: TurnStageProfile = { ...profile,
+      controls: [{ id: 'user', type: 'select', label: 'User', persist: 'global', default: { custid: 'C001', bdcun: 'B001' }, options: [
+        { label: 'A', value: { custid: 'C001', bdcun: 'B001' } }, { label: 'B', value: selected },
+      ] }],
+      conversation: { send: { method: 'POST', url: '${env.baseUrl}/stream', variants: [{ id: 'first', body: { custid: { $value: 'controls.user.custid' }, bdcun: { $value: 'controls.user.bdcun' } } }] } },
+    };
+    const session = new BrowserSession(controlProfile, environment, new Map(), () => undefined);
+    session.setControl('user', { bdcun: 'B002', custid: 'C002' });
+    expect(session.current.snapshot.controls.user).toEqual(selected);
+    session.setControl('user', { custid: 'forged', bdcun: 'B002' });
+    expect(session.current.snapshot.controls.user).toEqual(selected);
+    const reloaded = new BrowserSession(controlProfile, environment, new Map(), () => undefined);
+    expect(reloaded.current.snapshot.controls.user).toEqual(selected);
+    await reloaded.start();
+    await reloaded.send('Hello', { kind: 'manual' });
+    expect(fetch).toHaveBeenCalledWith('https://example.test/stream', expect.objectContaining({ body: JSON.stringify(selected) }));
+  });
+
   it('bounds long-lived raw event history without resetting per-turn sequence numbers', async () => {
     const body = `${'event: unused\ndata: {}\n\n'.repeat(5001)}event: done\ndata: {}\n\n`;
     vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })));

@@ -33,6 +33,8 @@ Open `http://SERVER_IP:9095/`. Set the Profile/Environment API base URL to `http
 
 The proxy forwards request methods, body, authentication headers, response status and headers, and flushes SSE/NDJSON chunks as they arrive. Request bodies are limited to 16 MiB. It does not log URLs or secrets. To keep it running after SSH logout:
 
+For the A/B topology where A hosts TurnStage Web on 9095 and an existing relay on 9098 forwards to HTTPS service B, point `serve.py` at A's 9098 HTTP relay and point shared Profiles at `http://A_IP:9095/api`. Certificate trust between the 9098 relay and B is the relay's responsibility; TurnStage Web and the browser do not disable HTTPS verification. The repository's `npm run test:visual:web-ab` exercises this complete path with a test-only relay and self-signed B, including chat, opening, local case uploads, general tests, and Red Team. It does not validate a company's actual relay configuration or network policies.
+
 ```bash
 nohup python3 serve.py --port 9095 --bind 0.0.0.0 --upstream http://127.0.0.1:9098 > /tmp/turnstage-web-9095.log 2>&1 < /dev/null &
 echo $!
@@ -86,17 +88,17 @@ HTTP provides no confidentiality or integrity for the Web app, Profiles, request
 
 ## Add official Profiles from VS Code files
 
-The extracted Web archive contains empty `profiles/` and `environments/` folders plus `update_profiles.py`. Copy your existing VS Code `*.turnstage.jsonc` files into `profiles/`. If a Profile names an Environment, also copy its `*.environment.jsonc` file into `environments/`. From the extracted directory containing `index.html`, run:
+The extracted Web archive contains empty `profiles/` and `environments/` folders plus `update_profiles.py`. Copy your existing VS Code `*.turnstage.jsonc` files into `profiles/`. Nested directories are supported, for example `profiles/Payments/SIT/chat.turnstage.jsonc`; the Web sidebar displays **Default → Payments → SIT → chat**. If a Profile names an Environment, also copy its `*.environment.jsonc` file into `environments/`. From the extracted directory containing `index.html`, run:
 
 ```bash
 python3 update_profiles.py
 ```
 
-This uses only the Python 3.6+ standard library; no `pip` install is needed. It scans the two folders and regenerates the adjacent `turnstage-catalog.json` as a list of file paths. The original JSONC files, including comments, stay unchanged. Refresh the Web page to load the new official Profiles. Run the command again after adding, removing, or changing a file. Python runs only for this update step, not while users browse TurnStage. If the Linux Web server has no Python, run the command on another computer against the extracted archive and upload the resulting files together.
+This uses only the Python 3.6+ standard library; no `pip` install is needed. It scans the two folders recursively and regenerates the adjacent `turnstage-catalog.json` as a list of file paths. The original JSONC files, including comments, stay unchanged. Refresh the Web page to load the new default Profiles. Run the command again after adding, removing, renaming, or changing a file or directory. Python runs only for this update step, not while users browse TurnStage. If the Linux Web server has no Python, run the command on another computer against the extracted archive and upload the resulting files together.
 
 When `profiles/` is empty, the generated catalog keeps the three bundled examples; when it contains files, those become the official Profile list instead. The same rule applies to `environments/`, with the bundled local Environment used only when that folder is empty. A missing or invalid Environment reference makes the catalog fail validation, so copy both files when needed. Existing Unicode or space-containing filenames are supported; file names must end in `.turnstage.jsonc` or `.environment.jsonc` as appropriate. The generated catalog supports up to 100 files of each kind and 512 KiB per file.
 
-The script refuses to overwrite a manually customized catalog. The folder workflow and the manually authored catalog workflow below are alternatives; do not edit the generated catalog by hand. Folder-based Profiles remain read-only to Web users, who can duplicate one into their own browser storage before editing. Only browser-supported features run in Web: VS Code workspace links, Test Explorer, Copilot, and SecretStorage do not become available just because their Profile file is shared.
+The script refuses to overwrite a manually customized catalog. The folder workflow and the manually authored catalog workflow below are alternatives; do not edit the generated catalog by hand. Server folders and their Profiles remain read-only to Web users. To rename, remove, or reorder server folders, change directories on the server (display order is alphabetical by directory name), regenerate the catalog, and refresh the page. Browser-local folders can instead be nested, renamed, moved up/down, or deleted from the sidebar without changing server files; deleting one moves its contents up one level after confirmation. Only browser-supported features run in Web: VS Code workspace links, Test Explorer, Copilot, and SecretStorage do not become available just because their Profile file is shared.
 
 ## Official catalog and browser-local profiles
 

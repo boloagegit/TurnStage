@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { ChatMessage, ConnectionNetworkPathSummary, ControlDefinition, InteractionContext, LocalRun, LocalRunSummary, MetricsSnapshot, NetworkExchange, NetworkExchangeKind, NormalizedEvent, OpeningDefinition, PreparedRequest, RawStreamEvent, RemoteSessionReference, RuntimeErrorData, ScenarioFaultDefinition, ScenarioRunEvidence, SessionSnapshot, TurnResult, TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
+import { controlSecretValues, isControlValue } from '../../shared/controlValue';
 import { MappingEngine } from '../mapping/mappingEngine';
 import { RequestBuilder } from '../request/requestBuilder';
 import { getPath } from '../request/templateResolver';
@@ -86,7 +87,8 @@ export class SessionController implements vscode.Disposable {
     this.rawBuffer = new EventBuffer(this.maxBufferedEvents, boundedSetting(config.get('maxBufferedBytes', 10 * 1024 * 1024), 1024 * 1024, 20 * 1024 * 1024, 10 * 1024 * 1024));
     for (const control of profile.controls ?? []) {
       if (control.persist === 'secret' && !vscode.workspace.isTrusted) continue;
-      this.controls[control.id] = this.persistedControl(control) ?? control.default;
+      const defaultValue = control.default === undefined || isControlValue(control, control.default) ? control.default : undefined;
+      this.controls[control.id] = this.persistedControl(control) ?? defaultValue;
     }
     this.refreshSnapshotControls();
   }
@@ -178,7 +180,7 @@ export class SessionController implements vscode.Disposable {
     const definition = this.profile.controls?.find((item) => item.id === id); if (!definition) return;
     if (definition.persist === 'secret' && !vscode.workspace.isTrusted) return;
     if (value !== undefined && !isControlValue(definition, value)) return;
-    this.controls[id] = value;
+    this.controls[id] = value === undefined ? undefined : structuredClone(value);
     this.refreshSnapshotControls();
     const persisted = value === undefined ? undefined : persistedControl(definition, value);
     if (definition.persist === 'global') await this.context.globalState.update(this.globalControlKey(id), persisted);
@@ -196,7 +198,7 @@ export class SessionController implements vscode.Disposable {
     for (const [id, value] of Object.entries(values)) {
       const definition = this.profile.controls?.find((item) => item.id === id);
       if (!definition || definition.persist === 'secret' || !isControlValue(definition, value)) continue;
-      this.controls[id] = value;
+      this.controls[id] = structuredClone(value);
     }
     this.refreshSnapshotControls();
     this.changed();
@@ -846,7 +848,7 @@ export class SessionController implements vscode.Disposable {
     });
   }
   private secretControlValues(): unknown[] {
-    return (this.profile.controls ?? []).filter((definition) => definition.persist === 'secret').map((definition) => this.controls[definition.id]).filter((value) => value !== undefined && value !== null && value !== '');
+    return (this.profile.controls ?? []).filter((definition) => definition.persist === 'secret').flatMap((definition) => controlSecretValues(this.controls[definition.id]));
   }
   private knownSecretValues(): unknown[] { return [...this.secretControlValues(), ...this.environmentSecretValues]; }
   private registerRequestSecrets(request: PreparedRequest): void { this.environmentSecretValues = [...new Set([...this.environmentSecretValues, ...(request.secretValues ?? [])])]; }
@@ -902,11 +904,6 @@ function readPersistedControl(definition: ControlDefinition, stored: unknown): u
     return envelope.controlType === definition.type && isControlValue(definition, envelope.value) ? envelope.value : undefined;
   }
   return isControlValue(definition, stored) ? stored : undefined;
-}
-function isControlValue(definition: ControlDefinition, value: unknown): boolean {
-  if (definition.type === 'boolean') return typeof value === 'boolean';
-  if (typeof value !== 'string') return false;
-  return definition.type !== 'select' || !definition.options?.length || definition.options.some((option) => option.value === value);
 }
 function safeMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 function errorType(error: unknown): string { return error instanceof TurnStageError ? diagnosticValue(error.type, 80) : error instanceof Error ? diagnosticValue(error.name || 'Error', 80) : 'UnexpectedError'; }

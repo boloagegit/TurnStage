@@ -1,0 +1,125 @@
+/* global localStorage, innerWidth */
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { extname, resolve, sep } from 'node:path';
+import { chromium } from 'playwright';
+
+const root = resolve(import.meta.dirname, '../..');
+const output = resolve(root, 'artifacts', 'web-library');
+await mkdir(output, { recursive: true });
+const server = createServer(async (request, response) => {
+  try {
+    const path = resolve(root, 'web-dist', `.${new URL(request.url, 'http://localhost').pathname === '/' ? '/index.html' : new URL(request.url, 'http://localhost').pathname}`);
+    if (!path.startsWith(`${resolve(root, 'web-dist')}${sep}`)) throw new Error('outside dist');
+    response.setHeader('content-type', { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.ttf': 'font/ttf', '.json': 'application/json' }[extname(path)] ?? 'application/octet-stream');
+    response.end(await readFile(path));
+  } catch { response.writeHead(404).end(); }
+});
+await new Promise((done) => server.listen(0, '127.0.0.1', done));
+const url = `http://127.0.0.1:${server.address().port}/`;
+const executablePath = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'].find(existsSync);
+const browser = await chromium.launch(executablePath ? { headless: true, executablePath } : { headless: true });
+const report = {};
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.addInitScript(() => {
+    const profiles = Array.from({ length: 100 }, (_, index) => {
+      const id = `qa-${String(index + 1).padStart(3, '0')}`;
+      const name = `QA Case Profile ${String(index + 1).padStart(3, '0')}`;
+      return { id, name, raw: JSON.stringify({ version: 1, id, name, conversation: { send: { method: 'POST', url: 'http://127.0.0.1:1/chat' } }, stream: { transport: 'sse', mappings: [] } }), updatedAt: Date.now() };
+    });
+    localStorage.setItem('turnstage.web.profiles.v1', JSON.stringify(profiles));
+    localStorage.setItem('turnstage.web.preferences.v1', JSON.stringify({ version: 1, locale: 'en' }));
+  });
+  await page.goto(url);
+  await page.getByRole('button', { name: /QA Case Profile 001/u }).waitFor();
+  assert.equal(await page.getByRole('searchbox', { name: 'Search profiles' }).count(), 1);
+  assert.equal(await page.getByLabel('Filter by source').count(), 1);
+  assert.equal(await page.locator('.profile-item').count(), 103);
+  await page.locator('.library-search input').fill('qa-099');
+  assert.equal(await page.locator('.profile-item').count(), 1);
+  await page.locator('.library-search input').fill('');
+  await page.locator('#profile-source-filter').selectOption('official');
+  assert.equal(await page.locator('.profile-item').count(), 3);
+  await page.locator('#profile-source-filter').selectOption('all');
+  page.once('dialog', (dialog) => dialog.accept('Regression'));
+  await page.getByRole('button', { name: 'New folder' }).click();
+  await page.getByRole('button', { name: 'Profile actions: QA Case Profile 099' }).click();
+  await page.getByRole('menuitem', { name: 'Move to folder' }).click();
+  await page.getByRole('menuitemradio', { name: 'Regression' }).click();
+  assert.ok((await page.evaluate(() => JSON.parse(localStorage.getItem('turnstage.web.profileOrganization.v1')))).assignments['qa-099']);
+  await page.reload();
+  await page.getByRole('button', { name: /Regression 1/u }).waitFor();
+  assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('turnstage.web.profileOrganization.v1')))).assignments['qa-099'], (await page.evaluate(() => JSON.parse(localStorage.getItem('turnstage.web.profileOrganization.v1')))).folders[0].id);
+  page.once('dialog', (dialog) => dialog.accept('Regression QA'));
+  await page.getByRole('button', { name: 'Rename folder: Regression' }).click();
+  await page.getByRole('button', { name: /Regression QA 1/u }).waitFor();
+  page.once('dialog', (dialog) => dialog.accept('SIT'));
+  await page.getByRole('button', { name: 'New subfolder: Regression QA' }).click();
+  await page.getByRole('button', { name: 'SIT 0' }).waitFor();
+  page.once('dialog', (dialog) => dialog.accept('UAT'));
+  await page.getByRole('button', { name: 'New subfolder: Regression QA' }).click();
+  await page.getByRole('button', { name: 'Move folder up: UAT' }).click();
+  assert.deepEqual((await page.evaluate(() => JSON.parse(localStorage.getItem('turnstage.web.profileOrganization.v1')))).folders.slice(1).map((folder) => folder.name), ['UAT', 'SIT']);
+  await page.getByRole('button', { name: 'Move folder down: UAT' }).click();
+  await page.getByRole('button', { name: 'Profile actions: QA Case Profile 099' }).click();
+  await page.getByRole('menuitem', { name: 'Move to folder' }).click();
+  await page.getByRole('menuitemradio', { name: 'Regression QA / SIT' }).click();
+  await page.reload();
+  await page.getByRole('button', { name: 'SIT 1' }).waitFor();
+  await page.screenshot({ path: resolve(output, 'desktop-100-profiles.png'), fullPage: true });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.getByRole('button', { name: 'Profile actions: Agent Flow', exact: true }).click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Move to folder' }).count(), 0, 'Default profiles cannot be moved into local folders');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => { const key = 'turnstage.web.profileOrganization.v1'; const state = JSON.parse(localStorage.getItem(key)); state.assignments['agent-flow'] = state.folders[0].id; localStorage.setItem(key, JSON.stringify(state)); });
+  await page.reload();
+  await page.locator('#profile-source-filter').selectOption('official');
+  assert.equal(await page.getByRole('button', { name: /Agent Flow, Default/u }).count(), 1);
+  assert.equal(await page.locator('.profile-folder').filter({ hasText: 'Local' }).count(), 0, 'Legacy folder assignments must not move default profiles into Local');
+  await page.locator('#profile-source-filter').selectOption('all');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Search profiles' }).click();
+  await page.locator('.library-search input').fill('qa-099');
+  assert.equal(await page.locator('.profile-item').count(), 1);
+  await page.screenshot({ path: resolve(output, 'mobile-search.png'), fullPage: true });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.library-open').count(), 0);
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Search profiles' }).click();
+  await page.locator('.library-search input').fill('');
+  await page.getByRole('button', { name: 'Delete folder: SIT' }).click();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Delete folder: UAT' }).click();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Delete folder: Regression QA' }).click();
+  assert.equal(await page.getByRole('button', { name: 'Delete folder: Regression QA' }).count(), 0);
+  assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('turnstage.web.profiles.v1')))).length, 100);
+  assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('turnstage.web.profileOrganization.v1')))).folders.length, 0);
+  report.profileCount = 103;
+  report.search = 'name and id';
+  report.filter = 'official/local';
+  report.folder = 'create, nest, assign local profiles, reload persistence, rename, keep defaults out of local folders, delete without deleting profiles';
+  report.mobile = 'search drawer, Escape, no document overflow';
+  await page.close();
+
+  const nestedPage = await browser.newPage({ viewport: { width: 1100, height: 780 } });
+  const nestedProfile = (await readFile(resolve(root, 'resources/templates/basic-sse-chat.turnstage.jsonc'), 'utf8')).replace('"id": "basic-sse-chat"', '"id": "nested-sit"').replace('"name": "Basic SSE Chat"', '"name": "Nested SIT"');
+  await nestedPage.route('**/turnstage-catalog.json', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ format: 'turnstage-web-catalog', version: 1, id: 'company', revision: '1', profiles: [{ file: './profiles/Payments/SIT/nested.turnstage.jsonc' }], environments: [{ bundled: 'local' }] }) }));
+  await nestedPage.route('**/profiles/Payments/SIT/nested.turnstage.jsonc', (route) => route.fulfill({ contentType: 'application/json', body: nestedProfile }));
+  await nestedPage.goto(url);
+  await nestedPage.getByRole('button', { name: /Nested SIT/u }).waitFor({ timeout: 5000 }).catch(async () => { throw new Error(`Nested catalog did not load: ${await nestedPage.locator('.catalog-note').getAttribute('title')}`); });
+  assert.equal(await nestedPage.getByRole('button', { name: 'Payments 1' }).count(), 1);
+  assert.equal(await nestedPage.getByRole('button', { name: 'SIT 1' }).count(), 1);
+  await nestedPage.screenshot({ path: resolve(output, 'server-nested-defaults.png'), fullPage: true });
+  report.serverFolders = 'nested server directories appear as read-only Default folders';
+  await nestedPage.close();
+} finally {
+  await browser.close();
+  await new Promise((done) => server.close(done));
+}
+await writeFile(resolve(output, 'results.json'), JSON.stringify(report, null, 2));
+console.log(JSON.stringify(report, null, 2));

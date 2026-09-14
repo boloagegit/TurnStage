@@ -99,7 +99,7 @@ const validUi: UiDefinition = {
 describe('profile UI schema', () => {
   it('declares every UiDefinition field and keeps extension points scoped', () => {
     expect(uiSchema).toMatchObject({ type: 'object', additionalProperties: false });
-    expect(Object.keys(uiSchema.properties ?? {})).toEqual(['layout', 'composer', 'streaming', 'locks', 'components', 'messageActions', 'messageActionVisibility', 'messageTags']);
+    expect(Object.keys(uiSchema.properties ?? {})).toEqual(['layout', 'composer', 'responseContent', 'streaming', 'locks', 'components', 'messageActions', 'messageActionVisibility', 'messageTags']);
 
     const layout = propertySchema(uiSchema, 'layout');
     expect(layout).toMatchObject({ type: 'object', additionalProperties: false });
@@ -112,6 +112,11 @@ describe('profile UI schema', () => {
     expect(Object.keys(composer.properties ?? {})).toEqual(['placeholder', 'multiline', 'enterBehavior', 'shiftEnterBehavior', 'showStopWhileStreaming']);
     expect(propertySchema(composer, 'enterBehavior').enum).toEqual(['send', 'newline']);
     expect(propertySchema(composer, 'shiftEnterBehavior').enum).toEqual(['send', 'newline']);
+
+    const responseContent = propertySchema(uiSchema, 'responseContent');
+    expect(responseContent).toMatchObject({ type: 'object', additionalProperties: false });
+    expect(propertySchema(responseContent, 'markdown')).toMatchObject({ type: 'boolean', default: true });
+    expect(propertySchema(responseContent, 'html')).toMatchObject({ type: 'boolean', default: true });
 
     const streaming = propertySchema(uiSchema, 'streaming');
     expect(streaming).toMatchObject({ type: 'object', additionalProperties: false });

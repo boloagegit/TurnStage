@@ -171,7 +171,7 @@ export type WebviewMessage = Envelope & (
   | { type: 'test.runCase'; scenarioId: string; suiteId?: string; kind?: 'adversarial' | 'contract' }
   | { type: 'test.runSelection'; cases: import('./testSelection').TestCaseIdentity[] }
   | { type: 'test.history.rerun'; runId: string; kind?: 'contract' | 'adversarial' }
-  | { type: 'test.history.export'; runId: string; format: 'json' | 'junit' | 'html' }
+  | { type: 'test.history.export'; runId: string; format: 'json' | 'junit' | 'html'; kind?: 'contract' | 'adversarial' }
   | { type: 'test.history.request' }
   | { type: 'test.history.clear'; kind: 'contract' | 'adversarial' }
   | { type: 'test.baseline.accept'; runId: string }
@@ -179,7 +179,7 @@ export type WebviewMessage = Envelope & (
   | { type: 'test.cancel' }
   | { type: 'test.timeline.open'; evidenceId: string }
   | { type: 'test.evidence.open'; evidenceId: string; location: ScenarioEvidenceLocation }
-  | { type: 'test.report.export'; format: 'json' | 'junit' | 'html'; evidenceId?: string }
+  | { type: 'test.report.export'; format: 'json' | 'junit' | 'html'; evidenceId?: string; kind?: 'contract' | 'adversarial' }
   | { type: 'test.evidenceBundle.export' }
   | { type: 'test.capture'; source: TestCaptureSource; suggestedKind?: 'contract' | 'adversarial' }
   | { type: 'campaign.preview'; campaignId: string }
@@ -347,13 +347,13 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
     case 'test.runCase': return isBoundedId(message.scenarioId) && (message.suiteId === undefined || isBoundedId(message.suiteId)) && (message.kind === undefined || message.kind === 'adversarial' || message.kind === 'contract');
     case 'test.runSelection': return Array.isArray(message.cases) && message.cases.length > 0 && message.cases.length <= 500 && message.cases.every((item) => isRecord(item) && isBoundedId(item.profileId) && isBoundedId(item.scenarioId) && (item.suiteId === undefined || isBoundedId(item.suiteId)) && (item.kind === 'contract' || item.kind === 'adversarial'));
     case 'test.history.rerun': return isBoundedId(message.runId) && (message.kind === undefined || message.kind === 'contract' || message.kind === 'adversarial');
-    case 'test.history.export': return isBoundedId(message.runId) && ['json', 'junit', 'html'].includes(String(message.format));
+    case 'test.history.export': return isBoundedId(message.runId) && ['json', 'junit', 'html'].includes(String(message.format)) && (message.kind === undefined || message.kind === 'contract' || message.kind === 'adversarial');
     case 'test.history.clear': return message.kind === 'contract' || message.kind === 'adversarial';
     case 'test.baseline.accept': return isBoundedId(message.runId);
     case 'test.rerun': return ['failed', 'unstable', 'incomplete'].includes(String(message.status));
     case 'test.timeline.open': return isBoundedString(message.evidenceId);
     case 'test.evidence.open': return isBoundedString(message.evidenceId) && isEvidenceLocation(message.location);
-    case 'test.report.export': return ['json', 'junit', 'html'].includes(String(message.format)) && optionalBoundedString(message.evidenceId);
+    case 'test.report.export': return ['json', 'junit', 'html'].includes(String(message.format)) && optionalBoundedString(message.evidenceId) && (message.kind === undefined || message.kind === 'contract' || message.kind === 'adversarial');
     case 'test.capture': return isTestCaptureSource(message.source) && (message.suggestedKind === undefined || message.suggestedKind === 'contract' || message.suggestedKind === 'adversarial');
     case 'campaign.preview': case 'campaign.run': case 'campaign.cancel': return isBoundedId(message.campaignId);
     case 'campaign.resume': case 'campaign.acceptBaseline': case 'campaign.exportResults': case 'campaign.copilotSummary': return isBoundedId(message.campaignId) && isBoundedId(message.runId);

@@ -6,6 +6,17 @@ vi.mock('vscode', () => ({}));
 import { RequestBuilder, interactionContext } from '../src/extension/request/requestBuilder';
 
 describe('RequestBuilder', () => {
+  it('resolves two fields from a selected object in first and continuing turns', async () => {
+    const builder = new RequestBuilder(async () => undefined);
+    const definition: RequestDefinition = { method: 'POST', url: 'https://example.test', variants: [
+      { id: 'first', when: { path: 'conversation.id', operator: 'notExists' }, body: { custid: { $value: 'controls.user.custid' }, bdcun: { $value: 'controls.user.bdcun' } } },
+      { id: 'next', when: { path: 'conversation.id', operator: 'exists' }, body: { custid: { $value: 'controls.user.custid' }, bdcun: { $value: 'controls.user.bdcun' }, conversationId: { $value: 'conversation.id' } } },
+    ] };
+    const controls = { user: { custid: 'C001', bdcun: 'B001' } };
+    expect((await builder.build(definition, { controls, conversation: {} })).body).toBe('{"custid":"C001","bdcun":"B001"}');
+    expect((await builder.build(definition, { controls, conversation: { id: 'conv-1' } })).body).toBe('{"custid":"C001","bdcun":"B001","conversationId":"conv-1"}');
+  });
+
   it('preserves bounded reconnect and redirect policy for the host transport', async () => {
     const request = await new RequestBuilder(async () => undefined).build({
       method: 'POST', url: 'https://example.test/stream',

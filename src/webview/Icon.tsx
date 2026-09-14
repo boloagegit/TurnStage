@@ -9,6 +9,7 @@ export type ProductIconName =
   | 'arrow-up'
   | 'arrow-swap'
   | 'beaker'
+  | 'book'
   | 'check'
   | 'chevron-down'
   | 'chevron-right'
@@ -29,6 +30,7 @@ export type ProductIconName =
   | 'ellipsis'
   | 'diff'
   | 'file-code'
+  | 'file-add'
   | 'folder-opened'
   | 'go-to-file'
   | 'info'
@@ -57,6 +59,7 @@ const codicons: Record<ProductIconName, string> = {
   'arrow-up': 'arrow-up',
   'arrow-swap': 'arrow-swap',
   beaker: 'beaker',
+  book: 'book',
   check: 'check',
   'chevron-down': 'chevron-down',
   'chevron-right': 'chevron-right',
@@ -77,6 +80,7 @@ const codicons: Record<ProductIconName, string> = {
   ellipsis: 'ellipsis',
   diff: 'diff',
   'file-code': 'file-code',
+  'file-add': 'file-add',
   'folder-opened': 'folder-opened',
   'go-to-file': 'go-to-file',
   info: 'info',

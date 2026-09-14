@@ -550,10 +550,10 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         }
         if (message.type === 'test.evidence.open') { await vscode.commands.executeCommand('turnstage.openTestEvidence', { evidenceId: message.evidenceId, location: message.location }); return; }
         if (message.type === 'test.report.export') {
-          if (!this.scenarioTests?.hasReport()) throw new Error(localize('No conversation contract results are available. Run a scenario from Test Explorer first.'));
+          if (!this.scenarioTests) throw new Error(localize('Test runtime is unavailable.'));
           const uri = message.evidenceId
             ? await this.scenarioTests.exportEvidenceReport(message.evidenceId, message.format)
-            : await this.scenarioTests.exportLastReport(message.format);
+            : message.kind ? await this.scenarioTests.exportLatestKindReport(document.uri, message.kind, message.format) : await this.scenarioTests.exportLastReport(message.format);
           if (!uri) return;
           await post({ type: 'test.exported', kind: 'report', ...registerArtifact(uri) }, message.requestId);
           if (message.format === 'html') await vscode.env.openExternal(uri);
@@ -561,7 +561,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         }
         if (message.type === 'test.history.export') {
           if (!this.scenarioTests) throw new Error(localize('Test runtime is unavailable.'));
-          const uri = await this.scenarioTests.exportRunReport(document.uri, message.runId, message.format);
+          const uri = await this.scenarioTests.exportRunReport(document.uri, message.runId, message.format, message.kind);
           if (!uri) return;
           await post({ type: 'test.exported', kind: 'report', ...registerArtifact(uri) }, message.requestId);
           if (message.format === 'html') await vscode.env.openExternal(uri);
@@ -1246,7 +1246,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     if (['input.fill', 'event.inspect', 'form.open', 'form.submit', 'form.cancel'].includes(action.actionId)) return;
     throw new Error(localize('This response action is not supported: {action}.', { action: action.actionId }));
   }
-  private html(webview: vscode.Webview, instanceId: string): string { const nonce = crypto.randomUUID().replace(/-/g, ''); const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js')); const style = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css')); const locale = configuredLocale(); const direction = textDirection(locale); return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ${webview.cspSource}; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource} data:; script-src 'nonce-${nonce}'"><link rel="stylesheet" href="${style}"><title>TurnStage</title></head><body><div id="root" data-instance-id="${instanceId}"></div><script nonce="${nonce}" src="${script}"></script></body></html>`; }
+  private html(webview: vscode.Webview, instanceId: string): string { const nonce = crypto.randomUUID().replace(/-/g, ''); const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js')); const style = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css')); const locale = configuredLocale(); const direction = textDirection(locale); return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ${webview.cspSource}; img-src ${webview.cspSource} data: blob: http: https:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource} data:; script-src 'nonce-${nonce}'"><link rel="stylesheet" href="${style}"><title>TurnStage</title></head><body><div id="root" data-instance-id="${instanceId}"></div><script nonce="${nonce}" src="${script}"></script></body></html>`; }
 }
 
 function headerValue(headers: Record<string, string> | undefined, name: string): string | undefined {
