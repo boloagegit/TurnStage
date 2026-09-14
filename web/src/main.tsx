@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createPortal } from 'react-dom';
 import { applyEdits, modify } from 'jsonc-parser';
 import type { HostMessage, HostPayload, WebviewMessage } from '../../src/shared/protocol';
 import { PROTOCOL_VERSION } from '../../src/shared/protocol';
@@ -22,6 +23,9 @@ import { decodeWebProfileBundle, encodeWebProfileBundle } from './profileBundle'
 import { IconButton } from '../../src/webview/Icon';
 import { copyText } from '../../src/webview/clipboardText';
 import { browserUuid } from './browserCrypto';
+import { loadProfileOrganization, normalizeProfileOrganization, saveProfileOrganization, type ProfileOrganization } from './profileOrganization';
+import { ProfileReferencePanel, type ReferencePage } from './ProfileReferencePanel';
+import { profileUrl, requestedProfileId } from './profileUrl';
 import basicRaw from '../../resources/templates/basic-sse-chat.turnstage.jsonc?raw';
 import agentRaw from '../../resources/templates/agent-flow.turnstage.jsonc?raw';
 import enterpriseRaw from '../../resources/templates/enterprise-chat.turnstage.jsonc?raw';
@@ -54,6 +58,7 @@ let tests: WebTestController;
 let campaigns: WebCampaignController;
 let insights: WebInsightsController;
 let onLibraryChanged: (() => void) | undefined;
+let onOpenReference: ((page: ReferencePage) => void) | undefined;
 
 const disposeAppearance = bindSystemAppearance(() => preferences.theme ?? 'system');
 window.addEventListener('beforeunload', () => { secrets.clear(); disposeAppearance(); });
@@ -80,11 +85,13 @@ async function bootstrap(): Promise<void> {
   officialProfiles = catalog.profiles;
   officialEnvironments = catalog.environments;
   profiles = mergeCatalogEntries(officialProfiles, loadProfiles());
-  active = profiles.find((item) => item.id === preferences.activeProfileId) ?? profiles[0]!;
+  const requestedId = requestedProfileId(window.location.search);
+  active = profiles.find((item) => item.id === requestedId) ?? profiles.find((item) => item.id === preferences.activeProfileId) ?? profiles[0]!;
+  window.history.replaceState(window.history.state, '', profileUrl(window.location.href, active.id));
   environments = mergeCatalogEntries(officialEnvironments, loadEnvironments());
   activeEnvironmentItem = environmentFor(activeProfile());
   session = createSession(active);
-  tests = new WebTestController(() => activeProfile(), () => activeEnvironment(), secrets, post);
+  tests = new WebTestController(() => activeProfile(), () => activeEnvironment(), secrets, post, () => preferences.locale ?? navigator.language);
   campaigns = new WebCampaignController(() => activeProfile(), tests, post);
   insights = new WebInsightsController(() => activeProfile(), () => session.current, post);
   createRoot(document.getElementById('profile-root')!).render(<ProfileLibrary />);
@@ -152,7 +159,7 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       case 'test.runCase': await tests.run('runCase', message.scenarioId, message.kind, message.suiteId); break;
       case 'test.runSelection': await tests.runCases(message.cases); break;
       case 'test.history.rerun': await tests.rerunHistory(message.runId, message.kind); break;
-      case 'test.history.export': await tests.exportRunReport(message.runId, message.format); break;
+      case 'test.history.export': await tests.exportRunReport(message.runId, message.format, message.kind); break;
       case 'test.history.request': await tests.postHistory(); break;
       case 'test.history.clear': await tests.clearHistory(message.kind); break;
       case 'test.baseline.accept': await tests.acceptBaseline(message.runId); break;
@@ -161,7 +168,7 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       case 'test.capture': await captureTest(message.source, message.suggestedKind ?? 'contract', message.requestId); break;
       case 'adversarial.capture': await captureTest({ kind: 'conversation' }, 'adversarial', message.requestId); break;
       case 'test.evidence.open': await tests.openEvidence(message.evidenceId); post({ type: 'inspector.focus', tab: message.location.kind === 'network' ? 'Network' : message.location.kind === 'normalizedEvent' ? 'Normalized' : 'Raw Events', evidenceId: message.evidenceId, networkId: message.location.kind === 'network' ? message.location.networkId : undefined, sequence: message.location.kind === 'rawEvent' || message.location.kind === 'normalizedEvent' ? message.location.sequence : undefined }); break;
-      case 'test.report.export': await tests.exportReport(message.format, message.evidenceId); break;
+      case 'test.report.export': await tests.exportReport(message.format, message.evidenceId, message.kind); break;
       case 'test.timeline.open': await tests.postTimeline(message.evidenceId); break;
       case 'test.evidenceBundle.export': await tests.exportEvidenceBundle(); break;
       case 'campaign.preview': await campaigns.preview(message.campaignId); break;
@@ -206,7 +213,7 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
         else notifyUnavailable('Linking workspace files is available only in the VS Code extension.', message.requestId);
         break;
       case 'uri.open': openExternalUri(message.uri); break;
-      case 'profile.openAsText': download(`${active.id}.turnstage.jsonc`, active.raw, 'application/json'); break;
+      case 'profile.openAsText': onOpenReference?.('source'); break;
       case 'artifact.action': if (message.action === 'copyPath') await copyText(message.artifactId); else notifyUnavailable('The browser already downloaded this artifact. Use the browser Downloads panel to open or reveal it.', message.requestId); break;
       case 'history.remote.apply': notifyUnavailable('Remote session references require an application backend and are not stored by TurnStage Web.', message.requestId); break;
       case 'output.open': notifyUnavailable('Output logs are shown in the browser developer console.', message.requestId); break;
@@ -280,6 +287,7 @@ function selectProfile(id: string): void {
   preferences.activeProfileId = active.id;
   preferences.activeEnvironmentId = activeEnvironmentItem.id;
   savePreferences(preferences);
+  window.history.replaceState(window.history.state, '', profileUrl(window.location.href, active.id));
   runSummaries = [];
   session = createSession(active);
   postProfile();
@@ -468,38 +476,41 @@ function createBlankProfile(): void {
   selectProfile(item.id);
 }
 
-function duplicateActive(): void {
-  const item = deriveLocalProfile(active);
+function duplicateProfile(source: StoredProfile): void {
+  const item = deriveLocalProfile(source);
   profiles = [...profiles, item];
   persistLibrary();
   selectProfile(item.id);
 }
+function duplicateActive(): void { duplicateProfile(active); }
 
-function exportActive(): void {
-  const profile = activeProfile();
+function exportProfile(item: StoredProfile): void {
+  const profile = codec.parse(item.raw).profile ?? fallbackProfile(item);
   const environmentItem = environments.find((item) => item.id === profile.environment);
   if (!environmentItem) { window.alert(`Profile ${profile.name} references an Environment that is not available in this browser.`); return; }
   const environment = parseEnvironment(environmentItem.raw);
   if (!environment) { window.alert(`Environment ${environmentItem.name} is invalid and cannot be exported.`); return; }
   try {
-    download(`${active.id}.turnstage-profile.json`, encodeWebProfileBundle(profile, environment), 'application/json');
+    download(`${item.id}.turnstage-profile.json`, encodeWebProfileBundle(profile, environment), 'application/json');
   } catch (error) { window.alert(error instanceof Error ? error.message : String(error)); }
 }
 
-function deleteActive(): void {
-  if (active.builtIn || profiles.length <= 1) return;
+function deleteProfile(item: StoredProfile): void {
+  if (item.builtIn || profiles.length <= 1) return;
   const locale = normalizeLocale(preferences.locale ?? navigator.language);
-  const restoresOfficial = officialProfiles.some((item) => item.id === active.id);
+  const restoresOfficial = officialProfiles.some((official) => official.id === item.id);
   const message = restoresOfficial
-    ? locale === 'zh-TW' ? `還原官方設定檔「${active.name}」？\n\n目前瀏覽器中的個人修改會被移除。` : locale === 'ja' ? `公式プロファイル「${active.name}」に戻しますか？\n\nこのブラウザー内の変更は削除されます。` : locale === 'ko' ? `공식 프로필 "${active.name}"(으)로 복원할까요?\n\n이 브라우저에 저장된 개인 변경 사항이 제거됩니다.` : `Restore the official Profile "${active.name}"?\n\nBrowser-local changes to this Profile will be removed.`
-    : locale === 'zh-TW' ? `刪除設定檔「${active.name}」？\n\n此瀏覽器中的設定檔會被移除。` : locale === 'ja' ? `プロファイル「${active.name}」を削除しますか？\n\nこのブラウザーに保存されたプロファイルは削除されます。` : locale === 'ko' ? `프로필 "${active.name}"을(를) 삭제할까요?\n\n이 브라우저에 저장된 프로필이 제거됩니다.` : `Delete Profile "${active.name}"?\n\nThis browser-local Profile will be removed.`;
+    ? locale === 'zh-TW' ? `還原預設設定檔「${item.name}」？\n\n目前瀏覽器中的個人修改會被移除。` : locale === 'ja' ? `デフォルトのプロファイル「${item.name}」に戻しますか？\n\nこのブラウザー内の変更は削除されます。` : locale === 'ko' ? `기본 프로필 "${item.name}"(으)로 복원할까요?\n\n이 브라우저에 저장된 개인 변경 사항이 제거됩니다.` : `Restore the default Profile "${item.name}"?\n\nBrowser-local changes to this Profile will be removed.`
+    : locale === 'zh-TW' ? `刪除設定檔「${item.name}」？\n\n此瀏覽器中的設定檔會被移除。` : locale === 'ja' ? `プロファイル「${item.name}」を削除しますか？\n\nこのブラウザーに保存されたプロファイルは削除されます。` : locale === 'ko' ? `프로필 "${item.name}"을(를) 삭제할까요?\n\n이 브라우저에 저장된 프로필이 제거됩니다.` : `Delete Profile "${item.name}"?\n\nThis browser-local Profile will be removed.`;
   if (!window.confirm(message)) return;
-  const deletedId = active.id;
+  const deletedId = item.id;
+  const wasActive = active.id === deletedId;
   const localProfiles = profiles.filter((item) => !item.builtIn && item.id !== deletedId);
   profiles = mergeCatalogEntries(officialProfiles, localProfiles);
-  active = profiles.find((item) => item.id === deletedId) ?? profiles[0]!;
+  if (wasActive) active = profiles.find((item) => item.id === deletedId) ?? profiles[0]!;
   persistLibrary();
-  selectProfile(active.id);
+  if (wasActive) selectProfile(active.id);
+  else onLibraryChanged?.();
 }
 
 function confirmSessionChange(action: 'clear' | 'restart'): boolean {
@@ -566,29 +577,171 @@ async function invokeAction(actionId: string, sourceMessageId: string | undefine
 function ProfileLibrary(): React.JSX.Element {
   const [, render] = useState(0);
   const [, renderSecrets] = useState(0);
+  const [query, setQuery] = useState('');
+  const [source, setSource] = useState<'all' | 'official' | 'local'>('all');
+  const [organization, setOrganization] = useState(loadProfileOrganization);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [referencePage, setReferencePage] = useState<ReferencePage | undefined>();
+  const [referenceProfileId, setReferenceProfileId] = useState<string | undefined>();
+  const [itemMenu, setItemMenu] = useState<{ id: string; top: number; left: number } | undefined>();
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
   const activeProfileButton = useRef<HTMLButtonElement>(null);
+  const itemMenuRef = useRef<HTMLDivElement>(null);
+  const itemMenuTrigger = useRef<HTMLButtonElement>(null);
   onLibraryChanged = () => render((value) => value + 1);
+  onOpenReference = (page) => { setReferenceProfileId(active.id); setReferencePage(page); };
   const locale = normalizeLocale(preferences.locale ?? navigator.language);
   const labels = useMemo(() => copy(locale), [locale]);
-  const overridesOfficial = !active.builtIn && officialProfiles.some((item) => item.id === active.id);
   useEffect(() => { activeProfileButton.current?.scrollIntoView({ block: 'nearest' }); }, [active.id]);
+  useEffect(() => { if (libraryOpen) searchInput.current?.focus(); }, [libraryOpen]);
+  useEffect(() => {
+    if (!itemMenu) return;
+    itemMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    const dismiss = (event: PointerEvent) => {
+      if (!itemMenuRef.current?.contains(event.target as Node) && !itemMenuTrigger.current?.contains(event.target as Node)) setItemMenu(undefined);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); setItemMenu(undefined); itemMenuTrigger.current?.focus(); }
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
+  }, [itemMenu]);
+  useEffect(() => {
+    if (!libraryOpen) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setLibraryOpen(false); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [libraryOpen]);
+  const updateOrganization = (next: ProfileOrganization) => { const normalized = normalizeProfileOrganization(next); setOrganization(normalized); saveProfileOrganization(normalized); };
+  const createFolder = (parentId?: string) => {
+    const name = window.prompt(labels.folderName)?.trim().slice(0, 60);
+    if (!name || organization.folders.length >= 100) return;
+    let depth = 0;
+    let ancestor = parentId;
+    while (ancestor) { depth++; ancestor = organization.folders.find((folder) => folder.id === ancestor)?.parentId; }
+    if (depth >= 8) return;
+    updateOrganization({ ...organization, folders: [...organization.folders, { id: browserUuid(), name, ...(parentId ? { parentId } : {}) }] });
+  };
+  const renameFolder = (id: string, previous: string) => {
+    const name = window.prompt(labels.renameFolder, previous)?.trim().slice(0, 60);
+    if (!name) return;
+    updateOrganization({ ...organization, folders: organization.folders.map((folder) => folder.id === id ? { ...folder, name } : folder) });
+  };
+  const deleteFolder = (id: string, name: string) => {
+    if (!window.confirm(labels.confirmDeleteFolder.replace('{name}', name))) return;
+    const parentId = organization.folders.find((folder) => folder.id === id)?.parentId;
+    const assignments = { ...organization.assignments };
+    for (const [profileId, folderId] of Object.entries(assignments)) if (folderId === id) { if (parentId) assignments[profileId] = parentId; else delete assignments[profileId]; }
+    updateOrganization({ folders: organization.folders.filter((folder) => folder.id !== id).map((folder) => folder.parentId === id ? { ...folder, parentId } : folder), assignments, collapsed: organization.collapsed.filter((folderId) => folderId !== `folder:${id}`) });
+  };
+  const moveFolder = (id: string, direction: -1 | 1) => {
+    const folders = [...organization.folders];
+    const index = folders.findIndex((folder) => folder.id === id);
+    const siblings = folders.map((folder, position) => folder.parentId === folders[index]?.parentId ? position : -1).filter((position) => position >= 0);
+    const siblingIndex = siblings.indexOf(index);
+    const target = siblings[siblingIndex + direction];
+    if (index < 0 || target === undefined) return;
+    [folders[index], folders[target]] = [folders[target]!, folders[index]!];
+    updateOrganization({ ...organization, folders });
+  };
+  const assignFolder = (profileId: string, folderId: string) => {
+    const assignments = { ...organization.assignments };
+    if (folderId) assignments[profileId] = folderId; else delete assignments[profileId];
+    updateOrganization({ ...organization, assignments });
+  };
+  const toggleFolder = (id: string) => updateOrganization({ ...organization, collapsed: organization.collapsed.includes(id) ? organization.collapsed.filter((item) => item !== id) : [...organization.collapsed, id] });
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visibleProfiles = profiles.filter((item) => {
+    if (source === 'official' && !item.builtIn) return false;
+    if (source === 'local' && item.builtIn) return false;
+    if (!normalizedQuery) return true;
+    return [item.name, item.id, item.official?.category, ...(item.official?.tags ?? [])].some((value) => value?.toLocaleLowerCase().includes(normalizedQuery));
+  });
+  type LibraryGroup = { id: string; name: string; items: StoredProfile[]; children: LibraryGroup[]; customId?: string };
+  const officialRoot: LibraryGroup = { id: 'official', name: labels.official, items: [], children: [] };
+  const localRoot: LibraryGroup = { id: 'local', name: labels.browser, items: [], children: [] };
+  const serverFolders = new Map<string, LibraryGroup>();
+  const customFolders = new Map(organization.folders.map((folder) => [folder.id, { id: `folder:${folder.id}`, name: folder.name, items: [], children: [], customId: folder.id } as LibraryGroup]));
+  for (const folder of organization.folders) (folder.parentId ? customFolders.get(folder.parentId) : localRoot)?.children.push(customFolders.get(folder.id)!);
+  for (const item of visibleProfiles) {
+    const assigned = organization.assignments[item.id];
+    if (!item.builtIn && assigned && customFolders.has(assigned)) { customFolders.get(assigned)!.items.push(item); continue; }
+    if (!item.builtIn) { localRoot.items.push(item); continue; }
+    let parent = officialRoot;
+    const path: string[] = [];
+    for (const segment of item.official?.folderPath ?? []) {
+      path.push(segment);
+      const key = path.join('/');
+      let group = serverFolders.get(key);
+      if (!group) { group = { id: `server:${key}`, name: segment, items: [], children: [] }; serverFolders.set(key, group); parent.children.push(group); }
+      parent = group;
+    }
+    parent.items.push(item);
+  }
+  const hasContent = (group: LibraryGroup): boolean => group.items.length > 0 || group.children.some(hasContent);
+  const groups = [officialRoot, localRoot].filter((group) => hasContent(group) || group.id === 'local' && source !== 'official' && !normalizedQuery && organization.folders.length > 0);
+  const folderPath = (id: string): string => { const names: string[] = []; let current = organization.folders.find((folder) => folder.id === id); while (current) { names.unshift(current.name); current = organization.folders.find((folder) => folder.id === current?.parentId); } return names.join(' / '); };
+  const countProfiles = (group: LibraryGroup): number => group.items.length + group.children.reduce((count, child) => count + countProfiles(child), 0);
+  const openItemMenu = (item: StoredProfile, button: HTMLButtonElement) => {
+    if (itemMenu?.id === item.id) { setItemMenu(undefined); return; }
+    const bounds = button.getBoundingClientRect();
+    itemMenuTrigger.current = button;
+    setFolderPickerOpen(false);
+    const menuHeight = 168;
+    setItemMenu({ id: item.id, top: bounds.bottom + menuHeight > window.innerHeight ? Math.max(8, bounds.top - menuHeight) : bounds.bottom + 4, left: Math.max(8, Math.min(bounds.right - 184, window.innerWidth - 192)) });
+  };
+  const menuItem = profiles.find((item) => item.id === itemMenu?.id);
+  const referenceItem = profiles.find((item) => item.id === referenceProfileId) ?? active;
+  const closeItemMenu = () => { setItemMenu(undefined); itemMenuTrigger.current?.focus(); };
+  const navigateItemMenu = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Tab') { setItemMenu(undefined); return; }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button')];
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+    event.preventDefault();
+    buttons[next]?.focus();
+  };
+  const renderGroup = (group: LibraryGroup, depth = 0): React.JSX.Element => {
+    const collapsed = !normalizedQuery && organization.collapsed.includes(group.id);
+    const siblings = organization.folders.filter((folder) => folder.parentId === organization.folders.find((folder) => folder.id === group.customId)?.parentId);
+    const siblingIndex = siblings.findIndex((folder) => folder.id === group.customId);
+    return <section className="profile-folder" key={group.id} style={{ '--folder-depth': depth } as React.CSSProperties}><div className="folder-heading"><button className="folder-toggle" aria-expanded={!collapsed} aria-controls={`profiles-${group.id}`} onClick={() => toggleFolder(group.id)}><span aria-hidden="true" className={`codicon codicon-chevron-${collapsed ? 'right' : 'down'}`} /><span className="folder-name" title={group.name}>{group.name}</span><span className="folder-count">{countProfiles(group)}</span></button>{group.customId && <div className="folder-actions"><IconButton className="sidebar-icon" icon="folder-opened" label={`${labels.newSubfolder}: ${group.name}`} disabled={depth >= 8 || organization.folders.length >= 100} onClick={() => createFolder(group.customId)} /><IconButton className="sidebar-icon" icon="arrow-up" label={`${labels.moveFolderUp}: ${group.name}`} disabled={siblingIndex <= 0} onClick={() => moveFolder(group.customId!, -1)} /><IconButton className="sidebar-icon" icon="arrow-down" label={`${labels.moveFolderDown}: ${group.name}`} disabled={siblingIndex >= siblings.length - 1} onClick={() => moveFolder(group.customId!, 1)} /><IconButton className="sidebar-icon" icon="edit" label={`${labels.renameFolder}: ${group.name}`} onClick={() => renameFolder(group.customId!, group.name)} /><IconButton className="sidebar-icon" icon="trash" label={`${labels.deleteFolder}: ${group.name}`} onClick={() => deleteFolder(group.customId!, group.name)} /></div>}</div><div id={`profiles-${group.id}`} hidden={collapsed}>{group.children.filter((child) => hasContent(child) || !normalizedQuery && source === 'all').map((child) => renderGroup(child, depth + 1))}{group.items.map((item) => { const sourceLabel = profileSourceLabel(item, labels); return <div className={`profile-item-row${itemMenu?.id === item.id ? ' menu-open' : ''}`} key={item.id}><button ref={item.id === active.id ? activeProfileButton : undefined} className={`profile-item${item.id === active.id ? ' active' : ''}`} aria-label={`${item.name}, ${sourceLabel}`} aria-current={item.id === active.id ? 'page' : undefined} onClick={() => { setItemMenu(undefined); selectProfile(item.id); setLibraryOpen(false); }}><span className="profile-glyph" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</span><span><strong>{item.name}</strong><small>{sourceLabel}</small></span></button><IconButton className="profile-item-more" icon="ellipsis" label={`${labels.profileActions}: ${item.name}`} aria-haspopup="menu" aria-expanded={itemMenu?.id === item.id} onClick={(event) => openItemMenu(item, event.currentTarget)} /></div>; })}</div></section>;
+  };
   const secretNames = [...new Set([
     ...[...active.raw.matchAll(/\$\{secret\.([A-Za-z0-9_.-]+)\}/gu)].map((match) => match[1]!),
     ...Object.values(activeEnvironment().secretReferences ?? {}),
   ])];
-  return <div className="profile-library">
+  return <div className={`profile-library${libraryOpen ? ' library-open' : ''}`}>
     <header className="brand"><span className="brand-mark" aria-hidden="true">T</span><h1><strong>TurnStage</strong><small>Web</small></h1></header>
-    <div className="library-heading"><span>{labels.profiles}</span><div className="library-heading-actions" role="group" aria-label={labels.profileActions}><IconButton className="sidebar-icon" icon="add" label={labels.newProfile} onClick={createBlankProfile} /><IconButton className="sidebar-icon" icon="arrow-up" label={labels.import} onClick={() => input.current?.click()} /></div></div>
+    <div className="library-heading"><span>{labels.profiles}</span><div className="library-heading-actions" role="group" aria-label={labels.profileActions}><IconButton className="sidebar-icon" icon="add" label={labels.newProfile} onClick={createBlankProfile} /><IconButton className="sidebar-icon" icon="file-add" label={labels.import} onClick={() => input.current?.click()} /><IconButton className="sidebar-icon" icon="folder-opened" label={labels.newFolder} onClick={() => createFolder()} /><IconButton className="sidebar-icon compact-library-toggle" icon={libraryOpen ? 'close' : 'search'} label={libraryOpen ? labels.closeLibrary : labels.searchProfiles} onClick={() => setLibraryOpen(!libraryOpen)} /></div></div>
     <input ref={input} className="visually-hidden" type="file" aria-label={labels.import} accept=".jsonc,.json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importProfile(file); event.target.value = ''; }} />
-    <nav aria-label={labels.profiles}>{profiles.map((item) => { const sourceLabel = profileSourceLabel(item, labels); return <button key={item.id} ref={item.id === active.id ? activeProfileButton : undefined} className={`profile-item${item.id === active.id ? ' active' : ''}`} aria-label={`${item.name}, ${sourceLabel}`} aria-current={item.id === active.id ? 'page' : undefined} onClick={() => selectProfile(item.id)}><span className="profile-glyph" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</span><span><strong>{item.name}</strong><small>{sourceLabel}</small></span></button>; })}</nav>
+    <div className="library-filters"><label className="library-search"><span className="visually-hidden">{labels.searchProfiles}</span><input ref={searchInput} type="search" value={query} placeholder={labels.searchProfiles} onChange={(event) => setQuery(event.target.value)} /></label><label className="visually-hidden" htmlFor="profile-source-filter">{labels.filterSource}</label><select id="profile-source-filter" value={source} onChange={(event) => setSource(event.target.value as typeof source)}><option value="all">{labels.allSources}</option><option value="official">{labels.official}</option><option value="local">{labels.browser}</option></select></div>
+    <nav aria-label={labels.profiles}>{groups.length === 0 && <p className="library-empty">{labels.noProfilesFound}</p>}{groups.map((group) => renderGroup(group))}</nav>
     <footer>
-      <div className="sidebar-actions"><button onClick={duplicateActive}>{labels.duplicate}</button><button onClick={exportActive}>{labels.export}</button><button disabled={Boolean(active.builtIn)} onClick={deleteActive}>{overridesOfficial ? labels.reset : labels.delete}</button></div>
-      <label>{labels.language}<select value={locale} onChange={(event) => { preferences.locale = event.target.value; savePreferences(preferences); window.location.reload(); }}><option value="en">English</option><option value="zh-TW">繁體中文</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
-      <label>{labels.theme}<select value={preferences.theme ?? 'system'} onChange={(event) => { preferences.theme = event.target.value as WebThemePreference; savePreferences(preferences); applyWebAppearance(preferences.theme); render((value) => value + 1); }}><option value="system">{labels.themeSystem}</option><option value="dark">{labels.themeDark}</option><option value="light">{labels.themeLight}</option></select></label>
+      <button type="button" className="profile-guide-link" onClick={() => { setReferenceProfileId(active.id); setReferencePage('guide'); }}><span className="codicon codicon-book" aria-hidden="true" />{labels.profileGuide}</button>
+      <details className="sidebar-preferences"><summary><span className="codicon codicon-settings-gear" aria-hidden="true" />{labels.displayPreferences}</summary><div><label>{labels.language}<select value={locale} onChange={(event) => { preferences.locale = event.target.value; savePreferences(preferences); window.location.reload(); }}><option value="en">English</option><option value="zh-TW">繁體中文</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label><label>{labels.theme}<select value={preferences.theme ?? 'system'} onChange={(event) => { preferences.theme = event.target.value as WebThemePreference; savePreferences(preferences); applyWebAppearance(preferences.theme); render((value) => value + 1); }}><option value="system">{labels.themeSystem}</option><option value="dark">{labels.themeDark}</option><option value="light">{labels.themeLight}</option></select></label></div></details>
       {secretNames.length > 0 && <details className="secret-editor"><summary>{labels.secrets}</summary>{secretNames.map((name) => <label key={name}>{name}<input type="password" autoComplete="off" value={secrets.get(name) ?? ''} placeholder={labels.memoryOnly} onChange={(event) => { if (event.target.value) secrets.set(name, event.target.value); else secrets.delete(name); renderSecrets((value) => value + 1); }} /></label>)}</details>}
       {catalog.warning && <p className="catalog-note catalog-note--warning" role="status" title={catalog.warning}>{labels.catalogFallback}</p>}
     </footer>
+    {referencePage && <ProfileReferencePanel page={referencePage} onClose={() => setReferencePage(undefined)} profileName={referenceItem.name} raw={referenceItem.raw} locale={locale} onDownload={() => download(`${referenceItem.id}.turnstage.jsonc`, referenceItem.raw, 'application/json')} onCopy={copyText} />}
+    {itemMenu && menuItem && createPortal(
+      <div ref={itemMenuRef} className="profile-item-menu" role="menu" aria-label={`${labels.profileActions}: ${menuItem.name}`} style={{ top: itemMenu.top, left: itemMenu.left, maxHeight: Math.max(80, window.innerHeight - itemMenu.top - 8) }} onKeyDown={navigateItemMenu}>
+        <button type="button" role="menuitem" onClick={() => { closeItemMenu(); setReferenceProfileId(menuItem.id); setReferencePage('source'); }}>{labels.viewJsonc}</button>
+        <button type="button" role="menuitem" onClick={() => { closeItemMenu(); duplicateProfile(menuItem); }}>{labels.duplicate}</button>
+        <button type="button" role="menuitem" onClick={() => { closeItemMenu(); exportProfile(menuItem); }}>{labels.export}</button>
+        {!menuItem.builtIn && organization.folders.length > 0 && <>
+          <button type="button" role="menuitem" aria-expanded={folderPickerOpen} onClick={() => setFolderPickerOpen(!folderPickerOpen)}>{labels.moveToFolder} <span aria-hidden="true">{folderPickerOpen ? '⌃' : '⌄'}</span></button>
+          {folderPickerOpen && <div className="profile-item-folder-list" role="group" aria-label={labels.moveToFolder}>
+            <button type="button" role="menuitemradio" aria-checked={!organization.assignments[menuItem.id]} onClick={() => { assignFolder(menuItem.id, ''); closeItemMenu(); }}>{menuItem.builtIn ? labels.official : labels.browser}</button>
+            {organization.folders.map((folder) => <button type="button" key={folder.id} role="menuitemradio" aria-checked={organization.assignments[menuItem.id] === folder.id} title={folderPath(folder.id)} onClick={() => { assignFolder(menuItem.id, folder.id); closeItemMenu(); }}>{folderPath(folder.id)}</button>)}
+          </div>}
+        </>}
+        {!menuItem.builtIn && <button type="button" role="menuitem" onClick={() => { closeItemMenu(); deleteProfile(menuItem); }}>{officialProfiles.some((item) => item.id === menuItem.id) ? labels.reset : labels.delete}</button>}
+      </div>, document.body)}
   </div>;
 }
 
@@ -654,28 +807,32 @@ function pickFile(accept: string): Promise<{ name: string; text: string } | unde
 function copy(locale: string) {
   const common = locale === 'zh-TW' ? {
     profiles: '設定檔', profileActions: '設定檔動作', newProfile: '新增設定檔', newProfileName: '新設定檔', import: '匯入設定檔',
-    official: '官方', browser: '本機', officialCopy: '源自官方範本', officialUpdated: '官方範本已有新版',
-    duplicate: '複製', export: '匯出可攜檔', delete: '刪除', reset: '還原官方',
-    catalogFallback: '無法載入官方範本，已改用內建範本。', language: '顯示語言', theme: '外觀主題', themeSystem: '跟隨系統', themeDark: '深色', themeLight: '淺色',
+    official: '預設', browser: '本機', officialCopy: '源自預設設定檔', officialUpdated: '預設設定檔已有新版',
+    duplicate: '複製', export: '匯出', delete: '刪除', reset: '還原預設', profileGuide: '設定檔指南', viewJsonc: '檢視 JSONC', moveToFolder: '移至資料夾',
+    catalogFallback: '無法載入預設設定檔，已改用內建範本。', language: '顯示語言', theme: '外觀主題', displayPreferences: '語言與外觀', themeSystem: '跟隨系統', themeDark: '深色', themeLight: '淺色',
     secrets: '工作階段密鑰', memoryOnly: '僅保留於記憶體',
+    searchProfiles: '搜尋設定檔', filterSource: '篩選來源', allSources: '全部', noProfilesFound: '沒有符合的設定檔', newFolder: '新增資料夾', newSubfolder: '新增子資料夾', moveFolderUp: '上移資料夾', moveFolderDown: '下移資料夾', folderName: '資料夾名稱', folder: '資料夾', renameFolder: '重新命名資料夾', deleteFolder: '刪除資料夾', confirmDeleteFolder: '刪除「{name}」資料夾？其中的設定檔與子資料夾會移到上一層。', closeLibrary: '收合設定檔側欄',
   } : locale === 'ja' ? {
     profiles: 'プロファイル', profileActions: 'プロファイル操作', newProfile: '新規プロファイル', newProfileName: '新規プロファイル', import: 'インポート',
-    official: '公式', browser: 'ローカル', officialCopy: '公式プリセットから作成', officialUpdated: '公式プリセットに更新あり',
-    duplicate: '複製', export: 'ポータブル書き出し', delete: '削除', reset: '公式版に戻す',
-    catalogFallback: '公式プリセットを読み込めません。内蔵プリセットを使用しています。', language: '表示言語', theme: '外観テーマ', themeSystem: 'システム設定', themeDark: 'ダーク', themeLight: 'ライト',
+    official: 'デフォルト', browser: 'ローカル', officialCopy: 'デフォルトから作成', officialUpdated: 'デフォルトに更新あり',
+    duplicate: '複製', export: '書き出し', delete: '削除', reset: 'デフォルトに戻す', profileGuide: 'プロファイルガイド', viewJsonc: 'JSONC を表示', moveToFolder: 'フォルダーへ移動',
+    catalogFallback: 'デフォルトを読み込めません。内蔵プリセットを使用しています。', language: '表示言語', theme: '外観テーマ', displayPreferences: '言語と外観', themeSystem: 'システム設定', themeDark: 'ダーク', themeLight: 'ライト',
     secrets: 'セッションシークレット', memoryOnly: 'メモリのみ',
+    searchProfiles: 'プロファイルを検索', filterSource: '提供元で絞り込み', allSources: 'すべて', noProfilesFound: '該当するプロファイルはありません', newFolder: 'フォルダーを作成', newSubfolder: 'サブフォルダーを作成', moveFolderUp: 'フォルダーを上へ', moveFolderDown: 'フォルダーを下へ', folderName: 'フォルダー名', folder: 'フォルダー', renameFolder: 'フォルダー名を変更', deleteFolder: 'フォルダーを削除', confirmDeleteFolder: '「{name}」フォルダーを削除しますか？プロファイルとサブフォルダーは親フォルダーに移動します。', closeLibrary: 'プロファイル一覧を閉じる',
   } : locale === 'ko' ? {
     profiles: '프로필', profileActions: '프로필 작업', newProfile: '새 프로필', newProfileName: '새 프로필', import: '가져오기',
-    official: '공식', browser: '로컬', officialCopy: '공식 프리셋에서 생성', officialUpdated: '공식 프리셋 업데이트 있음',
-    duplicate: '복제', export: '휴대용 내보내기', delete: '삭제', reset: '공식 버전 복원',
-    catalogFallback: '공식 프리셋을 불러오지 못했습니다. 기본 프리셋을 사용합니다.', language: '표시 언어', theme: '화면 테마', themeSystem: '시스템 설정', themeDark: '어둡게', themeLight: '밝게',
+    official: '기본', browser: '로컬', officialCopy: '기본 프로필에서 생성', officialUpdated: '기본 프로필 업데이트 있음',
+    duplicate: '복제', export: '내보내기', delete: '삭제', reset: '기본값 복원', profileGuide: '프로필 가이드', viewJsonc: 'JSONC 보기', moveToFolder: '폴더로 이동',
+    catalogFallback: '기본 프로필을 불러오지 못했습니다. 내장 프리셋을 사용합니다.', language: '표시 언어', theme: '화면 테마', displayPreferences: '언어 및 화면', themeSystem: '시스템 설정', themeDark: '어둡게', themeLight: '밝게',
     secrets: '세션 비밀', memoryOnly: '메모리에만 저장',
+    searchProfiles: '프로필 검색', filterSource: '출처별 필터', allSources: '전체', noProfilesFound: '일치하는 프로필이 없습니다', newFolder: '폴더 만들기', newSubfolder: '하위 폴더 만들기', moveFolderUp: '폴더 위로', moveFolderDown: '폴더 아래로', folderName: '폴더 이름', folder: '폴더', renameFolder: '폴더 이름 변경', deleteFolder: '폴더 삭제', confirmDeleteFolder: '“{name}” 폴더를 삭제할까요? 프로필과 하위 폴더는 상위 폴더로 이동합니다.', closeLibrary: '프로필 목록 닫기',
   } : {
     profiles: 'Profiles', profileActions: 'Profile actions', newProfile: 'New profile', newProfileName: 'New Profile', import: 'Import profile',
-    official: 'Official', browser: 'Local', officialCopy: 'Based on official preset', officialUpdated: 'Official preset updated',
-    duplicate: 'Duplicate', export: 'Portable export', delete: 'Delete', reset: 'Restore official',
-    catalogFallback: 'Official presets unavailable. Using bundled presets.', language: 'Display language', theme: 'Appearance theme', themeSystem: 'Use system setting', themeDark: 'Dark', themeLight: 'Light',
+    official: 'Default', browser: 'Local', officialCopy: 'Based on default profile', officialUpdated: 'Default profile updated',
+    duplicate: 'Duplicate', export: 'Export', delete: 'Delete', reset: 'Restore default', profileGuide: 'Profile guide', viewJsonc: 'View JSONC', moveToFolder: 'Move to folder',
+    catalogFallback: 'Default profiles unavailable. Using bundled presets.', language: 'Display language', theme: 'Appearance theme', displayPreferences: 'Language and appearance', themeSystem: 'Use system setting', themeDark: 'Dark', themeLight: 'Light',
     secrets: 'Session secrets', memoryOnly: 'Memory only',
+    searchProfiles: 'Search profiles', filterSource: 'Filter by source', allSources: 'All', noProfilesFound: 'No matching profiles', newFolder: 'New folder', newSubfolder: 'New subfolder', moveFolderUp: 'Move folder up', moveFolderDown: 'Move folder down', folderName: 'Folder name', folder: 'Folder', renameFolder: 'Rename folder', deleteFolder: 'Delete folder', confirmDeleteFolder: 'Delete “{name}”? Profiles and subfolders will move up one level.', closeLibrary: 'Close profile sidebar',
   };
   return common;
 }

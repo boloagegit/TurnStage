@@ -651,7 +651,7 @@ export interface ControlDefinition {
   default?: unknown;
   persist?: 'workspace' | 'global' | 'none' | 'secret';
   resetOnNewConversation?: boolean;
-  options?: Array<{ label: string; value: string }>;
+  options?: Array<{ label: string; value: string | Record<string, string> }>;
 }
 
 export interface Starter {
@@ -795,6 +795,8 @@ export interface StreamDefinition {
 export interface UiDefinition {
   layout?: { preset?: 'chat-only' | 'split-inspector' | 'chat-with-metrics' | 'compact'; inspectorPosition?: 'right' | 'bottom'; inspectorWidth?: number };
   composer?: { placeholder?: string; multiline?: boolean; enterBehavior?: 'send' | 'newline'; shiftEnterBehavior?: 'send' | 'newline'; showStopWhileStreaming?: boolean };
+  /** Both formats are enabled by default for Markdown-mapped assistant messages. */
+  responseContent?: { markdown?: boolean; html?: boolean };
   streaming?: {
     reveal?: 'instant' | 'event' | 'adaptive';
     indicator?: 'none' | 'caret' | 'dots' | 'shimmer';

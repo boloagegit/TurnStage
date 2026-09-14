@@ -242,7 +242,7 @@ function SafeMarkdownBlockView({ block, onCopyCode, onOpenLink, copyLabel }: { b
   }
 }
 
-function SafeCodeBlock({ code, language, onCopyCode, copyLabel }: { code: string; language?: string; onCopyCode?: SafeMarkdownProps['onCopyCode']; copyLabel: string }): React.JSX.Element {
+export function SafeCodeBlock({ code, language, onCopyCode, copyLabel }: { code: string; language?: string; onCopyCode?: SafeMarkdownProps['onCopyCode']; copyLabel: string }): React.JSX.Element {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copy = async (): Promise<void> => {
     try {

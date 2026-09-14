@@ -7,6 +7,7 @@ import type { VisualRegressionService } from './visualRegression';
 import { createProvenanceManifest, type ProvenanceFileInput } from './provenance';
 import { serializeCampaignResultsJsonl } from './adversarialJsonl';
 import { sanitizeCampaignCase } from './campaign';
+import type { TestReportKind } from '../../shared/testReportHtml';
 
 const MAX_VISUAL_ARTIFACT_BYTES = 24 * 1024 * 1024;
 
@@ -52,15 +53,16 @@ export class ScenarioReportService {
     return this.exportRecords(format, this.records, 'turnstage-contract-results');
   }
 
-  async exportRecords(format: ScenarioReportFormat, records: readonly ScenarioExecutionRecord[], baseName: string): Promise<vscode.Uri | undefined> {
-    if (!records.length) return undefined;
+  async exportRecords(format: ScenarioReportFormat, records: readonly ScenarioExecutionRecord[], baseName: string, kind?: TestReportKind, locale?: string): Promise<vscode.Uri | undefined> {
+    const selected = kind ? records.filter((record) => (record.kind ?? (record.result?.adversarial ? 'adversarial' : 'contract')) === kind) : records;
+    if (!selected.length) return undefined;
     const extension = reportExtension(format);
     const uri = await vscode.window.showSaveDialog({
       defaultUri: vscode.Uri.file(`${safeFilePart(baseName)}.${extension}`),
       filters: format === 'junit' ? { [localize('JUnit XML')]: ['xml'] } : format === 'html' ? { HTML: ['html'] } : { [localize('JSON')]: ['json'] },
     });
     if (!uri) return undefined;
-    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(serialize(format, records)));
+    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(format === 'html' ? serializeScenarioHtml(selected, undefined, kind, locale) : serialize(format, selected)));
     return uri;
   }
 

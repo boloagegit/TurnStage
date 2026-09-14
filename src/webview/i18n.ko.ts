@@ -1,5 +1,6 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'View JSONC': 'JSONC 보기',
   'Download chat screenshot': '채팅 스크린샷 다운로드',
   'Downloading chat screenshot…': '채팅 스크린샷 다운로드 중…',
   'Chat screenshot downloaded.': '채팅 스크린샷을 다운로드했습니다.',
@@ -315,7 +316,7 @@ export const ko: Record<string, string> = {
   'Linked suites': '연결된 스위트',
   'Inline': '인라인',
   'Add scenario': '시나리오 추가',
-  'CSV template': 'CSV 템플릿',
+  'Download sample CSV': 'CSV 예제 다운로드',
   'Open linked suite {path}': '연결된 스위트 {path} 열기',
   'Unlink suite {path}': '스위트 {path} 연결 해제',
   'No adversarial results in this Extension Host session.': '이 Extension Host 세션에는 적대적 테스트 결과가 없습니다.',

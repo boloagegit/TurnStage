@@ -117,6 +117,44 @@ describe('WebTestController', () => {
     expect(execution.result.repetitions).toMatchObject({ requestedAttempts: 2, completedAttempts: 2, sampleComplete: true, stability: 'stable-pass' });
   });
 
+  it('exports separate latest HTML reports after both test types have run', async () => {
+    const profile: TurnStageProfile = {
+      version: 1, id: `mixed-export-${crypto.randomUUID()}`, name: 'Mixed export',
+      opening: { mode: 'static', message: 'Ready', starters: [] },
+      conversation: { send: { method: 'POST', url: 'https://example.test/stream' } },
+      stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] },
+      tests: { scenarios: [
+        { id: 'ordinary-case', name: 'Ordinary case', steps: [{ id: 'turn', input: 'Hello' }] },
+        { id: 'red-case', name: 'Red case', steps: [{ id: 'turn', input: 'Probe' }], adversarial: { mode: 'singleTurn', maxTurns: 1, timeoutMs: 5_000, forbid: { urls: true } } },
+      ] },
+    };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('event: done\ndata: {}\n\n', { status: 200 })));
+    const controller = new WebTestController(() => profile, () => environment, new Map(), vi.fn(), () => 'zh-TW');
+    await controller.run('runContracts');
+    await controller.run('runAll');
+    let exported: Blob | undefined;
+    const objectUrl = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => { if (blob instanceof Blob) exported = blob; return 'blob:turnstage-report'; });
+    const revokeUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    vi.stubGlobal('document', { createElement: () => ({ click: () => undefined }) });
+    try {
+      await controller.exportReport('html', undefined, 'contract');
+      const ordinaryHtml = await exported!.text();
+      expect(ordinaryHtml).toContain('一般測試報告');
+      expect(ordinaryHtml).toContain('ordinary-case');
+      expect(ordinaryHtml).not.toContain('red-case');
+      await controller.exportReport('html', undefined, 'adversarial');
+      const redHtml = await exported!.text();
+      expect(redHtml).toContain('紅隊測試報告');
+      expect(redHtml).toContain('red-case');
+      expect(redHtml).not.toContain('ordinary-case');
+      await expect(controller.exportReport('html')).rejects.toThrow(/Choose general or red-team/u);
+    } finally {
+      objectUrl.mockRestore();
+      revokeUrl.mockRestore();
+    }
+  });
+
   it('runs only ready cases of the requested type and resolves the exact suite', async () => {
     const profile: TurnStageProfile = {
       version: 1, id: `selection-web-${crypto.randomUUID()}`, name: 'Selection Web', opening: { mode: 'static', message: 'Ready', starters: [] },
@@ -260,7 +298,7 @@ describe('WebTestController', () => {
     expect(junit).toContain('errors="1"');
     expect(junit).toContain('not-run');
     await controller.exportRunReport(sourceRunId!, 'html');
-    expect(await exported!.text()).toContain('Status: cancelled');
+    expect(await exported!.text()).toContain('Status cancelled');
     expect(await exported!.text()).toContain('Not run');
     await new ArtifactStore().put('runs', storedRun);
     objectUrl.mockRestore();

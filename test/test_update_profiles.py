@@ -58,6 +58,18 @@ class UpdateProfilesTests(unittest.TestCase):
         catalog = json.loads((self.root / "turnstage-catalog.json").read_text(encoding="utf-8"))
         self.assertEqual(catalog["profiles"][0]["file"], "./profiles/%E4%B8%AD%E6%96%87%20%E6%B8%AC%E8%A9%A6.turnstage.jsonc")
 
+    def test_indexes_nested_folders_and_rejects_symlinks(self):
+        nested = self.root / "profiles" / "Team A" / "SIT"
+        nested.mkdir(parents=True)
+        (nested / "中文.turnstage.jsonc").write_text('{ "id": "sit" }', encoding="utf-8")
+        MODULE.generate(self.root)
+        catalog = json.loads((self.root / "turnstage-catalog.json").read_text(encoding="utf-8"))
+        self.assertEqual(catalog["profiles"][0]["file"], "./profiles/Team%20A/SIT/%E4%B8%AD%E6%96%87.turnstage.jsonc")
+
+        (self.root / "profiles" / "outside").symlink_to(self.root)
+        with self.assertRaisesRegex(ValueError, "unsafe folder"):
+            MODULE.generate(self.root)
+
     def test_refuses_to_overwrite_a_manual_catalog(self):
         target = self.root / "turnstage-catalog.json"
         manual = {"format": "turnstage-web-catalog", "id": "company", "profiles": [], "environments": []}

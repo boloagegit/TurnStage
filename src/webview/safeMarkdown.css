@@ -7,6 +7,47 @@
   overflow-wrap: anywhere;
 }
 
+.safe-markdown--rich img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-block: var(--vscode-spacing-size8, 8px);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.1));
+  border-radius: 3px;
+}
+
+.safe-markdown--rich table {
+  display: block;
+  max-width: 100%;
+  border-collapse: collapse;
+  overflow-x: auto;
+}
+
+.safe-markdown--rich th,
+.safe-markdown--rich td {
+  min-width: 6ch;
+  padding: var(--vscode-spacing-size4, 4px) var(--vscode-spacing-size8, 8px);
+  border: 1px solid var(--vscode-editorWidget-border);
+  text-align: start;
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+.safe-markdown--rich pre,
+.safe-markdown--rich code {
+  max-width: 100%;
+}
+
+.safe-markdown--html-only,
+.safe-markdown--literal {
+  white-space: pre-wrap;
+}
+
+.safe-markdown--rich a:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
 .safe-markdown__paragraph,
 .safe-markdown__heading,
 .safe-markdown__list,

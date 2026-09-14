@@ -12,6 +12,7 @@ import { validateQualityRubrics } from '../copilot/quality/policy';
 import { isSafeRegexPattern } from '../../shared/regexSafety';
 import { isSafeOpeningResponsePath, MAX_OPENING_BLOCK_ITEMS, MAX_OPENING_RESPONSE_BLOCKS } from '../opening/responseBlockNormalizer';
 import { isBlockedLifecycleCommand } from '../../shared/vscodeCommandPolicy';
+import { isControlOptionValue, isControlValue } from '../../shared/controlValue';
 
 export interface ValidationIssue { severity: 'error' | 'warning'; message: string; offset: number; length: number }
 
@@ -287,6 +288,29 @@ export class ProfileValidator {
     if (maxRuns !== undefined && (!Number.isInteger(maxRuns) || maxRuns < 1 || maxRuns > 100)) out.push(issue(tree, ['history', 'localRuns', 'maxRuns'], localize('Local run retention must be an integer from 1 to 100.')));
     if (profile.environment && environments.length && !environments.some((env) => env.id === profile.environment)) out.push(issue(tree, ['environment'], localize('Environment "{environment}" was not found.', { environment: profile.environment })));
     for (const duplicate of duplicates((profile.controls ?? []).map((control) => control.id))) out.push(issue(tree, ['controls'], localize('Duplicate control id: {id}.', { id: duplicate })));
+    for (const [index, control] of (profile.controls ?? []).entries()) {
+      if (control.type !== 'select') continue;
+      if (control.options !== undefined && !Array.isArray(control.options)) {
+        out.push(issue(tree, ['controls', index, 'options'], localize('Select options must be an array.')));
+        continue;
+      }
+      for (const [optionIndex, option] of (control.options ?? []).entries()) {
+        if (!isControlOptionValue(option?.value)) out.push(issue(tree, ['controls', index, 'options', optionIndex, 'value'], localize('Select option value must be a string or a flat object of string fields.')));
+      }
+      if (control.default !== undefined && typeof control.default === 'object' && !isControlValue(control, control.default)) {
+        out.push(issue(tree, ['controls', index, 'default'], localize('Select default must match an option value.')));
+      }
+    }
+    const controlsDefaultCollapsed = profile.ui?.components?.controls?.defaultCollapsed as unknown;
+    if (controlsDefaultCollapsed !== undefined && typeof controlsDefaultCollapsed !== 'boolean') out.push(issue(tree, ['ui', 'components', 'controls', 'defaultCollapsed'], localize('Controls defaultCollapsed must be a boolean.')));
+    const responseContent = profile.ui?.responseContent as unknown;
+    if (responseContent !== undefined) {
+      if (!responseContent || typeof responseContent !== 'object' || Array.isArray(responseContent)) out.push(issue(tree, ['ui', 'responseContent'], localize('Response content settings must be an object.')));
+      else for (const format of ['markdown', 'html'] as const) {
+        const enabled = (responseContent as Record<string, unknown>)[format];
+        if (enabled !== undefined && typeof enabled !== 'boolean') out.push(issue(tree, ['ui', 'responseContent', format], localize('Response content {format} must be a boolean.', { format })));
+      }
+    }
     for (const duplicate of duplicates((profile.stream?.mappings ?? []).map((mapping) => mapping.id))) out.push(issue(tree, ['stream', 'mappings'], localize('Duplicate mapping id: {id}.', { id: duplicate })));
     const scenarios = profile.tests?.scenarios ?? [];
     const contractSuites = profile.tests?.contractSuites;

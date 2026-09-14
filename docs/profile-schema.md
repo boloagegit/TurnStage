@@ -310,9 +310,10 @@ send telemetry to a collector.
 }
 ```
 
-`type` is `select`, `boolean`, or `text`. A select uses string-valued
-`options`; a boolean renders a checkbox; text renders an input. `default` is
-untyped. `persist` may be `workspace`, `global`, `none`, or `secret` in the
+`type` is `select`, `boolean`, or `text`. A select accepts either the original
+string option values or flat objects of string fields; a boolean renders a
+checkbox; text renders an input. For an object option, `default` must match
+one of its option values. `persist` may be `workspace`, `global`, `none`, or `secret` in the
 schema/type. Workspace/global values use VS Code state, `none` remains
 session-local, and `secret` values are JSON-encoded in SecretStorage. Control
 workspace keys include workspace identity, profile ID, and control ID. Global
@@ -326,8 +327,40 @@ configured controls unless their definition explicitly sets
 persistent value is updated.
 
 Duplicate control IDs are reported by `ProfileValidator`. The current
-validator does not check that select options are unique or that a default is a
-valid option.
+validator checks object option shapes and object defaults, but does not check
+that select options are unique or that a string default is a valid option.
+
+To send two fields from one user choice, set an object as the select value and
+reference its fields in each request variant:
+
+```jsonc
+{
+  "controls": [{
+    "id": "user", "type": "select", "label": "User",
+    "default": { "custid": "C001", "bdcun": "B001" },
+    "options": [
+      { "label": "User A", "value": { "custid": "C001", "bdcun": "B001" } },
+      { "label": "User B", "value": { "custid": "C002", "bdcun": "B002" } }
+    ]
+  }],
+  "ui": { "components": { "controls": { "defaultCollapsed": false } } },
+  "conversation": { "send": { "variants": [
+    { "id": "first", "when": { "path": "conversation.id", "operator": "notExists" },
+      "body": { "custid": { "$value": "controls.user.custid" }, "bdcun": { "$value": "controls.user.bdcun" } } },
+    { "id": "next", "when": { "path": "conversation.id", "operator": "exists" },
+      "body": { "custid": { "$value": "controls.user.custid" }, "bdcun": { "$value": "controls.user.bdcun" }, "conversationId": { "$value": "conversation.id" } } }
+  ] } }
+}
+```
+
+The snippet shows only the relevant fields; keep the normal request method,
+URL, stream mappings, and other required Profile fields. The old string-valued
+select format still works. `ui.components.controls.defaultCollapsed` is
+optional: `false` opens the controls initially, while `true` or omission keeps
+them initially collapsed. Users can still expand or collapse the section.
+Changing user while a conversation is active does not reset its conversation
+ID; start a new conversation if the backend treats the user as part of session
+identity.
 
 ## Opening
 
@@ -487,6 +520,21 @@ be HTTP 4xx/5xx codes. Reconnect occurs only before the first stream event.
 `maxRedirects` limited to 0–10. Cross-origin `follow` never forwards standard
 credential headers or header values containing a secret resolved for the
 current request.
+
+Assistant response content mapped to `content.markdown.delta` supports Markdown and static HTML in the same message, including `<br>`, images, and tables. Content mapped to `content.text.delta` remains literal text. Scripts, event handlers, forms, embedded documents, inline CSS, and unsafe URLs are not rendered. External response images load automatically without a referrer; a browser may still block an image with an untrusted TLS certificate or mixed-content policy. The Web browser's API requests still require valid TLS and CORS or a same-origin proxy.
+
+For Markdown-mapped messages, a Profile can configure the two renderers independently:
+
+```jsonc
+"ui": {
+  "responseContent": {
+    "markdown": true,
+    "html": true
+  }
+}
+```
+
+Both settings default to `true` when omitted. Set only `html` to `false` to display HTML tags literally while retaining Markdown, or only `markdown` to `false` to render static HTML while leaving Markdown punctuation literal. Setting both to `false` displays the entire response as literal text. This is a display setting; it does not change the stream mapping or the stored raw/normalized response. It does not enable JavaScript, CSS, forms, embedded documents, or arbitrary browser capabilities. Large tables scroll within the response, and images fit the available width; a backend should use absolute image URLs when its images are hosted separately from the Web app.
 
 `tls.allowInvalidCertificates` defaults to `false`. When explicitly set to
 `true`, TurnStage uses a request-local HTTPS dispatcher that skips validation

@@ -5,6 +5,7 @@ if (!Number.isInteger(requestedPort) || requestedPort < 0 || requestedPort > 655
 const contractSlowDelayMs = Number(process.env.TURNSTAGE_MOCK_CONTRACT_SLOW_DELAY_MS ?? 450);
 if (!Number.isInteger(contractSlowDelayMs) || contractSlowDelayMs < 1 || contractSlowDelayMs > 30000) throw new Error('TURNSTAGE_MOCK_CONTRACT_SLOW_DELAY_MS must be an integer from 1 to 30000.');
 const json = (response, status, value) => { response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(value)); };
+const proofImage = '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="80" viewBox="0 0 240 80"><rect width="240" height="80" fill="#215977"/><text x="120" y="49" fill="white" text-anchor="middle" font-family="sans-serif" font-size="18">Mock image loaded</text></svg>';
 const readBody = async (request) => {
   const chunks = []; for await (const chunk of request) chunks.push(chunk);
   const text = Buffer.concat(chunks).toString('utf8');
@@ -142,6 +143,7 @@ const server = http.createServer(async (request, response) => {
   response.setHeader('access-control-allow-headers', 'content-type, accept, x-turnstage-mode');
   response.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
   if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return; }
+  if (request.method === 'GET' && request.url === '/rich-content/image.svg') { response.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' }); response.end(proofImage); return; }
   if (request.method !== 'POST') return json(response, 405, { code: 'METHOD_NOT_ALLOWED' });
   if (request.url === '/__turnstage_test/concurrency/reset') { resetConcurrencyProbe(); return json(response, 200, concurrencyProbeSnapshot()); }
   if (request.url === '/__turnstage_test/concurrency/metrics') return json(response, 200, concurrencyProbeSnapshot());
@@ -212,6 +214,19 @@ const server = http.createServer(async (request, response) => {
   if (mode === 'mapping-drift') await write('renamed_message_delta', { fragment: 'The configured mapping no longer matches this event.' });
   if (mode === 'adversarial-cta') await write('action', { id: 'adversarial-action', label: 'Continue', actionId: 'request.send', payload: { message: 'Continue' } });
   if (mode === 'slow-second-turn' && body.conversationId) await delay(450);
+  if (['rich-html', 'rich-markdown', 'rich-mixed', 'rich-complex'].includes(mode)) {
+    const port = server.address()?.port ?? requestedPort;
+    const imageUrl = `http://127.0.0.1:${port}/rich-content/image.svg`;
+    const content = mode === 'rich-complex'
+      ? `<h3>Complex response</h3><p>Markdown **bold** with <strong>HTML bold</strong> and a <a href="https://example.com">link</a>.</p><table><thead><tr>${Array.from({ length: 20 }, (_, index) => `<th>Column ${index}</th>`).join('')}</tr></thead><tbody><tr><td colspan="20"><blockquote>Nested HTML</blockquote></td></tr></tbody></table><img src="${imageUrl}" width="3000" alt="Mock image loaded"><div>${'LONGVALUE'.repeat(80)}</div>`
+      : mode === 'rich-html'
+      ? `<h3>HTML response</h3><p>First line<br>Second line</p><img src="${imageUrl}" alt="Mock image loaded"><table><tr><th>Format</th><th>Result</th></tr><tr><td>HTML</td><td>Visible</td></tr></table>`
+      : mode === 'rich-markdown'
+        ? `### Markdown response\n\n**Bold** and [safe link](https://example.com).\n\n![Mock image loaded](${imageUrl})\n\n| Format | Result |\n| --- | --- |\n| Markdown | Visible |`
+        : `### Mixed response\n\n**Markdown bold** with <strong>HTML bold</strong>.<br>Next line\n\n<img src="${imageUrl}" alt="Mock image loaded">\n\n| Format | Result |\n| --- | --- |\n| Mixed | Visible |`;
+    await write('message', { text: content });
+    await write('done', { ok: true }); response.end(); return;
+  }
   const prefix = mode === 'adversarial-content' ? 'sample-protected-marker ' : mode === 'adversarial-url' ? 'https://example.test/prohibited ' : 'Here is the ';
   await write('message', { text: prefix });
   if (mode === 'malformed-json') response.write('event: message\ndata: {not-json}\n\n');

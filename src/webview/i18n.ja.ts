@@ -1,5 +1,6 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'View JSONC': 'JSONC を表示',
   'Download chat screenshot': 'チャットのスクリーンショットをダウンロード',
   'Downloading chat screenshot…': 'チャットのスクリーンショットをダウンロード中…',
   'Chat screenshot downloaded.': 'チャットのスクリーンショットをダウンロードしました。',
@@ -315,7 +316,7 @@ export const ja: Record<string, string> = {
   'Linked suites': 'リンク済みスイート',
   'Inline': 'インライン',
   'Add scenario': 'シナリオを追加',
-  'CSV template': 'CSV テンプレート',
+  'Download sample CSV': 'CSV サンプルをダウンロード',
   'Open linked suite {path}': 'リンク済みスイート {path} を開く',
   'Unlink suite {path}': 'スイート {path} のリンクを解除',
   'No adversarial results in this Extension Host session.': 'この Extension Host セッションには対抗テスト結果がありません。',

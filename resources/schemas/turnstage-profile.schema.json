@@ -43,6 +43,14 @@
             "showStopWhileStreaming": { "type": "boolean" }
           }
         },
+        "responseContent": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "markdown": { "type": "boolean", "default": true },
+            "html": { "type": "boolean", "default": true }
+          }
+        },
         "streaming": {
           "type": "object",
           "additionalProperties": false,
@@ -113,7 +121,7 @@
         "tone": { "enum": ["neutral", "info", "success", "warning", "error"] }
       }
     },
-    "control": { "type": "object", "required": ["id", "type", "label"], "additionalProperties": true, "properties": { "id": { "type": "string" }, "type": { "enum": ["select", "boolean", "text"] }, "label": { "type": "string" }, "persist": { "enum": ["workspace", "global", "none", "secret"] }, "options": { "type": "array", "items": { "type": "object", "required": ["label", "value"], "properties": { "label": { "type": "string" }, "value": { "type": "string" } } } } } },
+    "control": { "type": "object", "required": ["id", "type", "label"], "additionalProperties": true, "properties": { "id": { "type": "string" }, "type": { "enum": ["select", "boolean", "text"] }, "label": { "type": "string" }, "persist": { "enum": ["workspace", "global", "none", "secret"] }, "options": { "type": "array", "items": { "type": "object", "required": ["label", "value"], "properties": { "label": { "type": "string" }, "value": { "oneOf": [{ "type": "string" }, { "type": "object", "minProperties": 1, "maxProperties": 32, "propertyNames": { "pattern": "^(?!constructor$|prototype$)[A-Za-z][A-Za-z0-9_]{0,63}$" }, "additionalProperties": { "type": "string" } }] } } } } } },
     "opening": {
       "type": "object",
       "required": ["mode"],

@@ -50,10 +50,32 @@ describe('ProfileCodec', () => {
 });
 
 describe('ProfileValidator', () => {
+  it('accepts object-valued select options and configured initial expansion', () => {
+    const profile = validProfile();
+    profile.controls = [{ id: 'user', type: 'select', label: 'User', default: { custid: 'C001', bdcun: 'B001' }, options: [{ label: 'User A', value: { custid: 'C001', bdcun: 'B001' } }] }];
+    profile.ui = { components: { controls: { defaultCollapsed: false } } };
+    profile.conversation.send.variants![0]!.body = { custid: { $value: 'controls.user.custid' } };
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
+
+    profile.controls[0]!.options![0]!.value = { custid: 123 } as never;
+    expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain('Select option value must be a string or a flat object of string fields.');
+    profile.controls[0]!.options![0]!.value = { custid: 'C001', bdcun: 'B001' };
+    profile.ui.components!.controls!.defaultCollapsed = 'yes' as never;
+    expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain('Controls defaultCollapsed must be a boolean.');
+  });
+
   it('accepts a complete profile when its environment is available', () => {
     const environments: TurnStageEnvironment[] = [{ version: 1, id: 'local', name: 'Local', variables: {} }];
 
     expect(new ProfileValidator().validate(validProfile(), undefined, environments)).toEqual([]);
+  });
+
+  it('accepts independent response format toggles and rejects non-booleans', () => {
+    const profile = validProfile();
+    profile.ui = { responseContent: { markdown: false, html: true } };
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
+    profile.ui.responseContent!.html = 'yes' as never;
+    expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain('Response content html must be a boolean.');
   });
 
   it('accepts an explicit TLS bypass boolean and rejects malformed TLS configuration', () => {

@@ -41,7 +41,8 @@ describe('starter resources', () => {
       const parsed = codec.parse(readFileSync(`resources/templates/${id}.turnstage.jsonc`, 'utf8'));
       const mode = parsed.profile?.controls?.find((control) => control.id === 'mode');
       expect(mode?.options?.map((option) => option.value)).toEqual([
-        'normal', 'slow', 'chunk-split', 'malformed-json', 'unknown-event',
+        'normal', ...(id === 'agent-flow' ? ['rich-html', 'rich-markdown', 'rich-mixed', 'rich-complex'] : []),
+        'slow', 'chunk-split', 'malformed-json', 'unknown-event',
         'partial-error', 'http-401', 'http-500', 'idle-timeout', 'disconnect',
       ]);
       expect(JSON.stringify(parsed.profile?.conversation.send.variants)).toContain('controls.mode');

@@ -16,6 +16,7 @@ import { resolveTestSelection, testCaseKey, type TestCaseIdentity } from '../../
 import { createTestRunHistoryRecord, nonPassingCases, type CompletedTestRunCase, type TestRunHistoryRecord } from '../../src/shared/testRunHistory';
 import { strToU8, zipSync } from 'fflate';
 import { browserSha256, browserUuid } from './browserCrypto';
+import { renderTestReportHtml, type TestReportKind, type TestReportOutcome } from '../../src/shared/testReportHtml';
 
 interface WebSuite {
   suiteId: string;
@@ -57,6 +58,7 @@ export class WebTestController {
     private readonly environment: () => TurnStageEnvironment,
     private readonly secrets: Map<string, string>,
     private readonly post: (payload: HostPayload, requestId?: string) => void,
+    private readonly reportLocale: () => string = () => navigator.language,
   ) {}
 
   async run(action: TestOperationAction, scenarioId?: string, kind?: 'contract' | 'adversarial', suiteId?: string): Promise<void> {
@@ -252,22 +254,35 @@ export class WebTestController {
     this.post({ type: 'test.exported', kind: 'evidenceBundle', path: name });
   }
 
-  async exportReport(format: 'json' | 'junit' | 'html', evidenceId?: string): Promise<void> {
-    const artifacts = evidenceId ? [await this.store.get<RetainedEvidence>('evidence', evidenceId)].filter(Boolean) as Array<StoredArtifact<RetainedEvidence>> : await this.store.list<RetainedEvidence>('evidence', this.profile().id);
-    const content = format === 'json' ? JSON.stringify(webReport(artifacts), null, 2) : format === 'junit' ? junitReport(artifacts) : htmlReport(artifacts);
-    const name = `turnstage-report-${new Date().toISOString().replaceAll(/[:.]/gu, '-')}.${format === 'junit' ? 'xml' : format}`;
+  async exportReport(format: 'json' | 'junit' | 'html', evidenceId?: string, kind?: TestReportKind): Promise<void> {
+    const profileId = this.profile().id;
+    let artifacts: Array<StoredArtifact<RetainedEvidence>>;
+    if (evidenceId) {
+      const selected = await this.store.get<RetainedEvidence>('evidence', evidenceId);
+      if (!selected || selected.profileId !== profileId || (kind && selected.kind !== kind)) throw new Error('The selected test evidence is no longer available for this profile and test type.');
+      artifacts = [selected];
+    } else if (kind) {
+      const ids = kind === 'contract' ? this.automationResults.map((item) => item.evidenceId) : this.adversarialResults.map((item) => item.evidenceId);
+      artifacts = (await Promise.all(ids.map((id) => id ? this.store.get<RetainedEvidence>('evidence', id) : undefined))).filter((item): item is StoredArtifact<RetainedEvidence> => Boolean(item));
+      if (artifacts.length !== ids.length || artifacts.some((item) => item.profileId !== profileId || item.kind !== kind)) throw new Error('Some latest test evidence is no longer available. Run the cases again before exporting.');
+    } else artifacts = await this.store.list<RetainedEvidence>('evidence', profileId);
+    if (!artifacts.length) throw new Error('No test results are available to export.');
+    if (!kind && format === 'html' && new Set(artifacts.map((item) => item.kind)).size > 1) throw new Error('Choose general or red-team results before exporting an HTML report.');
+    const reportKind = kind ?? (artifacts.every((item) => item.kind === 'adversarial') ? 'adversarial' : 'contract');
+    const content = format === 'json' ? JSON.stringify(webReport(artifacts), null, 2) : format === 'junit' ? junitReport(artifacts) : htmlReport(artifacts, reportKind, this.reportLocale());
+    const name = `turnstage-${reportKind}-report-${new Date().toISOString().replaceAll(/[:.]/gu, '-')}.${format === 'junit' ? 'xml' : format}`;
     download(name, content, format === 'html' ? 'text/html' : format === 'junit' ? 'application/xml' : 'application/json');
     this.post({ type: 'test.exported', kind: 'report', path: name });
   }
 
-  async exportRunReport(runId: string, format: 'json' | 'junit' | 'html'): Promise<void> {
+  async exportRunReport(runId: string, format: 'json' | 'junit' | 'html', kind?: TestReportKind): Promise<void> {
     const profileId = this.profile().id;
     const run = (await this.store.get<TestRunHistoryRecord>('runs', `test-batch:${profileId}:${runId}`))?.value;
     if (!run || run.profileId !== profileId) throw new Error('The selected test run is no longer available.');
-    const artifacts = await Promise.all(run.cases.map((item) => item.evidenceId ? this.store.get<RetainedEvidence>('evidence', item.evidenceId) : undefined));
-    if (run.cases.some((item, index) => item.evidenceId && !artifacts[index])) throw new Error('Some evidence for this test run has expired. Export was cancelled rather than mixing in another run.');
-    const content = runScopedReport(run, artifacts, format);
-    const name = `turnstage-run-${safeFileName(runId)}.${format === 'junit' ? 'xml' : format}`;
+    const artifacts = await Promise.all(run.cases.map((item) => (!kind || item.kind === kind) && item.evidenceId ? this.store.get<RetainedEvidence>('evidence', item.evidenceId) : undefined));
+    if (run.cases.some((item, index) => (!kind || item.kind === kind) && item.evidenceId && (!artifacts[index] || artifacts[index]?.profileId !== profileId || artifacts[index]?.kind !== item.kind))) throw new Error('Some evidence for this test run has expired or changed. Export was cancelled rather than mixing in another run.');
+    const content = runScopedReport(run, artifacts, format, kind, this.reportLocale());
+    const name = `turnstage-run-${safeFileName(runId)}${kind ? `-${kind}` : ''}.${format === 'junit' ? 'xml' : format}`;
     download(name, content, format === 'html' ? 'text/html' : format === 'junit' ? 'application/xml' : 'application/json');
     this.post({ type: 'test.exported', kind: 'report', path: name });
   }
@@ -433,15 +448,33 @@ function downloadBytes(name: string, content: Uint8Array, type: string): void { 
 function safeFileName(value: string): string { return value.replaceAll(/[^A-Za-z0-9_.-]+/gu, '-').slice(0, 128) || 'scenario'; }
 function webReport(items: Array<StoredArtifact<RetainedEvidence>>) { return { format: 'turnstage-web-report', version: 1, generatedAt: new Date().toISOString(), summary: { total: items.length, passed: items.filter((item) => item.value.result.passed).length, failed: items.filter((item) => !item.value.result.passed).length }, scenarios: items.map((item) => ({ id: item.value.scenario.id, name: item.value.scenario.name, result: item.value.result })) }; }
 function junitReport(items: Array<StoredArtifact<RetainedEvidence>>): string { const cases = items.map((item) => `<testcase name="${xml(item.value.scenario.name)}" time="${(item.value.result.durationMs / 1000).toFixed(3)}">${item.value.result.passed ? '' : `<failure message="Scenario failed"/>`}</testcase>`).join(''); return `<?xml version="1.0" encoding="UTF-8"?><testsuite tests="${items.length}" failures="${items.filter((item) => !item.value.result.passed).length}">${cases}</testsuite>`; }
-function htmlReport(items: Array<StoredArtifact<RetainedEvidence>>): string { const rows = items.map((item) => `<tr><td>${xml(item.value.scenario.name)}</td><td>${item.value.result.passed ? 'Passed' : 'Failed'}</td><td>${item.value.result.durationMs} ms</td></tr>`).join(''); return `<!doctype html><html><meta charset="utf-8"><title>TurnStage Web report</title><style>body{font:14px system-ui;margin:32px}table{border-collapse:collapse}td,th{padding:8px 12px;border-bottom:1px solid #ccc}</style><h1>TurnStage Web report</h1><table><thead><tr><th>Scenario</th><th>Outcome</th><th>Duration</th></tr></thead><tbody>${rows}</tbody></table></html>`; }
+function htmlReport(items: Array<StoredArtifact<RetainedEvidence>>, kind: TestReportKind, locale: string): string {
+  return renderTestReportHtml({
+    kind, locale, generatedAt: new Date().toISOString(),
+    cases: items.map(({ value }) => {
+      const { scenario, result } = value;
+      const checks = [...result.steps.flatMap((step) => step.checks), ...result.checks];
+      const outcome: TestReportOutcome = kind === 'adversarial' ? result.adversarial?.outcome ?? 'incomplete'
+        : result.evidence.snapshot.errors.some((error) => error.type === 'WebTestExecutionError') ? 'error' : result.passed ? 'passed' : 'failed';
+      return {
+        id: scenario.id, outcome, durationMs: result.durationMs,
+        passedChecks: checks.filter((check) => check.passed).length,
+        failedChecks: checks.filter((check) => !check.passed).length,
+        findingCount: result.adversarial?.findings.length,
+        ...(result.repetitions ? { completedAttempts: result.repetitions.completedAttempts, requestedAttempts: result.repetitions.requestedAttempts, stability: result.repetitions.stability } : {}),
+      };
+    }),
+  });
+}
 function runCaseState(item: TestRunHistoryRecord['cases'][number]): 'passed' | 'failed' | 'error' | 'incomplete' {
   if (!item.outcome || item.completedAttempts < item.requestedAttempts) return 'incomplete';
   if (item.outcome === 'passed' || item.outcome === 'resisted') return 'passed';
   if (item.outcome === 'failed' || item.outcome === 'attackSucceeded') return 'failed';
   return 'error';
 }
-function runScopedReport(run: TestRunHistoryRecord, artifacts: Array<StoredArtifact<RetainedEvidence> | undefined>, format: 'json' | 'junit' | 'html'): string {
-  const cases = run.cases.map((item, index) => ({ item, state: runCaseState(item), evidence: artifacts[index]?.value }));
+function runScopedReport(run: TestRunHistoryRecord, artifacts: Array<StoredArtifact<RetainedEvidence> | undefined>, format: 'json' | 'junit' | 'html', kind?: TestReportKind, locale = 'en'): string {
+  const cases = run.cases.map((item, index) => ({ item, state: runCaseState(item), evidence: artifacts[index]?.value })).filter(({ item }) => kind === undefined || item.kind === kind);
+  if (!cases.length) throw new Error('The selected test run has no cases of this type.');
   const runError = run.status !== 'completed' && cases.every(({ state }) => state !== 'incomplete' && state !== 'error');
   if (format === 'json') return JSON.stringify({
     format: 'turnstage-web-run-report', version: 1, generatedAt: new Date().toISOString(), runId: run.id,
@@ -458,7 +491,25 @@ function runScopedReport(run: TestRunHistoryRecord, artifacts: Array<StoredArtif
     if (runError) rows.push(`<testcase name="Run status"><error message="${xml(`Run ${run.status}`)}"/></testcase>`);
     return `<?xml version="1.0" encoding="UTF-8"?><testsuite name="${xml(`TurnStage run ${run.id} (${run.status})`)}" tests="${rows.length}" failures="${cases.filter(({ state }) => state === 'failed').length}" errors="${cases.filter(({ state }) => state === 'error' || state === 'incomplete').length + Number(runError)}">${rows.join('')}</testsuite>`;
   }
-  const rows = cases.map(({ item, state }) => `<tr><td>${xml(item.key)}</td><td>${xml(item.name)}</td><td>${xml(item.outcome ?? 'Not run')}</td><td>${xml(state)}</td><td>${item.completedAttempts}/${item.requestedAttempts}</td><td>${item.durationMs ?? '—'} ms</td></tr>`).join('');
-  return `<!doctype html><html><meta charset="utf-8"><title>TurnStage run ${xml(run.id)}</title><style>body{font:14px system-ui;margin:32px}table{border-collapse:collapse}td,th{padding:8px 12px;border-bottom:1px solid #ccc}</style><h1>TurnStage run ${xml(run.id)}</h1><p>Status: ${xml(run.status)}${runError ? ' (incomplete run)' : ''}</p><table><thead><tr><th>Case ID</th><th>Name</th><th>Outcome</th><th>State</th><th>Attempts</th><th>Duration</th></tr></thead><tbody>${rows}</tbody></table></html>`;
+  if (!kind && new Set(cases.map(({ item }) => item.kind)).size > 1) throw new Error('Choose general or red-team results before exporting an HTML report.');
+  const reportKind = kind ?? (cases.every(({ item }) => item.kind === 'adversarial') ? 'adversarial' : 'contract');
+  return renderTestReportHtml({
+    kind: reportKind, locale, generatedAt: new Date().toISOString(), runId: run.id, runStatus: localizedRunStatus(run.status, locale),
+    cases: cases.map(({ item, state, evidence }) => ({
+      id: item.name || item.scenarioId, profileId: item.profileId,
+      outcome: state === 'incomplete' ? 'incomplete' : item.outcome ?? 'incomplete',
+      durationMs: item.durationMs, completedAttempts: item.completedAttempts, requestedAttempts: item.requestedAttempts,
+      ...(evidence ? { passedChecks: [...evidence.result.steps.flatMap((step) => step.checks), ...evidence.result.checks].filter((check) => check.passed).length, failedChecks: [...evidence.result.steps.flatMap((step) => step.checks), ...evidence.result.checks].filter((check) => !check.passed).length, findingCount: evidence.result.adversarial?.findings.length } : {}),
+    })),
+  });
+}
+function localizedRunStatus(status: string, locale: string): string {
+  const translated = {
+    'zh-TW': { completed: '已完成', cancelled: '已取消', failed: '失敗', running: '執行中' },
+    ja: { completed: '完了', cancelled: 'キャンセル', failed: '失敗', running: '実行中' },
+    ko: { completed: '완료', cancelled: '취소됨', failed: '실패', running: '실행 중' },
+  } as const;
+  const language = locale.toLowerCase().startsWith('zh') ? 'zh-TW' : locale.toLowerCase().startsWith('ja') ? 'ja' : locale.toLowerCase().startsWith('ko') ? 'ko' : undefined;
+  return language ? translated[language][status as keyof typeof translated['zh-TW']] ?? status : status;
 }
 function xml(value: string): string { return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'); }

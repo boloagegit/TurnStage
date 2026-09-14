@@ -44,6 +44,29 @@ describe('control persistence scopes', () => {
     mock.workspace.isTrusted = true;
   });
 
+  it('restores an object-valued select in the VSIX host and resolves both request fields', async () => {
+    const selected = { custid: 'C002', bdcun: 'B002' };
+    const configured: TurnStageProfile = { ...profile,
+      controls: [{ id: 'user', type: 'select', label: 'User', default: { custid: 'C001', bdcun: 'B001' }, persist: 'global', options: [
+        { label: 'User A', value: { custid: 'C001', bdcun: 'B001' } }, { label: 'User B', value: selected },
+      ] }],
+      opening: { mode: 'request', request: { method: 'POST', url: 'https://example.test/opening', body: { custid: { $value: 'controls.user.custid' }, bdcun: { $value: 'controls.user.bdcun' } } }, response: { messagePath: '$.message' } },
+    };
+    const first = controller('/workspace-a/.vscode/turnstage/profiles/shared.turnstage.jsonc', context(new Map()), configured);
+    await first.setControl('user', { bdcun: 'B002', custid: 'C002' });
+    await first.setControl('user', { custid: 'forged', bdcun: 'B002' });
+    const restored = controller('/workspace-b/.vscode/turnstage/profiles/shared.turnstage.jsonc', context(new Map()), configured);
+    expect(restored.snapshot.controls.user).toEqual(selected);
+    const fetchMock = vi.fn(async () => new Response('{"message":"ready"}', { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await restored.startSession();
+      expect(fetchMock).toHaveBeenCalledWith('https://example.test/opening', expect.objectContaining({ body: JSON.stringify(selected) }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('shares global and secret controls while isolating workspace controls', async () => {
     const contextA = context(new Map());
     const controllerA = controller('/workspace-a/.vscode/turnstage/profiles/shared.turnstage.jsonc', contextA);
