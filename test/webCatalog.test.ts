@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadOfficialCatalog, mergeCatalogEntries } from '../web/src/catalog';
 import { loadProfiles, saveProfiles, type StoredProfile } from '../web/src/storage';
+import { ProfileCodec } from '../src/extension/config/profileCodec';
 
 const bundledProfile = JSON.stringify({ version: 1, id: 'example', name: 'Example', conversation: { send: { method: 'POST', url: 'https://example.test' } }, stream: { transport: 'sse', mappings: [] } });
 const bundledEnvironment = JSON.stringify({ version: 1, id: 'local', name: 'Local', variables: {} });
@@ -68,6 +69,61 @@ describe('TurnStage Web official catalog', () => {
     expect(result.source).toBe('configured');
     expect(result.profiles[0]?.raw).toContain('Bearer shared-test-token');
     expect(result.environments[0]?.raw).toContain('shared-test-api-key');
+  });
+
+  it('loads original VSIX JSONC files from the generated folder catalog', async () => {
+    const profileRaw = `{
+      // This comment is valid in a VSIX profile.
+      "version": 1, "id": "sit", "name": "SIT", "environment": "sit",
+      "conversation": { "send": { "method": "POST", "url": "${'${env.baseUrl}'}/chat" } },
+      "stream": { "transport": "sse", "mappings": [] },
+    }`;
+    const environmentRaw = '{ /* VSIX environment */ "version": 1, "id": "sit", "name": "SIT", "variables": { "baseUrl": "https://sit.example.test" }, }';
+    const catalog = {
+      format: 'turnstage-web-catalog', version: 1, id: 'turnstage-folder-catalog', revision: 'abc',
+      profiles: [{ file: './profiles/SIT%20%E4%B8%AD%E6%96%87.turnstage.jsonc', version: '123' }],
+      environments: [{ file: './environments/sit.environment.jsonc', version: '456' }],
+    };
+    const requested: string[] = [];
+    const result = await loadOfficialCatalog({
+      bundledProfiles, bundledEnvironments,
+      parseProfile: (raw) => new ProfileCodec().parse(raw).profile,
+      parseEnvironment: (raw) => new ProfileCodec().parse(raw).profile,
+      fetcher: async (input) => {
+        requested.push(String(input));
+        const source = String(input) === './turnstage-catalog.json' ? JSON.stringify(catalog)
+          : String(input) === './profiles/SIT%20%E4%B8%AD%E6%96%87.turnstage.jsonc' ? profileRaw
+            : String(input) === './environments/sit.environment.jsonc' ? environmentRaw : undefined;
+        return source === undefined ? new Response('', { status: 404 }) : new Response(source);
+      },
+    });
+    expect(result.source).toBe('configured');
+    expect(result.profiles[0]).toMatchObject({ id: 'sit', raw: profileRaw, builtIn: true, official: { entryVersion: '123' } });
+    expect(result.environments[0]).toMatchObject({ id: 'sit', raw: environmentRaw, builtIn: true });
+    expect(requested).toEqual(['./turnstage-catalog.json', './environments/sit.environment.jsonc', './profiles/SIT%20%E4%B8%AD%E6%96%87.turnstage.jsonc']);
+  });
+
+  it('rejects unsafe, unavailable, and oversized folder files without exposing a partial catalog', async () => {
+    const base = {
+      format: 'turnstage-web-catalog', version: 1, id: 'company', revision: '1',
+      profiles: [{ file: './profiles/sit.turnstage.jsonc' }], environments: [{ bundled: 'local' }],
+    };
+    for (const [file, response, expected] of [
+      ['https://external.test/sit.turnstage.jsonc', new Response(bundledProfile), 'not a supported local JSONC path'],
+      ['../sit.turnstage.jsonc', new Response(bundledProfile), 'not a supported local JSONC path'],
+      ['./profiles/sit%2Fother.turnstage.jsonc', new Response(bundledProfile), 'not a supported local JSONC path'],
+      ['./profiles/sit.turnstage.jsonc', new Response('', { status: 404 }), 'returned HTTP 404'],
+      ['./profiles/sit.turnstage.jsonc', new Response('x'.repeat(524_289)), 'exceeds 512 KiB'],
+    ] as const) {
+      const result = await loadOfficialCatalog({
+        bundledProfiles, bundledEnvironments, parseProfile, parseEnvironment,
+        fetcher: async (input) => String(input) === './turnstage-catalog.json'
+          ? new Response(JSON.stringify({ ...base, profiles: [{ file }] })) : response,
+      });
+      expect(result.source).toBe('fallback');
+      expect(result.warning).toContain(expected);
+      expect(result.profiles.map((item) => item.id)).toEqual(['example']);
+    }
   });
 
   it('keeps browser-local collisions deterministic and strips forged official state from storage', () => {

@@ -39,6 +39,7 @@ interface CatalogOptions {
 interface CatalogEntry {
   id?: string;
   bundled?: string;
+  file?: string;
   profile?: unknown;
   environment?: unknown;
   version?: string;
@@ -56,7 +57,7 @@ interface CatalogDocument {
 }
 
 export async function loadOfficialCatalog(options: CatalogOptions): Promise<OfficialCatalogResult> {
-  const fallback = bundledCatalog(options);
+  const fallback = await bundledCatalog(options);
   const fetcher = options.fetcher ?? globalThis.fetch;
   if (typeof fetcher !== 'function') return { ...fallback, warning: 'The official catalog could not be loaded because Fetch is unavailable.' };
 
@@ -73,8 +74,8 @@ export async function loadOfficialCatalog(options: CatalogOptions): Promise<Offi
     const text = await response.text();
     if (new TextEncoder().encode(text).byteLength > MAX_CATALOG_BYTES) throw new Error('catalog exceeds 1 MiB');
     const document = parseCatalogDocument(text);
-    const environments = materializeEntries(document.environments, 'environment', document, options);
-    const profiles = materializeEntries(document.profiles, 'profile', document, options);
+    const environments = await materializeEntries(document.environments, 'environment', document, options, fetcher, controller.signal);
+    const profiles = await materializeEntries(document.profiles, 'profile', document, options, fetcher, controller.signal);
     if (options.validateProfile && profiles.some((profile) => !options.validateProfile!(profile.raw, environments.map((environment) => environment.raw)))) throw new Error('catalog contains an invalid profile');
     return { catalogId: document.id, revision: document.revision, profiles, environments, source: 'configured' };
   } catch (error) {
@@ -90,7 +91,7 @@ export function mergeCatalogEntries<T extends { id: string }>(official: readonly
   return [...official.filter((item) => !localIds.has(item.id)), ...local];
 }
 
-function bundledCatalog(options: CatalogOptions): OfficialCatalogResult {
+async function bundledCatalog(options: CatalogOptions): Promise<OfficialCatalogResult> {
   const document: CatalogDocument = {
     format: WEB_CATALOG_FORMAT,
     version: WEB_CATALOG_VERSION,
@@ -102,8 +103,8 @@ function bundledCatalog(options: CatalogOptions): OfficialCatalogResult {
   return {
     catalogId: document.id,
     revision: document.revision,
-    profiles: materializeEntries(document.profiles, 'profile', document, options),
-    environments: materializeEntries(document.environments, 'environment', document, options),
+    profiles: await materializeEntries(document.profiles, 'profile', document, options),
+    environments: await materializeEntries(document.environments, 'environment', document, options),
     source: 'fallback',
   };
 }
@@ -119,20 +120,23 @@ function parseCatalogDocument(text: string): CatalogDocument {
   return { format: WEB_CATALOG_FORMAT, version: WEB_CATALOG_VERSION, id, revision, profiles: value.profiles as CatalogEntry[], environments: value.environments as CatalogEntry[] };
 }
 
-function materializeEntries(
+async function materializeEntries(
   entries: CatalogEntry[],
   kind: 'profile' | 'environment',
   document: CatalogDocument,
   options: CatalogOptions,
-): Array<StoredProfile | StoredEnvironment> {
+  fetcher?: typeof fetch,
+  signal?: AbortSignal,
+): Promise<Array<StoredProfile | StoredEnvironment>> {
   const seen = new Set<string>();
-  return entries.map((entry, index) => {
+  return Promise.all(entries.map(async (entry, index) => {
     if (!isRecord(entry)) throw new Error(`${kind} entry ${index + 1} must be an object`);
     const bundled = typeof entry.bundled === 'string' ? entry.bundled : undefined;
+    const file = typeof entry.file === 'string' ? entry.file : undefined;
     const inline = kind === 'profile' ? entry.profile : entry.environment;
-    if (Boolean(bundled) === Boolean(inline)) throw new Error(`${kind} entry ${index + 1} must define exactly one bundled key or inline value`);
+    if (Number(Boolean(bundled)) + Number(file !== undefined) + Number(inline !== undefined) !== 1) throw new Error(`${kind} entry ${index + 1} must define exactly one bundled key, file, or inline value`);
     const bundledSources = kind === 'profile' ? options.bundledProfiles : options.bundledEnvironments;
-    const raw = bundled ? bundledSources.get(bundled) : JSON.stringify(inline, null, 2);
+    const raw = bundled ? bundledSources.get(bundled) : file !== undefined ? await readCatalogFile(file, kind, fetcher, signal) : JSON.stringify(inline, null, 2);
     if (!raw) throw new Error(`${kind} entry ${index + 1} references an unknown bundled key`);
     if (new TextEncoder().encode(raw).byteLength > MAX_ENTRY_BYTES) throw new Error(`${kind} entry ${index + 1} exceeds 512 KiB`);
     const parsed = kind === 'profile' ? options.parseProfile(raw) : options.parseEnvironment(raw);
@@ -149,7 +153,30 @@ function materializeEntries(
       ...(entry.tags !== undefined ? { tags: boundedTags(entry.tags, kind) } : {}),
     };
     return { id: parsed.id, name: parsed.name, raw, builtIn: true, official: reference, updatedAt: 0 };
+  }));
+}
+
+async function readCatalogFile(file: string, kind: 'profile' | 'environment', fetcher?: typeof fetch, signal?: AbortSignal): Promise<string> {
+  const folder = kind === 'profile' ? './profiles/' : './environments/';
+  const suffix = kind === 'profile' ? '.turnstage.jsonc' : '.environment.jsonc';
+  const encodedName = file.startsWith(folder) ? file.slice(folder.length) : '';
+  let decodedName = '';
+  try { decodedName = decodeURIComponent(encodedName); } catch { /* invalid URI encoding */ }
+  const unsafeName = [...decodedName].some((character) => character === '/' || character === '\\' || character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
+  if (!/^[A-Za-z0-9._~%-]+$/u.test(encodedName) || !decodedName.endsWith(suffix) || decodedName.length <= suffix.length || unsafeName) {
+    throw new Error(`${kind} file path is not a supported local JSONC path`);
+  }
+  if (!fetcher) throw new Error(`${kind} file cannot be loaded because Fetch is unavailable`);
+  const response = await fetcher(file, {
+    signal,
+    cache: 'no-store',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json, text/plain' },
   });
+  if (!response.ok) throw new Error(`${kind} file ${file} returned HTTP ${response.status}`);
+  const raw = await response.text();
+  if (new TextEncoder().encode(raw).byteLength > MAX_ENTRY_BYTES) throw new Error(`${kind} file ${file} exceeds 512 KiB`);
+  return raw;
 }
 
 function boundedIdentifier(value: unknown, label: string): string {

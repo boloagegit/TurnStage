@@ -10,7 +10,10 @@ const documentation = ['web-deployment.md', 'web-user-guide.md'];
 const archive = Object.fromEntries(await Promise.all([
   ...files.map(async (path) => [relative(output, path).replaceAll('\\', '/'), new Uint8Array(await readFile(path))]),
   ...documentation.map(async (name) => [`docs/${name}`, new Uint8Array(await readFile(resolve(repository, 'docs', name)))]),
+  ['update_profiles.py', new Uint8Array(await readFile(resolve(repository, 'scripts', 'update_profiles.py')))],
 ]));
+archive['profiles/'] = new Uint8Array();
+archive['environments/'] = new Uint8Array();
 const target = resolve(repository, `turnstage-web-${packageJson.version}.zip`);
 await writeFile(target, zipSync(archive, { level: 9 }));
 console.log(`Created ${relative(repository, target)} with ${Object.keys(archive).length} files.`);

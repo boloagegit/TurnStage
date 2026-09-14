@@ -34,9 +34,23 @@ location /turnstage/ {
 
 The archive has no server-side runtime dependency. HTTPS, authentication, access logging, and network policy remain responsibilities of the company reverse proxy.
 
+## Add official Profiles from VS Code files
+
+The extracted Web archive contains empty `profiles/` and `environments/` folders plus `update_profiles.py`. Copy your existing VS Code `*.turnstage.jsonc` files into `profiles/`. If a Profile names an Environment, also copy its `*.environment.jsonc` file into `environments/`. From the extracted directory containing `index.html`, run:
+
+```bash
+python3 update_profiles.py
+```
+
+This uses only the Python 3.6+ standard library; no `pip` install is needed. It scans the two folders and regenerates the adjacent `turnstage-catalog.json` as a list of file paths. The original JSONC files, including comments, stay unchanged. Refresh the Web page to load the new official Profiles. Run the command again after adding, removing, or changing a file. Python runs only for this update step, not while users browse TurnStage. If the Linux Web server has no Python, run the command on another computer against the extracted archive and upload the resulting files together.
+
+When `profiles/` is empty, the generated catalog keeps the three bundled examples; when it contains files, those become the official Profile list instead. The same rule applies to `environments/`, with the bundled local Environment used only when that folder is empty. A missing or invalid Environment reference makes the catalog fail validation, so copy both files when needed. Existing Unicode or space-containing filenames are supported; file names must end in `.turnstage.jsonc` or `.environment.jsonc` as appropriate. The generated catalog supports up to 100 files of each kind and 512 KiB per file.
+
+The script refuses to overwrite a manually customized catalog. The folder workflow and the manually authored catalog workflow below are alternatives; do not edit the generated catalog by hand. Folder-based Profiles remain read-only to Web users, who can duplicate one into their own browser storage before editing. Only browser-supported features run in Web: VS Code workspace links, Test Explorer, Copilot, and SecretStorage do not become available just because their Profile file is shared.
+
 ## Official catalog and browser-local profiles
 
-`turnstage-catalog.json` is loaded beside `index.html` at startup with `no-store` caching. It is the deployment-owned catalog of official Profile and Environment presets, so a company can replace this one file after extracting the archive without rebuilding TurnStage Web. The included catalog selects the three bundled examples and local mock environment.
+`turnstage-catalog.json` is loaded beside `index.html` at startup with `no-store` caching. It is the deployment-owned catalog of official Profile and Environment presets, so a company can replace this one file after extracting the archive without rebuilding TurnStage Web. The included catalog selects the three bundled examples and local mock environment. Use the folder command above for ordinary VS Code JSONC files; the inline form below is for administrators who intentionally maintain the catalog by hand.
 
 An organization entry can instead carry an inline Profile or Environment. For example:
 
@@ -73,7 +87,7 @@ An organization entry can instead carry an inline Profile or Environment. For ex
 }
 ```
 
-Each entry must contain exactly one `bundled` key or one inline `profile`/`environment` value. The catalog is bounded to 1 MiB, 100 Profiles, 100 Environments, and 512 KiB per entry. A malformed, oversized, duplicated, or unsupported catalog is rejected as a whole and the bundled defaults remain available.
+Each entry must contain exactly one `bundled` key, a generated local `file` path, or an inline `profile`/`environment` value. The catalog is bounded to 1 MiB, 100 Profiles, 100 Environments, and 512 KiB per entry. A malformed, oversized, duplicated, or unsupported catalog is rejected as a whole and the bundled defaults remain available.
 
 Official presets are never written to browser storage. The Web sidebar lists Profiles only; Environments remain catalog data resolved through the selected Profile and are not a separate sidebar editor. **Duplicate** creates an editable browser-local Profile without changing the official entry. An edit attempt on an official Profile is also rejected by the Web host. A newer official entry version is shown without overwriting the copy. A portable Profile import/export includes its referenced Environment, so users can move a complete configuration without a separate Environment control. Browser-local imports and new Profiles remain editable, deletable, and exportable. For backward compatibility, an existing browser-local Profile with the same ID deterministically overrides the official entry; deleting that local override reveals the current official preset.
 
