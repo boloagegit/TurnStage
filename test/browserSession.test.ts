@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LocalRun, TurnStageEnvironment, TurnStageProfile } from '../src/shared/types';
-import { BrowserSession } from '../web/src/browserSession';
+import { BrowserSession, type BrowserSessionState } from '../web/src/browserSession';
 
 const profile: TurnStageProfile = {
   version: 1,
@@ -32,7 +32,7 @@ describe('BrowserSession', () => {
       'event: done\ndata: {"ok":true}\n\n',
     ].join('');
     vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })));
-    const states: Array<ReturnType<typeof structuredClone>> = [];
+    const states: BrowserSessionState[] = [];
     const session = new BrowserSession(profile, environment, new Map(), (state) => states.push(structuredClone(state)));
     session.start();
 
@@ -49,7 +49,7 @@ describe('BrowserSession', () => {
     expect(states.length).toBeGreaterThan(3);
   });
 
-  it('turns browser fetch failures into an explicit CORS-oriented error', async () => {
+  it('reports browser fetch failures without assuming that CORS is the cause', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
     const session = new BrowserSession(profile, environment, new Map(), () => undefined);
     session.start();
@@ -58,6 +58,50 @@ describe('BrowserSession', () => {
 
     expect(session.current.snapshot.turnState).toBe('failed');
     expect(session.current.snapshot.errors[0]?.message).toContain('CORS');
+    expect(session.current.snapshot.errors[0]?.message).toContain('TLS certificate trust');
+  });
+
+  it('uses a legacy VS Code invalid-certificate flag without blocking browser opening or messages', async () => {
+    const tlsProfile: TurnStageProfile = {
+      ...profile,
+      opening: { mode: 'request', request: { method: 'GET', url: 'http://127.0.0.1:9095/api/opening', tls: { allowInvalidCertificates: true } } },
+      conversation: { send: { ...profile.conversation.send, url: 'http://127.0.0.1:9095/api/stream', tls: { allowInvalidCertificates: true } } },
+    };
+    const fetch = vi.fn(async (url: string | URL | Request) => String(url).endsWith('/opening')
+      ? new Response(JSON.stringify({ message: 'Remote opening' }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : new Response('event: done\ndata: {}\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    vi.stubGlobal('fetch', fetch);
+    const states: BrowserSessionState[] = [];
+    const session = new BrowserSession(tlsProfile, environment, new Map(), (state) => states.push(structuredClone(state)));
+
+    await session.start();
+    expect(session.current.snapshot.opening?.message).toBe('Remote opening');
+    expect(states.some((state) => state.networkEntries[0]?.state === 'pending')).toBe(true);
+    await session.send('Hello', { kind: 'manual' });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(session.current.snapshot.turnState).toBe('completed');
+    expect(session.current.networkEntries).toHaveLength(2);
+    expect(session.current.networkEntries.map((entry) => entry.state)).toEqual(['completed', 'completed']);
+    expect(session.current.requestPreview).not.toHaveProperty('tls');
+  });
+
+  it('lets the browser reject untrusted HTTPS instead of claiming to disable certificate checks', async () => {
+    const tlsProfile: TurnStageProfile = {
+      ...profile,
+      conversation: { send: { ...profile.conversation.send, tls: { allowInvalidCertificates: true } } },
+    };
+    const fetch = vi.fn(async () => { throw new TypeError('Failed to fetch'); });
+    vi.stubGlobal('fetch', fetch);
+    const session = new BrowserSession(tlsProfile, environment, new Map(), () => undefined);
+    await session.start();
+
+    await session.send('Hello', { kind: 'manual' });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(session.current.snapshot.turnState).toBe('failed');
+    expect(session.current.snapshot.errors[0]?.message).toContain('TLS certificate trust');
+    expect(session.current.networkEntries[0]?.state).toBe('failed');
   });
 
   it('replays recorded raw events through the shared mapping and reducer path', async () => {

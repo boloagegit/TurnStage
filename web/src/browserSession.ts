@@ -1,4 +1,4 @@
-import type { InteractionContext, LocalRun, NetworkExchange, RawStreamEvent, ReplaySnapshot, SessionSnapshot, TurnStageEnvironment, TurnStageProfile } from '../../src/shared/types';
+import type { InteractionContext, LocalRun, NetworkExchange, PreparedRequest, RawStreamEvent, ReplaySnapshot, SessionSnapshot, TurnStageEnvironment, TurnStageProfile } from '../../src/shared/types';
 import { MappingEngine } from '../../src/extension/mapping/mappingEngine';
 import { RequestBuilder } from '../../src/extension/request/requestBuilder';
 import { getPath } from '../../src/extension/request/templateResolver';
@@ -67,12 +67,13 @@ export class BrowserSession {
           profile: { id: this.profile.id, name: this.profile.name },
           runtime: { simulationContext: {} },
         });
-        if (request.tls?.allowInvalidCertificates) throw new Error('Browsers cannot disable TLS certificate validation.');
-        if (!this.authorize(request.url, 'opening', Boolean(request.secretValues?.length))) throw new Error('The browser request was not authorized.');
-        const network = this.beginNetwork(request.redacted, startedAt, 'opening');
+        const browserRequest = enforceBrowserTls(request);
+        if (!this.authorize(browserRequest.url, 'opening', Boolean(browserRequest.secretValues?.length))) throw new Error('The browser request was not authorized.');
+        const network = this.beginNetwork(browserRequest.redacted, startedAt, 'opening');
+        this.emit();
         const controller = new AbortController();
         timeoutHandle = setTimeout(() => controller.abort(new DOMException('Opening request timed out.', 'TimeoutError')), request.timeoutMs ?? 120_000);
-        const response = await fetchWithRedirectPolicy(request, controller.signal);
+        const response = await fetchWithRedirectPolicy(browserRequest, controller.signal);
         network.status = response.status;
         network.responseHeaders = Object.fromEntries(response.headers.entries());
         network.timing.headers = Date.now() - startedAt;
@@ -176,9 +177,9 @@ export class BrowserSession {
         turn: { clientRequestId, startedAt, interaction },
       };
       const request = await new RequestBuilder(async (name) => this.secret(name)).build(this.profile.conversation.send, context);
-      if (request.tls?.allowInvalidCertificates) throw new Error('Browsers cannot disable TLS certificate validation.');
-      if (!this.authorize(request.url, 'conversation', Boolean(request.secretValues?.length))) throw new Error('The browser request was not authorized.');
-      this.state.requestPreview = request.redacted;
+      const browserRequest = enforceBrowserTls(request);
+      if (!this.authorize(browserRequest.url, 'conversation', Boolean(browserRequest.secretValues?.length))) throw new Error('The browser request was not authorized.');
+      this.state.requestPreview = browserRequest.redacted;
       this.state.snapshot.messages.push({ id: `user-${clientRequestId}`, role: 'user', status: 'completed', createdAt: Date.now(), completedAt: Date.now(), parts: [{ type: 'text', text }], citations: [], actions: [], followups: [], metadata: { clientRequestId } });
       this.state.snapshot.messages.push({ id: `assistant-${clientRequestId}`, role: 'assistant', status: 'pending', createdAt: Date.now(), parts: [], citations: [], actions: [], followups: [], timing: {}, metadata: { clientRequestId } });
       this.state.snapshot.turnState = 'waitingStart';
@@ -188,9 +189,9 @@ export class BrowserSession {
         if (idleHandle) clearTimeout(idleHandle);
         if (request.idleTimeoutMs) idleHandle = setTimeout(() => { timeoutKind = 'idle'; this.abortController?.abort(); }, request.idleTimeoutMs);
       };
-      const network = this.beginNetwork(request.redacted, startedAt, 'stream');
+      const network = this.beginNetwork(browserRequest.redacted, startedAt, 'stream');
       this.emit();
-      const response = await fetchWithRedirectPolicy(request, this.abortController.signal);
+      const response = await fetchWithRedirectPolicy(browserRequest, this.abortController.signal);
       network.status = response.status;
       network.responseHeaders = Object.fromEntries(response.headers.entries());
       network.timing.headers = Date.now() - startedAt;
@@ -368,8 +369,17 @@ export class BrowserSession {
 
 interface StreamRecord { raw: string; sse?: Parameters<typeof toRawEvent>[4] }
 
+function enforceBrowserTls(request: PreparedRequest): PreparedRequest {
+  if (!request.tls?.allowInvalidCertificates) return request;
+  // The browser always validates HTTPS certificates. A VS Code-only opt-out in
+  // a shared Profile must not prevent otherwise valid HTTP or HTTPS requests.
+  const redacted = { ...request.redacted };
+  delete redacted.tls;
+  return { ...request, tls: undefined, redacted };
+}
+
 function browserErrorMessage(error: unknown): string {
-  if (error instanceof TypeError) return `${error.message} The target must allow this browser origin through CORS.`;
+  if (error instanceof TypeError) return `${error.message} Check browser connectivity, TLS certificate trust, and CORS for this target.`;
   return error instanceof Error ? error.message : String(error);
 }
 

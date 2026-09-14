@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.30.1
+
+- Web no longer blocks opening and conversation requests solely because a shared VS Code Profile contains `tls.allowInvalidCertificates`. The browser still validates HTTPS certificates and does not bypass certificate errors.
+- Opening requests appear in the Web Network inspector while pending, and browser fetch failures now identify connectivity, TLS trust, and CORS as separate possible causes rather than implying CORS alone.
+- Compatibility: Profile and VSIX request formats are unchanged. Direct requests to another origin still require browser reachability and CORS; the fixed `/api/` proxy route remains opt-in through the Profile URL.
+
 ## 0.30.0
 
 - Added an optional Python 3.6+ Web launcher to the ZIP: it serves the static site on port 9095 and streams same-origin `/api/` requests to a fixed HTTP upstream, defaulting to `127.0.0.1:9098`. The upstream service itself does not need to change.

@@ -154,7 +154,7 @@ When a Profile points directly at a target API, requests originate from each use
 
 The optional `serve.py` or Nginx `/api/` route is different: the browser connects to the same Web origin, and the Web server connects to the one configured upstream. That upstream must be reachable from the Web server, but does not need to be reachable from each browser or provide CORS for this route. A Profile must actually use the Web origin's `/api` URL to get this behavior.
 
-TurnStage Web cannot disable TLS verification or silently use a system proxy. Profiles, Environments, and display preferences use versioned browser `localStorage`; this includes plaintext credentials written into Profile or Environment JSON. Optional `${secret.*}` values are kept only in page memory and are cleared on refresh. Larger suites, runs, evidence, campaigns, and visual baselines use IndexedDB.
+TurnStage Web cannot disable TLS verification or silently use a system proxy. If an existing VS Code Profile contains `tls.allowInvalidCertificates`, Web ignores that flag and lets the browser enforce normal certificate checks; HTTP `/api/` routes do not need that flag. Profiles, Environments, and display preferences use versioned browser `localStorage`; this includes plaintext credentials written into Profile or Environment JSON. Optional `${secret.*}` values are kept only in page memory and are cleared on refresh. Larger suites, runs, evidence, campaigns, and visual baselines use IndexedDB.
 
 ## Compatibility boundary
 
