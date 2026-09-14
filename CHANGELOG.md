@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.30.0
+
+- Added an optional Python 3.6+ Web launcher to the ZIP: it serves the static site on port 9095 and streams same-origin `/api/` requests to a fixed HTTP upstream, defaulting to `127.0.0.1:9098`. The upstream service itself does not need to change.
+- Existing static-server deployments remain supported. Profiles using the launcher must point to the Web origin's `/api` route; other backend addresses are not automatically proxied. HTTP traffic and plaintext credentials remain unencrypted.
+- Compatibility: VSIX behavior and Profile, suite, and storage formats are unchanged.
+
 ## 0.29.1
 
 - Fixed TurnStage Web on ordinary `http://SERVER_IP:PORT` origins: browser sessions, test runs, suite imports, and the shared Web UI no longer require secure-context-only UUID or digest APIs.

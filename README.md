@@ -175,21 +175,31 @@ files, run `python3 -m http.server 8000 --bind 127.0.0.1` from the extracted
 directory and open `http://127.0.0.1:8000/` (Python 3.6 or newer). Do not open
 `index.html` directly. The Python server is for local preview, not production.
 
-For a shared internal server without a domain, the Web build can be served at
-`http://SERVER_IP:8080/`; an SSE proxy on port 8081 can sit behind `/api/` on
-the same 8080 origin. See the [HTTP-by-IP setup](docs/web-deployment.md#serve-by-ip-over-ordinary-http)
-and its plaintext-transport warning.
+For a simple internal HTTP-by-IP deployment, the ZIP also includes `serve.py`.
+Run it from the extracted directory:
+
+```sh
+python3 serve.py --port 9095 --bind 0.0.0.0 --upstream http://127.0.0.1:9098
+```
+
+It serves Web on 9095 and streams `/api/` to the fixed upstream on 9098
+without modifying that service. Point the Web Profile API base URL at
+`http://SERVER_IP:9095/api`.
+See the [deployment steps](docs/web-deployment.md#one-command-web-and-api-proxy-on-port-9095)
+and plaintext-transport warning. A managed reverse proxy is recommended for
+durable shared deployments.
 
 To provide official Profiles, copy VS Code `*.turnstage.jsonc` files into the
 extracted `profiles/` folder and their referenced `*.environment.jsonc` files
 into `environments/`, then run `python3 update_profiles.py` from that directory.
-The included Python 3.6+ script generates `turnstage-catalog.json`; Python is
-not needed while the Web server runs. Users can duplicate an official Profile
-or create, import, edit, and export their own browser-local Profiles. A
+The included `update_profiles.py` generates `turnstage-catalog.json`; Python
+is not needed while a separate static Web server runs. Users can duplicate an
+official Profile or create, import, edit, and export their own browser-local Profiles. A
 portable Profile export includes its referenced Environment and any plaintext
-credentials in those settings. Browser requests go directly to the configured
-API, which must be reachable from the user's device and allow the Web origin
-through CORS. See the [Web deployment guide](docs/web-deployment.md) for
+credentials in those settings. Browser requests pointed at the same-origin
+`/api/` route use the fixed server-side proxy; requests pointed directly at
+other origins must be reachable from the user's device and allow the Web
+origin through CORS. See the [Web deployment guide](docs/web-deployment.md) for
 administrator setup and security boundaries, and the
 [Web user guide](docs/web-user-guide.md) for everyday use and backups.
 
