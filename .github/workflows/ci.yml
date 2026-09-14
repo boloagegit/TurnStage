@@ -29,6 +29,9 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run test:web
+      - name: Web profile folder generator tests
+        if: runner.os == 'Linux'
+        run: python3 -B -m unittest discover -s test -p 'test_*.py'
       - run: npm run compile
       - run: npm run web:build
       - name: Extension Host integration tests

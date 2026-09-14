@@ -12,6 +12,7 @@ vite.config.ts
 web/**
 web-dist/**
 scripts/package-web.mjs
+scripts/update_profiles.py
 vitest.config.ts
 node_modules/**
 .vscode-test/**

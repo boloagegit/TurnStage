@@ -175,8 +175,11 @@ files, run `python3 -m http.server 8000 --bind 127.0.0.1` from the extracted
 directory and open `http://127.0.0.1:8000/` (Python 3.6 or newer). Do not open
 `index.html` directly. The Python server is for local preview, not production.
 
-The adjacent `turnstage-catalog.json` supplies deployment-owned, read-only
-Profiles without rebuilding the app. Users can duplicate an official Profile
+To provide official Profiles, copy VS Code `*.turnstage.jsonc` files into the
+extracted `profiles/` folder and their referenced `*.environment.jsonc` files
+into `environments/`, then run `python3 update_profiles.py` from that directory.
+The included Python 3.6+ script generates `turnstage-catalog.json`; Python is
+not needed while the Web server runs. Users can duplicate an official Profile
 or create, import, edit, and export their own browser-local Profiles. A
 portable Profile export includes its referenced Environment and any plaintext
 credentials in those settings. Browser requests go directly to the configured

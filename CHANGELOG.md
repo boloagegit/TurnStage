@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.29.0
+
+- Added folder-based official Web Profiles: copy existing VS Code JSONC Profiles and their Environments into the extracted Web archive, then run the included Python 3.6+ standard-library script to regenerate the file index. No Python process or other application server is needed while users browse the static Web app.
+- The Web catalog now loads and validates listed same-origin JSONC files while keeping official Profiles read-only. Unsafe paths, missing files, oversized files, and invalid configurations fail closed to bundled examples; manually maintained inline catalogs remain supported.
+- Compatibility: VSIX Profile and Environment formats are unchanged. VS Code-only features referenced by a Profile remain unavailable in Web; deployment-shared files and any plaintext credentials in them are readable by users with access to the static site.
+
 ## 0.28.3
 
 - Removed the standalone Web Environment editor from the sidebar and environment ID from the chat toolbar. Users select Profiles; referenced Environments remain available through the deployment catalog or portable Profile import/export.
