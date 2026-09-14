@@ -68,7 +68,6 @@ export class BrowserSession {
           runtime: { simulationContext: {} },
         });
         const browserRequest = enforceBrowserTls(request);
-        if (!this.authorize(browserRequest.url, 'opening', Boolean(browserRequest.secretValues?.length))) throw new Error('The browser request was not authorized.');
         const network = this.beginNetwork(browserRequest.redacted, startedAt, 'opening');
         this.emit();
         const controller = new AbortController();
@@ -178,7 +177,6 @@ export class BrowserSession {
       };
       const request = await new RequestBuilder(async (name) => this.secret(name)).build(this.profile.conversation.send, context);
       const browserRequest = enforceBrowserTls(request);
-      if (!this.authorize(browserRequest.url, 'conversation', Boolean(browserRequest.secretValues?.length))) throw new Error('The browser request was not authorized.');
       this.state.requestPreview = browserRequest.redacted;
       this.state.snapshot.messages.push({ id: `user-${clientRequestId}`, role: 'user', status: 'completed', createdAt: Date.now(), completedAt: Date.now(), parts: [{ type: 'text', text }], citations: [], actions: [], followups: [], metadata: { clientRequestId } });
       this.state.snapshot.messages.push({ id: `assistant-${clientRequestId}`, role: 'assistant', status: 'pending', createdAt: Date.now(), parts: [], citations: [], actions: [], followups: [], timing: {}, metadata: { clientRequestId } });
@@ -354,15 +352,6 @@ export class BrowserSession {
   }
 
   private secret(name: string): string | undefined { return this.secrets.get(this.environment.secretReferences?.[name] ?? name); }
-  private authorize(rawUrl: string, purpose: 'opening' | 'conversation', hasSecrets: boolean): boolean {
-    const url = new URL(rawUrl);
-    const loopback = url.hostname === 'localhost' || url.hostname === '::1' || /^127\./u.test(url.hostname);
-    const automaticRemoteOpening = purpose === 'opening' && !loopback;
-    const cleartextSecrets = url.protocol === 'http:' && hasSecrets && !loopback;
-    if (!automaticRemoteOpening && !cleartextSecrets) return true;
-    if (typeof window === 'undefined') return false;
-    return window.confirm([`Allow TurnStage Web to connect to ${url.origin}?`, automaticRemoteOpening ? 'This request starts automatically when the Profile opens.' : '', cleartextSecrets ? 'This request sends secret values over unencrypted HTTP.' : ''].filter(Boolean).join('\n\n'));
-  }
 
   private emit(): void { this.changed(structuredClone(this.state)); }
 }
