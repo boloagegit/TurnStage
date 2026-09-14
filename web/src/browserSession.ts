@@ -2,12 +2,19 @@ import type { InteractionContext, LocalRun, NetworkExchange, PreparedRequest, Ra
 import { MappingEngine } from '../../src/extension/mapping/mappingEngine';
 import { RequestBuilder } from '../../src/extension/request/requestBuilder';
 import { getPath } from '../../src/extension/request/templateResolver';
+import { selectOpeningFallback } from '../../src/extension/opening/fallbackResolver';
+import { normalizeOpeningResponseBlocks } from '../../src/extension/opening/responseBlockNormalizer';
+import { normalizeOpeningStarters } from '../../src/extension/opening/starterNormalizer';
 import { createSnapshot, reduceEvent } from '../../src/extension/runtime/reducer';
 import { MetricsCollector } from '../../src/extension/runtime/metrics';
 import { NdjsonParser, SseParser, toRawEvent } from '../../src/extension/transport/streamParser';
 import { fetchWithRedirectPolicy } from '../../src/extension/transport/fetchPolicy';
 import { ReplayEngine, type ReplaySpeed } from '../../src/extension/replay/replayEngine';
+import { redactHeaders, redactKnownSecrets } from '../../src/shared/redaction';
 import { browserUuid } from './browserCrypto';
+
+const MAX_OPENING_RESPONSE_BYTES = 1024 * 1024;
+const MAX_NETWORK_RESPONSE_PREVIEW_CHARS = 64 * 1024;
 
 export interface BrowserSessionState {
   snapshot: SessionSnapshot;
@@ -60,6 +67,10 @@ export class BrowserSession {
       this.emit();
       const startedAt = Date.now();
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      let network: NetworkExchange | undefined;
+      let responseStatus: number | undefined;
+      let openingData: unknown;
+      let missingMessage = false;
       try {
         const request = await new RequestBuilder(async (name) => this.secret(name)).build(opening.request, {
           controls: this.state.snapshot.controls,
@@ -68,36 +79,51 @@ export class BrowserSession {
           runtime: { simulationContext: {} },
         });
         const browserRequest = enforceBrowserTls(request);
-        const network = this.beginNetwork(browserRequest.redacted, startedAt, 'opening');
+        this.state.requestPreview = browserRequest.redacted;
+        network = this.beginNetwork(browserRequest.redacted, startedAt, 'opening');
         this.emit();
         const controller = new AbortController();
         timeoutHandle = setTimeout(() => controller.abort(new DOMException('Opening request timed out.', 'TimeoutError')), request.timeoutMs ?? 120_000);
         const response = await fetchWithRedirectPolicy(browserRequest, controller.signal);
+        responseStatus = response.status;
         network.status = response.status;
-        network.responseHeaders = Object.fromEntries(response.headers.entries());
+        network.responseHeaders = redactKnownSecrets(redactHeaders(Object.fromEntries(response.headers.entries())), [...this.secrets.values(), ...(browserRequest.secretValues ?? [])]) as Record<string, string>;
         network.timing.headers = Date.now() - startedAt;
-        network.transferredBytes = Number(response.headers.get('content-length') ?? 0);
+        network.state = 'streaming';
+        this.emit();
+        const body = await readBoundedOpeningText(response, MAX_OPENING_RESPONSE_BYTES);
+        network.transferredBytes = body.bytes;
+        const safeText = redactKnownSecrets(body.text, [...this.secrets.values(), ...(browserRequest.secretValues ?? [])]) as string;
+        network.responseBodyPreview = safeText.slice(0, MAX_NETWORK_RESPONSE_PREVIEW_CHARS);
+        network.responseBodyTruncated = body.truncated || safeText.length > MAX_NETWORK_RESPONSE_PREVIEW_CHARS;
+        try { openingData = body.text ? JSON.parse(body.text) : {}; } catch { openingData = body.text; }
+        if (body.truncated) throw new Error('Opening response exceeded the maximum allowed size.');
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json() as unknown;
-        const message = getPath(data, opening.response?.messagePath ?? '$.message');
-        const starters = getPath(data, opening.response?.startersPath ?? '$.options');
-        if (typeof message !== 'string') throw new Error('Opening response did not contain a message.');
-        this.state.snapshot.opening = { message, starters: Array.isArray(starters) ? starters.filter(isStarter) : [] };
+        const message = getPath(openingData, opening.response?.messagePath ?? '$.message');
+        const starters = getPath(openingData, opening.response?.startersPath ?? '$.options');
+        if (typeof message !== 'string') { missingMessage = true; throw new Error('Opening response did not contain a message.'); }
+        const blocks = normalizeOpeningResponseBlocks(openingData, opening.response?.blocks);
+        this.state.snapshot.opening = redactKnownSecrets({ message, starters: normalizeOpeningStarters(starters), ...(blocks.length ? { blocks } : {}) }, [...this.secrets.values(), ...(browserRequest.secretValues ?? [])]) as NonNullable<SessionSnapshot['opening']>;
         this.state.snapshot.sessionState = 'ready';
         network.state = 'completed';
         network.completedAt = Date.now();
         network.timing.total = network.completedAt - startedAt;
       } catch (error) {
-        const fallback = opening.fallbacks?.[0];
-        if (opening.failurePolicy?.useFallbackOnNetworkError && fallback) {
-          this.state.snapshot.opening = { message: fallback.message, starters: fallback.starters ?? [] };
+        const fallback = selectOpeningFallback(opening, openingData, { status: responseStatus, missingMessage, errorType: error instanceof TypeError ? 'BrowserNetworkError' : 'OpeningError' })
+          ?? (opening.failurePolicy?.useFallbackOnNetworkError ? opening.fallbacks?.[0] : undefined);
+        if (network) {
+          network.state = missingMessage && fallback ? 'completed' : 'failed';
+          network.completedAt = Date.now();
+          network.timing.total = network.completedAt - startedAt;
+          if (network.state === 'failed') network.error = { type: responseStatus === undefined ? 'BrowserNetworkError' : 'OpeningError', message: browserErrorMessage(error), ...(responseStatus === undefined ? {} : { status: responseStatus }) };
+        }
+        if (fallback) {
+          this.state.snapshot.opening = { message: fallback.message, starters: normalizeOpeningStarters(fallback.starters) };
           this.state.snapshot.sessionState = 'ready';
         } else {
           this.state.snapshot.sessionState = 'failed';
           this.state.snapshot.errors.push({ type: error instanceof TypeError ? 'BrowserNetworkError' : 'OpeningError', message: browserErrorMessage(error), retrySafe: true });
         }
-        const network = this.state.networkEntries.at(-1);
-        if (network?.kind === 'opening' && network.state !== 'completed') network.state = 'failed';
       } finally {
         if (timeoutHandle) clearTimeout(timeoutHandle);
       }
@@ -106,7 +132,7 @@ export class BrowserSession {
     }
     this.state.snapshot.sessionState = 'ready';
     if (opening?.mode === 'static') {
-      this.state.snapshot.opening = { message: opening.message ?? '', starters: opening.starters ?? [] };
+      this.state.snapshot.opening = { message: opening.message ?? '', starters: normalizeOpeningStarters(opening.starters) };
     }
     this.emit();
   }
@@ -114,7 +140,7 @@ export class BrowserSession {
   useOpeningFallback(): void {
     const fallback = this.profile.opening?.fallbacks?.[0];
     if (!fallback) return;
-    this.state.snapshot.opening = { message: fallback.message, starters: fallback.starters ?? [] };
+    this.state.snapshot.opening = { message: fallback.message, starters: normalizeOpeningStarters(fallback.starters) };
     this.state.snapshot.sessionState = 'ready';
     this.state.snapshot.errors = [];
     this.emit();
@@ -372,8 +398,26 @@ function browserErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isStarter(value: unknown): value is NonNullable<SessionSnapshot['opening']>['starters'][number] {
-  if (!value || typeof value !== 'object') return false;
-  const item = value as Record<string, unknown>;
-  return typeof item.id === 'string' && typeof item.label === 'string' && typeof item.prompt === 'string' && (item.behavior === 'send' || item.behavior === 'fill');
+async function readBoundedOpeningText(response: Response, maxBytes: number): Promise<{ text: string; bytes: number; truncated: boolean }> {
+  if (!response.body) return { text: '', bytes: 0, truncated: false };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let bytes = 0;
+  let truncated = false;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done || !value) break;
+      const remaining = Math.max(0, maxBytes - bytes);
+      text += decoder.decode(value.subarray(0, remaining), { stream: true });
+      bytes += value.byteLength;
+      if (value.byteLength > remaining) { truncated = true; break; }
+    }
+    text += decoder.decode();
+    return { text, bytes, truncated };
+  } finally {
+    if (truncated) { try { await reader.cancel(); } catch { /* The bounded reader intentionally stops early. */ } }
+    reader.releaseLock();
+  }
 }
