@@ -21,6 +21,25 @@ python3 -m http.server 8000 --bind 127.0.0.1
 
 Open `http://127.0.0.1:8000/` in a browser. Python 3.6 supports this command; Python is needed only for this optional local preview, not to build or run the deployed Web archive. The server serves the current directory, so running it beside the ZIP instead of inside the extracted directory will not open TurnStage Web. Stop it with Ctrl+C. Python's `http.server` is not intended for production; use a managed static HTTP server or reverse proxy for shared access. A local preview does not start the optional mock API, and real API calls still require browser reachability, trusted TLS, and CORS permission.
 
+## One-command Web and API proxy on port 9095
+
+The archive also includes `serve.py` for a simple internal deployment using Python 3.6+ standard-library modules only. From the extracted directory containing `index.html`, stop any old `python3 -m http.server` process that is using port 9095, then run:
+
+```bash
+python3 serve.py --port 9095 --bind 0.0.0.0 --upstream http://127.0.0.1:9098
+```
+
+Open `http://SERVER_IP:9095/`. Set the Profile/Environment API base URL to `http://SERVER_IP:9095/api`, or set a request URL directly to `http://SERVER_IP:9095/api/chat` when the upstream endpoint is `/chat`. The script strips `/api` before forwarding, so `/api/chat` reaches `http://127.0.0.1:9098/chat`. The upstream service on 9098 is not modified. Change `--upstream` only if the fixed upstream is at a different reachable HTTP address; the script does not proxy arbitrary Profile URLs or automatically route other services. Requests routed through `/api/` come from the Web server, not from each user's browser, and the browser sees one origin, avoiding CORS for this route. Requests pointed directly at another IP or port still need browser reachability and CORS.
+
+The proxy forwards request methods, body, authentication headers, response status and headers, and flushes SSE/NDJSON chunks as they arrive. Request bodies are limited to 16 MiB. It does not log URLs or secrets. To keep it running after SSH logout:
+
+```bash
+nohup python3 serve.py --port 9095 --bind 0.0.0.0 --upstream http://127.0.0.1:9098 > /tmp/turnstage-web-9095.log 2>&1 < /dev/null &
+echo $!
+```
+
+Keep the displayed PID to stop that exact process later. This Python server does not auto-restart after a crash or reboot and is not a hardened production reverse proxy. Restrict access on the company network, prefer HTTPS for sensitive data, and use a managed proxy such as Nginx for a durable shared deployment.
+
 ## Minimal Linux example
 
 If the company server already has Nginx, copy the extracted files into a dedicated directory and point an Nginx `root` at that directory. A minimal location is:
@@ -36,18 +55,18 @@ The archive has no server-side runtime dependency. HTTPS, authentication, access
 
 ## Serve by IP over ordinary HTTP
 
-For an internal deployment without a domain or TLS certificate, TurnStage Web also works at `http://SERVER_IP:8080/`. Unlike a localhost preview, this is an insecure browser origin, so Web uses an HTTP-compatible UUID and digest implementation. Text copy uses a browser gesture fallback; the chat screenshot action downloads a PNG instead of copying an image to the clipboard. Browser-specific policy can still deny clipboard access, in which case TurnStage reports the failure.
+For an internal deployment without a domain or TLS certificate, TurnStage Web also works at `http://SERVER_IP:9095/`. Unlike a localhost preview, this is an insecure browser origin, so Web uses an HTTP-compatible UUID and digest implementation. Text copy uses a browser gesture fallback; the chat screenshot action downloads a PNG instead of copying an image to the clipboard. Browser-specific policy can still deny clipboard access, in which case TurnStage reports the failure.
 
-If the SSE proxy is on port 8081 of the same server, the simplest arrangement is to expose only port 8080 to users and route `/api/` internally:
+If the SSE proxy is on port 9098 of the same server and Nginx is already available, expose only port 9095 to users and route `/api/` internally:
 
 ```nginx
 server {
-    listen 8080;
+    listen 9095;
     server_name _;
     root /opt/turnstage-web;
 
     location /api/ {
-        proxy_pass http://127.0.0.1:8081/;
+        proxy_pass http://127.0.0.1:9098/;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_buffering off;
@@ -61,7 +80,7 @@ server {
 }
 ```
 
-Set the Profile's API base URL to `http://SERVER_IP:8080/api` (substitute the actual server IP). This keeps browser requests on the Web page's origin, so the 8081 service does not need a browser-facing port or CORS. `proxy_pass` above removes `/api/` before forwarding; adjust it if the SSE proxy itself expects that prefix. A Profile pointing directly at `http://SERVER_IP:8081` is also possible, but that port must be reachable from every user's browser and permit the Web origin through CORS, including any preflight `OPTIONS` request and configured headers. Never use `localhost:8081` in a shared Profile: it refers to the user's own device.
+Set the Profile's API base URL to `http://SERVER_IP:9095/api` (substitute the actual server IP). This keeps browser requests on the Web page's origin, so the 9098 service does not need a browser-facing port or CORS. `proxy_pass` above removes `/api/` before forwarding; adjust it if the SSE proxy itself expects that prefix. A Profile pointing directly at `http://SERVER_IP:9098` is also possible, but that port must be reachable from every user's browser and permit the Web origin through CORS, including any preflight `OPTIONS` request and configured headers. Never use `localhost:9098` in a shared Profile: it refers to the user's own device.
 
 HTTP provides no confidentiality or integrity for the Web app, Profiles, requests, SSE responses, or plaintext tokens. Use this mode only on a trusted internal network with access controls appropriate to the data; prefer HTTPS when tokens or sensitive test content cross an untrusted network. Changing between HTTP and HTTPS or between ports changes the browser storage origin, so export browser-local data before changing the address.
 
@@ -126,12 +145,14 @@ Inline catalog entries may contain plaintext credentials when every user of that
 
 ## Browser-to-target connectivity
 
-Requests originate from each user's browser, not from the Linux server. Every target API must therefore:
+When a Profile points directly at a target API, requests originate from each user's browser, not from the Linux server. Every directly addressed API must therefore:
 
 - be reachable from the user's browser;
 - use a certificate trusted by the browser;
 - allow the TurnStage Web origin through CORS;
 - permit the required methods and request headers.
+
+The optional `serve.py` or Nginx `/api/` route is different: the browser connects to the same Web origin, and the Web server connects to the one configured upstream. That upstream must be reachable from the Web server, but does not need to be reachable from each browser or provide CORS for this route. A Profile must actually use the Web origin's `/api` URL to get this behavior.
 
 TurnStage Web cannot disable TLS verification or silently use a system proxy. Profiles, Environments, and display preferences use versioned browser `localStorage`; this includes plaintext credentials written into Profile or Environment JSON. Optional `${secret.*}` values are kept only in page memory and are cleared on refresh. Larger suites, runs, evidence, campaigns, and visual baselines use IndexedDB.
 

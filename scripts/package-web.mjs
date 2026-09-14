@@ -11,6 +11,7 @@ const archive = Object.fromEntries(await Promise.all([
   ...files.map(async (path) => [relative(output, path).replaceAll('\\', '/'), new Uint8Array(await readFile(path))]),
   ...documentation.map(async (name) => [`docs/${name}`, new Uint8Array(await readFile(resolve(repository, 'docs', name)))]),
   ['update_profiles.py', new Uint8Array(await readFile(resolve(repository, 'scripts', 'update_profiles.py')))],
+  ['serve.py', new Uint8Array(await readFile(resolve(repository, 'scripts', 'serve.py')))],
 ]));
 archive['profiles/'] = new Uint8Array();
 archive['environments/'] = new Uint8Array();
