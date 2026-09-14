@@ -19,6 +19,7 @@ import {
 } from './adversarialSuite';
 import { normalizeAdversarialSuite, resolveSuiteDefaultRepetitions } from './adversarialSuite';
 import { runScenario, type ScenarioCancellation, type ScenarioSession } from './scenarioRunner';
+import { browserUuid } from '../../shared/uuid';
 
 export const MAX_RUN_PLAN_ATTEMPTS = MAX_ADVERSARIAL_ATTEMPTS_PER_SUITE;
 export const MAX_RUN_PLAN_REQUESTS = MAX_ADVERSARIAL_REQUESTS_PER_SUITE;
@@ -238,7 +239,7 @@ export async function runScenarioGroup(profileId: string, scenario: ScenarioDefi
   const existing = options.existing;
   if (existing && (existing.profileId !== profileId || existing.scenarioId !== scenario.id || existing.requestedAttempts > casePlan.repetitions)) throw new Error('The saved run group does not match the current scenario plan.');
 
-  const runId = existing?.id ?? options.runId ?? crypto.randomUUID();
+  const runId = existing?.id ?? options.runId ?? browserUuid();
   const attempts: ScenarioAttemptExecution[] = (existing?.attempts ?? []).map((attempt) => ({ summary: structuredClone(attempt) }));
   const alreadyCompleted = attempts.length;
   if (alreadyCompleted > casePlan.repetitions) throw new Error('The saved run group contains more attempts than the current plan.');

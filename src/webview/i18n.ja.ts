@@ -1,5 +1,9 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Download chat screenshot': 'チャットのスクリーンショットをダウンロード',
+  'Downloading chat screenshot…': 'チャットのスクリーンショットをダウンロード中…',
+  'Chat screenshot downloaded.': 'チャットのスクリーンショットをダウンロードしました。',
+  'Unable to download chat screenshot.': 'チャットのスクリーンショットをダウンロードできません。',
   'Search cases': 'ケースを検索',
   'No test cases yet.': 'テストケースはまだありません。',
   'No cases match the current search.': '検索条件に一致するケースはありません。',

@@ -20,6 +20,8 @@ import { loadOfficialCatalog, mergeCatalogEntries, type OfficialCatalogResult } 
 import { applyWebAppearance, bindSystemAppearance } from './theme';
 import { decodeWebProfileBundle, encodeWebProfileBundle } from './profileBundle';
 import { IconButton } from '../../src/webview/Icon';
+import { copyText } from '../../src/webview/clipboardText';
+import { browserUuid } from './browserCrypto';
 import basicRaw from '../../resources/templates/basic-sse-chat.turnstage.jsonc?raw';
 import agentRaw from '../../resources/templates/agent-flow.turnstage.jsonc?raw';
 import enterpriseRaw from '../../resources/templates/enterprise-chat.turnstage.jsonc?raw';
@@ -205,7 +207,7 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
         break;
       case 'uri.open': openExternalUri(message.uri); break;
       case 'profile.openAsText': download(`${active.id}.turnstage.jsonc`, active.raw, 'application/json'); break;
-      case 'artifact.action': if (message.action === 'copyPath') await navigator.clipboard.writeText(message.artifactId); else notifyUnavailable('The browser already downloaded this artifact. Use the browser Downloads panel to open or reveal it.', message.requestId); break;
+      case 'artifact.action': if (message.action === 'copyPath') await copyText(message.artifactId); else notifyUnavailable('The browser already downloaded this artifact. Use the browser Downloads panel to open or reveal it.', message.requestId); break;
       case 'history.remote.apply': notifyUnavailable('Remote session references require an application backend and are not stored by TurnStage Web.', message.requestId); break;
       case 'output.open': notifyUnavailable('Output logs are shown in the browser developer console.', message.requestId); break;
       case 'testExplorer.open': notifyUnavailable('VS Code Test Explorer is unavailable in Web. Use the Tests workspace.', message.requestId); break;
@@ -355,7 +357,7 @@ async function importRun(requestId?: string): Promise<void> {
   const run = candidate as LocalRun;
   if (run.profileId !== active.id || typeof run.id !== 'string' || !run.metrics || !run.result) throw new Error(`This run does not belong to profile ${active.id}.`);
   const duplicate = Boolean(await findRun(run.id));
-  const imported = redactKnownSecrets({ ...structuredClone(run), id: duplicate ? crypto.randomUUID() : run.id }, [...secrets.values()]) as LocalRun;
+  const imported = redactKnownSecrets({ ...structuredClone(run), id: duplicate ? browserUuid() : run.id }, [...secrets.values()]) as LocalRun;
   await artifacts.put<LocalRun>('runs', { id: `${active.id}:${imported.id}`, profileId: active.id, kind: 'conversation', name: selected.name, updatedAt: Date.now(), value: imported });
   await refreshRuns();
   post({ type: 'run.imported', path: selected.name, runId: imported.id, duplicate }, requestId);
@@ -517,7 +519,7 @@ function persistLibrary(): void {
   savePreferences(preferences);
 }
 
-function post(payload: HostPayload, requestId: string = crypto.randomUUID()): void {
+function post(payload: HostPayload, requestId: string = browserUuid()): void {
   // Match the structured-clone boundary used by VS Code and omit undefined fields.
   const message = JSON.parse(JSON.stringify({ ...payload, protocolVersion: PROTOCOL_VERSION, editorInstanceId: 'turnstage-web', requestId })) as HostMessage;
   window.dispatchEvent(new MessageEvent('message', { data: message }));
@@ -536,7 +538,7 @@ function openCitation(citationId: string): void {
 async function invokeAction(actionId: string, sourceMessageId: string | undefined, requestId?: string): Promise<void> {
   const source = sourceMessageId ? session.current.snapshot.messages.find((item) => item.id === sourceMessageId) : undefined;
   if (actionId === 'message.copy') {
-    await navigator.clipboard.writeText(source?.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text).join('') ?? '');
+    await copyText(source?.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text).join('') ?? '');
     if (sourceMessageId) post({ type: 'action.feedback', actionId, sourceMessageId, status: 'success', message: 'Message copied.' }, requestId);
     return;
   }

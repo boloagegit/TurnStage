@@ -175,6 +175,11 @@ files, run `python3 -m http.server 8000 --bind 127.0.0.1` from the extracted
 directory and open `http://127.0.0.1:8000/` (Python 3.6 or newer). Do not open
 `index.html` directly. The Python server is for local preview, not production.
 
+For a shared internal server without a domain, the Web build can be served at
+`http://SERVER_IP:8080/`; an SSE proxy on port 8081 can sit behind `/api/` on
+the same 8080 origin. See the [HTTP-by-IP setup](docs/web-deployment.md#serve-by-ip-over-ordinary-http)
+and its plaintext-transport warning.
+
 To provide official Profiles, copy VS Code `*.turnstage.jsonc` files into the
 extracted `profiles/` folder and their referenced `*.environment.jsonc` files
 into `environments/`, then run `python3 update_profiles.py` from that directory.

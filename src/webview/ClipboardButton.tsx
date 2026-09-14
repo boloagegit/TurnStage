@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { IconButton } from './Icon';
 import { t } from './i18n';
+import { copyText } from './clipboardText';
 
 export function ClipboardButton({ text, label }: { text: string; label: string }): React.JSX.Element {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copy = async (): Promise<void> => {
     try {
-      if (typeof navigator === 'undefined' || typeof navigator.clipboard?.writeText !== 'function') throw new Error('Clipboard unavailable');
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       setState('copied');
     } catch {
       setState('failed');

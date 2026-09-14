@@ -1,5 +1,6 @@
 import type { ChatMessage, Citation, FormDefinition, MessageMetric, MessageMetricAggregation, NormalizedEvent, SessionSnapshot } from '../../shared/types';
 import { localize } from '../l10n';
+import { browserUuid } from '../../shared/uuid';
 
 const MAX_MESSAGE_TEXT_CHARS = 1024 * 1024;
 const MAX_MESSAGE_PARTS = 1000;
@@ -134,8 +135,8 @@ function isMetricValue(value: unknown): value is MessageMetric['value'] {
   return typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value));
 }
 
-export function createSnapshot(trusted: boolean): SessionSnapshot {
-  return { sessionId: crypto.randomUUID(), sessionState: 'notStarted', turnState: 'idle', messages: [], rawEvents: [], normalizedEvents: [], metrics: { eventCount: 0, byteCount: 0, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0, reconnectCount: 0 }, errors: [], droppedEventCount: 0, droppedNormalizedEventCount: 0, droppedMessageCount: 0, trusted, controls: {} };
+export function createSnapshot(trusted: boolean, createId: () => string = browserUuid): SessionSnapshot {
+  return { sessionId: createId(), sessionState: 'notStarted', turnState: 'idle', messages: [], rawEvents: [], normalizedEvents: [], metrics: { eventCount: 0, byteCount: 0, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0, reconnectCount: 0 }, errors: [], droppedEventCount: 0, droppedNormalizedEventCount: 0, droppedMessageCount: 0, trusted, controls: {} };
 }
 
 export function resetReducerState(snapshot: SessionSnapshot): void { eventKeys.delete(snapshot); }
