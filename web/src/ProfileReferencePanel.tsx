@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { JsoncCodeViewer } from './JsoncCodeViewer';
 
 export type ReferencePage = 'source' | 'guide';
+export type ProfileSourceSaveResult = { ok: true; id: string; raw: string } | { ok: false; error: string; offset?: number };
 type Locale = 'en' | 'zh-TW' | 'ja' | 'ko';
 
 const topics = [
@@ -17,7 +18,7 @@ const topics = [
 const translations = {
   en: {
     source: 'View JSONC', guide: 'Profile guide', close: 'Close', download: 'Download JSONC', copy: 'Copy', copied: 'Copied',
-    readOnly: 'Read-only', snippet: 'Example', path: 'Setting', search: 'Find in JSONC', previous: 'Previous match', next: 'Next match', noMatches: 'No matches', matchCount: '{current} of {total}', wrap: 'Wrap lines', sections: 'Sections', overview: 'Top', lines: '{count} lines', copyFailed: 'Unable to copy. Select the text and copy it manually.',
+    readOnly: 'Read-only', edit: 'Edit JSONC', save: 'Save', cancel: 'Cancel', duplicate: 'Duplicate to edit', saved: 'Saved', discard: 'Discard unsaved JSONC changes?', location: 'Line {line}, column {column}', snippet: 'Example', path: 'Setting', search: 'Find in JSONC', previous: 'Previous match', next: 'Next match', noMatches: 'No matches', matchCount: '{current} of {total}', wrap: 'Wrap lines', sections: 'Sections', overview: 'Top', lines: '{count} lines', copyFailed: 'Unable to copy. Select the text and copy it manually.',
     topics: {
       request: ['Send a message', 'Set the endpoint, method, headers, and message body.'],
       timeout: ['Set timeouts', 'Request timeout limits the whole request. Idle timeout limits time without a stream event. Values are milliseconds.'],
@@ -29,7 +30,7 @@ const translations = {
   },
   'zh-TW': {
     source: '檢視 JSONC', guide: '設定檔指南', close: '關閉', download: '下載 JSONC', copy: '複製', copied: '已複製',
-    readOnly: '唯讀', snippet: '範例', path: '設定位置', search: '搜尋 JSONC', previous: '上一個結果', next: '下一個結果', noMatches: '找不到結果', matchCount: '第 {current} / {total} 筆', wrap: '自動換行', sections: '設定區段', overview: '檔案開頭', lines: '共 {count} 行', copyFailed: '無法複製，請選取文字後手動複製。',
+    readOnly: '唯讀', edit: '編輯 JSONC', save: '儲存', cancel: '取消', duplicate: '複製後編輯', saved: '已儲存', discard: '放棄尚未儲存的 JSONC 修改？', location: '第 {line} 行、第 {column} 欄', snippet: '範例', path: '設定位置', search: '搜尋 JSONC', previous: '上一個結果', next: '下一個結果', noMatches: '找不到結果', matchCount: '第 {current} / {total} 筆', wrap: '自動換行', sections: '設定區段', overview: '檔案開頭', lines: '共 {count} 行', copyFailed: '無法複製，請選取文字後手動複製。',
     topics: {
       request: ['傳送訊息', '設定請求網址、方法、標頭與訊息內容。'],
       timeout: ['設定逾時', '請求逾時限制整個請求；閒置逾時限制串流沒有新事件的時間。單位為毫秒。'],
@@ -41,7 +42,7 @@ const translations = {
   },
   ja: {
     source: 'JSONC を表示', guide: 'プロファイルガイド', close: '閉じる', download: 'JSONC をダウンロード', copy: 'コピー', copied: 'コピーしました',
-    readOnly: '読み取り専用', snippet: '例', path: '設定箇所', search: 'JSONC を検索', previous: '前の一致', next: '次の一致', noMatches: '一致なし', matchCount: '{current} / {total} 件', wrap: '行を折り返す', sections: '設定セクション', overview: '先頭', lines: '{count} 行', copyFailed: 'コピーできません。テキストを選択して手動でコピーしてください。',
+    readOnly: '読み取り専用', edit: 'JSONC を編集', save: '保存', cancel: 'キャンセル', duplicate: '複製して編集', saved: '保存しました', discard: '未保存の JSONC 変更を破棄しますか？', location: '{line} 行 {column} 列', snippet: '例', path: '設定箇所', search: 'JSONC を検索', previous: '前の一致', next: '次の一致', noMatches: '一致なし', matchCount: '{current} / {total} 件', wrap: '行を折り返す', sections: '設定セクション', overview: '先頭', lines: '{count} 行', copyFailed: 'コピーできません。テキストを選択して手動でコピーしてください。',
     topics: {
       request: ['メッセージを送信', '送信先、メソッド、ヘッダー、本文を設定します。'],
       timeout: ['タイムアウトを設定', 'リクエスト全体と、ストリームイベントが届かない時間を別々に制限します。単位はミリ秒です。'],
@@ -53,7 +54,7 @@ const translations = {
   },
   ko: {
     source: 'JSONC 보기', guide: '프로필 가이드', close: '닫기', download: 'JSONC 다운로드', copy: '복사', copied: '복사됨',
-    readOnly: '읽기 전용', snippet: '예시', path: '설정 위치', search: 'JSONC 검색', previous: '이전 결과', next: '다음 결과', noMatches: '결과 없음', matchCount: '{current} / {total}', wrap: '줄 바꿈', sections: '설정 섹션', overview: '파일 시작', lines: '총 {count}줄', copyFailed: '복사할 수 없습니다. 텍스트를 선택해 직접 복사하세요.',
+    readOnly: '읽기 전용', edit: 'JSONC 편집', save: '저장', cancel: '취소', duplicate: '복제 후 편집', saved: '저장됨', discard: '저장하지 않은 JSONC 변경 사항을 버릴까요?', location: '{line}행 {column}열', snippet: '예시', path: '설정 위치', search: 'JSONC 검색', previous: '이전 결과', next: '다음 결과', noMatches: '결과 없음', matchCount: '{current} / {total}', wrap: '줄 바꿈', sections: '설정 섹션', overview: '파일 시작', lines: '총 {count}줄', copyFailed: '복사할 수 없습니다. 텍스트를 선택해 직접 복사하세요.',
     topics: {
       request: ['메시지 보내기', '요청 주소, 메서드, 헤더와 본문을 설정합니다.'],
       timeout: ['시간 초과 설정', '전체 요청 시간과 스트림 이벤트가 없는 시간을 각각 제한합니다. 단위는 밀리초입니다.'],
@@ -63,23 +64,60 @@ const translations = {
       tests: ['테스트 사례 추가', '입력을 보내고 결과를 확인합니다. 테스트 탭에서 실행합니다.'],
     },
   },
-} satisfies Record<Locale, { source: string; guide: string; close: string; download: string; copy: string; copied: string; readOnly: string; snippet: string; path: string; search: string; previous: string; next: string; noMatches: string; matchCount: string; wrap: string; sections: string; overview: string; lines: string; copyFailed: string; topics: Record<typeof topics[number]['id'], readonly [string, string]> }>;
+} satisfies Record<Locale, { source: string; guide: string; close: string; download: string; copy: string; copied: string; readOnly: string; edit: string; save: string; cancel: string; duplicate: string; saved: string; discard: string; location: string; snippet: string; path: string; search: string; previous: string; next: string; noMatches: string; matchCount: string; wrap: string; sections: string; overview: string; lines: string; copyFailed: string; topics: Record<typeof topics[number]['id'], readonly [string, string]> }>;
 
-export function ProfileReferencePanel({ page, onClose, profileName, raw, locale, onDownload, onCopy }: {
+export function ProfileReferencePanel({ page, onClose, profileName, raw, locale, readOnly = true, onSave, onDuplicate, onDownload, onCopy }: {
   page: ReferencePage;
   onClose: () => void;
   profileName: string;
   raw: string;
   locale: string;
-  onDownload: () => void;
+  readOnly?: boolean;
+  onSave?: (raw: string) => ProfileSourceSaveResult;
+  onDuplicate?: () => { id: string; raw: string };
+  onDownload: (value: string) => void;
   onCopy: (value: string) => Promise<void>;
 }): React.JSX.Element {
   const labels = translations[(locale in translations ? locale : 'en') as Locale];
   const [selected, setSelected] = useState<typeof topics[number]['id']>('request');
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
+  const [editing, setEditing] = useState(page === 'source' && !readOnly && Boolean(onSave));
+  const [draft, setDraft] = useState(raw);
+  const [saveError, setSaveError] = useState('');
+  const [saved, setSaved] = useState(false);
   const panel = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
+  const editor = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (!editing) setDraft(raw); }, [raw, editing]);
+  useEffect(() => { if (editing) editor.current?.focus(); }, [editing]);
+  const close = () => {
+    if (editing && draft !== raw && !window.confirm(labels.discard)) return;
+    onClose();
+  };
+  const cancel = () => {
+    if (draft !== raw && !window.confirm(labels.discard)) return;
+    onClose();
+  };
+  const save = () => {
+    if (!onSave) return;
+    const result = onSave(draft);
+    if (!result.ok) {
+      const before = draft.slice(0, result.offset ?? 0);
+      const line = before.split('\n').length;
+      const column = before.length - before.lastIndexOf('\n');
+      setSaveError(`${labels.location.replace('{line}', String(line)).replace('{column}', String(column))}: ${result.error}`);
+      if (result.offset !== undefined) {
+        editor.current?.focus();
+        editor.current?.setSelectionRange(result.offset, result.offset);
+      }
+      return;
+    }
+    setDraft(result.raw);
+    setSaveError('');
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 1800);
+  };
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
     const background = document.getElementById('web-shell');
@@ -89,9 +127,10 @@ export function ProfileReferencePanel({ page, onClose, profileName, raw, locale,
   }, []);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
+      if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+      if (editing && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(); return; }
       if (event.key !== 'Tab' || !panel.current) return;
-      const focusable = [...panel.current.querySelectorAll<HTMLElement>('button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), [tabindex="0"]')];
+      const focusable = [...panel.current.querySelectorAll<HTMLElement>('button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]')];
       const first = focusable[0];
       const last = focusable.at(-1);
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
@@ -99,18 +138,18 @@ export function ProfileReferencePanel({ page, onClose, profileName, raw, locale,
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  });
   const copyValue = async (value: string) => {
     try { await onCopy(value); setCopyError(false); setCopied(true); window.setTimeout(() => setCopied(false), 1800); }
     catch { setCopyError(true); setCopied(false); }
   };
   const topic = topics.find((item) => item.id === selected)!;
-  return createPortal(<div className="profile-reference-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+  return createPortal(<div className="profile-reference-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
     <section ref={panel} className="profile-reference-panel" role="dialog" aria-modal="true" aria-labelledby="profile-reference-title">
-      <header className="profile-reference-header"><div><h2 id="profile-reference-title" title={page === 'source' ? profileName : labels.guide}>{page === 'source' ? profileName : labels.guide}</h2>{page === 'source' && <span>{labels.source} · {labels.readOnly}</span>}</div><button ref={closeButton} type="button" onClick={onClose} aria-label={labels.close}>×</button></header>
+      <header className="profile-reference-header"><div><h2 id="profile-reference-title" title={page === 'source' ? profileName : labels.guide}>{page === 'source' ? profileName : labels.guide}</h2>{page === 'source' && <span>{editing ? labels.edit : `${labels.source}${readOnly ? ` · ${labels.readOnly}` : ''}`}</span>}</div><button ref={closeButton} type="button" onClick={close} aria-label={labels.close}>×</button></header>
       {page === 'source' ? <div id="profile-reference-source" className="profile-reference-content">
-        <div className="profile-reference-toolbar"><span role="status">{copyError ? labels.copyFailed : copied ? labels.copied : ''}</span><button type="button" onClick={() => void copyValue(raw)}>{labels.copy}</button><button type="button" onClick={onDownload}>{labels.download}</button></div>
-        <JsoncCodeViewer raw={raw} labels={labels} />
+        <div className="profile-reference-toolbar"><span role="status">{copyError ? labels.copyFailed : copied ? labels.copied : saved ? labels.saved : ''}</span>{editing ? <><button type="button" onClick={() => void copyValue(draft)}>{labels.copy}</button><button type="button" onClick={() => onDownload(draft)}>{labels.download}</button><button type="button" onClick={cancel}>{labels.cancel}</button><button type="button" className="profile-reference-save" disabled={draft === raw || !onSave} onClick={save}>{labels.save}</button></> : <>{readOnly && onDuplicate && <button type="button" onClick={() => { const copy = onDuplicate(); setDraft(copy.raw); setSaveError(''); setEditing(true); }}>{labels.duplicate}</button>}<button type="button" onClick={() => void copyValue(raw)}>{labels.copy}</button><button type="button" onClick={() => onDownload(raw)}>{labels.download}</button></>}</div>
+        {editing ? <div className="profile-reference-editor">{saveError && <p role="alert" className="profile-reference-editor-error">{saveError}</p>}<JsoncCodeViewer raw={draft} labels={labels} editorRef={editor} onEdit={(value) => { setDraft(value); setSaveError(''); }} /></div> : <JsoncCodeViewer raw={raw} labels={labels} />}
       </div> : <div id="profile-reference-guide" className="profile-reference-guide">
         <nav aria-label={labels.guide}>{topics.map((item) => <button type="button" key={item.id} aria-current={selected === item.id ? 'page' : undefined} onClick={() => { setSelected(item.id); setCopied(false); }}>{labels.topics[item.id][0]}</button>)}</nav>
         <article><h3>{labels.topics[selected][0]}</h3><p>{labels.topics[selected][1]}</p><dl><dt>{labels.path}</dt><dd><code>{topic.path}</code></dd></dl><div className="profile-reference-toolbar"><span>{labels.snippet}</span><button type="button" onClick={() => void copyValue(topic.snippet)}>{copied ? labels.copied : labels.copy}</button></div><pre className="profile-reference-code"><code>{topic.snippet}</code></pre></article>

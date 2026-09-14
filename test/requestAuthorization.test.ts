@@ -51,9 +51,9 @@ describe('request authorization assessment', () => {
     expect(assessRequestAuthorization(request('http://[::1]/opening'), 'opening', false).required).toBe(false);
   });
 
-  it('requires consent for external automatic openings', () => {
+  it('does not interrupt ordinary external automatic openings in a trusted workspace', () => {
     const result = assessRequestAuthorization(request('https://api.example.test/opening'), 'opening', false);
-    expect(result).toMatchObject({ required: true, automaticOpening: true, destination: 'https://api.example.test/opening' });
+    expect(result).toMatchObject({ required: false, automaticOpening: true, destination: 'https://api.example.test/opening' });
   });
 
   it('requires consent for cleartext secrets but not ordinary explicit HTTPS sends', () => {
@@ -86,20 +86,26 @@ describe('remembered request authorization', () => {
     } as never;
   }
 
+  it('does not show a confirmation for an ordinary external opening', async () => {
+    const service = new RequestAuthorizationService(context());
+    await expect(service.authorize(profileUri, profile, environment, request('https://api.example.test/opening'), 'opening', false)).resolves.toBe(true);
+    expect(mock.window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
   it('remembers a Profile grant and asks again after the destination changes', async () => {
     const service = new RequestAuthorizationService(context());
     mock.window.showWarningMessage.mockResolvedValue('Allow this Profile');
-    const first = request('https://api.example.test/opening', { secret: true });
+    const first = request('https://api.example.test/opening', { secret: true, invalidTls: true });
     await expect(service.authorize(profileUri, profile, environment, first, 'opening', true)).resolves.toBe(true);
     await expect(service.authorize(profileUri, profile, environment, first, 'opening', true)).resolves.toBe(true);
-    await expect(service.authorize(profileUri, profile, environment, request('https://other.example.test/opening', { secret: true }), 'opening', true)).resolves.toBe(true);
+    await expect(service.authorize(profileUri, profile, environment, request('https://other.example.test/opening', { secret: true, invalidTls: true }), 'opening', true)).resolves.toBe(true);
     expect(mock.window.showWarningMessage).toHaveBeenCalledTimes(2);
   });
 
   it('does not persist allow-once or a cancelled prompt', async () => {
     const service = new RequestAuthorizationService(context());
     mock.window.showWarningMessage.mockResolvedValueOnce('Allow once').mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
-    const candidate = request('https://api.example.test/opening');
+    const candidate = request('https://api.example.test/opening', { invalidTls: true });
     await expect(service.authorize(profileUri, profile, environment, candidate, 'opening', false)).resolves.toBe(true);
     await expect(service.authorize(profileUri, profile, environment, candidate, 'opening', false)).resolves.toBe(false);
     await expect(service.authorize(profileUri, profile, environment, candidate, 'opening', false)).resolves.toBe(false);

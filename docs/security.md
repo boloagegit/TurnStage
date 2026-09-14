@@ -94,15 +94,16 @@ bounded hop count. The default is same-origin only; explicit cross-origin
 following strips common credential headers and any header whose value contains
 a secret resolved for that request.
 
-Loopback request-backed openings remain automatic for local development. Before
-the first automatic opening to another host, the host shows a modal summary of
-the destination, method, secret usage, and TLS verification state. A remembered
+Request-backed openings run automatically in trusted workspaces, including when
+the Profile is opened from outside the workspace. A Profile can therefore send
+its configured opening request to a remote host as soon as it is opened; inspect
+downloaded Profiles before opening them. Non-loopback HTTP requests containing
+known secrets and all requests that disable certificate verification still show
+a modal summary of destination, method, secret usage, and TLS state. A remembered
 grant contains only a SHA-256 fingerprint in workspace storage. The fingerprint
 changes with the Profile URI, destination origin, request definition,
-environment secret-reference mapping, purpose, or TLS mode. Explicit
-non-loopback HTTP requests containing known secrets and all requests that disable
-certificate verification use the same boundary. Cancelling the prompt sends no
-request and stores no grant.
+environment secret-reference mapping, purpose, or TLS mode. Cancelling a
+required prompt sends no request and stores no grant.
 
 Opening response blocks are presentation-only projections owned by the
 Extension Host. Profiles may select bounded dotted paths and fixed display

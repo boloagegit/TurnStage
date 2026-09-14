@@ -433,6 +433,7 @@
   "No visual baseline exists for this profile and viewport.": "No visual baseline exists for this profile and viewport.",
   "Replace Baseline": "Replace Baseline",
   "Replace the visual baseline for {profile} at {width} × {height}?": "Replace the visual baseline for {profile} at {width} × {height}?",
+  "Visual baseline unchanged.": "Visual baseline unchanged.",
   "Visual capture is not a PNG image.": "Visual capture is not a PNG image.",
   "Visual capture is malformed.": "Visual capture is malformed.",
   "Visual capture exceeds the 24 MiB safety limit.": "Visual capture exceeds the 24 MiB safety limit.",

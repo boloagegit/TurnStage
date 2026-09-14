@@ -82,7 +82,9 @@ type SendMessage = (text?: string, interaction?: InteractionContext) => void;
 type SetDraft = (value: string) => void;
 type PostMessage = (message: WebviewPayload) => void;
 export interface MessageActionFeedback { actionId: string; sourceMessageId: string; status: 'pending' | 'success' | 'info' | 'error'; message: string }
-export interface VisualFeedback { operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselinePath: string; diffPath?: string }
+export type VisualFeedback =
+  | { operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselinePath: string; diffPath?: string }
+  | { operation: 'baseline' | 'compare'; status: 'error'; message: string };
 
 export interface MobileChatPreviewProps {
   profile: TurnStageProfile;
@@ -356,7 +358,8 @@ export function MobileChatPreview({
   useEffect(() => {
     if (!visualFeedback) return;
     setCapturingVisual(undefined);
-    if (visualFeedback.operation === 'baseline') setScreenshotStatus(t('Visual baseline saved.'));
+    if (visualFeedback.status === 'error') setScreenshotStatus(visualFeedback.message);
+    else if (visualFeedback.operation === 'baseline') setScreenshotStatus(t('Visual baseline saved.'));
     else setScreenshotStatus(visualFeedback.status === 'passed' ? t('Visual comparison passed ({difference}%).', { difference: formatNumber(visualFeedback.differencePercent ?? 0) }) : t('Visual comparison failed ({difference}%).', { difference: formatNumber(visualFeedback.differencePercent ?? 0) }));
   }, [visualFeedback]);
   useEffect(() => {
@@ -364,6 +367,11 @@ export function MobileChatPreview({
     const timeout = window.setTimeout(() => { setCapturingVisual(undefined); setScreenshotStatus(t('Visual comparison timed out.')); }, 30_000);
     return () => window.clearTimeout(timeout);
   }, [capturingVisual]);
+  useEffect(() => {
+    if (!screenshotStatus || capturingVisual || capturingScreenshot) return;
+    const timeout = window.setTimeout(() => setScreenshotStatus(''), 7000);
+    return () => window.clearTimeout(timeout);
+  }, [screenshotStatus, capturingVisual, capturingScreenshot]);
 
   const rootClassName = ['mobile-chat-preview', className].filter(Boolean).join(' ');
 
@@ -374,7 +382,7 @@ export function MobileChatPreview({
         <div className="mobile-chat-preview__viewport-settings-panel">
           <label className="mobile-chat-preview__preset-control"><span>{t('Viewport preset')}</span><select value={presetId} aria-label={t('Viewport preset')} onChange={(event) => selectPreset(event.target.value as ChatViewportPreset)}><option value="responsive">{t('Responsive')}</option><optgroup label={t('Devices')}>{CHAT_VIEWPORT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{t(preset.label)} — {preset.width} × {preset.height}</option>)}</optgroup><option value="custom">{t('Custom')}</option></select></label>
           <div className="mobile-chat-preview__dimensions" role="group" aria-label={t('Viewport dimensions')}><label><span>{t('Width')}</span><ViewportDimensionInput value={logicalWidth} minimum={MIN_VIEWPORT_WIDTH} maximum={MAX_VIEWPORT_WIDTH} label={t('Viewport width')} onCommit={(value) => setViewportDimension('width', value)} /></label><span aria-hidden="true">×</span><label><span>{t('Height')}</span><ViewportDimensionInput value={logicalHeight} minimum={MIN_VIEWPORT_HEIGHT} maximum={MAX_VIEWPORT_HEIGHT} label={t('Viewport height')} onCommit={(value) => setViewportDimension('height', value)} /></label><IconButton className="mobile-chat-preview__rotate" icon="arrow-swap" label={t('Rotate viewport')} type="button" onClick={rotateViewport} /></div>
-          <label className="mobile-chat-preview__zoom-control"><span>{t('Viewport zoom')}</span><select value={responsive ? '100' : viewport.zoom} disabled={responsive} aria-label={t('Viewport zoom')} onChange={(event) => updateViewport({ ...viewport, zoom: event.target.value as ChatViewportZoom })}><option value="fit">{t('Fit')}</option><option value="100">100%</option><option value="75">75%</option><option value="50">50%</option></select>{!responsive && viewport.zoom === 'fit' && <small className="mobile-chat-preview__fit-scale" aria-label={t('Preview scale')}>{formatNumber(Math.round(previewScale * 100))}% {t('actual preview')}</small>}</label>
+          {!responsive && <label className="mobile-chat-preview__zoom-control"><span>{t('Viewport zoom')}</span><select value={viewport.zoom} aria-label={t('Viewport zoom')} onChange={(event) => updateViewport({ ...viewport, zoom: event.target.value as ChatViewportZoom })}><option value="fit">{t('Fit')}</option><option value="100">100%</option><option value="75">75%</option><option value="50">50%</option></select>{viewport.zoom === 'fit' && <small className="mobile-chat-preview__fit-scale" aria-label={t('Preview scale')}>{formatNumber(Math.round(previewScale * 100))}% {t('actual preview')}</small>}</label>}
         </div>
       </details>
       <div className="mobile-chat-preview__session-tools" role="group" aria-label={t('Session status and actions')}>
@@ -419,7 +427,7 @@ export function MobileChatPreview({
       </div>
       </div>
     </div>
-    <p className="mobile-chat-preview__status" role="status" aria-live="polite" aria-atomic="true">{screenshotStatus || statusText}</p>
+    <p className={`mobile-chat-preview__status${screenshotStatus ? ' is-visible' : ''}`} role="status" aria-live="polite" aria-atomic="true">{screenshotStatus || statusText}</p>
   </section>;
 }
 

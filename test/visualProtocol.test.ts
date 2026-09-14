@@ -27,6 +27,8 @@ describe('visual protocol payload bounds', () => {
       baselinePath: '.turnstage/baselines/profile.desktop.png',
       diffPath: '.turnstage/baselines/profile.desktop.diff.png',
     }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'visual.error', operation: 'compare', message: 'No baseline saved.' }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, type: 'visual.error', operation: 'invalid', message: 'No baseline saved.' }, 'editor-1')).toBe(false);
   });
 
   it('rejects malformed captures and out-of-range viewport dimensions', () => {

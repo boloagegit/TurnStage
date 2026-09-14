@@ -154,6 +154,10 @@ export interface SettingsWorkspaceProps {
 
 type PatchPath = Array<string | number>;
 
+function ReadOnlyNotice({ post }: { post: SettingsWorkspacePost }): React.JSX.Element {
+  return <div className="settings-readonly-notice" role="note"><ProductIcon name="lock" /><strong>{t('Server-managed Profile')}</strong><button type="button" className="primary" onClick={() => post({ type: 'profile.duplicate' })}>{t('Duplicate to edit')}</button></div>;
+}
+
 function useRestoredScrollPosition(ref: React.RefObject<HTMLDivElement | null>, key: string, scrollTop: number | undefined): void {
   const restoredKey = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
@@ -226,17 +230,17 @@ export function SettingsWorkspace({
           id={`settings-panel-${active.id}`}
           className="settings-panel"
           aria-labelledby={sectionTitleId}
-          aria-describedby={sectionDescriptionId}
+          aria-describedby={embedded ? undefined : sectionDescriptionId}
           tabIndex={-1}
         >
-          <div className="settings-panel-heading">
+          <div className={embedded ? 'sr-only' : 'settings-panel-heading'}>
             <div className="settings-panel-title">
               <h1 id={sectionTitleId}>{t(active.label)}</h1>
-              <p id={sectionDescriptionId} className="settings-section-description">{t(active.description)}</p>
+              {!embedded && <p id={sectionDescriptionId} className="settings-section-description">{t(active.description)}</p>}
             </div>
-            <span className="settings-section-count">{t('Profile')} <code>{profile.id}</code></span>
+            {!embedded && <span className="settings-section-count">{t('Profile')} <code>{profile.id}</code></span>}
           </div>
-          {readOnly && <div className="settings-readonly-notice" role="note"><ProductIcon name="lock" /><div><strong>{t('Server-managed Profile')}</strong><span>{t('This Profile is read-only. Duplicate it to create an editable copy in this browser.')}</span></div><button type="button" className="primary" onClick={() => post({ type: 'profile.duplicate' })}>{t('Duplicate to edit')}</button></div>}
+          {readOnly && <ReadOnlyNotice post={post} />}
           <fieldset className="settings-editable-region" disabled={readOnly}>
           {active.id === 'general' && <GeneralSection profile={profile} snapshot={snapshot} post={post} patch={patch} vscodeFeatures={vscodeFeatures} />}
           {active.id === 'opening-flow' && <OpeningFlowSection profile={profile} post={post} />}
@@ -404,7 +408,6 @@ function GeneralSection({ profile, snapshot, post, patch, vscodeFeatures }: { pr
 
 function OpeningFlowSection({ profile, post }: { profile: TurnStageProfile; post: SettingsWorkspacePost }): React.JSX.Element {
   return <div className="settings-editor-frame">
-    <div className="settings-editor-note"><strong>{t('Flow editor')}</strong></div>
     <FlowEditor profile={profile} post={post} />
   </div>;
 }
@@ -775,7 +778,7 @@ function ScenarioTestsSection({ view, automationSection = 'settings', onAutomati
       </>}
     </section>}
     {contractCasesVisible && <section id="automation-scenarios" className="settings-card red-team-section" role="tabpanel" aria-labelledby="automation-scenarios-tab scenario-contract-heading" tabIndex={-1}>
-      {readOnly && <div className="settings-readonly-notice" role="note"><ProductIcon name="lock" /><div><strong>{t('Server-managed Profile')}</strong><span>{t('This Profile is read-only. Duplicate it to create an editable copy in this browser.')}</span></div><button type="button" className="primary" onClick={() => post({ type: 'profile.duplicate' })}>{t('Duplicate to edit')}</button></div>}
+      {readOnly && <ReadOnlyNotice post={post} />}
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="scenario-contract-heading">{t('Test cases')}</h2></div><div className="adversarial-case-heading-actions">
         <IconButton type="button" icon="add" label={t('Add case')} disabled={readOnly} onClick={addScenario} />
         <IconButton type="button" icon="desktop-download" label={t('Download sample CSV')} disabled={!trusted} onClick={() => post({ type: 'contract.file', action: 'csvTemplate' })} />
@@ -844,7 +847,7 @@ function ScenarioTestsSection({ view, automationSection = 'settings', onAutomati
       </div>}
     </section>}
     {view === 'adversarial' && adversarialSection === 'cases' && <section id="red-team-cases" className="settings-card red-team-section" role="tabpanel" aria-labelledby="red-team-cases-tab adversarial-tests-heading" tabIndex={-1}>
-      {readOnly && <div className="settings-readonly-notice" role="note"><ProductIcon name="lock" /><div><strong>{t('Server-managed Profile')}</strong><span>{t('This Profile is read-only. Duplicate it to create an editable copy in this browser.')}</span></div><button type="button" className="primary" onClick={() => post({ type: 'profile.duplicate' })}>{t('Duplicate to edit')}</button></div>}
+      {readOnly && <ReadOnlyNotice post={post} />}
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="adversarial-tests-heading">{t('Test cases')}</h2></div><div className="adversarial-case-heading-actions" role="group" aria-label={t('Author adversarial cases')}><IconButton type="button" icon="add" label={t('Add case')} disabled={readOnly} onClick={addAdversarial} /><IconButton type="button" icon="desktop-download" label={t('Download sample CSV')} onClick={() => post({ type: 'adversarial.file', action: 'csvTemplate' })} /><details className="adversarial-case-file-menu"><summary aria-label={t('More case actions')} title={t('More case actions')}><ProductIcon name="ellipsis" /></summary><div>
         <details className="case-format-submenu"><summary aria-label={t('Add cases from file')}>{t('Add cases from file')}</summary><div>
         <button type="button" disabled={readOnly} onClick={(event) => { closeCaseFileMenu(event); post({ type: 'adversarial.file', action: 'importJsonc' }); }}>{t('Import JSONC copy')}</button>
@@ -1657,7 +1660,7 @@ function evidenceLocationText(kind: AdversarialResultSummary['primaryLocation'][
 function uniqueId(values: ReadonlySet<string>, preferred: string): string { if (!values.has(preferred)) return preferred; for (let index = 2; index < 10_000; index++) if (!values.has(`${preferred}-${index}`)) return `${preferred}-${index}`; return `${preferred}-${Date.now()}`; }
 
 function SectionHeading({ id, title, description }: { id: string; title: string; description: string }): React.JSX.Element {
-  return <div className="settings-card-heading"><div><h2 id={id}>{title}</h2><p className="settings-card-description">{description}</p></div></div>;
+  return <div className="settings-card-heading"><div><h2 id={id}>{title}</h2><p className="sr-only">{description}</p></div></div>;
 }
 
 function SettingField({ label, id, hint, error, wide, children }: { label: string; id: string; hint?: string; error?: string; wide?: boolean; children: React.ReactNode }): React.JSX.Element {

@@ -83,7 +83,7 @@ export function assessRequestAuthorization(request: PreparedRequest, purpose: Re
   const cleartextSecrets = target?.protocol === 'http:' && hasSecrets && !loopback;
   const automaticOpening = purpose === 'opening' && !loopback;
   return {
-    required: invalidCertificates || Boolean(cleartextSecrets) || automaticOpening,
+    required: invalidCertificates || Boolean(cleartextSecrets),
     destination: displayDestination(safeUrl(request.redacted.url)),
     hasSecrets,
     invalidCertificates,

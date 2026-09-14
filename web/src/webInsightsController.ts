@@ -1,6 +1,8 @@
 import type { HostPayload } from '../../src/shared/protocol';
 import type { ConnectionDoctorFinding, ConnectionDoctorSummary, SessionSnapshot, TurnStageProfile } from '../../src/shared/types';
 import { ArtifactStore } from './artifactStore';
+import { pngDataUrlToBlob } from '../../src/webview/chatScreenshot';
+import { t } from '../../src/webview/i18n';
 import type { BrowserSessionState } from './browserSession';
 
 interface VisualBaseline { dataUrl: string; viewport: { id: string; width: number; height: number } }
@@ -33,7 +35,11 @@ export class WebInsightsController {
 
   async saveBaseline(dataUrl: string, viewport: VisualBaseline['viewport']): Promise<void> {
     const profile = this.profile();
-    const id = `${profile.id}:${viewport.id}`;
+    const id = visualBaselineId(profile.id, viewport);
+    if (await this.store.get<VisualBaseline>('visualBaselines', id) && !window.confirm(t('Replace visual baseline for this viewport?'))) {
+      this.post({ type: 'visual.error', operation: 'baseline', message: t('Visual baseline unchanged.') });
+      return;
+    }
     const value = { dataUrl, viewport };
     await this.store.put<VisualBaseline>('visualBaselines', { id, profileId: profile.id, kind: 'visual', name: viewport.id, updatedAt: Date.now(), value });
     this.post({ type: 'visual.result', operation: 'baseline', status: 'saved', baselinePath: `browser://visual-baseline/${id}` });
@@ -41,28 +47,30 @@ export class WebInsightsController {
 
   async compare(dataUrl: string, viewport: VisualBaseline['viewport']): Promise<void> {
     const profile = this.profile();
-    const id = `${profile.id}:${viewport.id}`;
+    const id = visualBaselineId(profile.id, viewport);
     const baseline = await this.store.get<VisualBaseline>('visualBaselines', id);
-    if (!baseline) throw new Error(`No browser-local baseline exists for viewport ${viewport.id}.`);
-    const differencePercent = await pixelDifference(baseline.value.dataUrl, dataUrl, baseline.value.viewport, viewport);
-    this.post({ type: 'visual.result', operation: 'compare', status: differencePercent === 0 ? 'passed' : 'failed', differencePercent, baselinePath: `browser://visual-baseline/${id}`, ...(differencePercent ? { diffPath: `browser://visual-diff/${id}` } : {}) });
+    if (!baseline) throw new Error(t('No visual baseline for this viewport. Save one first.'));
+    const differencePercent = await pixelDifference(baseline.value.dataUrl, dataUrl, baseline.value.viewport, viewport, profile.tests?.visual?.channelTolerance ?? 16);
+    this.post({ type: 'visual.result', operation: 'compare', status: differencePercent <= (profile.tests?.visual?.maxDifferencePercent ?? 0.1) ? 'passed' : 'failed', differencePercent, baselinePath: `browser://visual-baseline/${id}` });
   }
 }
 
 function finding(category: ConnectionDoctorFinding['category'], severity: ConnectionDoctorFinding['severity'], message: string): ConnectionDoctorFinding { return { id: `${category}-${severity}-${message.slice(0, 24).replaceAll(/\W+/gu, '-').toLowerCase()}`, category, severity, message }; }
+function visualBaselineId(profileId: string, viewport: VisualBaseline['viewport']): string { return `${profileId}:${viewport.id}:${viewport.width}x${viewport.height}`; }
 
-async function pixelDifference(leftUrl: string, rightUrl: string, leftViewport: VisualBaseline['viewport'], rightViewport: VisualBaseline['viewport']): Promise<number> {
+async function pixelDifference(leftUrl: string, rightUrl: string, leftViewport: VisualBaseline['viewport'], rightViewport: VisualBaseline['viewport'], channelTolerance: number): Promise<number> {
   if (leftViewport.width !== rightViewport.width || leftViewport.height !== rightViewport.height) return 100;
   const [left, right] = await Promise.all([imageData(leftUrl, leftViewport.width, leftViewport.height), imageData(rightUrl, rightViewport.width, rightViewport.height)]);
   let changed = 0;
+  const tolerance = Number.isFinite(channelTolerance) ? Math.min(255, Math.max(0, channelTolerance)) : 16;
   for (let index = 0; index < left.data.length; index += 4) {
-    if (Math.abs(left.data[index]! - right.data[index]!) > 8 || Math.abs(left.data[index + 1]! - right.data[index + 1]!) > 8 || Math.abs(left.data[index + 2]! - right.data[index + 2]!) > 8 || Math.abs(left.data[index + 3]! - right.data[index + 3]!) > 8) changed += 1;
+    if (Math.abs(left.data[index]! - right.data[index]!) > tolerance || Math.abs(left.data[index + 1]! - right.data[index + 1]!) > tolerance || Math.abs(left.data[index + 2]! - right.data[index + 2]!) > tolerance || Math.abs(left.data[index + 3]! - right.data[index + 3]!) > tolerance) changed += 1;
   }
   return Math.round((changed / (left.width * left.height)) * 10_000) / 100;
 }
 
 async function imageData(dataUrl: string, width: number, height: number): Promise<ImageData> {
-  const image = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const image = await createImageBitmap(pngDataUrlToBlob(dataUrl));
   let context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
   if (typeof OffscreenCanvas === 'undefined') {
     const canvas = document.createElement('canvas');

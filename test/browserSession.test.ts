@@ -58,8 +58,8 @@ describe('BrowserSession', () => {
     await session.send('Hello', { kind: 'manual' });
 
     expect(session.current.snapshot.turnState).toBe('failed');
-    expect(session.current.snapshot.errors[0]?.message).toContain('CORS');
-    expect(session.current.snapshot.errors[0]?.message).toContain('TLS certificate trust');
+    expect(session.current.snapshot.errors[0]?.message).toContain('did not provide an HTTP response');
+    expect(session.current.snapshot.errors[0]?.message).not.toContain('CORS');
   });
 
   it('does not silently use another environment when the selected Profile environment is missing', async () => {
@@ -318,7 +318,7 @@ describe('BrowserSession', () => {
 
     expect(fetch).toHaveBeenCalledOnce();
     expect(session.current.snapshot.turnState).toBe('failed');
-    expect(session.current.snapshot.errors[0]?.message).toContain('TLS certificate trust');
+    expect(session.current.snapshot.errors[0]?.message).toContain('did not provide an HTTP response');
     expect(session.current.networkEntries[0]?.state).toBe('failed');
   });
 

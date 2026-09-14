@@ -240,6 +240,7 @@ export type HostMessage = Envelope & (
   | { type: 'test.captured'; detail: string; kind: 'contract' | 'adversarial'; scenarioId: string; sourcePath?: string }
   | { type: 'adversarial.captured'; detail: string }
   | { type: 'visual.result'; operation: 'baseline' | 'compare'; status: 'saved' | 'passed' | 'failed'; differencePercent?: number; baselinePath: string; diffPath?: string }
+  | { type: 'visual.error'; operation: 'baseline' | 'compare'; message: string }
   | { type: 'workspaceTrust.changed'; trusted: boolean }
 );
 export type WebviewPayload = WithoutEnvelope<WebviewMessage>;
@@ -428,6 +429,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'test.captured': return isBoundedString(message.detail, MAX_TEXT_LENGTH) && ['contract', 'adversarial'].includes(String(message.kind)) && isBoundedId(message.scenarioId) && optionalBoundedString(message.sourcePath);
     case 'adversarial.captured': return isBoundedString(message.detail, MAX_TEXT_LENGTH);
     case 'visual.result': return (message.operation === 'baseline' || message.operation === 'compare') && ['saved', 'passed', 'failed'].includes(String(message.status)) && optionalBoundedString(message.baselinePath) && optionalBoundedString(message.diffPath) && (message.differencePercent === undefined || (typeof message.differencePercent === 'number' && Number.isFinite(message.differencePercent) && message.differencePercent >= 0 && message.differencePercent <= 100));
+    case 'visual.error': return (message.operation === 'baseline' || message.operation === 'compare') && isBoundedString(message.message, 4096);
     case 'workspaceTrust.changed': return typeof message.trusted === 'boolean';
     default: return false;
   }
