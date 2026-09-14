@@ -2,6 +2,7 @@ import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMe
 import { createRoot } from 'react-dom/client';
 import type { AdversarialCaseCatalog, ContractCaseCatalog, HostMessage, MappingTestResult, TestOperationSnapshot, WebviewPayload, WorkspaceSection } from '../shared/protocol';
 import { isHostMessage, isWorkspaceSection, PROTOCOL_VERSION } from '../shared/protocol';
+import { browserUuid } from '../shared/uuid';
 import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ChatMessage, ConnectionDoctorSummary, EvidenceTimelineEntry, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { mappingDraftFromRawEvent } from './configEditors';
 import { JsonViewer, safeJson } from './JsonViewer';
@@ -54,7 +55,7 @@ const savedState = normalizeWebviewState(vscode.getState());
 const savedSplitCustomized = savedState?.splitCustomized === true;
 const savedInspectorTab = (savedState as { inspectorTab?: unknown } | undefined)?.inspectorTab;
 
-function post(message: WebviewPayload): void { vscode.postMessage({ ...message, protocolVersion: PROTOCOL_VERSION, editorInstanceId: instanceId, requestId: crypto.randomUUID() }); }
+function post(message: WebviewPayload): void { vscode.postMessage({ ...message, protocolVersion: PROTOCOL_VERSION, editorInstanceId: instanceId, requestId: browserUuid() }); }
 
 function App(): React.JSX.Element {
   const savedSection = isWorkspaceSection(savedState?.section) ? savedState.section : 'test';
@@ -487,7 +488,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
     </div>
     <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
     <section ref={previewRef} className="preview-pane">
-      <MobileChatPreview profile={profile} showEnvironment={hostKind === 'vscode'} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} viewport={chatViewport} onViewportChange={setChatViewport} onConfigure={() => setRightPaneMode('configure')} selectedMessageId={rightPaneMode === 'debug' ? selectedMessageId : undefined} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={onMessageActionFeedback} initialMessageScrollTop={scrollPositions.chat} onMessageScrollTopChange={(value) => onScrollPositionChange('chat', value)} />
+      <MobileChatPreview profile={profile} showEnvironment={hostKind === 'vscode'} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} viewport={chatViewport} onViewportChange={setChatViewport} onConfigure={() => setRightPaneMode('configure')} selectedMessageId={rightPaneMode === 'debug' ? selectedMessageId : undefined} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={onMessageActionFeedback} initialMessageScrollTop={scrollPositions.chat} onMessageScrollTopChange={(value) => onScrollPositionChange('chat', value)} screenshotMode={hostKind === 'web' && !window.isSecureContext ? 'download' : 'copy'} />
     </section>
     {showRightPane && <>
       <div className={`splitter splitter--${rightPanePosition}`} role="separator" aria-label={t('Resize chat preview and right panel')} aria-orientation={rightPanePosition === 'right' ? 'vertical' : 'horizontal'} aria-valuemin={10} aria-valuemax={90} aria-valuenow={Math.round(splitPercent)} tabIndex={0} onPointerDown={beginResize} onKeyDown={(event) => {

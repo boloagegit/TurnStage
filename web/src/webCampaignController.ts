@@ -5,6 +5,7 @@ import { serializeCampaignResultsJsonl } from '../../src/extension/testing/adver
 import { isScenarioReady } from '../../src/extension/testing/scenarioCapture';
 import { ArtifactStore } from './artifactStore';
 import { WebTestController, webCaseUnsupportedReason, type WebScenarioEntry } from './webTestController';
+import { browserUuid } from './browserCrypto';
 
 export class WebCampaignController {
   private readonly store = new ArtifactStore();
@@ -42,7 +43,7 @@ export class WebCampaignController {
     let record = resumeRunId ? await this.getRun(resumeRunId) : undefined;
     if (resumeRunId && !record) throw new Error('The browser-local campaign run to resume was not found.');
     if (record && (record.campaignId !== campaignId || record.sourceDigest !== plan.sourceDigest)) throw new Error('The saved campaign no longer matches the current profile or selectors.');
-    record ??= createCampaignRunRecord(plan, profile.id, { id: crypto.randomUUID() });
+    record ??= createCampaignRunRecord(plan, profile.id, { id: browserUuid() });
     record = { ...record, status: 'running', updatedAt: Date.now() };
     await this.saveRun(record);
     await this.postDashboard();

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.29.1
+
+- Fixed TurnStage Web on ordinary `http://SERVER_IP:PORT` origins: browser sessions, test runs, suite imports, and the shared Web UI no longer require secure-context-only UUID or digest APIs.
+- Text copy now has an HTTP-compatible gesture fallback. Chat screenshots download as PNG on insecure Web origins, while secure Web and VS Code keep image clipboard behavior.
+- Documented domain-free, HTTP-by-IP deployment with a same-origin route to an internal SSE proxy on a separate port. HTTP does not protect Profiles, credentials, requests, or responses in transit.
+- Compatibility: Profile, suite, storage, and VSIX protocols are unchanged.
+
 ## 0.29.0
 
 - Added folder-based official Web Profiles: copy existing VS Code JSONC Profiles and their Environments into the extracted Web archive, then run the included Python 3.6+ standard-library script to regenerate the file index. No Python process or other application server is needed while users browse the static Web app.

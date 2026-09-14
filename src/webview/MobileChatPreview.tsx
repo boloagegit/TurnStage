@@ -107,6 +107,7 @@ export interface MobileChatPreviewProps {
   /** Scroll checkpoint restored after VS Code recreates a hidden Webview DOM. */
   initialMessageScrollTop?: number;
   onMessageScrollTopChange?: (value: number) => void;
+  screenshotMode?: 'copy' | 'download';
   className?: string;
 }
 
@@ -137,6 +138,7 @@ export function MobileChatPreview({
   onMessageActionFeedback,
   initialMessageScrollTop,
   onMessageScrollTopChange,
+  screenshotMode = 'copy',
   className
 }: MobileChatPreviewProps): React.JSX.Element {
   const [uncontrolledViewport, setUncontrolledViewport] = useState<ChatViewportState>(controlledViewport ?? DEFAULT_CHAT_VIEWPORT);
@@ -315,13 +317,22 @@ export function MobileChatPreview({
     const device = deviceRef.current;
     if (!device || capturingScreenshot) return;
     setCapturingScreenshot(true);
-    setScreenshotStatus(t('Copying chat screenshot…'));
+    setScreenshotStatus(t(screenshotMode === 'download' ? 'Downloading chat screenshot…' : 'Copying chat screenshot…'));
     try {
-      const screenshot = captureChatScreenshot(device);
-      await copyChatScreenshotToClipboard(screenshot.then((result) => result.dataUrl));
-      setScreenshotStatus(t('Chat screenshot copied to clipboard.'));
+      if (screenshotMode === 'download') {
+        const screenshot = await captureChatScreenshot(device);
+        const link = document.createElement('a');
+        link.href = screenshot.dataUrl;
+        link.download = 'turnstage-chat.png';
+        link.click();
+        setScreenshotStatus(t('Chat screenshot downloaded.'));
+      } else {
+        const screenshot = captureChatScreenshot(device);
+        await copyChatScreenshotToClipboard(screenshot.then((result) => result.dataUrl));
+        setScreenshotStatus(t('Chat screenshot copied to clipboard.'));
+      }
     } catch {
-      setScreenshotStatus(t('Unable to copy chat screenshot.'));
+      setScreenshotStatus(t(screenshotMode === 'download' ? 'Unable to download chat screenshot.' : 'Unable to copy chat screenshot.'));
     } finally {
       setCapturingScreenshot(false);
     }
@@ -373,7 +384,7 @@ export function MobileChatPreview({
         </span>
         {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon="debug-restart" label={t('Restart session')} type="button" disabled={!trusted || active || snapshot.sessionState === 'loadingOpening'} onClick={() => post({ type: 'conversation.new' })} />}
       </div>
-      <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
+      <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(screenshotMode === 'download' ? capturingScreenshot ? 'Downloading chat screenshot…' : 'Download chat screenshot' : capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
       {onConfigure && <IconButton icon="settings-gear" label={t('Configure profile')} type="button" onClick={onConfigure} />}
       <ToolbarOverflow>
         <button role="menuitem" type="button" disabled={!trusted || active || !snapshot?.messages.some((message) => message.role === 'user')} onClick={() => post({ type: 'test.capture', source: { kind: 'conversation' } })}><ProductIcon name="beaker" /><span>{t('Save as test…')}</span></button>

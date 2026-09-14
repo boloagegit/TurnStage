@@ -15,6 +15,7 @@ import { isScenarioReady } from '../../src/extension/testing/scenarioCapture';
 import { resolveTestSelection, testCaseKey, type TestCaseIdentity } from '../../src/shared/testSelection';
 import { createTestRunHistoryRecord, nonPassingCases, type CompletedTestRunCase, type TestRunHistoryRecord } from '../../src/shared/testRunHistory';
 import { strToU8, zipSync } from 'fflate';
+import { browserSha256, browserUuid } from './browserCrypto';
 
 interface WebSuite {
   suiteId: string;
@@ -102,7 +103,7 @@ export class WebTestController {
     this.activeRun = true;
     this.cancelled = false;
     const startedAt = Date.now();
-    const runId = crypto.randomUUID();
+    const runId = browserUuid();
     const completedCases: CompletedTestRunCase[] = [];
     this.post({ type: 'test.operation', operation: { action, state: 'running', progress: { totalCases: selected.length, completedCases: 0, totalAttempts: attempts, completedAttempts: 0, maxConcurrency: 1 } } });
     let completed = 0;
@@ -203,13 +204,13 @@ export class WebTestController {
     const cancellation = cancellable ? { get isCancellationRequested() { return isCancelled(); }, onCancellationRequested: (listener: () => void) => { listeners.add(listener); return { dispose: () => listeners.delete(listener) }; } } : undefined;
     try { assertWebCaseSupported(item.scenario);
       result = item.scenario.adversarial
-      ? (await runScenarioGroup(profile.id, item.scenario, async () => new BrowserSession(profile, environment, secrets, () => undefined), { cancellation })).result
+      ? (await runScenarioGroup(profile.id, item.scenario, async () => new BrowserSession(profile, environment, secrets, () => undefined), { cancellation, runId: browserUuid() })).result
       : await runScenario(profile.id, item.scenario, runtime, cancellation); }
     catch (error) { result = executionError(profile.id, item.scenario, error); }
     result = redactKnownSecrets(result, [...secrets.values()]) as ScenarioRunResult;
-    const evidenceId = crypto.randomUUID();
+    const evidenceId = browserUuid();
     await this.store.put<RetainedEvidence>('evidence', { id: evidenceId, profileId: profile.id, kind: item.scenario.adversarial ? 'adversarial' : 'contract', name: item.scenario.name, updatedAt: Date.now(), value: { scenario: item.scenario, result } });
-    await this.store.put<ScenarioRunResult>('runs', { id: crypto.randomUUID(), profileId: profile.id, kind: 'test', name: item.scenario.name, updatedAt: Date.now(), value: result });
+    await this.store.put<ScenarioRunResult>('runs', { id: browserUuid(), profileId: profile.id, kind: 'test', name: item.scenario.name, updatedAt: Date.now(), value: result });
     if (result.adversarial) this.upsertAdversarial(adversarialSummary(profile.id, item.scenario, result, evidenceId, item.suiteId));
     else this.upsertAutomation(automationSummary(profile.id, item.scenario, result, evidenceId, item.suiteId));
     return { result, evidenceId };
@@ -381,7 +382,7 @@ function adversarialSummary(profileId: string, scenario: ScenarioDefinition, res
 
 function executionError(profileId: string, scenario: ScenarioDefinition, error: unknown): ScenarioRunResult {
   const message = error instanceof Error ? error.message : String(error);
-  return { scenarioId: scenario.id, passed: false, durationMs: 0, steps: [], checks: [{ id: 'web-execution-error', label: message, passed: false, kind: 'invariant', location: { kind: 'profile', path: 'tests.scenarios' } }], evidence: { profileId, scenarioId: scenario.id, snapshot: { sessionId: crypto.randomUUID(), sessionState: 'failed', turnState: 'failed', messages: [], rawEvents: [], normalizedEvents: [], metrics: { eventCount: 0, byteCount: 0, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0 }, errors: [{ type: 'WebTestExecutionError', message }], droppedEventCount: 0, trusted: true, controls: {} }, networkEntries: [] } };
+  return { scenarioId: scenario.id, passed: false, durationMs: 0, steps: [], checks: [{ id: 'web-execution-error', label: message, passed: false, kind: 'invariant', location: { kind: 'profile', path: 'tests.scenarios' } }], evidence: { profileId, scenarioId: scenario.id, snapshot: { sessionId: browserUuid(), sessionState: 'failed', turnState: 'failed', messages: [], rawEvents: [], normalizedEvents: [], metrics: { eventCount: 0, byteCount: 0, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0 }, errors: [{ type: 'WebTestExecutionError', message }], droppedEventCount: 0, trusted: true, controls: {} }, networkEntries: [] } };
 }
 
 async function parseSuite(kind: 'contract' | 'adversarial', format: 'csv' | 'jsonc' | 'jsonl', fileName: string, raw: string): Promise<WebSuite> {
@@ -407,7 +408,7 @@ async function parseSuite(kind: 'contract' | 'adversarial', format: 'csv' | 'jso
     }
   }
   if (!scenarios.length) throw new Error('The selected suite contains no cases.');
-  return { suiteId, name, kind, sourceFormat: format, sourcePath: `browser://suite/${crypto.randomUUID()}/${fileName}`, revision: await digest(raw), scenarios, raw };
+  return { suiteId, name, kind, sourceFormat: format, sourcePath: `browser://suite/${browserUuid()}/${fileName}`, revision: await digest(raw), scenarios, raw };
 }
 
 function serializeSuite(suite: WebSuite, scenarios: ScenarioDefinition[]): string {
@@ -426,7 +427,7 @@ async function pickTextFile(accept: string): Promise<{ name: string; text: strin
   });
 }
 
-async function digest(value: string): Promise<string> { const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)); return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, '0')).join(''); }
+async function digest(value: string): Promise<string> { return browserSha256(value); }
 function download(name: string, content: string, type: string): void { const url = URL.createObjectURL(new Blob([content], { type })); const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click(); URL.revokeObjectURL(url); }
 function downloadBytes(name: string, content: Uint8Array, type: string): void { const url = URL.createObjectURL(new Blob([content as BlobPart], { type })); const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click(); URL.revokeObjectURL(url); }
 function safeFileName(value: string): string { return value.replaceAll(/[^A-Za-z0-9_.-]+/gu, '-').slice(0, 128) || 'scenario'; }

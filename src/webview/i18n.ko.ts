@@ -1,5 +1,9 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Download chat screenshot': '채팅 스크린샷 다운로드',
+  'Downloading chat screenshot…': '채팅 스크린샷 다운로드 중…',
+  'Chat screenshot downloaded.': '채팅 스크린샷을 다운로드했습니다.',
+  'Unable to download chat screenshot.': '채팅 스크린샷을 다운로드할 수 없습니다.',
   'Search cases': '케이스 검색',
   'No test cases yet.': '아직 테스트 케이스가 없습니다.',
   'No cases match the current search.': '검색 조건에 맞는 케이스가 없습니다.',

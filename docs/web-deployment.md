@@ -34,6 +34,37 @@ location /turnstage/ {
 
 The archive has no server-side runtime dependency. HTTPS, authentication, access logging, and network policy remain responsibilities of the company reverse proxy.
 
+## Serve by IP over ordinary HTTP
+
+For an internal deployment without a domain or TLS certificate, TurnStage Web also works at `http://SERVER_IP:8080/`. Unlike a localhost preview, this is an insecure browser origin, so Web uses an HTTP-compatible UUID and digest implementation. Text copy uses a browser gesture fallback; the chat screenshot action downloads a PNG instead of copying an image to the clipboard. Browser-specific policy can still deny clipboard access, in which case TurnStage reports the failure.
+
+If the SSE proxy is on port 8081 of the same server, the simplest arrangement is to expose only port 8080 to users and route `/api/` internally:
+
+```nginx
+server {
+    listen 8080;
+    server_name _;
+    root /opt/turnstage-web;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8081/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+Set the Profile's API base URL to `http://SERVER_IP:8080/api` (substitute the actual server IP). This keeps browser requests on the Web page's origin, so the 8081 service does not need a browser-facing port or CORS. `proxy_pass` above removes `/api/` before forwarding; adjust it if the SSE proxy itself expects that prefix. A Profile pointing directly at `http://SERVER_IP:8081` is also possible, but that port must be reachable from every user's browser and permit the Web origin through CORS, including any preflight `OPTIONS` request and configured headers. Never use `localhost:8081` in a shared Profile: it refers to the user's own device.
+
+HTTP provides no confidentiality or integrity for the Web app, Profiles, requests, SSE responses, or plaintext tokens. Use this mode only on a trusted internal network with access controls appropriate to the data; prefer HTTPS when tokens or sensitive test content cross an untrusted network. Changing between HTTP and HTTPS or between ports changes the browser storage origin, so export browser-local data before changing the address.
+
 ## Add official Profiles from VS Code files
 
 The extracted Web archive contains empty `profiles/` and `environments/` folders plus `update_profiles.py`. Copy your existing VS Code `*.turnstage.jsonc` files into `profiles/`. If a Profile names an Environment, also copy its `*.environment.jsonc` file into `environments/`. From the extracted directory containing `index.html`, run:

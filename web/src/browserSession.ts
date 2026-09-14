@@ -7,6 +7,7 @@ import { MetricsCollector } from '../../src/extension/runtime/metrics';
 import { NdjsonParser, SseParser, toRawEvent } from '../../src/extension/transport/streamParser';
 import { fetchWithRedirectPolicy } from '../../src/extension/transport/fetchPolicy';
 import { ReplayEngine, type ReplaySpeed } from '../../src/extension/replay/replayEngine';
+import { browserUuid } from './browserCrypto';
 
 export interface BrowserSessionState {
   snapshot: SessionSnapshot;
@@ -15,7 +16,7 @@ export interface BrowserSessionState {
 }
 
 export class BrowserSession {
-  private state: BrowserSessionState = { snapshot: createSnapshot(true), networkEntries: [] };
+  private state: BrowserSessionState = { snapshot: createSnapshot(true, browserUuid), networkEntries: [] };
   private abortController?: AbortController;
   private sequence = 0;
   private replay?: ReplayEngine;
@@ -32,7 +33,7 @@ export class BrowserSession {
     this.abortController?.abort();
     this.profile = profile;
     this.environment = environment;
-    this.state = { snapshot: createSnapshot(true), networkEntries: [] };
+    this.state = { snapshot: createSnapshot(true, browserUuid), networkEntries: [] };
     this.sequence = 0;
     this.turnIndex = 0;
     this.resetControls();
@@ -138,7 +139,7 @@ export class BrowserSession {
   }
 
   async newConversation(): Promise<void> {
-    this.state = { snapshot: createSnapshot(true), networkEntries: [] };
+    this.state = { snapshot: createSnapshot(true, browserUuid), networkEntries: [] };
     this.sequence = 0;
     this.turnIndex = 0;
     this.resetControls();
@@ -153,7 +154,7 @@ export class BrowserSession {
     text = text.trim();
     if (!text || ['submitting', 'waitingStart', 'streaming', 'stopping'].includes(this.state.snapshot.turnState)) return;
     const startedAt = Date.now();
-    const clientRequestId = crypto.randomUUID();
+    const clientRequestId = browserUuid();
     const turnIndex = this.turnIndex++;
     const metrics = new MetricsCollector();
     let timeoutKind: 'request' | 'idle' | undefined;
@@ -255,7 +256,7 @@ export class BrowserSession {
   replayRun(run: LocalRun, speed: ReplaySpeed): boolean {
     if (!run.rawEvents?.length || ['submitting', 'waitingStart', 'streaming', 'stopping'].includes(this.state.snapshot.turnState)) return false;
     this.replay?.dispose();
-    const snapshot = createSnapshot(true);
+    const snapshot = createSnapshot(true, browserUuid);
     const recorded = run.snapshot;
     if (recorded) {
       const lastUser = recorded.messages.map((message) => message.role).lastIndexOf('user');
@@ -328,7 +329,7 @@ export class BrowserSession {
 
   private beginNetwork(request: BrowserSessionState['requestPreview'] extends infer T ? T : never, startedAt: number, kind: NetworkExchange['kind']): NetworkExchange {
     const preview = request as { method: string; url: string; headers: Record<string, string>; body?: unknown };
-    const entry: NetworkExchange = { id: crypto.randomUUID(), kind, attempt: 1, state: 'pending', method: preview.method, url: preview.url, requestHeaders: preview.headers, requestBody: preview.body, startedAt, timing: {}, transferredBytes: 0, eventCount: 0 };
+    const entry: NetworkExchange = { id: browserUuid(), kind, attempt: 1, state: 'pending', method: preview.method, url: preview.url, requestHeaders: preview.headers, requestBody: preview.body, startedAt, timing: {}, transferredBytes: 0, eventCount: 0 };
     this.state.networkEntries.push(entry);
     return entry;
   }

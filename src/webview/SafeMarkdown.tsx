@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { IconButton } from './Icon';
 import { JsonSyntax } from './JsonViewer';
+import { copyText } from './clipboardText';
 import './safeMarkdown.css';
 
 /**
@@ -247,10 +248,8 @@ function SafeCodeBlock({ code, language, onCopyCode, copyLabel }: { code: string
     try {
       if (onCopyCode) {
         await onCopyCode(code, language);
-      } else if (typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function') {
-        await navigator.clipboard.writeText(code);
       } else {
-        throw new Error('Clipboard unavailable');
+        await copyText(code);
       }
       setState('copied');
     } catch {
