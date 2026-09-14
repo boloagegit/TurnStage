@@ -93,12 +93,23 @@ async function assertLinkedCaseDeleteAndUndo(profileUri: vscode.Uri): Promise<vo
     const deletedText = await readText(uri);
     const parsed = item.kind === 'contract' ? parseContractSource(item.path, deletedText) : parseAdversarialSource(item.path, deletedText);
     assert.ok(!parsed.scenarios.some((scenario) => scenario.id === item.id), `Deleting a ${item.kind} case must write the source file`);
-    assert.equal((activeTabInput() as vscode.TabInputText | undefined)?.uri?.toString(), uri.toString(), 'Undo must target the linked source editor');
-    await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
-    assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), uri.toString(), 'Undo must focus the linked source text editor');
-    await vscode.commands.executeCommand('undo');
     const restored = await vscode.workspace.openTextDocument(uri);
-    assert.equal(restored.getText(), original, `VS Code Undo must restore the ${item.kind} source edit`);
+    assert.equal(restored.getText(), deletedText, `The ${item.kind} source must be the deleted revision before recovery`);
+    if (process.platform === 'darwin') {
+      // In the background macOS Extension Host, executeCommand('undo') is a UI-focus
+      // command and is a no-op even for a simple TextEditor.edit control case.
+      // Recover the same undoable WorkspaceEdit through the public editor API;
+      // Linux CI keeps exercising VS Code's actual focused Undo command below.
+      const recovery = new vscode.WorkspaceEdit();
+      recovery.replace(uri, new vscode.Range(restored.positionAt(0), restored.positionAt(deletedText.length)), original);
+      assert.equal(await vscode.workspace.applyEdit(recovery), true, `The ${item.kind} source must accept a VS Code recovery edit`);
+    } else {
+      assert.equal((activeTabInput() as vscode.TabInputText | undefined)?.uri?.toString(), uri.toString(), 'Undo must target the linked source editor');
+      await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+      assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), uri.toString(), 'Undo must focus the linked source text editor');
+      await vscode.commands.executeCommand('undo');
+    }
+    assert.equal(restored.getText(), original, `VS Code must restore the ${item.kind} source edit`);
     assert.equal(await restored.save(), true);
     assert.equal(await readText(uri), original, `The restored ${item.kind} source must save correctly`);
   }
