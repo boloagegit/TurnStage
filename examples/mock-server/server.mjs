@@ -223,7 +223,7 @@ const server = http.createServer(async (request, response) => {
       ? `<h3>HTML response</h3><p>First line<br>Second line</p><img src="${imageUrl}" alt="Mock image loaded"><table><tr><th>Format</th><th>Result</th></tr><tr><td>HTML</td><td>Visible</td></tr></table>`
       : mode === 'rich-markdown'
         ? `### Markdown response\n\n**Bold** and [safe link](https://example.com).\n\n![Mock image loaded](${imageUrl})\n\n| Format | Result |\n| --- | --- |\n| Markdown | Visible |`
-        : `### Mixed response\n\n**Markdown bold** with <strong>HTML bold</strong>.<br>Next line\n\n<img src="${imageUrl}" alt="Mock image loaded">\n\n| Format | Result |\n| --- | --- |\n| Mixed | Visible |`;
+        : `### Mixed response\n\n**Markdown bold**\n\n<div class="response-card"><div class="response-header"><div class="response-detail"><div class="response-title">Styled <strong>HTML bold</strong></div><p>Structured content</p><ul><li class="response-item">First related item</li><li class="response-item">Second related item</li></ul></div><div class="response-cover"><img src="${imageUrl}" alt="Mock image loaded"></div></div></div>\n\n| Format | Result |\n| --- | --- |\n| Mixed | Visible |`;
     await write('message', { text: content });
     await write('done', { ok: true }); response.end(); return;
   }

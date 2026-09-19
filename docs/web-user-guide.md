@@ -12,7 +12,7 @@
 
 預設由瀏覽器直接連線到設定檔指定的 API。若部署人員使用 ZIP 附帶的 `serve.py` 並設定 `--upstream`，只有指向同一個 Web 位址下 `/api/` 的請求才會由 Web Server 轉送到固定上游；其他 IP 或連接埠仍由瀏覽器直接連線，必須符合瀏覽器的網路、TLS 與 CORS 規則。
 
-回覆若映射為 Markdown，預設會一起顯示 Markdown 與安全的靜態 HTML。若需分別關閉，可在設定檔的 `ui.responseContent` 設定 `markdown` 或 `html` 為 `false`；兩者省略時均為啟用。多欄表格可在回覆內橫向捲動，圖片會縮到可用寬度。此功能不執行 JavaScript 或自訂 CSS。
+回覆若映射為 Markdown，預設會一起顯示 Markdown 與安全的靜態 HTML。若需分別關閉，可在設定檔的 `ui.responseContent` 設定 `markdown` 或 `html` 為 `false`；兩者省略時均為啟用。多欄表格可在回覆內橫向捲動，圖片會縮到可用寬度。點擊助理回覆可在 TurnStage 全畫面檢視「預覽」及事件依序組合的「原始內容」，並可複製原文或前往相關事件。若後端 HTML 使用 class，可由 `classStyles` 指定基礎樣式，再由 `styleRules` 設定 class 的階層、直接子元素、相鄰元素及 hover/focus 等狀態；規則只作用於該筆回覆。未列入允許範圍的選擇器與 CSS、`url()`、JavaScript、事件處理器及嵌入內容不會執行；完整範例與限制請看 [設定檔 Schema 說明](profile-schema.md#assistant-response-content)。
 
 ## 辨識 Profile 來源
 
@@ -84,13 +84,13 @@
 
 只有確定收件人都應取得同一份 credential 時，才把它直接寫入 Profile、Environment 或公司 Catalog。可攜檔與 Catalog 都不是加密的；任何能讀取檔案或網站靜態內容的人都能看到明文。測試案例、CSV、報告與截圖仍不應放入 credential。
 
-設定檔的下拉控制項可維持舊的字串選項，也可讓一個選項包含多個字串欄位，例如 `"value": { "custid": "C001", "bdcun": "B001" }`。在 `conversation.send.variants[].body` 以 `{ "$value": "controls.user.custid" }` 和 `{ "$value": "controls.user.bdcun" }` 分別帶入欄位。若希望控制項預設展開，在設定檔加入 `"ui": { "components": { "controls": { "defaultCollapsed": false } } }`；未設定時維持預設收合。切換使用者不會自動重設後端對話 ID；若後端以使用者識別對話，切換後請開啟新對話。
+設定檔的下拉控制項可維持舊的字串選項，也可讓一個選項包含多個字串欄位，例如 `"value": { "customerId": "C001", "regionCode": "R001" }`。在 `conversation.send.variants[].body` 以 `{ "$value": "controls.user.customerId" }` 和 `{ "$value": "controls.user.regionCode" }` 分別帶入欄位。若希望控制項預設展開，在設定檔加入 `"ui": { "components": { "controls": { "defaultCollapsed": false } } }`；未設定時維持預設收合。切換使用者不會自動重設後端對話 ID；若後端以使用者識別對話，切換後請開啟新對話。
 
 ## 測試、紅隊案例與執行記錄
 
 TurnStage Web 右側直接選「一般測試」或「紅隊測試」，再進入各自的「測試案例」或「測試結果」；不把兩種判定不同的案例混成一張清單。兩邊都可在原本的案例列表搜尋、選取、執行與編輯，新增、匯入和連結操作也留在同一畫面，不需另開管理頁。列表每頁顯示 25 筆；可單筆執行，也可勾選或一次選取符合搜尋條件的同類型可執行案例（每次最多 500 筆）；開始前會顯示案例數、嘗試次數與最多請求數。未填完必填欄位、尚待審閱的草稿和 Web 不支援的案例無法選取或執行。測試結果可搜尋及分頁，並包含當次詳細結果與可跨重新整理保留的摘要紀錄；完成的紀錄可以設為比較基準。詳細 Evidence 可能另外過期，不能把摘要紀錄當作永久證據備份。匯入的套件是瀏覽器副本，不會修改原始檔；若原始檔有外部變更，請重新匯入。依畫面提供的按鈕匯入或匯出 JSON、JSONC、JSONL、CSV、HTML、JUnit 或 ZIP 檔案。
 
-在各自的「測試結果」匯出 HTML，可取得離線報告：包含結果摘要、分布圖、耗時較長的案例與案例表格；從執行紀錄匯出則只包含該次執行與所選的測試類型。報告不需要 JavaScript 或外部圖表服務，也不輸出對話內容、請求本文與標頭。若詳細證據已過期，請重新執行後再匯出；不要把舊紀錄與其他執行結果混在同一份報告。
+在各自的「測試結果」匯出 HTML，可取得離線報告：包含結果摘要、分布圖、耗時較長的案例、每一筆案例結果、完整結構化明細、文字搜尋、結果篩選、展開／收合與列印；從執行紀錄匯出則只包含該次執行與所選的測試類型。報告不連接外部圖表服務或其他網站，只用受 Content Security Policy 限制的內嵌程式操作已清理的報告列，也不輸出對話內容、請求本文與標頭。若詳細證據已過期，請重新執行後再匯出；不要把舊紀錄與其他執行結果混在同一份報告。
 
 兩個「測試案例」標題旁都有「下載 CSV 範例」按鈕；一般測試與紅隊測試下載的是不同格式，範例均含可重新匯入的實際案例。
 

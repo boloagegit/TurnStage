@@ -50,6 +50,24 @@ describe('BrowserSession', () => {
     expect(states.length).toBeGreaterThan(3);
   });
 
+  it('uses Profile-mapped backend TTFT and total duration in Web', async () => {
+    const timedProfile: TurnStageProfile = { ...profile, stream: { ...profile.stream, mappings: [
+      ...profile.stream.mappings,
+      { id: 'timing', match: { event: 'timing' }, emit: { type: 'message.timing.updated', timing: { ttftMs: { path: '$.firstTokenMs' }, totalDurationMs: { path: '$.totalMs' } } } },
+    ] } };
+    const body = [
+      'event: message\ndata: {"text":"Timed response"}\n\n',
+      'event: timing\ndata: {"firstTokenMs":45,"totalMs":320}\n\n',
+      'event: done\ndata: {}\n\n',
+    ].join('');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })));
+    const session = new BrowserSession(timedProfile, environment, new Map(), () => undefined);
+    await session.start();
+    await session.send('Hello', { kind: 'manual' });
+    expect(session.current.snapshot.metrics).toMatchObject({ ttft: 45, totalDuration: 320 });
+    expect(session.current.snapshot.messages.find((message) => message.role === 'assistant')?.timing).toEqual({ ttft: 45, totalDuration: 320 });
+  });
+
   it('reports browser fetch failures without assuming that CORS is the cause', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
     const session = new BrowserSession(profile, environment, new Map(), () => undefined);
@@ -188,17 +206,17 @@ describe('BrowserSession', () => {
     vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) });
     const fetch = vi.fn(async () => new Response('event: done\ndata: {}\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } }));
     vi.stubGlobal('fetch', fetch);
-    const selected = { custid: 'C002', bdcun: 'B002' };
+    const selected = { customerId: 'C002', regionCode: 'R002' };
     const controlProfile: TurnStageProfile = { ...profile,
-      controls: [{ id: 'user', type: 'select', label: 'User', persist: 'global', default: { custid: 'C001', bdcun: 'B001' }, options: [
-        { label: 'A', value: { custid: 'C001', bdcun: 'B001' } }, { label: 'B', value: selected },
+      controls: [{ id: 'user', type: 'select', label: 'User', persist: 'global', default: { customerId: 'C001', regionCode: 'R001' }, options: [
+        { label: 'A', value: { customerId: 'C001', regionCode: 'R001' } }, { label: 'B', value: selected },
       ] }],
-      conversation: { send: { method: 'POST', url: '${env.baseUrl}/stream', variants: [{ id: 'first', body: { custid: { $value: 'controls.user.custid' }, bdcun: { $value: 'controls.user.bdcun' } } }] } },
+      conversation: { send: { method: 'POST', url: '${env.baseUrl}/stream', variants: [{ id: 'first', body: { customerId: { $value: 'controls.user.customerId' }, regionCode: { $value: 'controls.user.regionCode' } } }] } },
     };
     const session = new BrowserSession(controlProfile, environment, new Map(), () => undefined);
-    session.setControl('user', { bdcun: 'B002', custid: 'C002' });
+    session.setControl('user', { regionCode: 'R002', customerId: 'C002' });
     expect(session.current.snapshot.controls.user).toEqual(selected);
-    session.setControl('user', { custid: 'forged', bdcun: 'B002' });
+    session.setControl('user', { customerId: 'forged', regionCode: 'R002' });
     expect(session.current.snapshot.controls.user).toEqual(selected);
     const reloaded = new BrowserSession(controlProfile, environment, new Map(), () => undefined);
     expect(reloaded.current.snapshot.controls.user).toEqual(selected);

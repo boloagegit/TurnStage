@@ -13,6 +13,7 @@ import { isSafeRegexPattern } from '../../shared/regexSafety';
 import { isSafeOpeningResponsePath, MAX_OPENING_BLOCK_ITEMS, MAX_OPENING_RESPONSE_BLOCKS } from '../opening/responseBlockNormalizer';
 import { isBlockedLifecycleCommand } from '../../shared/vscodeCommandPolicy';
 import { isControlOptionValue, isControlValue } from '../../shared/controlValue';
+import { isSafeResponseClassStyleProperty, isSafeResponseClassStyleValue, isSafeResponseStyleSelector, MAX_RESPONSE_CLASSES, MAX_RESPONSE_CLASS_PROPERTIES, MAX_RESPONSE_STYLE_RULES, RESPONSE_CLASS_NAME_PATTERN } from '../../shared/responseClassStyles';
 
 export interface ValidationIssue { severity: 'error' | 'warning'; message: string; offset: number; length: number }
 
@@ -20,7 +21,7 @@ const requiredEmitFields: Record<string, string[]> = {
   'conversation.started': ['conversationId'], 'content.text.delta': ['text'], 'content.markdown.delta': ['text'],
   'tool.started': ['toolCallId', 'name'], 'tool.completed': ['toolCallId'], 'citation.upsert': ['citation'],
   'content.citation': ['citationId'], 'followup.upsert': ['followup'], 'action.upsert': ['action'], 'form.upsert': ['form'],
-  'message.metric.updated': ['metric']
+  'message.metric.updated': ['metric'], 'message.timing.updated': ['timing']
 };
 const assertionOperators = new Set<ScenarioAssertionDefinition['operator']>(['equals', 'notEquals', 'exists', 'notExists', 'contains', 'regex', 'oneOf', 'lessThan', 'lessThanOrEqual', 'greaterThan', 'greaterThanOrEqual', 'sequenceEquals', 'sequenceContains']);
 const assertionsWithoutValue = new Set<ScenarioAssertionDefinition['operator']>(['exists', 'notExists']);
@@ -306,9 +307,13 @@ export class ProfileValidator {
     const responseContent = profile.ui?.responseContent as unknown;
     if (responseContent !== undefined) {
       if (!responseContent || typeof responseContent !== 'object' || Array.isArray(responseContent)) out.push(issue(tree, ['ui', 'responseContent'], localize('Response content settings must be an object.')));
-      else for (const format of ['markdown', 'html'] as const) {
-        const enabled = (responseContent as Record<string, unknown>)[format];
-        if (enabled !== undefined && typeof enabled !== 'boolean') out.push(issue(tree, ['ui', 'responseContent', format], localize('Response content {format} must be a boolean.', { format })));
+      else {
+        for (const format of ['markdown', 'html'] as const) {
+          const enabled = (responseContent as Record<string, unknown>)[format];
+          if (enabled !== undefined && typeof enabled !== 'boolean') out.push(issue(tree, ['ui', 'responseContent', format], localize('Response content {format} must be a boolean.', { format })));
+        }
+        validateResponseClassStyles(tree, (responseContent as Record<string, unknown>).classStyles, out);
+        validateResponseStyleRules(tree, (responseContent as Record<string, unknown>).styleRules, out);
       }
     }
     for (const duplicate of duplicates((profile.stream?.mappings ?? []).map((mapping) => mapping.id))) out.push(issue(tree, ['stream', 'mappings'], localize('Duplicate mapping id: {id}.', { id: duplicate })));
@@ -579,6 +584,9 @@ export class ProfileValidator {
       }
     }
     profile.stream.mappings.forEach((mapping, index) => {
+      if (mapping.emit.type === 'message.timing.updated') {
+        validateMessageTimingMapping(mapping.emit.timing, tree, ['stream', 'mappings', index, 'emit', 'timing'], out);
+      }
       if (mapping.emit.type !== 'message.metric.updated') return;
       const metric = mapping.emit.metric;
       if (!metric || typeof metric !== 'object' || Array.isArray(metric)) { out.push(issue(tree, ['stream', 'mappings', index, 'emit', 'metric'], localize('Message metrics require id and value fields.'))); return; }
@@ -611,6 +619,76 @@ export class ProfileValidator {
     for (const reference of [...(profile.ui?.locks?.whileTurnActive?.disable ?? []), ...(profile.ui?.locks?.whileTurnActive?.allow ?? [])]) if (!lockable.has(reference)) out.push(issue(tree, ['ui', 'locks'], localize('UI lock references unknown component "{component}".', { component: reference }), 'warning'));
     if (/\b(?:sk|token|bearer)[-_][A-Za-z0-9]{16,}\b/i.test(source)) out.push(issue(tree, [], localize('The profile may contain a secret value. Move secrets to SecretStorage.'), 'warning'));
     return out;
+  }
+}
+
+function validateMessageTimingMapping(value: unknown, tree: Node | undefined, path: Array<string | number>, out: ValidationIssue[]): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    out.push(issue(tree, path, localize('Message timing requires a ttftMs or totalDurationMs mapping.')));
+    return;
+  }
+  const timing = value as Record<string, unknown>;
+  const keys = Object.keys(timing);
+  for (const key of keys) if (!['ttftMs', 'totalDurationMs'].includes(key)) out.push(issue(tree, [...path, key], localize('Unknown message timing field: {field}.', { field: key })));
+  if (!keys.some((key) => ['ttftMs', 'totalDurationMs'].includes(key))) out.push(issue(tree, path, localize('Message timing requires a ttftMs or totalDurationMs mapping.')));
+  for (const key of ['ttftMs', 'totalDurationMs']) {
+    const candidate = timing[key];
+    if (candidate === undefined) continue;
+    const literal = typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0 && candidate <= 86_400_000;
+    const mapped = Boolean(candidate && typeof candidate === 'object' && !Array.isArray(candidate) && Object.keys(candidate as object).length === 1 && typeof (candidate as Record<string, unknown>).path === 'string' && (candidate as Record<string, unknown>).path);
+    if (!literal && !mapped) out.push(issue(tree, [...path, key], localize('Message timing must be milliseconds or a path mapping.')));
+  }
+}
+
+function validateResponseClassStyles(tree: Node | undefined, value: unknown, out: ValidationIssue[]): void {
+  if (value === undefined) return;
+  const path = ['ui', 'responseContent', 'classStyles'] as const;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    out.push(issue(tree, [...path], localize('Response classStyles must be an object.')));
+    return;
+  }
+  const classes = Object.entries(value);
+  if (classes.length > MAX_RESPONSE_CLASSES) out.push(issue(tree, [...path], localize('Response classStyles can contain at most {count} classes.', { count: MAX_RESPONSE_CLASSES })));
+  for (const [className, candidate] of classes.slice(0, MAX_RESPONSE_CLASSES)) {
+    if (!RESPONSE_CLASS_NAME_PATTERN.test(className)) {
+      out.push(issue(tree, [...path, className], localize('Response class name must contain only letters, numbers, underscores, and hyphens.')));
+      continue;
+    }
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      out.push(issue(tree, [...path, className], localize('Response class style must be an object.')));
+      continue;
+    }
+    const properties = Object.entries(candidate);
+    if (properties.length > MAX_RESPONSE_CLASS_PROPERTIES) out.push(issue(tree, [...path, className], localize('Response class style has too many properties.')));
+    for (const [property, styleValue] of properties.slice(0, MAX_RESPONSE_CLASS_PROPERTIES)) {
+      if (!isSafeResponseClassStyleProperty(property) || !isSafeResponseClassStyleValue(property, styleValue)) out.push(issue(tree, [...path, className, property], localize('Response class style property or value is not supported.')));
+    }
+  }
+}
+
+function validateResponseStyleRules(tree: Node | undefined, value: unknown, out: ValidationIssue[]): void {
+  if (value === undefined) return;
+  const path = ['ui', 'responseContent', 'styleRules'] as const;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    out.push(issue(tree, [...path], localize('Response styleRules must be an object.')));
+    return;
+  }
+  const rules = Object.entries(value);
+  if (rules.length > MAX_RESPONSE_STYLE_RULES) out.push(issue(tree, [...path], localize('Response styleRules can contain at most {count} rules.', { count: MAX_RESPONSE_STYLE_RULES })));
+  for (const [selector, candidate] of rules.slice(0, MAX_RESPONSE_STYLE_RULES)) {
+    if (!isSafeResponseStyleSelector(selector)) {
+      out.push(issue(tree, [...path, selector], localize('Response style selector is not supported.')));
+      continue;
+    }
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      out.push(issue(tree, [...path, selector], localize('Response style rule must be an object.')));
+      continue;
+    }
+    const properties = Object.entries(candidate);
+    if (properties.length > MAX_RESPONSE_CLASS_PROPERTIES) out.push(issue(tree, [...path, selector], localize('Response style rule has too many properties.')));
+    for (const [property, styleValue] of properties.slice(0, MAX_RESPONSE_CLASS_PROPERTIES)) {
+      if (!isSafeResponseClassStyleProperty(property) || !isSafeResponseClassStyleValue(property, styleValue)) out.push(issue(tree, [...path, selector, property], localize('Response style rule property or value is not supported.')));
+    }
   }
 }
 

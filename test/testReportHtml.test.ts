@@ -3,13 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { renderTestReportHtml } from '../src/shared/testReportHtml';
 
 describe('offline HTML test report', () => {
-  it('shows accessible charts and a useful table without active or remote content', () => {
+  it('shows accessible charts, complete details, and local-only report controls', () => {
     const html = renderTestReportHtml({
       kind: 'contract', locale: 'zh-TW', generatedAt: '2026-09-14T12:00:00.000Z',
       cases: [
         { id: '快測', outcome: 'passed', durationMs: 120, passedChecks: 3, failedChecks: 0 },
         { id: '<img src=x onerror=alert(1)>', outcome: 'failed', durationMs: 2300, passedChecks: 1, failedChecks: 1,
-          facts: [{ label: 'Failed check', value: '<script>alert(1)</script>' }], timeline: [{ elapsedMs: 30, label: 'a & b' }] },
+          facts: Array.from({ length: 24 }, (_, index) => ({ label: `Failed check ${index}`, value: index ? `detail ${index}` : '<script>alert(1)</script>' })),
+          timeline: Array.from({ length: 18 }, (_, index) => ({ elapsedMs: 30 + index, label: `event ${index} & detail` })) },
       ],
     });
     const document = new DOMParser().parseFromString(html, 'text/html');
@@ -20,9 +21,14 @@ describe('offline HTML test report', () => {
     expect(document.querySelectorAll('tbody tr')).toHaveLength(2);
     expect(document.querySelector('tbody tr:last-child th')?.textContent).toContain('<img src=x onerror=alert(1)>');
     expect(document.querySelector('img')).toBeNull();
-    expect(document.querySelector('script')).toBeNull();
+    expect(document.querySelectorAll('details dl div')).toHaveLength(24);
+    expect(document.querySelectorAll('details ol li')).toHaveLength(18);
+    expect(document.querySelector('input[type="search"]')).toBeTruthy();
+    expect(document.querySelector('select#report-outcome')).toBeTruthy();
+    expect(document.querySelector('script')?.getAttribute('nonce')).toBe('turnstage-report');
     expect(document.querySelector('link')).toBeNull();
     expect(document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')).toContain("default-src 'none'");
+    expect(document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')).toContain("script-src 'nonce-turnstage-report'");
     expect(document.querySelector('style')?.textContent).toContain('@media(max-width:520px)');
     expect(document.querySelector('style')?.textContent).toContain('@media print');
     expect(html).not.toContain('https://');

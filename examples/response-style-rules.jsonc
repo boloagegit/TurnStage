@@ -1,0 +1,79 @@
+{
+  "$schema": "../resources/schemas/turnstage-profile.schema.json",
+  "version": 1,
+  "id": "response-style-demo",
+  "name": "Response Style Demo",
+  "description": "Runnable Markdown and static HTML response styling example.",
+  "controls": [{
+    "id": "mode", "type": "select", "label": "Response format", "default": "rich-mixed", "persist": "none",
+    "options": [
+      { "label": "Mixed HTML + Markdown", "value": "rich-mixed" },
+      { "label": "Complex HTML + Markdown", "value": "rich-complex" }
+    ]
+  }],
+  "opening": { "mode": "static", "message": "Send a message to preview the styled response." },
+  "conversation": {
+    "send": {
+      "method": "POST",
+      "url": "http://127.0.0.1:8787/agent/chat/stream",
+      "headers": { "Accept": "text/event-stream", "Content-Type": "application/json" },
+      "idleTimeoutMs": 30000,
+      "timeoutMs": 120000,
+      "variants": [{
+        "id": "default",
+        "body": {
+          "mode": { "$value": "controls.mode" },
+          "message": { "$value": "input.text" },
+          "conversationId": { "$value": "conversation.id" },
+          "clientRequestId": { "$value": "turn.clientRequestId" }
+        }
+      }]
+    }
+  },
+  "stream": {
+    "transport": "sse", "dataFormat": "json", "mappingMode": "firstMatch", "unexpectedEndPolicy": "fail", "doneValue": "[DONE]",
+    "mappings": [
+      { "id": "start", "match": { "event": "start" }, "emit": { "type": "conversation.started", "conversationId": { "path": "$.conversationId" }, "assistantMessageId": { "path": "$.assistantMessageId" } } },
+      { "id": "message", "match": { "event": "message" }, "emit": { "type": "content.markdown.delta", "text": { "path": "$.text" } } },
+      { "id": "done", "match": { "event": "done" }, "emit": { "type": "stream.completed" } },
+      { "id": "error", "match": { "event": "error" }, "emit": { "type": "stream.failed", "error": { "path": "$" } } }
+    ]
+  },
+  "ui": {
+    "responseContent": {
+      "markdown": true,
+      "html": true,
+      "classStyles": {
+        "response-card": {
+          "backgroundColor": "#183447", "color": "#f4f7fa", "padding": "12px 16px", "borderRadius": "8px",
+          "borderStyle": "solid", "borderWidth": "1px", "borderColor": "#31566f"
+        },
+        "response-header": {
+          "display": "flex", "justifyContent": "space-between", "alignItems": "center"
+        },
+        "response-cover": {
+          "display": "flex", "flex": "none", "justifyContent": "center", "alignItems": "center",
+          "overflow": "hidden", "width": "80px", "height": "80px", "marginLeft": "12px"
+        }
+      },
+      "styleRules": {
+        ".response-card > .response-header": { "borderBottomStyle": "solid", "borderBottomWidth": "1px", "borderBottomColor": "#31566f" },
+        ".response-card .response-title": { "fontWeight": "700", "fontSize": "20px" },
+        ".response-detail:has(p) ul": { "padding": "0 0 20px 16px" },
+        ".response-detail ul > li": { "listStyle": "disc", "lineHeight": "2" },
+        ".response-item + .response-item": { "marginTop": "6px" },
+        ".response-cover img": { "maxWidth": "100%", "maxHeight": "100%" },
+        ".response-card:hover": { "backgroundColor": "#234a62" },
+        ".response-card:focus-within": { "borderColor": "#ff955f" }
+      }
+    },
+    "components": {
+      "opening": { "visible": true }, "progress": { "visible": true },
+      "diagnostics": { "visible": true }, "metrics": { "visible": true }
+    },
+    "messageActions": ["message.copy", "message.retry", "message.inspectRaw"]
+  },
+  "history": { "localRuns": { "enabled": true, "maxRuns": 20, "recordRawEvents": true, "recordNormalizedEvents": true, "recordChatSnapshot": true } },
+  "errorPolicy": { "preservePartialContent": true, "showErrorPart": true, "keepConversationId": true, "allowContinuation": true, "releaseAllLocks": true },
+  "metrics": { "enabled": ["headersLatency", "firstEventLatency", "ttft", "totalDuration", "eventCount", "byteCount", "parseErrorCount", "mappingErrorCount"] }
+}

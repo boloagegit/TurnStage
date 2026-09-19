@@ -1,4 +1,4 @@
-import type { ControlDefinition, InteractionContext, LocalRun, NetworkExchange, NormalizedEvent, PreparedRequest, RawStreamEvent, ReplaySnapshot, SessionSnapshot, TurnStageEnvironment, TurnStageProfile } from '../../src/shared/types';
+import type { ControlDefinition, InteractionContext, LocalRun, MetricsSnapshot, NetworkExchange, NormalizedEvent, PreparedRequest, RawStreamEvent, ReplaySnapshot, SessionSnapshot, TurnStageEnvironment, TurnStageProfile } from '../../src/shared/types';
 import { controlSecretValues, isControlValue } from '../../src/shared/controlValue';
 import { MappingEngine } from '../../src/extension/mapping/mappingEngine';
 import { RequestBuilder } from '../../src/extension/request/requestBuilder';
@@ -405,6 +405,7 @@ export class BrowserSession {
       if (generation === this.generation) {
         metrics.finish(this.state.snapshot.turnState === 'aborted' ? 'user_cancel' : undefined);
         this.state.snapshot.metrics = { ...metrics.value };
+        this.syncAssistantTiming(metrics.value);
         this.abortController = undefined;
         this.currentTurn = undefined;
         this.requestDispatched = false;
@@ -487,7 +488,7 @@ export class BrowserSession {
     this.pushRaw(raw);
     if (result.errors.length) metrics.mappingError(result.errors.length);
     if (!result.events.length) metrics.unmatched();
-    for (const event of result.events) { metrics.normalized(event); reduceEvent(this.state.snapshot, this.publicValue(event) as NormalizedEvent); }
+    for (const event of result.events) { metrics.normalized(event); reduceEvent(this.state.snapshot, this.publicValue(event) as NormalizedEvent); this.syncAssistantTiming(metrics.value); }
     this.boundCollections();
     return !['completed', 'failed', 'aborted'].includes(this.state.snapshot.turnState);
   }
@@ -655,6 +656,15 @@ export class BrowserSession {
       const error = this.state.snapshot.errors.at(-1);
       if (error) message.parts.push({ type: 'error', text: error.message });
     }
+  }
+
+  private syncAssistantTiming(metrics: MetricsSnapshot): void {
+    const message = [...this.state.snapshot.messages].reverse().find((item) => item.role === 'assistant' && (item.status === 'pending' || item.status === 'streaming' || item.status === 'completed' || item.status === 'failed' || item.status === 'aborted'));
+    if (!message) return;
+    message.timing = {
+      ...(metrics.ttft === undefined ? {} : { ttft: metrics.ttft }),
+      ...(metrics.totalDuration === undefined ? {} : { totalDuration: metrics.totalDuration }),
+    };
   }
 
   private resetControls(): void {

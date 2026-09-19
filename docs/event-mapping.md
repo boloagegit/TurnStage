@@ -216,6 +216,32 @@ non-numeric waiting/streaming labels until each value is known; it does not
 display a misleading zero. A response that ends without displayable text marks
 TTFT unavailable.
 
+If the backend reports authoritative timing values, a Profile can map its own
+field names into the two built-ins with `message.timing.updated`. Values are
+milliseconds; each may be a literal or a normal `{ "path": "$.…" }` mapping.
+Mapped values replace the host measurement for the current response and its
+test evidence. Invalid, negative, non-numeric, or greater-than-24-hour values
+are ignored.
+
+```jsonc
+{
+  "id": "response-timing",
+  "match": { "event": "done" },
+  "emit": {
+    "type": "message.timing.updated",
+    "messageId": { "path": "$.assistantMessageId" },
+    "timing": {
+      "ttftMs": { "path": "$.performance.firstTokenMs" },
+      "totalDurationMs": { "path": "$.performance.totalMs" }
+    }
+  }
+}
+```
+
+Omit this rule to keep TurnStage's default host-measured timings. This mapping
+does not assume any backend property name; change only the two paths to match
+the response event.
+
 `message.metric.updated` is the generic measurement seam for values reported
 by a backend event. The mapping can correlate a sample to an explicit
 `messageId`; when omitted, the current assistant response is used.

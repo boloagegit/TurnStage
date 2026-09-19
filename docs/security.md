@@ -334,7 +334,10 @@ toolbar action. PNG input is limited to 24 MiB, validated before decode, and
 stored under a validated workspace-relative directory (or Extension global
 storage for a user profile). A visual image can contain the visible chat, so
 Evidence Bundle export excludes it by default and requires a second explicit
-opt-in before copying it. The HTML report has no external resources or script.
+opt-in before copying it. The HTML report has no external resources. Its small
+inline script is restricted by a Content Security Policy nonce and only filters,
+expands, resets, and prints the already-sanitized structural rows in the document;
+it performs no network requests and does not evaluate report data as code.
 
 Correlation capture accepts only a structurally valid W3C `traceparent` and
 bounded printable request IDs. `tracestate`, `baggage`, arbitrary headers, and

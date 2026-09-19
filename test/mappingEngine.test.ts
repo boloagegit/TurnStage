@@ -116,4 +116,15 @@ describe('MappingEngine', () => {
       metric: { id: 'e2e', label: 'E2E', value: 180, unit: 'ms', format: 'duration', aggregation: 'last' },
     });
   });
+
+  it('extracts backend timing fields without assuming backend property names', () => {
+    const stream: StreamDefinition = { transport: 'sse', mappings: [{
+      id: 'response-timing', match: { event: 'done' }, emit: {
+        type: 'message.timing.updated',
+        timing: { ttftMs: { path: '$.performance.firstToken' }, totalDurationMs: { path: '$.performance.total' } },
+      },
+    }] };
+    const result = new MappingEngine(stream).map(raw({ performance: { firstToken: 125, total: 480 } }, 'done'));
+    expect(result.events[0]).toMatchObject({ type: 'message.timing.updated', timing: { ttftMs: 125, totalDurationMs: 480 } });
+  });
 });

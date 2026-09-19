@@ -141,6 +141,18 @@ describe('MetricsCollector', () => {
     metrics.reconnectCount(2);
     expect(metrics.value.reconnectCount).toBe(3);
   });
+
+  it('lets an explicit timing mapping override host-measured TTFT and total duration', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const metrics = new MetricsCollector();
+    metrics.start();
+    metrics.normalized({ version: 1, type: 'content.text.delta', sequence: 1, receivedAt: 1_080 });
+    metrics.normalized({ version: 1, type: 'message.timing.updated', sequence: 2, receivedAt: 1_100, timing: { ttftMs: 42, totalDurationMs: 350 } });
+    vi.setSystemTime(2_000);
+    metrics.finish();
+    expect(metrics.value).toMatchObject({ ttft: 42, totalDuration: 350 });
+  });
 });
 
 describe('isActive and SessionController.finalizeTurn', () => {

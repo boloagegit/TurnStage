@@ -25,6 +25,8 @@ import { IconButton, ProductIcon } from './Icon';
 import { JsonSyntax } from './JsonViewer';
 import { ClipboardButton } from './ClipboardButton';
 import { RichMarkdown } from './RichMarkdown';
+import { CaseEditorOverlay } from './CaseEditorOverlay';
+import type { ResponseClassStyles, ResponseStyleRules } from '../shared/responseClassStyles';
 import { captureChatScreenshot, copyChatScreenshotToClipboard } from './chatScreenshot';
 import { resolveComposer, resolveMessageActions, resolveMessageActionVisibility, resolveStreaming, type ResolvedStreaming } from './uiConfig';
 import { advanceGraphemeBoundary, calculateRevealStep, resolveRevealPacing } from './streamingReveal';
@@ -159,10 +161,12 @@ export function MobileChatPreview({
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
   const [capturingVisual, setCapturingVisual] = useState<'baseline' | 'compare'>();
   const [screenshotStatus, setScreenshotStatus] = useState('');
+  const [responseDetailId, setResponseDetailId] = useState<string>();
   const allSnapshotMessages = snapshot?.messages ?? EMPTY_MESSAGES;
   const [visibleMessageLimit, setVisibleMessageLimit] = useState(DEFAULT_VISIBLE_CHAT_MESSAGES);
   const hiddenMessageCount = Math.max(0, allSnapshotMessages.length - visibleMessageLimit);
   const snapshotMessages = useMemo(() => hiddenMessageCount ? allSnapshotMessages.slice(hiddenMessageCount) : allSnapshotMessages, [allSnapshotMessages, hiddenMessageCount]);
+  const responseDetailMessage = useMemo(() => allSnapshotMessages.find((message) => message.id === responseDetailId), [allSnapshotMessages, responseDetailId]);
   const messageTagEventIndex = useMemo(() => createMessageTagEventIndex(snapshot), [snapshot?.rawEvents, snapshot?.normalizedEvents]);
   const messageContentKey = useMemo(() => getMessageContentKey(snapshotMessages), [snapshotMessages]);
   const { activeAssistant, latestUserCreatedAt } = useMemo(() => {
@@ -204,6 +208,7 @@ export function MobileChatPreview({
   } as CSSProperties;
 
   useEffect(() => { setVisibleMessageLimit(DEFAULT_VISIBLE_CHAT_MESSAGES); }, [snapshot?.sessionId]);
+  useEffect(() => { if (responseDetailId && !responseDetailMessage) setResponseDetailId(undefined); }, [responseDetailId, responseDetailMessage]);
   useEffect(() => {
     if (!selectedMessageId || hiddenMessageCount === 0) return;
     const index = allSnapshotMessages.findIndex((message) => message.id === selectedMessageId);
@@ -414,7 +419,7 @@ export function MobileChatPreview({
             {snapshot?.sessionState === 'loadingOpening' && profile.opening?.mode === 'request' && <OpeningLoading headingId={`${previewId}-opening-loading-heading`} />}
             {snapshot?.sessionState === 'failed' && profile.opening?.mode === 'request' && <OpeningError profile={profile} snapshot={snapshot} post={post} trusted={trusted} headingId={`${previewId}-opening-error-heading`} />}
             {opening && componentVisible(profile, 'opening') && <OpeningCard profile={profile} opening={opening} active={active} trusted={trusted} setDraft={setDraft} send={sendAndFollow} post={post} headingId={`${previewId}-opening-heading`} />}
-      {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} snapshot={snapshot} messageTagEventIndex={messageTagEventIndex} post={post} send={sendAndFollow} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback} onActionFeedback={onMessageActionFeedback} />)}
+      {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} snapshot={snapshot} messageTagEventIndex={messageTagEventIndex} post={post} send={sendAndFollow} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} onOpenResponse={message.role === 'assistant' ? () => setResponseDetailId(message.id) : undefined} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback} onActionFeedback={onMessageActionFeedback} />)}
             {responseActivityPhase && responseActivityPhase !== 'receiving' && !activeAssistant && <ResponseActivity profile={profile} phase={responseActivityPhase} elapsedMs={responseActivityElapsedMs} />}
             {!snapshot && <p className="mobile-chat-preview__empty" role="status">{t('Loading conversation…')}</p>}
             {snapshot && snapshotMessages.length === 0 && !opening && snapshot.sessionState === 'ready' && <p className="mobile-chat-preview__empty">{t('No messages yet. Send a message to begin.')}</p>}
@@ -428,6 +433,7 @@ export function MobileChatPreview({
       </div>
     </div>
     <p className={`mobile-chat-preview__status${screenshotStatus ? ' is-visible' : ''}`} role="status" aria-live="polite" aria-atomic="true">{screenshotStatus || statusText}</p>
+    {responseDetailMessage && <ResponseContentOverlay profile={profile} message={responseDetailMessage} snapshot={snapshot} post={post} onInspect={onSelectMessage ? () => { setResponseDetailId(undefined); onSelectMessage(responseDetailMessage.id); } : undefined} onClose={() => setResponseDetailId(undefined)} />}
   </section>;
 }
 
@@ -680,7 +686,64 @@ function stopActionLabel(turnState?: TurnState): string {
   return t('Stop conversation');
 }
 
-function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post, send, setDraft, trusted, selected, onSelectMessage, acceptedForms, actionFeedback, onActionFeedback }: { profile: TurnStageProfile; message: ChatMessage; snapshot?: SessionSnapshot; messageTagEventIndex: MessageTagEventIndex; post: PostMessage; send: SendMessage; setDraft: SetDraft; trusted: boolean; selected: boolean; onSelectMessage?: (messageId: string) => void; acceptedForms?: ReadonlySet<string>; actionFeedback?: MessageActionFeedback; onActionFeedback?: (feedback: MessageActionFeedback | undefined) => void }): React.JSX.Element {
+const MAX_RESPONSE_SOURCE_CHARS = 1024 * 1024;
+
+export interface ResponseSource {
+  text: string;
+  fragmentCount: number;
+  format: 'text' | 'markdown' | 'mixed';
+  truncated: boolean;
+}
+
+export function assembleResponseSource(message: ChatMessage, snapshot?: SessionSnapshot): ResponseSource {
+  const rawSequences = new Set((Array.isArray(message.metadata?.rawSequences) ? message.metadata.rawSequences : []).filter((value): value is number => typeof value === 'number'));
+  const turnId = typeof message.metadata?.clientRequestId === 'string' ? message.metadata.clientRequestId : undefined;
+  const contentEvents = (snapshot?.normalizedEvents ?? []).filter((event) => event.type === 'content.text.delta' || event.type === 'content.markdown.delta');
+  const byRawSequence = rawSequences.size ? contentEvents.filter((event) => rawSequences.has(typeof event.rawSequence === 'number' ? event.rawSequence : event.sequence)) : [];
+  const byMessage = byRawSequence.length ? byRawSequence : contentEvents.filter((event) => event.messageId === message.id);
+  const events = (byMessage.length ? byMessage : turnId ? contentEvents.filter((event) => event.turnId === turnId) : []).sort((left, right) => left.sequence - right.sequence);
+  const fragments = events.length
+    ? events.map((event) => ({ type: event.type === 'content.markdown.delta' ? 'markdown' as const : 'text' as const, text: String(event.text ?? '') }))
+    : message.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => ({ type: part.type === 'markdown' ? 'markdown' as const : 'text' as const, text: part.text ?? '' }));
+  const formats = new Set(fragments.map((fragment) => fragment.type));
+  const complete = fragments.map((fragment) => fragment.text).join('');
+  return { text: complete.slice(0, MAX_RESPONSE_SOURCE_CHARS), fragmentCount: fragments.length, format: formats.size > 1 ? 'mixed' : formats.has('markdown') ? 'markdown' : 'text', truncated: complete.length > MAX_RESPONSE_SOURCE_CHARS };
+}
+
+function ResponseContentOverlay({ profile, message, snapshot, post, onInspect, onClose }: { profile: TurnStageProfile; message: ChatMessage; snapshot?: SessionSnapshot; post: PostMessage; onInspect?: () => void; onClose: () => void }): React.JSX.Element {
+  const [view, setView] = useState<'preview' | 'source'>('preview');
+  const [wrap, setWrap] = useState(true);
+  const source = useMemo(() => assembleResponseSource(message, snapshot), [message, snapshot]);
+  const previewId = useId();
+  const sourceId = useId();
+  const format = source.format === 'mixed' ? t('Mixed') : source.format === 'markdown' ? t('Markdown / HTML') : t('Text');
+  const switchTab = (next: 'preview' | 'source', event: KeyboardEvent<HTMLButtonElement>) => {
+    setView(next);
+    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next === 'preview' ? 0 : 1]?.focus();
+  };
+  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+    event.preventDefault();
+    switchTab(event.key === 'ArrowLeft' || event.key === 'Home' ? 'preview' : 'source', event);
+  };
+  const footer = onInspect ? <button type="button" onClick={onInspect}>{t('View related events')}</button> : undefined;
+  return <CaseEditorOverlay className="response-content-dialog" title={t('Response content')} context={`${format} · ${t('{count} content fragments', { count: formatNumber(source.fragmentCount) })}`} closeLabel={t('Close response content')} onRequestClose={onClose} footer={footer}>
+    <div className="response-content-dialog__body">
+      <div className="response-content-dialog__toolbar">
+        <div className="response-content-dialog__tabs" role="tablist" aria-label={t('Response content view')}>
+          <button type="button" role="tab" aria-selected={view === 'preview'} aria-controls={previewId} tabIndex={view === 'preview' ? 0 : -1} onKeyDown={onTabKeyDown} onClick={() => setView('preview')}>{t('Preview')}</button>
+          <button type="button" role="tab" aria-selected={view === 'source'} aria-controls={sourceId} tabIndex={view === 'source' ? 0 : -1} onKeyDown={onTabKeyDown} onClick={() => setView('source')}>{t('Raw content')}</button>
+        </div>
+        {view === 'source' && <div className="response-content-dialog__source-actions"><label><input type="checkbox" checked={wrap} onChange={(event) => setWrap(event.target.checked)} />{t('Wrap lines')}</label><ClipboardButton text={source.text} label={t('Copy raw content')} /></div>}
+      </div>
+      {view === 'preview'
+        ? <div id={previewId} role="tabpanel" aria-label={t('Preview')} className="response-content-dialog__preview">{message.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part, index) => part.type === 'markdown' ? <RichMarkdown key={index} text={part.text ?? ''} markdown={profile.ui?.responseContent?.markdown !== false} html={profile.ui?.responseContent?.html !== false} classStyles={profile.ui?.responseContent?.classStyles} styleRules={profile.ui?.responseContent?.styleRules} copyLabel={t('Copy code')} onOpenLink={(uri) => post({ type: 'uri.open', uri })} /> : <p key={index}>{part.text}</p>)}</div>
+        : <div id={sourceId} role="tabpanel" aria-label={t('Raw content')} className="response-content-dialog__source"><pre className={wrap ? 'is-wrapped' : ''}><code>{source.text}</code></pre>{source.truncated && <p role="status">{t('Content was truncated at the safety limit.')}</p>}</div>}
+    </div>
+  </CaseEditorOverlay>;
+}
+
+function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post, send, setDraft, trusted, selected, onSelectMessage, onOpenResponse, acceptedForms, actionFeedback, onActionFeedback }: { profile: TurnStageProfile; message: ChatMessage; snapshot?: SessionSnapshot; messageTagEventIndex: MessageTagEventIndex; post: PostMessage; send: SendMessage; setDraft: SetDraft; trusted: boolean; selected: boolean; onSelectMessage?: (messageId: string) => void; onOpenResponse?: () => void; acceptedForms?: ReadonlySet<string>; actionFeedback?: MessageActionFeedback; onActionFeedback?: (feedback: MessageActionFeedback | undefined) => void }): React.JSX.Element {
   const [responseActionPreview, setResponseActionPreview] = useState<{ action: ResponseAction; previewOnly: boolean }>();
   const responseActionReceiptRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { if (responseActionPreview) responseActionReceiptRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [responseActionPreview]);
@@ -725,16 +788,18 @@ function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post,
     '--mcp-stream-intensity': streaming.intensityPercent / 100,
   } as CSSProperties;
   const onMessageClick = (event: React.MouseEvent<HTMLElement>) => {
-    if (!onSelectMessage) return;
+    if (!onOpenResponse && !onSelectMessage) return;
     if (isMessageInteractiveTarget(event.target)) return;
-    onSelectMessage(message.id);
+    if (onOpenResponse && text) onOpenResponse();
+    else onSelectMessage?.(message.id);
   };
   const onMessageKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (!onSelectMessage || isMessageInteractiveTarget(event.target) || (event.key !== 'Enter' && event.key !== ' ')) return;
+    if ((!onOpenResponse && !onSelectMessage) || isMessageInteractiveTarget(event.target) || (event.key !== 'Enter' && event.key !== ' ')) return;
     event.preventDefault();
-    onSelectMessage(message.id);
+    if (onOpenResponse && text) onOpenResponse();
+    else onSelectMessage?.(message.id);
   };
-  return <article className={`mobile-chat-preview__message mobile-chat-preview__message--${message.role} ${selected ? 'mobile-chat-preview__message--selected' : ''}`} data-message-id={message.id} data-status={message.status} data-selected={selected ? 'true' : 'false'} aria-label={t('{role} message, {status}', messageLabelValues)} style={streamingStyle} tabIndex={onSelectMessage ? 0 : undefined} onClick={onMessageClick} onKeyDown={onMessageKeyDown}>
+  return <article className={`mobile-chat-preview__message mobile-chat-preview__message--${message.role} ${selected ? 'mobile-chat-preview__message--selected' : ''}`} data-message-id={message.id} data-status={message.status} data-selected={selected ? 'true' : 'false'} aria-label={t(onOpenResponse && text ? '{role} message, {status}. Open response content.' : '{role} message, {status}', messageLabelValues)} style={streamingStyle} tabIndex={onOpenResponse || onSelectMessage ? 0 : undefined} onClick={onMessageClick} onKeyDown={onMessageKeyDown}>
     {message.role !== 'user' && <span className="mobile-chat-preview__message-avatar" aria-hidden="true">{profile.name.trim().charAt(0).toUpperCase() || 'T'}</span>}
     <span className="mobile-chat-preview__message-heading"><strong>{roleLabel}</strong><MessageStatus state={message.status} />{messageTags.length > 0 && <span className="mobile-chat-preview__message-tags" aria-label={t('Message tags')}>{messageTags.map((tag) => <span className={`mobile-chat-preview__message-tag mobile-chat-preview__message-tag--${tag.tone}`} key={tag.id}>{tag.label}</span>)}</span>}</span>
     <div className="mobile-chat-preview__message-body">
@@ -899,7 +964,7 @@ export function resizeComposerTextarea(textarea: HTMLTextAreaElement | null): vo
 
 function MobileMessagePart({ profile, part, messageId, citations, post, trusted, accepted, streaming, streamingActive }: { profile: TurnStageProfile; part: MessagePart; messageId: string; citations: Citation[]; post: PostMessage; trusted: boolean; accepted?: boolean; streaming?: ResolvedStreaming; streamingActive: boolean }): React.JSX.Element | null {
   if (part.type === 'text') return <MobileText text={part.text ?? ''} streaming={streaming} streamingActive={streamingActive} />;
-  if (part.type === 'markdown') return <MobileMarkdown text={part.text ?? ''} post={post} streaming={streaming} streamingActive={streamingActive} markdown={profile.ui?.responseContent?.markdown !== false} html={profile.ui?.responseContent?.html !== false} />;
+  if (part.type === 'markdown') return <MobileMarkdown text={part.text ?? ''} post={post} streaming={streaming} streamingActive={streamingActive} markdown={profile.ui?.responseContent?.markdown !== false} html={profile.ui?.responseContent?.html !== false} classStyles={profile.ui?.responseContent?.classStyles} styleRules={profile.ui?.responseContent?.styleRules} />;
   if (part.type === 'citation-reference') {
     if (!componentVisible(profile, 'citations')) return null;
     const citationId = typeof part.citationId === 'string' ? part.citationId : '';
@@ -929,9 +994,9 @@ function MobileMessagePart({ profile, part, messageId, citations, post, trusted,
   return null;
 }
 
-function MobileMarkdown({ text, post, streaming, streamingActive, markdown, html }: { text: string; post: PostMessage; streaming?: ResolvedStreaming; streamingActive: boolean; markdown: boolean; html: boolean }): React.JSX.Element {
+function MobileMarkdown({ text, post, streaming, streamingActive, markdown, html, classStyles, styleRules }: { text: string; post: PostMessage; streaming?: ResolvedStreaming; streamingActive: boolean; markdown: boolean; html: boolean; classStyles?: ResponseClassStyles; styleRules?: ResponseStyleRules }): React.JSX.Element {
   const visibleText = useStreamingRevealText(text, streamingActive, streaming);
-  return <div className="mobile-chat-preview__text" data-reveal-mode={streaming?.reveal ?? 'instant'}><RichMarkdown text={visibleText} markdown={markdown} html={html} copyLabel={t('Copy code')} onOpenLink={(uri) => post({ type: 'uri.open', uri })} />{streamingActive && streaming ? <StreamingIndicator streaming={streaming} /> : null}</div>;
+  return <div className="mobile-chat-preview__text" data-reveal-mode={streaming?.reveal ?? 'instant'}><RichMarkdown text={visibleText} markdown={markdown} html={html} classStyles={classStyles} styleRules={styleRules} copyLabel={t('Copy code')} onOpenLink={(uri) => post({ type: 'uri.open', uri })} />{streamingActive && streaming ? <StreamingIndicator streaming={streaming} /> : null}</div>;
 }
 
 function MobileText({ text, streaming, streamingActive }: { text: string; streaming?: ResolvedStreaming; streamingActive: boolean }): React.JSX.Element {
