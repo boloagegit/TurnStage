@@ -45,7 +45,7 @@ export async function runScenario(profileId: string, scenario: ScenarioDefinitio
       await session.send(step.input, { kind: 'manual' });
       const evidence = { snapshot: session.snapshot, networkEntries: session.getNetworkEntries() };
       const checks = [...evaluateSessionInvariants(evidence), ...evaluateAssertions(step.assertions, evidence)];
-      stepResults.push({ stepId: step.id, name: step.name?.trim() || step.id, durationMs: Date.now() - stepStartedAt, checks });
+      stepResults.push({ stepId: step.id, name: step.name?.trim() || step.id, input: step.input, durationMs: Date.now() - stepStartedAt, checks });
     }
   } finally {
     cancellationSubscription?.dispose();
@@ -116,7 +116,7 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
         const location = { kind: 'network' as const, networkId: session.getNetworkEntries().at(-1)?.id };
         const issue: AdversarialIssue = { id: `infrastructure-timeout-${turnIndex + 1}`, kind: 'infrastructure', turnId: step.id, turnIndex, label: localize('The adversarial case timeout elapsed.'), location };
         issues.push(issue);
-        stepResults.push({ stepId: step.id, name: step.name?.trim() || step.id, durationMs: Date.now() - stepStartedAt, checks: [issueCheck(issue)] });
+        stepResults.push({ stepId: step.id, name: step.name?.trim() || step.id, input: step.input, durationMs: Date.now() - stepStartedAt, checks: [issueCheck(issue)] });
         break;
       }
       if (send === 'cancelled') break;
@@ -129,7 +129,7 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
       const checks = evaluation.findings.length || evaluation.issues.length
         ? [...evaluation.findings.map(findingCheck), ...evaluation.issues.map(issueCheck)]
         : [resistedTurnCheck(step.id, turnIndex, turnSnapshot.messages.filter((message) => message.role === 'assistant').at(-1)?.id)];
-      stepResults.push({ stepId: step.id, name: step.name?.trim() || step.id, durationMs: Date.now() - stepStartedAt, checks });
+      stepResults.push({ stepId: step.id, name: step.name?.trim() || step.id, input: step.input, durationMs: Date.now() - stepStartedAt, checks });
       activeTurn = undefined;
       if (evaluation.findings.length && definition.stopOnAttackSucceeded !== false) break;
       if (evaluation.issues.some((issue) => issue.kind === 'infrastructure')) break;
@@ -143,7 +143,7 @@ async function runAdversarialScenario(profileId: string, scenario: ScenarioDefin
       location: { kind: 'network', networkId: session.getNetworkEntries().at(-1)?.id },
     };
     issues.push(issue);
-    if (activeTurn && !stepResults.some((step) => step.stepId === activeTurn!.step.id)) stepResults.push({ stepId: activeTurn.step.id, name: activeTurn.step.name?.trim() || activeTurn.step.id, durationMs: Date.now() - activeTurn.startedAt, checks: [issueCheck(issue)] });
+    if (activeTurn && !stepResults.some((step) => step.stepId === activeTurn!.step.id)) stepResults.push({ stepId: activeTurn.step.id, name: activeTurn.step.name?.trim() || activeTurn.step.id, input: activeTurn.step.input, durationMs: Date.now() - activeTurn.startedAt, checks: [issueCheck(issue)] });
   } finally {
     clearTimeout(timeoutHandle);
     cancellationSubscription?.dispose();

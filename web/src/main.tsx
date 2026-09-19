@@ -27,6 +27,7 @@ import { browserUuid } from './browserCrypto';
 import { loadProfileOrganization, normalizeProfileOrganization, saveProfileOrganization, type ProfileOrganization } from './profileOrganization';
 import { ProfileReferencePanel, type ProfileSourceSaveResult, type ReferencePage } from './ProfileReferencePanel';
 import { profileUrl, requestedProfileId } from './profileUrl';
+import { schemaDiagnostics, webCompatibilityDiagnostics, type ProfileSourceDiagnostic } from './profileSourceDiagnostics';
 import basicRaw from '../../resources/templates/basic-sse-chat.turnstage.jsonc?raw';
 import agentRaw from '../../resources/templates/agent-flow.turnstage.jsonc?raw';
 import enterpriseRaw from '../../resources/templates/enterprise-chat.turnstage.jsonc?raw';
@@ -274,11 +275,13 @@ function validateActive(requestId?: string): void {
   post({ type: 'profile.validated', valid: issues.length === 0 }, requestId);
 }
 
-function diagnostics(raw: string): Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number }> {
+function diagnostics(raw: string): ProfileSourceDiagnostic[] {
   const parsed = codec.parse(raw);
-  if (parsed.errors.length) return parsed.errors.map((error) => ({ severity: 'error', message: `Invalid JSONC (${error.error})`, offset: error.offset, length: error.length }));
-  if (!parsed.profile) return [{ severity: 'error', message: 'The profile root must be an object.', offset: 0, length: 1 }];
-  return validator.validate(parsed.profile, parsed.tree, environments.flatMap((item) => { const environment = parseEnvironment(item.raw); return environment ? [environment] : []; }));
+  if (parsed.errors.length) return parsed.errors.map((error) => ({ code: 'jsonc.syntax', severity: 'error', message: `Invalid JSONC (${error.error})`, offset: error.offset, length: error.length, path: [] }));
+  if (!parsed.profile) return [{ code: 'jsonc.root', severity: 'error', message: 'The profile root must be an object.', offset: 0, length: 1, path: [] }];
+  const availableEnvironments = environments.flatMap((item) => { const environment = parseEnvironment(item.raw); return environment ? [environment] : []; });
+  const semantic = validator.validate(parsed.profile, parsed.tree, availableEnvironments).map((issue) => ({ ...issue, code: 'profile.semantic', path: [] }));
+  return [...schemaDiagnostics(parsed.profile, parsed.tree, preferences.locale), ...semantic, ...webCompatibilityDiagnostics(parsed.profile, parsed.tree, availableEnvironments, preferences.locale)];
 }
 
 function selectProfile(id: string): void {
@@ -757,7 +760,7 @@ function ProfileLibrary(): React.JSX.Element {
       {secretNames.length > 0 && <details className="secret-editor"><summary>{labels.secrets}</summary>{secretNames.map((name) => <label key={name}>{name}<input type="password" autoComplete="off" value={secrets.get(name) ?? ''} placeholder={labels.memoryOnly} onChange={(event) => { if (event.target.value) secrets.set(name, event.target.value); else secrets.delete(name); renderSecrets((value) => value + 1); }} /></label>)}</details>}
       {catalog.warning && <p className="catalog-note catalog-note--warning" role="status" title={catalog.warning}>{labels.catalogFallback}</p>}
     </footer>
-    {referencePage && <ProfileReferencePanel page={referencePage} onClose={() => setReferencePage(undefined)} profileName={referenceItem.name} raw={referenceItem.raw} locale={locale} readOnly={Boolean(referenceItem.builtIn)} onSave={(raw) => {
+    {referencePage && <ProfileReferencePanel page={referencePage} onClose={() => setReferencePage(undefined)} profileId={referenceItem.id} profileName={referenceItem.name} raw={referenceItem.raw} locale={locale} readOnly={Boolean(referenceItem.builtIn)} onValidate={diagnostics} onSave={(raw) => {
       const previousId = referenceItem.id;
       const result = saveProfileSource(previousId, raw);
       if (result.ok) {

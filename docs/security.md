@@ -311,6 +311,14 @@ Automatic report output is trusted-workspace-only and accepts only a validated
 workspace-relative directory. Restricted Mode performs no contract network
 request and writes no configured report.
 
+An HTML report downloaded explicitly from the latest-results or run-history UI
+is a different, detailed artifact. It includes retained test inputs, assertion
+expected/actual values, messages, request/response evidence, and raw/normalized
+events so a reviewer can diagnose a result offline. Sensitive header values and
+recognized secret fields are redacted, but conversation and payload content may
+still be confidential. Configured reports and Evidence Bundles remain on the
+sanitized projection described above.
+
 Copilot-triggered contract runs are advisory and never write configured CI
 reports or Recorded Runs, even in a Trusted Workspace. They retain only a
 bounded in-memory aggregate evidence capsule per selected case. If Workspace
@@ -336,8 +344,10 @@ storage for a user profile). A visual image can contain the visible chat, so
 Evidence Bundle export excludes it by default and requires a second explicit
 opt-in before copying it. The HTML report has no external resources. Its small
 inline script is restricted by a Content Security Policy nonce and only filters,
-expands, resets, and prints the already-sanitized structural rows in the document;
+expands, resets, and prints already-escaped report content in the document;
 it performs no network requests and does not evaluate report data as code.
+Detailed user-downloaded reports provide local search, result and non-passing
+filters, pagination, expandable evidence, and print rendering.
 
 Correlation capture accepts only a structurally valid W3C `traceparent` and
 bounded printable request IDs. `tracestate`, `baggage`, arbitrary headers, and

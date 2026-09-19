@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
-  { ignores: ['dist/**', 'web-dist/**', 'node_modules/**', '*.vsix', 'turnstage-web-*.zip'] },
+  { ignores: ['dist/**', 'web-dist/**', 'web/src/generated/**', 'node_modules/**', '*.vsix', 'turnstage-web-*.zip'] },
   { files: ['src/**/*.{ts,tsx}', 'web/src/**/*.{ts,tsx}', 'vite.config.ts', 'test/**/*.ts'], languageOptions: { parserOptions: { project: './tsconfig.json' } }, rules: { '@typescript-eslint/no-explicit-any': 'off' } },
   { files: ['examples/**/*.mjs', 'scripts/**/*.mjs', 'test/integration/**/*.mjs', 'esbuild.mjs'], languageOptions: { globals: { process: 'readonly', Buffer: 'readonly', console: 'readonly', setTimeout: 'readonly' } } },
   { files: ['test/visual/**/*.mjs'], languageOptions: { globals: { process: 'readonly', console: 'readonly', URL: 'readonly', document: 'readonly', getComputedStyle: 'readonly' } } }

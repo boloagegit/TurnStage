@@ -88,7 +88,7 @@ export class ScenarioReportService {
     if (this.scope.campaign) fileNames.push('campaign-summary.json', 'campaign-results.jsonl');
     if (includeVisual && visual) { fileNames.push('visual-baseline.png'); if (visual.diffUri) fileNames.push('visual-diff.png'); }
     const files: Array<[string, string | Uint8Array]> = [
-      ['index.html', appendCampaignHtml(serializeScenarioHtml(this.records, generatedAt), this.scope.campaign)],
+      ['index.html', appendCampaignHtml(serializeScenarioHtml(this.records, generatedAt, undefined, undefined, false), this.scope.campaign)],
       ['report.json', serializeScenarioJson(this.records, generatedAt)],
       ['junit.xml', serializeScenarioJUnit(this.records, generatedAt)],
       ['adversarial-summary.csv', serializeAdversarialSummaryCsv(this.records)],
@@ -155,7 +155,7 @@ async function readBoundedVisualArtifact(uri: vscode.Uri): Promise<Uint8Array> {
 }
 
 function serialize(format: ScenarioReportFormat, records: readonly ScenarioExecutionRecord[]): string {
-  return format === 'junit' ? serializeScenarioJUnit(records) : format === 'html' ? serializeScenarioHtml(records) : serializeScenarioJson(records);
+  return format === 'junit' ? serializeScenarioJUnit(records) : format === 'html' ? serializeScenarioHtml(records, undefined, undefined, undefined, false) : serializeScenarioJson(records);
 }
 
 function reportExtension(format: ScenarioReportFormat): string { return format === 'junit' ? 'xml' : format; }

@@ -13,6 +13,7 @@ web/**
 web-dist/**
 scripts/package-web.mjs
 scripts/update_profiles.py
+scripts/generate-profile-validator.mjs
 vitest.config.ts
 node_modules/**
 .vscode-test/**

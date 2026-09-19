@@ -595,6 +595,8 @@ export interface ScenarioCheckResult {
 export interface ScenarioStepResult {
   stepId: string;
   name: string;
+  /** Exact test input retained for human-readable evidence reports. */
+  input?: string;
   durationMs: number;
   checks: ScenarioCheckResult[];
 }

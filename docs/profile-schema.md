@@ -750,6 +750,8 @@ when no mapping exists).
 
 ## JSONC and validation workflow
 
+VS Code opens Profile JSONC in the native text editor and continues to use the bundled schema and Problems diagnostics. Standalone Web uses its browser editor only for browser-local Profiles; server-managed Profiles remain read-only until duplicated. The Web editor preserves comments, validates syntax and the same bundled schema while typing, adds Web capability warnings, and saves only after an explicit **Save** action. Browser-local unsaved drafts are recoverable and never modify the server catalog files.
+
 `ProfileCodec` parses comments and trailing commas with `jsonc-parser` and
 returns both a typed value and a parse tree. Parse errors prevent controller
 creation. VS Code JSON validation handles schema-level diagnostics; the

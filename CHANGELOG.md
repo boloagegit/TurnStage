@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.33.0
+
+- Browser-local Web Profiles now open in a CodeMirror JSONC editor with line numbers, search, formatting, syntax and schema diagnostics, Web capability warnings, problem navigation, and recoverable unsaved drafts. Server-managed Profiles remain read-only until duplicated, while VS Code continues to use its native text editor.
+- Web Profile validation is generated from the bundled JSON schema during compile and Web builds, reducing drift between documented Profile settings, VS Code validation, and standalone Web editing.
+- User-downloaded general and red-team HTML reports now include success and latency summaries, TTFT and total-duration P50/P95, red-team stability counts, every case, test steps, expected and actual assertion values, complete retained conversation and request evidence, raw and normalized events, and errors.
+- The self-contained reports add local search, outcome and non-passing filters, 25/50/100-row pagination, full-width expandable evidence, mobile card layouts, keyboard-operable controls, and complete print rendering without external resources. Sensitive headers and recognized secret fields remain redacted; configured reports and Evidence Bundles remain sanitized.
+- Profile schema coverage now explicitly validates control defaults and options, opening fallbacks and policies, stop behavior, history, error policy, and timing-event mappings used by the editor and runtime.
+
 ## 0.32.3
 
 - The bundled `serve.py` no longer assumes a local API upstream. Its Web bind address, listen port, and optional `/api/` upstream can be supplied by command-line options or environment variables; the proxy stays disabled and returns 503 until an upstream is explicitly configured.
