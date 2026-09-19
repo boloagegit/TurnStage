@@ -32,7 +32,7 @@ describe('Web profile reference', () => {
     expect(within(dialog).queryByRole('tab')).toBeNull();
   });
 
-  it('edits a browser-local JSONC source, keeps invalid edits open, and saves the exact text', () => {
+  it('opens browser-local JSONC directly in the structured editor', async () => {
     const onSave = vi.fn((value: string) => value.includes('broken')
       ? { ok: false as const, error: 'Invalid JSONC', offset: value.indexOf('broken') }
       : { ok: true as const, id: 'example', raw: value });
@@ -40,39 +40,26 @@ describe('Web profile reference', () => {
     const onCopy = vi.fn(async () => undefined);
     render(<ProfileReferencePanel page="source" onClose={() => undefined} profileName="Example" raw={raw} locale="zh-TW" readOnly={false} onSave={onSave} onDownload={onDownload} onCopy={onCopy} />);
     expect(screen.queryByRole('button', { name: '編輯 JSONC' })).toBeNull();
-    const editor = screen.getByRole('textbox', { name: 'JSONC' }) as HTMLTextAreaElement;
+    const editor = await screen.findByRole('textbox', { name: 'JSONC' });
     expect(screen.getByRole('navigation', { name: '設定區段' })).toBeTruthy();
     expect(document.querySelector('.profile-reference-editor .jsonc-lines')).toBeNull();
-    expect(editor.value).toBe(raw);
-    fireEvent.change(editor, { target: { value: `${raw}// broken` } });
-    fireEvent.click(screen.getByRole('button', { name: '儲存' }));
-    expect(screen.getByRole('alert').textContent).toContain('Invalid JSONC');
-    const valid = `${raw}// a preserved comment`;
-    fireEvent.change(editor, { target: { value: valid } });
-    fireEvent.click(screen.getByRole('button', { name: '複製' }));
-    expect(onCopy).toHaveBeenCalledWith(valid);
-    fireEvent.click(screen.getByRole('button', { name: '下載 JSONC' }));
-    expect(onDownload).toHaveBeenCalledWith(valid);
-    fireEvent.click(screen.getByRole('button', { name: '儲存' }));
-    expect(onSave).toHaveBeenLastCalledWith(valid);
+    expect(editor.getAttribute('contenteditable')).toBe('true');
+    expect(screen.getByRole('button', { name: '格式化' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '儲存' }).hasAttribute('disabled')).toBe(true);
+    expect(onSave).not.toHaveBeenCalled();
     expect(screen.getByRole('textbox', { name: 'JSONC' })).toBeTruthy();
   });
 
-  it('requires confirmation before discarding edits and offers a duplicate for read-only sources', () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+  it('offers a duplicate for read-only sources and opens the copy in the editor', async () => {
     const onDuplicate = vi.fn(() => ({ id: 'copy', raw }));
     const onClose = vi.fn();
     render(<ProfileReferencePanel page="source" onClose={onClose} profileName="Example" raw={raw} locale="zh-TW" onDuplicate={onDuplicate} onDownload={() => undefined} onCopy={async () => undefined} />);
     expect(screen.queryByRole('button', { name: '編輯 JSONC' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '複製後編輯' }));
     expect(onDuplicate).toHaveBeenCalledOnce();
-    fireEvent.change(screen.getByRole('textbox', { name: 'JSONC' }), { target: { value: `${raw}// changed` } });
-    fireEvent.click(screen.getByRole('button', { name: '取消' }));
-    expect(screen.getByRole('textbox', { name: 'JSONC' })).toBeTruthy();
-    expect(onClose).not.toHaveBeenCalled();
+    await screen.findByRole('textbox', { name: 'JSONC' });
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(onClose).toHaveBeenCalledOnce();
-    confirm.mockRestore();
   });
 
   it('shows focused examples and paths in the guide', () => {

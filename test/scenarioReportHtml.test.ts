@@ -73,7 +73,7 @@ function record(): ScenarioExecutionRecord {
 }
 
 describe('HTML scenario reports', () => {
-  it('escapes identifiers and includes only bounded fault/correlation summaries', () => {
+  it('escapes identifiers and includes complete retained evidence with sensitive headers redacted', () => {
     const html = serializeScenarioHtml([record()], '2026-08-28T00:00:00.000Z');
 
     expect(html).toContain('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;');
@@ -82,9 +82,21 @@ describe('HTML scenario reports', () => {
     expect(html).not.toContain('<img src=x onerror=alert(1)>');
     expect(html).toContain('corruptEventAt=1, disconnectAfterEvents=2');
     expect(html).toContain('trace&lt;&amp;&quot;');
+    expect(html).toContain('Expected');
+    expect(html).toContain('Actual');
+    expect(html).toContain('Raw events');
+    expect(html).toContain('Requests and responses');
+    expect(html).toContain('https://example.test/chat');
+    expect(html).toContain('••••••••');
+    expect(html).not.toContain(`&quot;authorization&quot;: &quot;${secret}&quot;`);
+  });
+
+  it('keeps configured and bundle HTML on the sanitized projection', () => {
+    const html = serializeScenarioHtml([record()], '2026-08-28T00:00:00.000Z', undefined, 'en', false);
     expect(html).not.toContain(secret);
-    expect(html).not.toContain('rawEvents');
-    expect(html).not.toContain('requestPreview');
+    expect(html).not.toContain('Raw events');
+    expect(html).not.toContain('Requests and responses');
     expect(html).not.toContain('https://example.test/chat');
+    expect(html).toContain('check&lt;&amp;');
   });
 });

@@ -45,10 +45,13 @@ Test Explorer and the headless CLI can also run ready cases.
 Results stay separate from case setup. Pick a previous run, compare it with an
 accepted baseline, rerun cases that did not pass, or export that run. Open a
 failed result to inspect its captured Chat, Network, Raw Events, or Normalized
-Events. Reports include sanitized JSON, JUnit, HTML, and Evidence Bundles for
-local review or CI. General and red-team HTML exports are separate, offline
-reports with outcome and duration charts, every case result, text search, outcome
-filters, expandable details, and print support; a run export stays scoped to that run.
+Events. Configured reports and Evidence Bundles use a sanitized projection for
+local review or CI. Explicitly downloaded general and red-team HTML reports are
+separate, self-contained detailed artifacts with success and latency summaries,
+every case and retained evidence, search, outcome and non-passing filters,
+pagination, mobile layouts, expandable details, and complete print rendering; a
+run export stays scoped to that run. Treat downloaded detailed HTML as
+confidential when the underlying conversation or payload is confidential.
 
 ![Synthetic general-test results and run history](media/marketplace/automated-tests.png)
 
@@ -76,6 +79,9 @@ integration. The repository also provides a [standalone Web
 build](docs/web-deployment.md)
 as a static ZIP; it does not load or run the VSIX. Web users can choose
 deployment-owned read-only Profile presets or make browser-local copies.
+Browser-local Profiles can be edited as JSONC with syntax and schema diagnostics,
+formatting, problem navigation, and recoverable unsaved drafts; deployment-owned
+files remain read-only until copied.
 VS Code-only actions are disabled in Web. The browser calls the configured API
 directly, so that API must allow the Web origin through CORS.
 

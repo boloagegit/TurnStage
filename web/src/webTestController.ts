@@ -17,6 +17,7 @@ import { createTestRunHistoryRecord, nonPassingCases, type CompletedTestRunCase,
 import { strToU8, zipSync } from 'fflate';
 import { browserSha256, browserUuid } from './browserCrypto';
 import { renderTestReportHtml, type TestReportKind, type TestReportOutcome } from '../../src/shared/testReportHtml';
+import { buildTestReportEvidence } from '../../src/shared/testReportEvidence';
 
 interface WebSuite {
   suiteId: string;
@@ -462,6 +463,8 @@ function htmlReport(items: Array<StoredArtifact<RetainedEvidence>>, kind: TestRe
         failedChecks: checks.filter((check) => !check.passed).length,
         findingCount: result.adversarial?.findings.length,
         facts: webReportFacts(result, locale),
+        timeline: buildEvidenceTimeline(result).entries.map((entry) => ({ elapsedMs: entry.elapsedMs, label: entry.label })),
+        evidence: buildTestReportEvidence(result, scenario),
         ...(result.repetitions ? { completedAttempts: result.repetitions.completedAttempts, requestedAttempts: result.repetitions.requestedAttempts, stability: result.repetitions.stability } : {}),
       };
     }),
@@ -500,7 +503,7 @@ function runScopedReport(run: TestRunHistoryRecord, artifacts: Array<StoredArtif
       id: item.name || item.scenarioId, profileId: item.profileId,
       outcome: state === 'incomplete' ? 'incomplete' : item.outcome ?? 'incomplete',
       durationMs: item.durationMs, completedAttempts: item.completedAttempts, requestedAttempts: item.requestedAttempts,
-      ...(evidence ? { passedChecks: [...evidence.result.steps.flatMap((step) => step.checks), ...evidence.result.checks].filter((check) => check.passed).length, failedChecks: [...evidence.result.steps.flatMap((step) => step.checks), ...evidence.result.checks].filter((check) => !check.passed).length, findingCount: evidence.result.adversarial?.findings.length, facts: webReportFacts(evidence.result, locale) } : {}),
+      ...(evidence ? { passedChecks: [...evidence.result.steps.flatMap((step) => step.checks), ...evidence.result.checks].filter((check) => check.passed).length, failedChecks: [...evidence.result.steps.flatMap((step) => step.checks), ...evidence.result.checks].filter((check) => !check.passed).length, findingCount: evidence.result.adversarial?.findings.length, facts: webReportFacts(evidence.result, locale), timeline: buildEvidenceTimeline(evidence.result).entries.map((entry) => ({ elapsedMs: entry.elapsedMs, label: entry.label })), evidence: buildTestReportEvidence(evidence.result, evidence.scenario) } : {}),
     })),
   });
 }

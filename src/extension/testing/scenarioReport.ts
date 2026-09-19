@@ -1,5 +1,6 @@
 import type { EvidenceTimelineSummary, ScenarioRunResult } from '../../shared/types';
 import { renderTestReportHtml, type TestReportKind } from '../../shared/testReportHtml';
+import { buildTestReportEvidence } from '../../shared/testReportEvidence';
 import { buildEvidenceTimeline, clusterFailures, type FailureClusterV1 } from './evidenceTimeline';
 import { createReliabilitySummary, type ReliabilitySummaryV1 } from './reliabilityStatistics';
 
@@ -171,7 +172,7 @@ export function serializeScenarioJUnit(records: readonly ScenarioExecutionRecord
   return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuite name="TurnStage Conversation Contracts" tests="${report.summary.total}" failures="${report.summary.failed}" errors="${report.summary.errors}" skipped="${report.summary.skipped}" time="${(report.summary.durationMs / 1_000).toFixed(3)}" timestamp="${timestamp}">\n${cases}\n</testsuite>\n`;
 }
 
-export function serializeScenarioHtml(records: readonly ScenarioExecutionRecord[], generatedAt?: string, kind?: TestReportKind, locale?: string): string {
+export function serializeScenarioHtml(records: readonly ScenarioExecutionRecord[], generatedAt?: string, kind?: TestReportKind, locale?: string, includeEvidence = true): string {
   const selected = kind ? records.filter((record) => (record.kind ?? (record.result?.adversarial ? 'adversarial' : 'contract')) === kind) : [...records];
   const resolvedKind = kind ?? (selected.length > 0 && selected.every((record) => record.kind === 'adversarial' || Boolean(record.result?.adversarial)) ? 'adversarial' : 'contract');
   const report = createScenarioReport(selected, generatedAt);
@@ -202,6 +203,7 @@ export function serializeScenarioHtml(records: readonly ScenarioExecutionRecord[
         findingCount: scenario.adversarial?.findings.length,
         facts,
         timeline: scenario.adversarial?.timeline.entries.slice(0, 16).map((entry) => ({ elapsedMs: entry.elapsedMs, label: entry.label })),
+        ...(includeEvidence && selected[index]?.result ? { evidence: buildTestReportEvidence(selected[index].result) } : {}),
       };
     }),
     failureClusters: report.failureClusters.map((cluster) => ({ label: `${cluster.fingerprint.phase} / ${cluster.fingerprint.code}`, count: cluster.count })),

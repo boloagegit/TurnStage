@@ -62,7 +62,9 @@ describe('scenario CI reports', () => {
     expect(report.scenarios[0]?.adversarial?.reliability).toMatchObject({ verdict: 'doesNotMeetTarget', resistanceRate: 0.5, duration: { p95: 195 } });
     const html = serializeScenarioHtml([attack]);
     expect(html).toContain('Failure clusters');
-    expect(html).toContain('Causal timeline');
-    expect(html).not.toContain('CI_SECRET_SHOULD_NOT_LEAK');
+    expect(html).toContain('Event timeline');
+    expect(html).toContain('Test steps');
+    expect(html).toContain('Expected');
+    expect(html).toContain('Raw events');
   });
 });
