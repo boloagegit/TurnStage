@@ -12,6 +12,7 @@ type SchemaNode = {
   minLength?: number;
   maxLength?: number;
   maxItems?: number;
+  maxProperties?: number;
   pattern?: string;
   uniqueItems?: boolean;
   properties?: Record<string, SchemaNode>;
@@ -117,6 +118,12 @@ describe('profile UI schema', () => {
     expect(responseContent).toMatchObject({ type: 'object', additionalProperties: false });
     expect(propertySchema(responseContent, 'markdown')).toMatchObject({ type: 'boolean', default: true });
     expect(propertySchema(responseContent, 'html')).toMatchObject({ type: 'boolean', default: true });
+    const classStyles = propertySchema(responseContent, 'classStyles');
+    expect(classStyles).toMatchObject({ type: 'object', maxProperties: 64 });
+    expect(classStyles.additionalProperties).toMatchObject({ type: 'object', maxProperties: 40, additionalProperties: false });
+    const styleRules = propertySchema(responseContent, 'styleRules');
+    expect(styleRules).toMatchObject({ type: 'object', maxProperties: 64 });
+    expect(styleRules.additionalProperties).toMatchObject({ type: 'object', maxProperties: 40, additionalProperties: false });
 
     const streaming = propertySchema(uiSchema, 'streaming');
     expect(streaming).toMatchObject({ type: 'object', additionalProperties: false });

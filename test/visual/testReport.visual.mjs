@@ -35,6 +35,14 @@ try {
     page.on('request', (request) => { if (!request.url().startsWith('file:')) remoteRequests.push(request.url()); });
     await page.goto(`file://${file}`);
     assert.equal(await page.locator('tbody tr').count(), 12);
+    await page.getByRole('searchbox', { name: '搜尋案例' }).fill(cases[0].id);
+    assert.equal(await page.locator('tbody tr:visible').count(), 1);
+    await page.getByRole('button', { name: '清除篩選' }).click();
+    assert.equal(await page.locator('tbody tr:visible').count(), 12);
+    const failedOutcome = kind === 'contract' ? 'failed' : 'attackSucceeded';
+    await page.locator('#report-outcome').selectOption(failedOutcome);
+    assert.equal(await page.locator('tbody tr:visible').count(), 3);
+    await page.getByRole('button', { name: '清除篩選' }).click();
     assert.equal(await page.locator('.segment').count() >= 2, true);
     assert.equal(await page.locator('.bars li').count(), 8);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);

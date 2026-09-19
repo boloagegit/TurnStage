@@ -7,12 +7,33 @@ export class MetricsCollector {
   headers(ms: number): void { this.value.headersLatency ??= ms; }
   chunk(bytes: number, firstLatency: number): void { this.value.byteCount += bytes; if (firstLatency) this.value.firstChunkLatency ??= firstLatency; }
   raw(event: RawStreamEvent): void { this.value.eventCount++; this.value.firstEventLatency ??= event.receivedAt - this.startedAt; if (event.parseError) this.value.parseErrorCount++; if (this.previousEventAt) this.gaps.push(event.receivedAt - this.previousEventAt); this.previousEventAt = event.receivedAt; }
-  normalized(event: NormalizedEvent): void { if ((event.type === 'content.text.delta' || event.type === 'content.markdown.delta') && this.value.ttft === undefined) this.value.ttft = event.receivedAt - this.startedAt; }
+  normalized(event: NormalizedEvent): void {
+    if ((event.type === 'content.text.delta' || event.type === 'content.markdown.delta') && this.value.ttft === undefined) this.value.ttft = event.receivedAt - this.startedAt;
+    if (event.type !== 'message.timing.updated') return;
+    const timing = mappedMessageTiming(event.timing);
+    if (timing.ttft !== undefined) this.value.ttft = timing.ttft;
+    if (timing.totalDuration !== undefined) this.value.totalDuration = timing.totalDuration;
+  }
   mappingError(count = 1): void { this.value.mappingErrorCount += count; }
   unmatched(): void { this.value.unmatchedEventCount++; }
   reconnectCount(count: number): void {
     if (!Number.isFinite(count) || count < 0) return;
     this.value.reconnectCount = Math.max(this.value.reconnectCount ?? 0, Math.floor(count));
   }
-  finish(reason?: string): void { const now = Date.now(); this.value.totalDuration = now - this.startedAt; this.value.streamDuration = this.value.headersLatency === undefined ? undefined : now - (this.startedAt + this.value.headersLatency); if (this.gaps.length) { this.value.averageEventGap = this.gaps.reduce((a, b) => a + b, 0) / this.gaps.length; this.value.maxEventGap = Math.max(...this.gaps); } this.value.abortReason = reason; }
+  finish(reason?: string): void { const now = Date.now(); this.value.totalDuration ??= now - this.startedAt; this.value.streamDuration = this.value.headersLatency === undefined ? undefined : now - (this.startedAt + this.value.headersLatency); if (this.gaps.length) { this.value.averageEventGap = this.gaps.reduce((a, b) => a + b, 0) / this.gaps.length; this.value.maxEventGap = Math.max(...this.gaps); } this.value.abortReason = reason; }
+}
+
+export function mappedMessageTiming(value: unknown): { ttft?: number; totalDuration?: number } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  const ttft = boundedMilliseconds(source.ttftMs);
+  const totalDuration = boundedMilliseconds(source.totalDurationMs);
+  return {
+    ...(ttft === undefined ? {} : { ttft }),
+    ...(totalDuration === undefined ? {} : { totalDuration }),
+  };
+}
+
+function boundedMilliseconds(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 86_400_000 ? value : undefined;
 }

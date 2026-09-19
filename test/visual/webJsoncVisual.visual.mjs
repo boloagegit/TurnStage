@@ -59,12 +59,12 @@ try {
     return { outerHeight: outer.height, inputHeight: input.height, topGap: input.top - outer.top, bottomGap: outer.bottom - input.bottom };
   });
   let layout = await editorLayout();
-  assert.ok(layout.outerHeight > 400 && layout.inputHeight >= layout.outerHeight - 60 && layout.topGap >= 40 && layout.bottomGap <= 2, `Highlighted JSONC editor fills the dialog below its toolbar: ${JSON.stringify(layout)}`);
+  assert.ok(layout.outerHeight > 400 && layout.inputHeight >= layout.outerHeight - 60 && layout.topGap >= 40 && layout.bottomGap <= 2, `JSONC editor fills the dialog below its toolbar: ${JSON.stringify(layout)}`);
   await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: /opening/u }).waitFor();
-  assert.ok(await page.locator('.profile-reference-editor .jsonc-key').count() > 3, 'Editable source retains syntax highlighting');
+  assert.equal(await page.locator('.profile-reference-editor .jsonc-lines').count(), 0, 'Edit mode uses one visible native text layer so the caret cannot drift from highlighted text');
   await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: /opening/u }).click();
-  const sectionJump = await editor.evaluate((element) => ({ inputScroll: element.scrollTop, highlightedScroll: element.parentElement.scrollTop, caret: element.selectionStart, targetTop: element.parentElement.querySelector('[data-line="20"]').offsetTop, inputScrollHeight: element.scrollHeight, highlightedScrollHeight: element.parentElement.scrollHeight }));
-  assert.ok(sectionJump.inputScroll > 0 && Math.abs(sectionJump.inputScroll - sectionJump.highlightedScroll) <= 2 && sectionJump.caret > 0, `Section jump keeps editor and highlighting aligned: ${JSON.stringify(sectionJump)}`);
+  const sectionJump = await editor.evaluate((element) => ({ inputScroll: element.scrollTop, caret: element.selectionStart, inputScrollHeight: element.scrollHeight }));
+  assert.ok(sectionJump.caret > 0, `Section jump places the native caret at the selected section: ${JSON.stringify(sectionJump)}`);
   await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Top' }).click();
   await screenshot(page, 'jsonc-editing');
   await page.setViewportSize({ width: 520, height: 700 });
@@ -77,7 +77,7 @@ try {
   await editor.focus();
   await editor.press('End');
   await editor.type('x');
-  assert.notEqual(await editor.inputValue(), initial, 'Typing edits the highlighted JSONC source directly');
+  assert.notEqual(await editor.inputValue(), initial, 'Typing edits the native JSONC source directly');
   await editor.fill(initial);
   await editor.fill('{ broken');
   await page.getByRole('button', { name: 'Save', exact: true }).click();

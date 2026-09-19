@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AdversarialResultSummary, AutomationResultSummary, ChatMessage, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
-import { isPreviewOnlyResponseAction, MobileChatPreview, resizeComposerTextarea, resolveResponseActivity } from '../src/webview/MobileChatPreview';
+import { assembleResponseSource, isPreviewOnlyResponseAction, MobileChatPreview, resizeComposerTextarea, resolveResponseActivity } from '../src/webview/MobileChatPreview';
 import { ACCESSIBLE_EVENT_WINDOW_SIZE, adversarialCaseCount, AutomationEvidenceReviewBar, CausalTimeline, DEFAULT_EVENT_FILTERS, eventMatchesFilters, eventTimeDeltas, EvidenceReviewBar, EvidenceSummary, Inspector, JsonBlock, NetworkInspector, normalizeInspectorEventFilters, Replay, resolveActiveAutomationEvidence, resolveActiveEvidence, resolveMessageInspectionTarget, terminalSequences, VirtualEvents, type InspectorEventFilters } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
 import { AdversarialWorkspace, AutomationWorkspace, SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
@@ -29,7 +29,7 @@ function eventRows(scope: HTMLElement | Document = document): HTMLElement[] {
 
 describe('Webview DOM behavior', () => {
   it('keeps controls collapsed by default, supports configured expansion, and posts object option values', () => {
-    const selected = { custid: 'C002', bdcun: 'B002' };
+    const selected = { customerId: 'C002', regionCode: 'R002' };
     const controlProfile: TurnStageProfile = { ...profile, controls: [{ id: 'user', type: 'select', label: 'User', default: 'legacy', options: [
       { label: 'Legacy', value: 'legacy' }, { label: 'User B', value: selected },
     ] }] };
@@ -164,14 +164,19 @@ describe('Webview DOM behavior', () => {
     expect(onViewportChange).toHaveBeenLastCalledWith({ preset: 'custom', width: 667, height: 412, zoom: '75' });
   });
 
-  it('selects a message with the keyboard and keeps every message action focusable', async () => {
+  it('opens the response content with the keyboard and keeps every message action focusable', async () => {
     const user = userEvent.setup();
     const onSelectMessage = vi.fn();
     render(<MobileChatPreview {...mobileProps({ onSelectMessage })} />);
 
-    const message = screen.getByLabelText('Assistant message, Completed');
+    const message = screen.getByLabelText('Assistant message, Completed. Open response content.');
     message.focus();
     await user.keyboard('{Enter}');
+    const dialog = screen.getByRole('dialog', { name: 'Response content' });
+    expect(within(dialog).getByRole('tab', { name: 'Preview' })).toBeTruthy();
+    await user.click(within(dialog).getByRole('tab', { name: 'Raw content' }));
+    expect(within(dialog).getByText('A completed response.')).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'View related events' }));
     expect(onSelectMessage).toHaveBeenCalledWith('assistant-1');
 
     const actions = screen.getByRole('group', { name: 'Message actions' });
@@ -575,7 +580,7 @@ describe('Webview DOM behavior', () => {
     expect(document.documentElement.dir).toBe('rtl');
     expect(screen.getByText(longText)).toBeTruthy();
     expect(screen.getByRole('log').classList.contains('mobile-chat-preview__messages')).toBe(true);
-    expect(screen.getByLabelText('Assistant message, Completed').textContent).toContain('🧪🚀🙂');
+    expect(screen.getByLabelText('Assistant message, Completed. Open response content.').textContent).toContain('🧪🚀🙂');
   });
 
   it('progressively mounts long conversations in bounded 200-message windows', async () => {
@@ -669,7 +674,7 @@ describe('Webview DOM behavior', () => {
 
     const indicator = document.querySelector('.mobile-chat-preview__stream-indicator');
     expect(indicator?.getAttribute('data-effect')).toBe(effect);
-    const message = screen.getByLabelText('Assistant message, Streaming') as HTMLElement;
+    const message = screen.getByLabelText('Assistant message, Streaming. Open response content.') as HTMLElement;
     expect(message.style.getPropertyValue('--mcp-stream-duration')).toBe('1200ms');
     expect(message.style.getPropertyValue('--mcp-stream-intensity')).toBe('0.8');
   });
@@ -1640,6 +1645,29 @@ describe('Webview DOM behavior', () => {
 
     expect(resolveMessageInspectionTarget(userMessage, network)).toEqual({ tab: 'Network', turnId, networkId: 'network-1' });
     expect(resolveMessageInspectionTarget(assistantMessage, network)).toEqual({ tab: 'Raw Events', turnId, sequence: 8 });
+  });
+
+  it('assembles the original response fragments in normalized event order', () => {
+    const message: ChatMessage = {
+      ...assistantMessage('assistant-source', 'fallback'),
+      metadata: { clientRequestId: 'turn-source', rawSequences: [9, 3, 6] },
+    };
+    const source = assembleResponseSource(message, {
+      ...snapshot,
+      messages: [message],
+      normalizedEvents: [
+        { version: 1, type: 'content.markdown.delta', sequence: 9, rawSequence: 9, receivedAt: 9, turnId: 'turn-source', messageId: message.id, text: '**end**' },
+        { version: 1, type: 'content.text.delta', sequence: 3, rawSequence: 3, receivedAt: 3, turnId: 'turn-source', messageId: message.id, text: '<div class="notice">start</div>' },
+        { version: 1, type: 'content.text.delta', sequence: 6, rawSequence: 6, receivedAt: 6, turnId: 'turn-source', messageId: message.id, text: '\n' },
+      ],
+    });
+
+    expect(source).toEqual({
+      text: '<div class="notice">start</div>\n**end**',
+      fragmentCount: 3,
+      format: 'mixed',
+      truncated: false,
+    });
   });
 
   it('authors and operates a bounded campaign with baseline, diff, resume, and JSONL actions', async () => {

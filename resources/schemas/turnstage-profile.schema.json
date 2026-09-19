@@ -48,7 +48,112 @@
           "additionalProperties": false,
           "properties": {
             "markdown": { "type": "boolean", "default": true },
-            "html": { "type": "boolean", "default": true }
+            "html": { "type": "boolean", "default": true },
+            "classStyles": {
+              "type": "object",
+              "maxProperties": 64,
+              "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$" },
+              "additionalProperties": {
+                "type": "object",
+                "maxProperties": 40,
+                "additionalProperties": false,
+                "properties": {
+                  "alignItems": { "type": "string", "maxLength": 96 },
+                  "backgroundColor": { "type": "string", "maxLength": 96 },
+                  "borderBottomColor": { "type": "string", "maxLength": 96 },
+                  "borderBottomStyle": { "type": "string", "maxLength": 96 },
+                  "borderBottomWidth": { "type": "string", "maxLength": 96 },
+                  "borderColor": { "type": "string", "maxLength": 96 },
+                  "borderRadius": { "type": "string", "maxLength": 96 },
+                  "borderStyle": { "type": "string", "maxLength": 96 },
+                  "borderTopColor": { "type": "string", "maxLength": 96 },
+                  "borderTopStyle": { "type": "string", "maxLength": 96 },
+                  "borderTopWidth": { "type": "string", "maxLength": 96 },
+                  "borderWidth": { "type": "string", "maxLength": 96 },
+                  "color": { "type": "string", "maxLength": 96 },
+                  "display": { "type": "string", "maxLength": 96 },
+                  "flex": { "type": "string", "maxLength": 96 },
+                  "fontSize": { "type": "string", "maxLength": 96 },
+                  "fontStyle": { "type": "string", "maxLength": 96 },
+                  "fontWeight": { "type": "string", "maxLength": 96 },
+                  "height": { "type": "string", "maxLength": 96 },
+                  "justifyContent": { "type": "string", "maxLength": 96 },
+                  "lineHeight": { "type": "string", "maxLength": 96 },
+                  "listStyle": { "type": "string", "maxLength": 96 },
+                  "margin": { "type": "string", "maxLength": 96 },
+                  "marginBlock": { "type": "string", "maxLength": 96 },
+                  "marginInline": { "type": "string", "maxLength": 96 },
+                  "marginLeft": { "type": "string", "maxLength": 96 },
+                  "marginTop": { "type": "string", "maxLength": 96 },
+                  "maxHeight": { "type": "string", "maxLength": 96 },
+                  "maxWidth": { "type": "string", "maxLength": 96 },
+                  "overflow": { "type": "string", "maxLength": 96 },
+                  "padding": { "type": "string", "maxLength": 96 },
+                  "paddingBlock": { "type": "string", "maxLength": 96 },
+                  "paddingBottom": { "type": "string", "maxLength": 96 },
+                  "paddingInline": { "type": "string", "maxLength": 96 },
+                  "paddingTop": { "type": "string", "maxLength": 96 },
+                  "textAlign": { "type": "string", "maxLength": 96 },
+                  "textDecoration": { "type": "string", "maxLength": 96 },
+                  "whiteSpace": { "type": "string", "maxLength": 96 },
+                  "width": { "type": "string", "maxLength": 96 }
+                }
+              }
+            },
+            "styleRules": {
+              "type": "object",
+              "maxProperties": 64,
+              "propertyNames": {
+                "maxLength": 256,
+                "pattern": "^(?:\\.[A-Za-z_][A-Za-z0-9_-]{0,63}|a|blockquote|br|code|div|em|h[1-6]|img|li|ol|p|pre|section|span|strong|table|tbody|td|th|thead|tr|ul)(?:\\.[A-Za-z_][A-Za-z0-9_-]{0,63}|:(?:hover|active|focus|focus-visible|focus-within|first-child|last-child|only-child|first-of-type|last-of-type|disabled|checked)|:has\\((?:\\.[A-Za-z_][A-Za-z0-9_-]{0,63}|a|blockquote|br|code|div|em|h[1-6]|img|li|ol|p|pre|section|span|strong|table|tbody|td|th|thead|tr|ul)\\)){0,7}(?:(?:\\s*[>+]\\s*|\\s+)(?:\\.[A-Za-z_][A-Za-z0-9_-]{0,63}|a|blockquote|br|code|div|em|h[1-6]|img|li|ol|p|pre|section|span|strong|table|tbody|td|th|thead|tr|ul)(?:\\.[A-Za-z_][A-Za-z0-9_-]{0,63}|:(?:hover|active|focus|focus-visible|focus-within|first-child|last-child|only-child|first-of-type|last-of-type|disabled|checked)|:has\\((?:\\.[A-Za-z_][A-Za-z0-9_-]{0,63}|a|blockquote|br|code|div|em|h[1-6]|img|li|ol|p|pre|section|span|strong|table|tbody|td|th|thead|tr|ul)\\)){0,7}){0,3}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "maxProperties": 40,
+                "additionalProperties": false,
+                "properties": {
+                  "alignItems": { "type": "string", "maxLength": 96 },
+                  "backgroundColor": { "type": "string", "maxLength": 96 },
+                  "borderBottomColor": { "type": "string", "maxLength": 96 },
+                  "borderBottomStyle": { "type": "string", "maxLength": 96 },
+                  "borderBottomWidth": { "type": "string", "maxLength": 96 },
+                  "borderColor": { "type": "string", "maxLength": 96 },
+                  "borderRadius": { "type": "string", "maxLength": 96 },
+                  "borderStyle": { "type": "string", "maxLength": 96 },
+                  "borderTopColor": { "type": "string", "maxLength": 96 },
+                  "borderTopStyle": { "type": "string", "maxLength": 96 },
+                  "borderTopWidth": { "type": "string", "maxLength": 96 },
+                  "borderWidth": { "type": "string", "maxLength": 96 },
+                  "color": { "type": "string", "maxLength": 96 },
+                  "display": { "type": "string", "maxLength": 96 },
+                  "flex": { "type": "string", "maxLength": 96 },
+                  "fontSize": { "type": "string", "maxLength": 96 },
+                  "fontStyle": { "type": "string", "maxLength": 96 },
+                  "fontWeight": { "type": "string", "maxLength": 96 },
+                  "height": { "type": "string", "maxLength": 96 },
+                  "justifyContent": { "type": "string", "maxLength": 96 },
+                  "lineHeight": { "type": "string", "maxLength": 96 },
+                  "listStyle": { "type": "string", "maxLength": 96 },
+                  "margin": { "type": "string", "maxLength": 96 },
+                  "marginBlock": { "type": "string", "maxLength": 96 },
+                  "marginInline": { "type": "string", "maxLength": 96 },
+                  "marginLeft": { "type": "string", "maxLength": 96 },
+                  "marginTop": { "type": "string", "maxLength": 96 },
+                  "maxHeight": { "type": "string", "maxLength": 96 },
+                  "maxWidth": { "type": "string", "maxLength": 96 },
+                  "overflow": { "type": "string", "maxLength": 96 },
+                  "padding": { "type": "string", "maxLength": 96 },
+                  "paddingBlock": { "type": "string", "maxLength": 96 },
+                  "paddingBottom": { "type": "string", "maxLength": 96 },
+                  "paddingInline": { "type": "string", "maxLength": 96 },
+                  "paddingTop": { "type": "string", "maxLength": 96 },
+                  "textAlign": { "type": "string", "maxLength": 96 },
+                  "textDecoration": { "type": "string", "maxLength": 96 },
+                  "whiteSpace": { "type": "string", "maxLength": 96 },
+                  "width": { "type": "string", "maxLength": 96 }
+                }
+              }
+            }
           }
         },
         "streaming": {
@@ -181,6 +286,7 @@
     "request": { "type": "object", "required": ["method", "url"], "additionalProperties": true, "properties": { "method": { "enum": ["POST", "GET", "PUT", "PATCH", "DELETE"] }, "url": { "type": "string" }, "headers": { "type": "object", "additionalProperties": { "type": "string" } }, "body": {}, "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 900000 }, "idleTimeoutMs": { "type": "integer", "minimum": 1, "maximum": 900000 }, "reconnect": { "type": "object", "additionalProperties": false, "properties": { "maxAttempts": { "type": "integer", "minimum": 0, "maximum": 5 }, "baseDelayMs": { "type": "integer", "minimum": 0, "maximum": 30000 }, "maxDelayMs": { "type": "integer", "minimum": 0, "maximum": 120000 }, "retryOnStatuses": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "integer", "minimum": 400, "maximum": 599 } } } }, "redirectPolicy": { "enum": ["same-origin", "follow", "error"] }, "maxRedirects": { "type": "integer", "minimum": 0, "maximum": 10 }, "tls": { "type": "object", "additionalProperties": false, "properties": { "allowInvalidCertificates": { "type": "boolean" } } }, "variants": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "body"], "properties": { "id": { "type": "string" }, "when": { "$ref": "#/$defs/condition" }, "body": {}, "headers": { "type": "object", "additionalProperties": { "type": "string" } } } } } } },
     "stop": { "type": "object", "required": ["strategy"], "additionalProperties": true, "properties": { "strategy": { "enum": ["abortOnly", "abortThenRequest"] }, "request": { "$ref": "#/$defs/request" }, "requiredContext": { "type": "array", "items": { "type": "string" } } } },
     "mappingPath": { "type": "object", "required": ["path"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 256 } } },
+    "messageTimingMapping": { "type": "object", "minProperties": 1, "additionalProperties": false, "properties": { "ttftMs": { "oneOf": [{ "type": "number", "minimum": 0, "maximum": 86400000 }, { "$ref": "#/$defs/mappingPath" }] }, "totalDurationMs": { "oneOf": [{ "type": "number", "minimum": 0, "maximum": 86400000 }, { "$ref": "#/$defs/mappingPath" }] } } },
     "responseAction": {
       "type": "object",
       "required": ["id", "label", "actionId"],
@@ -196,7 +302,7 @@
         "confirm": { "type": "object" }
       }
     },
-    "stream": { "type": "object", "required": ["transport", "mappings"], "additionalProperties": false, "properties": { "transport": { "enum": ["sse", "ndjson", "json", "text-stream", "fixture"] }, "dataFormat": { "enum": ["json", "text"] }, "mappingMode": { "enum": ["firstMatch", "allMatches"] }, "unexpectedEndPolicy": { "enum": ["fail", "completeWithWarning"] }, "doneValue": { "type": "string" }, "mappings": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "match", "emit"], "properties": { "id": { "type": "string" }, "match": { "$ref": "#/$defs/condition" }, "emit": { "type": "object", "required": ["type"], "properties": { "type": { "type": "string" }, "action": { "oneOf": [{ "$ref": "#/$defs/responseAction" }, { "$ref": "#/$defs/mappingPath" }] } }, "additionalProperties": true }, "continue": { "type": "boolean" } } } } } },
+    "stream": { "type": "object", "required": ["transport", "mappings"], "additionalProperties": false, "properties": { "transport": { "enum": ["sse", "ndjson", "json", "text-stream", "fixture"] }, "dataFormat": { "enum": ["json", "text"] }, "mappingMode": { "enum": ["firstMatch", "allMatches"] }, "unexpectedEndPolicy": { "enum": ["fail", "completeWithWarning"] }, "doneValue": { "type": "string" }, "mappings": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "match", "emit"], "properties": { "id": { "type": "string" }, "match": { "$ref": "#/$defs/condition" }, "emit": { "type": "object", "required": ["type"], "properties": { "type": { "type": "string" }, "action": { "oneOf": [{ "$ref": "#/$defs/responseAction" }, { "$ref": "#/$defs/mappingPath" }] }, "timing": { "$ref": "#/$defs/messageTimingMapping" } }, "additionalProperties": true }, "continue": { "type": "boolean" } } } } } },
     "tests": {
       "type": "object",
       "required": ["scenarios"],

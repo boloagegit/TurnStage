@@ -21,9 +21,19 @@ python3 -m http.server 8000 --bind 127.0.0.1
 
 Open `http://127.0.0.1:8000/` in a browser. Python 3.6 supports this command; Python is needed only for this optional local preview, not to build or run the deployed Web archive. The server serves the current directory, so running it beside the ZIP instead of inside the extracted directory will not open TurnStage Web. Stop it with Ctrl+C. Python's `http.server` is not intended for production; use a managed static HTTP server or reverse proxy for shared access. A local preview does not start the optional mock API, and real API calls still require browser reachability, trusted TLS, and CORS permission.
 
-## One-command Web and API proxy on port 9095
+## One-command Web server with an optional API proxy
 
-The archive also includes `serve.py` for a simple internal deployment using Python 3.6+ standard-library modules only. From the extracted directory containing `index.html`, stop any old `python3 -m http.server` process that is using port 9095, then run:
+The archive also includes `serve.py` for a simple internal deployment using Python 3.6+ standard-library modules only. It contains no company endpoint. Its listener and optional upstream are supplied at startup.
+
+The command-line options take precedence over environment variables:
+
+| Purpose | Command-line option | Environment variable | Safe default |
+| --- | --- | --- | --- |
+| Web listen port | `--port` | `TURNSTAGE_WEB_PORT` | `8000` |
+| Web listen address | `--bind` | `TURNSTAGE_WEB_BIND` | `127.0.0.1` (local machine only) |
+| `/api/` upstream | `--upstream` | `TURNSTAGE_API_UPSTREAM` | disabled |
+
+To expose Web on the network and forward `/api/` to one HTTP service, run from the extracted directory containing `index.html`:
 
 ```bash
 python3 serve.py --port 9095 --bind 0.0.0.0 --upstream http://127.0.0.1:9098
@@ -31,9 +41,20 @@ python3 serve.py --port 9095 --bind 0.0.0.0 --upstream http://127.0.0.1:9098
 
 Open `http://SERVER_IP:9095/`. Set the Profile/Environment API base URL to `http://SERVER_IP:9095/api`, or set a request URL directly to `http://SERVER_IP:9095/api/chat` when the upstream endpoint is `/chat`. The script strips `/api` before forwarding, so `/api/chat` reaches `http://127.0.0.1:9098/chat`. The upstream service on 9098 is not modified. Change `--upstream` only if the fixed upstream is at a different reachable HTTP address; the script does not proxy arbitrary Profile URLs or automatically route other services. Requests routed through `/api/` come from the Web server, not from each user's browser, and the browser sees one origin, avoiding CORS for this route. Requests pointed directly at another IP or port still need browser reachability and CORS.
 
+The IP addresses and ports in that command are examples. Replace them with values for the deployment. If `--upstream` and `TURNSTAGE_API_UPSTREAM` are both omitted, static Web still works but `/api/` returns HTTP 503 instead of silently forwarding to a built-in destination.
+
+The equivalent environment-variable form is:
+
+```bash
+TURNSTAGE_WEB_PORT=9095 \
+TURNSTAGE_WEB_BIND=0.0.0.0 \
+TURNSTAGE_API_UPSTREAM=http://127.0.0.1:9098 \
+python3 serve.py
+```
+
 The proxy forwards request methods, body, authentication headers, response status and headers, and flushes SSE/NDJSON chunks as they arrive. Request bodies are limited to 16 MiB. It does not log URLs or secrets. To keep it running after SSH logout:
 
-For the A/B topology where A hosts TurnStage Web on 9095 and an existing relay on 9098 forwards to HTTPS service B, point `serve.py` at A's 9098 HTTP relay and point shared Profiles at `http://A_IP:9095/api`. Certificate trust between the 9098 relay and B is the relay's responsibility; TurnStage Web and the browser do not disable HTTPS verification. The repository's `npm run test:visual:web-ab` exercises this complete path with a test-only relay and self-signed B, including chat, opening, local case uploads, general tests, and Red Team. It does not validate a company's actual relay configuration or network policies.
+For an A/B topology where A hosts TurnStage Web and an existing relay forwards to HTTPS service B, set `--upstream` (or `TURNSTAGE_API_UPSTREAM`) to the relay's HTTP origin and point shared Profiles at `http://A_IP:WEB_PORT/api`. Certificate trust between the relay and B is the relay's responsibility; TurnStage Web and the browser do not disable HTTPS verification. The repository's `npm run test:visual:web-ab` exercises this complete path with dynamically allocated test ports, a test-only relay, and self-signed B, including chat, opening, local case uploads, general tests, and Red Team. It does not validate an organization's actual relay configuration or network policies.
 
 ```bash
 nohup python3 serve.py --port 9095 --bind 0.0.0.0 --upstream http://127.0.0.1:9098 > /tmp/turnstage-web-9095.log 2>&1 < /dev/null &

@@ -25,6 +25,13 @@ NDJSON events, normalized mappings, errors, and correlation identifiers. Stop
 or replay a turn, then reopen its evidence without reconstructing the session
 from logs.
 
+Click an Assistant response to compare its rendered preview with the complete
+raw content assembled from the mapped stream events. Markdown and static HTML
+share the same renderer in VS Code and Web. Profiles may map safe visual styles
+to response class names and use bounded, response-scoped class selectors for
+child, descendant, adjacent, and interaction-state styling. Scripts, handlers,
+arbitrary CSS, remote styles, and unsafe URLs remain blocked.
+
 ## Save and run general test cases
 
 Save a conversation as a draft test, review its expected behavior, and run it
@@ -40,7 +47,8 @@ accepted baseline, rerun cases that did not pass, or export that run. Open a
 failed result to inspect its captured Chat, Network, Raw Events, or Normalized
 Events. Reports include sanitized JSON, JUnit, HTML, and Evidence Bundles for
 local review or CI. General and red-team HTML exports are separate, offline
-reports with outcome and duration charts; a run export stays scoped to that run.
+reports with outcome and duration charts, every case result, text search, outcome
+filters, expandable details, and print support; a run export stays scoped to that run.
 
 ![Synthetic general-test results and run history](media/marketplace/automated-tests.png)
 
@@ -177,16 +185,18 @@ directory and open `http://127.0.0.1:8000/` (Python 3.6 or newer). Do not open
 `index.html` directly. The Python server is for local preview, not production.
 
 For a simple internal HTTP-by-IP deployment, the ZIP also includes `serve.py`.
-Run it from the extracted directory:
+Run it from the extracted directory and explicitly choose the Web listener and,
+only when needed, the single API upstream:
 
 ```sh
 python3 serve.py --port 9095 --bind 0.0.0.0 --upstream http://127.0.0.1:9098
 ```
 
-It serves Web on 9095 and streams `/api/` to the fixed upstream on 9098
-without modifying that service. Point the Web Profile API base URL at
-`http://SERVER_IP:9095/api`.
-See the [deployment steps](docs/web-deployment.md#one-command-web-and-api-proxy-on-port-9095)
+The numbers above are deployment examples, not embedded company endpoints.
+Without `--upstream` (or `TURNSTAGE_API_UPSTREAM`), the `/api/` proxy is
+disabled and requests to it return 503. Point a Web Profile at the Web
+server's same-origin `/api` path only when that proxy is configured.
+See the [deployment steps](docs/web-deployment.md#one-command-web-server-with-an-optional-api-proxy)
 and plaintext-transport warning. A managed reverse proxy is recommended for
 durable shared deployments.
 

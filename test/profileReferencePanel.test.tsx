@@ -42,7 +42,8 @@ describe('Web profile reference', () => {
     expect(screen.queryByRole('button', { name: '編輯 JSONC' })).toBeNull();
     const editor = screen.getByRole('textbox', { name: 'JSONC' }) as HTMLTextAreaElement;
     expect(screen.getByRole('navigation', { name: '設定區段' })).toBeTruthy();
-    expect(document.querySelector('.profile-reference-editor .jsonc-key')).toBeTruthy();
+    expect(document.querySelector('.profile-reference-editor .jsonc-lines')).toBeNull();
+    expect(editor.value).toBe(raw);
     fireEvent.change(editor, { target: { value: `${raw}// broken` } });
     fireEvent.click(screen.getByRole('button', { name: '儲存' }));
     expect(screen.getByRole('alert').textContent).toContain('Invalid JSONC');

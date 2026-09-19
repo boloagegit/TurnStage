@@ -1,3 +1,5 @@
+import type { ResponseClassStyles, ResponseStyleRules } from './responseClassStyles';
+
 export type JsonObject = Record<string, unknown>;
 
 export interface TurnStageProfile {
@@ -796,7 +798,7 @@ export interface UiDefinition {
   layout?: { preset?: 'chat-only' | 'split-inspector' | 'chat-with-metrics' | 'compact'; inspectorPosition?: 'right' | 'bottom'; inspectorWidth?: number };
   composer?: { placeholder?: string; multiline?: boolean; enterBehavior?: 'send' | 'newline'; shiftEnterBehavior?: 'send' | 'newline'; showStopWhileStreaming?: boolean };
   /** Both formats are enabled by default for Markdown-mapped assistant messages. */
-  responseContent?: { markdown?: boolean; html?: boolean };
+  responseContent?: { markdown?: boolean; html?: boolean; classStyles?: ResponseClassStyles; styleRules?: ResponseStyleRules };
   streaming?: {
     reveal?: 'instant' | 'event' | 'adaptive';
     indicator?: 'none' | 'caret' | 'dots' | 'shimmer';

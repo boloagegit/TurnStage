@@ -1,6 +1,7 @@
 import type { ChatMessage, Citation, FormDefinition, MessageMetric, MessageMetricAggregation, NormalizedEvent, SessionSnapshot } from '../../shared/types';
 import { localize } from '../l10n';
 import { browserUuid } from '../../shared/uuid';
+import { mappedMessageTiming } from './metrics';
 
 const MAX_MESSAGE_TEXT_CHARS = 1024 * 1024;
 const MAX_MESSAGE_PARTS = 1000;
@@ -69,6 +70,11 @@ export function reduceEvent(snapshot: SessionSnapshot, event: NormalizedEvent): 
     case 'diagnostic.updated': pushBounded(message.parts, { type: 'diagnostic', diagnostic: event.diagnostic }, MAX_MESSAGE_PARTS); break;
     case 'usage.updated': pushBounded(message.parts, { type: 'usage', usage: event.usage }, MAX_MESSAGE_PARTS); break;
     case 'message.metric.updated': upsertMessageMetric(message, event.metric); break;
+    case 'message.timing.updated': {
+      const timing = mappedMessageTiming(event.timing);
+      message.timing = { ...message.timing, ...timing };
+      break;
+    }
     case 'stream.completed': snapshot.turnState = 'completed'; break;
     case 'stream.failed': snapshot.turnState = 'failed'; snapshot.errors.push({ type: 'StreamError', message: typeof event.error === 'string' ? event.error : JSON.stringify(event.error), retrySafe: true }); break;
     case 'stream.aborted': snapshot.turnState = 'aborted'; break;

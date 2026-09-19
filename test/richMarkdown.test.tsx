@@ -69,4 +69,67 @@ describe('RichMarkdown', () => {
     expect(screen.getByRole('img', { name: 'Large image' }).getAttribute('width')).toBe('3000');
     expect(container.querySelector('script')).toBeNull();
   });
+
+  it('applies only profile-approved class styles and keeps incoming CSS inert', () => {
+    const { container } = render(<RichMarkdown
+      text={'<div class="notice unknown" style="position:fixed;background-image:url(https://bad.test/x)">Safe notice</div>'}
+      classStyles={{ notice: { color: '#123456', padding: '12px', fontWeight: '700' } }}
+    />);
+    const notice = container.querySelector('.notice') as HTMLElement;
+    expect(notice.classList.contains('unknown')).toBe(false);
+    expect(getComputedStyle(notice).color).toBe('rgb(18, 52, 86)');
+    expect(getComputedStyle(notice).padding).toBe('12px');
+    expect(getComputedStyle(notice).fontWeight).toBe('700');
+    expect(notice.style.position).toBe('');
+    expect(notice.style.backgroundImage).toBe('');
+  });
+
+  it('scopes safe descendant, child, adjacent, and pseudo-class rules to one response', () => {
+    const rules = {
+      '.card > .title': { color: '#123456', fontWeight: '700' },
+      '.card .detail': { padding: '8px' },
+      '.item + .item': { marginBlock: '6px' },
+      '.card:hover': { backgroundColor: '#eeeeee' },
+    };
+    const first = render(<RichMarkdown text={'<section class="card"><h3 class="title">Title</h3><p class="detail">Detail</p><p class="item">One</p><p class="item">Two</p></section>'} styleRules={rules} />);
+    const title = first.container.querySelector('.title') as HTMLElement;
+    const detail = first.container.querySelector('.detail') as HTMLElement;
+    const items = first.container.querySelectorAll<HTMLElement>('.item');
+    expect(title.className).toBe('title');
+    expect(detail.className).toBe('detail');
+    expect(items).toHaveLength(2);
+    const styleSheet = first.container.querySelector('style')?.textContent ?? '';
+    expect(styleSheet).toMatch(/^\[data-response-style-scope="response-[A-Za-z0-9_-]+"\]/u);
+    expect(styleSheet).toContain('.card > .title{color:#123456;font-weight:700}');
+    expect(styleSheet).toContain('.card .detail{padding:8px}');
+    expect(styleSheet).toContain('.item + .item{margin-block:6px}');
+    expect(styleSheet).toContain('.card:hover{background-color:#eeeeee}');
+    first.unmount();
+
+    const second = render(<RichMarkdown text={'<section class="card"><h3 class="title">Unstyled</h3></section>'} />);
+    expect(second.container.querySelector('.card, .title')).toBeNull();
+  });
+
+  it('supports bounded structured-card layout properties and tag descendants', () => {
+    const { container } = render(<RichMarkdown
+      text={'<section class="card"><header class="header"><div class="body"><p>Intro</p><ul><li class="item">One</li></ul></div><div class="cover"><img src="/image.png" alt="Cover"></div></header></section>'}
+      classStyles={{
+        header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+        cover: { flex: 'none', overflow: 'hidden', width: '80px', height: '80px', marginLeft: '12px' },
+      }}
+      styleRules={{
+        '.body:has(p) ul': { paddingBottom: '20px' },
+        '.body ul > li': { listStyle: 'disc', lineHeight: '2' },
+        '.item:first-child': { marginTop: '0' },
+        '.cover img': { maxWidth: '100%', maxHeight: '100%' },
+      }}
+    />);
+    const sheet = container.querySelector('style')?.textContent ?? '';
+    expect(sheet).toContain('.header{display:flex;justify-content:space-between;align-items:center}');
+    expect(sheet).toContain('.body:has(p) ul{padding-bottom:20px}');
+    expect(sheet).toContain('.body ul > li{list-style:disc;line-height:2}');
+    expect(sheet).toContain('.cover img{max-width:100%;max-height:100%}');
+    expect(container.querySelector('.body ul > li')).not.toBeNull();
+    expect(container.querySelector('.body li')?.className).toBe('item');
+  });
 });

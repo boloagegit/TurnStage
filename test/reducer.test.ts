@@ -136,6 +136,13 @@ describe('reduceEvent', () => {
     ]);
   });
 
+  it('applies mapped backend timings to the target message', () => {
+    const snapshot = createSnapshot(true);
+    reduceEvent(snapshot, event('conversation.started', 1, { conversationId: 'conv-1', assistantMessageId: 'assistant-server-1' }));
+    reduceEvent(snapshot, event('message.timing.updated', 2, { messageId: 'assistant-server-1', timing: { ttftMs: 125, totalDurationMs: 480 } }));
+    expect(assistantMessage(snapshot).timing).toEqual({ ttft: 125, totalDuration: 480 });
+  });
+
   it('supports first, min, max, and count metrics without accepting invalid numeric samples', () => {
     const snapshot = createSnapshot(true);
     reduceEvent(snapshot, event('message.metric.updated', 1, { metric: { id: 'first', value: 'initial', aggregation: 'first' } }));

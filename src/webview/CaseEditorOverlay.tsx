@@ -3,11 +3,13 @@ import { createPortal } from 'react-dom';
 import { IconButton } from './Icon';
 import { t } from './i18n';
 
-export function CaseEditorOverlay({ title, context, children, footer, onRequestClose }: {
+export function CaseEditorOverlay({ title, context, children, footer, className, closeLabel, onRequestClose }: {
   title: string;
   context?: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  className?: string;
+  closeLabel?: string;
   onRequestClose: () => void;
 }): React.JSX.Element {
   const dialog = useRef<HTMLElement>(null);
@@ -30,8 +32,8 @@ export function CaseEditorOverlay({ title, context, children, footer, onRequestC
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
   return createPortal(<div className="case-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onRequestClose(); }}>
-    <section ref={dialog} className="case-editor-dialog" role="dialog" aria-modal="true" aria-label={title} onKeyDown={onKeyDown}>
-      <header className="case-editor-dialog__header"><div><strong>{title}</strong>{context && <small>{context}</small>}</div><IconButton type="button" icon="close" label={t('Close editor')} onClick={onRequestClose} /></header>
+    <section ref={dialog} className={['case-editor-dialog', className].filter(Boolean).join(' ')} role="dialog" aria-modal="true" aria-label={title} onKeyDown={onKeyDown}>
+      <header className="case-editor-dialog__header"><div><strong>{title}</strong>{context && <small>{context}</small>}</div><IconButton type="button" icon="close" label={closeLabel ?? t('Close editor')} onClick={onRequestClose} /></header>
       <div className="case-editor-dialog__body">{children}</div>
       {footer && <footer className="case-editor-dialog__footer">{footer}</footer>}
     </section>

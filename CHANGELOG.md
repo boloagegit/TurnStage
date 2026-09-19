@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.32.3
+
+- The bundled `serve.py` no longer assumes a local API upstream. Its Web bind address, listen port, and optional `/api/` upstream can be supplied by command-line options or environment variables; the proxy stays disabled and returns 503 until an upstream is explicitly configured.
+- Profiles can map backend-reported millisecond fields to built-in TTFT and total duration with `message.timing.updated`; omitting the mapping preserves host-measured timing in both VS Code and Web.
+- Web JSONC editing now uses one native text layer instead of placing a transparent editor over highlighted source, keeping caret and selection geometry aligned while read-only viewing retains syntax highlighting.
+- General and red-team HTML exports now include every case and all retained structural details, plus offline search, outcome filters, reset, expand/collapse, and print controls under a restrictive Content Security Policy.
+- Response-scoped style rules now accept safe HTML tag descendants and tightly bounded `:has()` arguments, enabling selectors such as `.body ul > li`, `.body:has(p) ul`, and `.cover img` without allowing selectors to escape the current response.
+- The safe response property vocabulary now covers common card layout needs including flex alignment, bounded font and element sizes, directional borders and spacing, overflow, and list styles. Positioning, scripts, remote CSS, `url()`, animations, attribute selectors, pseudo-elements, selector lists, and unrestricted `:has()` remain blocked.
+- Sanitized list, section, heading, code, link, and image elements preserve only Profile-approved class names, so structured HTML styling behaves consistently in standalone Web and the VS Code Webview.
+
+## 0.32.2
+
+- Response styling now supports Profile-defined, response-scoped class selectors through `ui.responseContent.styleRules`, including descendant, child, adjacent-sibling, compound-class, and bounded interaction/state pseudo-classes.
+- Selector rules use the same safe presentation-property allowlist as `classStyles`, cannot target elements outside the rendered response, and still reject arbitrary CSS, tag/attribute selectors, selector lists, pseudo-elements, `:has()`, positioning, external resources, and `url()` values.
+- The bundled Agent Flow Profile and mock rich-content response demonstrate and exercise the same scoped rules in standalone Web and the VS Code Webview.
+
+## 0.32.1
+
+- Assistant responses can be opened in a full TurnStage overlay with separate rendered-preview and raw-content views. Raw content is assembled in normalized event order, can be copied or wrapped, and links back to the related diagnostic events.
+- Markdown/HTML responses may use CSS class names whose safe visual properties are defined by the Profile under `ui.responseContent.classStyles`. Arbitrary styles, scripts, handlers, layout escape, remote CSS, and `url()` values remain blocked.
+- The same response rendering, class-style allowlist, raw-content assembly, keyboard navigation, and focus handling are shared by the VS Code Webview and standalone Web app. Existing Profiles require no migration.
+
 ## 0.32.0
 
 - VS Code no longer asks for an extra TurnStage confirmation solely because a trusted Profile's configured opening request targets a remote host, including Profiles opened from Downloads. Restricted Mode still blocks requests; sending known secrets over non-loopback HTTP or disabling TLS verification still requires consent. Review downloaded Profiles before opening them because configured openings can run automatically.
@@ -14,7 +36,7 @@
 
 ## 0.31.0
 
-- Select controls now accept either their existing string values or a flat object of string fields. Request variants can reference fields such as `controls.user.custid` and `controls.user.bdcun` in both VS Code and Web; validated selections persist and restore without changing existing string-valued Profiles.
+- Select controls now accept either their existing string values or a flat object of string fields. Request variants can reference fields such as `controls.user.customerId` and `controls.user.regionCode` in both VS Code and Web; validated selections persist and restore without changing existing string-valued Profiles.
 - Profiles may set `ui.components.controls.defaultCollapsed` to `false` to open the chat controls initially. Omission keeps the previous collapsed default, and users can still toggle the section.
 - Object option values are constrained to safe, flat string fields. Secret-persisted object fields are included in known-secret redaction. No Profile migration is needed; changing a selected user does not automatically start a new backend conversation.
 

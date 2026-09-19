@@ -45,16 +45,16 @@ describe('control persistence scopes', () => {
   });
 
   it('restores an object-valued select in the VSIX host and resolves both request fields', async () => {
-    const selected = { custid: 'C002', bdcun: 'B002' };
+    const selected = { customerId: 'C002', regionCode: 'R002' };
     const configured: TurnStageProfile = { ...profile,
-      controls: [{ id: 'user', type: 'select', label: 'User', default: { custid: 'C001', bdcun: 'B001' }, persist: 'global', options: [
-        { label: 'User A', value: { custid: 'C001', bdcun: 'B001' } }, { label: 'User B', value: selected },
+      controls: [{ id: 'user', type: 'select', label: 'User', default: { customerId: 'C001', regionCode: 'R001' }, persist: 'global', options: [
+        { label: 'User A', value: { customerId: 'C001', regionCode: 'R001' } }, { label: 'User B', value: selected },
       ] }],
-      opening: { mode: 'request', request: { method: 'POST', url: 'https://example.test/opening', body: { custid: { $value: 'controls.user.custid' }, bdcun: { $value: 'controls.user.bdcun' } } }, response: { messagePath: '$.message' } },
+      opening: { mode: 'request', request: { method: 'POST', url: 'https://example.test/opening', body: { customerId: { $value: 'controls.user.customerId' }, regionCode: { $value: 'controls.user.regionCode' } } }, response: { messagePath: '$.message' } },
     };
     const first = controller('/workspace-a/.vscode/turnstage/profiles/shared.turnstage.jsonc', context(new Map()), configured);
-    await first.setControl('user', { bdcun: 'B002', custid: 'C002' });
-    await first.setControl('user', { custid: 'forged', bdcun: 'B002' });
+    await first.setControl('user', { regionCode: 'R002', customerId: 'C002' });
+    await first.setControl('user', { customerId: 'forged', regionCode: 'R002' });
     const restored = controller('/workspace-b/.vscode/turnstage/profiles/shared.turnstage.jsonc', context(new Map()), configured);
     expect(restored.snapshot.controls.user).toEqual(selected);
     const fetchMock = vi.fn(async () => new Response('{"message":"ready"}', { status: 200, headers: { 'content-type': 'application/json' } }));

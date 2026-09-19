@@ -72,15 +72,39 @@ try {
     if (mode === 'rich-mixed') {
       assert.equal(await page.getByText('Markdown bold').evaluate((element) => element.tagName), 'STRONG');
       assert.equal(await page.getByText('HTML bold').evaluate((element) => element.tagName), 'STRONG');
+      const responseCard = page.locator('.response-card');
+      assert.equal(await responseCard.evaluate((element) => getComputedStyle(element).paddingTop), '12px');
+      assert.equal(await page.locator('.response-title').evaluate((element) => getComputedStyle(element).fontWeight), '700');
+      assert.equal(await page.locator('.response-title').evaluate((element) => getComputedStyle(element).fontSize), '20px');
+      assert.equal(await page.locator('.response-header').evaluate((element) => getComputedStyle(element).display), 'flex');
+      assert.equal(await page.locator('.response-cover').evaluate((element) => getComputedStyle(element).width), '80px');
+      assert.equal(await page.locator('.response-detail ul').evaluate((element) => getComputedStyle(element).paddingBottom), '20px');
+      assert.equal(await page.locator('.response-detail li').first().evaluate((element) => getComputedStyle(element).listStyleType), 'disc');
+      assert.equal(await page.locator('.response-item').nth(1).evaluate((element) => getComputedStyle(element).marginTop), '6px');
+      assert.equal(await responseCard.evaluate((element) => getComputedStyle(element).backgroundColor), 'rgb(24, 52, 71)');
+      await responseCard.hover();
+      assert.equal(await responseCard.evaluate((element) => getComputedStyle(element).backgroundColor), 'rgb(35, 74, 98)');
     }
     if (mode === 'rich-complex') {
       await page.getByRole('heading', { name: 'Complex response' }).scrollIntoViewIfNeeded();
       await page.screenshot({ path: resolve(artifacts, 'web-rich-complex-desktop.png'), fullPage: true });
+      const responseMessage = page.locator('.mobile-chat-preview__message--assistant').last();
+      await responseMessage.focus();
+      await responseMessage.press('Enter');
+      const responseDialog = page.locator('.response-content-dialog');
+      await responseDialog.waitFor();
+      await responseDialog.screenshot({ path: resolve(artifacts, 'web-response-preview.png') });
+      await responseDialog.getByRole('tab').nth(1).click();
+      assert.ok((await responseDialog.locator('pre').innerText()).includes('<h3>Complex response</h3>'));
+      await responseDialog.screenshot({ path: resolve(artifacts, 'web-response-raw.png') });
+      await responseDialog.locator('.case-editor-dialog__header .icon-button').click();
+      assert.equal(await responseMessage.evaluate((element) => element === document.activeElement), true, 'Closing response content must restore message focus');
+      report.web.responseOverlay = { preview: 'web-response-preview.png', raw: 'web-response-raw.png', focusRestored: true };
       await page.setViewportSize({ width: 760, height: 720 });
       await page.evaluate(() => document.documentElement.style.setProperty('--vscode-font-size', '26px'));
       assert.equal(await page.locator('.safe-markdown--rich').evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'Complex Web response must fit narrow viewport and 200% text');
       assert.equal(await page.locator('.safe-markdown--rich table').evaluate((element) => element.scrollWidth > element.clientWidth), true, 'Complex Web table must scroll internally');
-      assert.equal(await page.getByRole('img', { name: 'Mock image loaded' }).evaluate((element) => element.getBoundingClientRect().width <= element.parentElement.getBoundingClientRect().width + 1), true, 'Complex Web image must fit');
+      assert.equal(await page.locator('.mobile-chat-preview__message--assistant .safe-markdown--rich img[alt="Mock image loaded"]').last().evaluate((element) => Boolean(element.parentElement) && element.getBoundingClientRect().width <= element.parentElement.getBoundingClientRect().width + 1), true, 'Complex Web image must fit');
       await page.locator('.safe-markdown--rich').screenshot({ path: resolve(artifacts, 'web-rich-complex-detail.png') });
     }
     assert.ok(requests.some((url) => url.includes('/agent/chat/stream')), 'Browser must call the mock stream');
@@ -106,9 +130,29 @@ try {
   await page.waitForFunction(() => Boolean(window.__turnstageHarness?.snapshot));
   await page.getByText('Here is the sample result.').waitFor();
   await page.evaluate((imageUrl) => {
+    const profile = JSON.parse(JSON.stringify(window.__turnstageHarness.profile));
+    profile.ui.responseContent = {
+      markdown: true,
+      html: true,
+      classStyles: {
+        'response-card': { backgroundColor: '#183447', color: '#f4f7fa', padding: '12px 16px', borderRadius: '8px' },
+        'response-header': { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+        'response-cover': { display: 'flex', flex: 'none', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', width: '80px', height: '80px', marginLeft: '12px' },
+      },
+      styleRules: {
+        '.response-card > .response-header': { borderBottomStyle: 'solid', borderBottomWidth: '1px', borderBottomColor: '#31566f' },
+        '.response-card .response-title': { fontWeight: '700', fontSize: '20px' },
+        '.response-detail:has(p) ul': { padding: '0 0 20px 16px' },
+        '.response-detail ul > li': { listStyle: 'disc', lineHeight: '2' },
+        '.response-item + .response-item': { marginTop: '6px' },
+        '.response-cover img': { maxWidth: '100%', maxHeight: '100%' },
+        '.response-card:hover': { backgroundColor: '#234a62' },
+      },
+    };
+    window.__turnstageHarness.dispatch({ type: 'profile.snapshot', profile, version: 1, environments: ['local'] });
     const snapshot = JSON.parse(JSON.stringify(window.__turnstageHarness.snapshot));
     const assistant = snapshot.messages.find((message) => message.role === 'assistant');
-    assistant.parts = [{ type: 'markdown', text: `### VSIX Webview mixed response\n\n**Markdown** and <strong>HTML</strong>.<br>Next line\n\n<img src="${imageUrl}" alt="Mock image loaded">\n\n| Kind | Result |\n| --- | --- |\n| Mixed | Visible |` }];
+    assistant.parts = [{ type: 'markdown', text: `### VSIX Webview mixed response\n\n**Markdown**\n\n<div class="response-card"><div class="response-header"><div class="response-detail"><div class="response-title">Styled <strong>HTML</strong></div><p>Structured content</p><ul><li class="response-item">First related item</li><li class="response-item">Second related item</li></ul></div><div class="response-cover"><img src="${imageUrl}" alt="Mock image loaded"></div></div></div>\n\n| Kind | Result |\n| --- | --- |\n| Mixed | Visible |` }];
     window.__turnstageHarness.dispatch({ type: 'session.snapshot', snapshot, runs: [], requestPreview: { method: 'POST', url: imageUrl }, networkEntries: [] });
   }, `${mockUrl}/rich-content/image.svg`);
   await page.getByRole('heading', { name: 'VSIX Webview mixed response' }).waitFor();
@@ -118,8 +162,29 @@ try {
   });
   assert.deepEqual(harnessImage, { width: 240, height: 80 });
   assert.equal(await page.getByRole('table').count(), 1);
+  const harnessCard = page.locator('.response-card');
+  assert.equal(await harnessCard.evaluate((element) => getComputedStyle(element).paddingTop), '12px');
+  assert.equal(await page.locator('.response-title').evaluate((element) => getComputedStyle(element).fontWeight), '700');
+  assert.equal(await page.locator('.response-title').evaluate((element) => getComputedStyle(element).fontSize), '20px');
+  assert.equal(await page.locator('.response-header').evaluate((element) => getComputedStyle(element).display), 'flex');
+  assert.equal(await page.locator('.response-cover').evaluate((element) => getComputedStyle(element).width), '80px');
+  assert.equal(await page.locator('.response-detail ul').evaluate((element) => getComputedStyle(element).paddingBottom), '20px');
+  assert.equal(await page.locator('.response-detail li').first().evaluate((element) => getComputedStyle(element).listStyleType), 'disc');
+  assert.equal(await page.locator('.response-item').nth(1).evaluate((element) => getComputedStyle(element).marginTop), '6px');
+  await harnessCard.hover();
+  assert.equal(await harnessCard.evaluate((element) => getComputedStyle(element).backgroundColor), 'rgb(35, 74, 98)');
   await page.screenshot({ path: resolve(artifacts, 'vsix-webview-mixed.png'), fullPage: true });
   report.vsixWebview = { passed: true, image: harnessImage, screenshot: 'vsix-webview-mixed.png', note: 'Shared VSIX Webview bundle in browser harness; Extension Host tested separately' };
+  const harnessResponse = page.locator('.mobile-chat-preview__message--assistant').last();
+  await harnessResponse.focus();
+  await harnessResponse.press('Enter');
+  const harnessDialog = page.locator('.response-content-dialog');
+  await harnessDialog.waitFor();
+  await harnessDialog.getByRole('tab').nth(1).click();
+  assert.ok((await harnessDialog.locator('pre').innerText()).includes('VSIX Webview mixed response'));
+  await harnessDialog.screenshot({ path: resolve(artifacts, 'vsix-response-raw.png') });
+  await harnessDialog.locator('.case-editor-dialog__header .icon-button').click();
+  report.vsixWebview.responseOverlay = { raw: 'vsix-response-raw.png', focusRestored: await harnessResponse.evaluate((element) => element === document.activeElement) };
   for (const [markdown, html, strongCount, literalHtml, literalMarkdown] of [[true, true, 2, false, false], [true, false, 1, true, false], [false, true, 1, false, true], [false, false, 0, true, true]]) {
     await page.evaluate(({ markdown, html }) => {
       const profile = JSON.parse(JSON.stringify(window.__turnstageHarness.profile));

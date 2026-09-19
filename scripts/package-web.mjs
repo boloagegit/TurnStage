@@ -10,6 +10,7 @@ const documentation = ['web-deployment.md', 'web-user-guide.md', 'profile-schema
 const archive = Object.fromEntries(await Promise.all([
   ...files.map(async (path) => [relative(output, path).replaceAll('\\', '/'), new Uint8Array(await readFile(path))]),
   ...documentation.map(async (name) => [`docs/${name}`, new Uint8Array(await readFile(resolve(repository, 'docs', name)))]),
+  ['examples/response-style-rules.jsonc', new Uint8Array(await readFile(resolve(repository, 'examples', 'response-style-rules.jsonc')))],
   ['update_profiles.py', new Uint8Array(await readFile(resolve(repository, 'scripts', 'update_profiles.py')))],
   ['serve.py', new Uint8Array(await readFile(resolve(repository, 'scripts', 'serve.py')))],
 ]));

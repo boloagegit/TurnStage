@@ -337,18 +337,18 @@ reference its fields in each request variant:
 {
   "controls": [{
     "id": "user", "type": "select", "label": "User",
-    "default": { "custid": "C001", "bdcun": "B001" },
+    "default": { "customerId": "C001", "regionCode": "R001" },
     "options": [
-      { "label": "User A", "value": { "custid": "C001", "bdcun": "B001" } },
-      { "label": "User B", "value": { "custid": "C002", "bdcun": "B002" } }
+      { "label": "User A", "value": { "customerId": "C001", "regionCode": "R001" } },
+      { "label": "User B", "value": { "customerId": "C002", "regionCode": "R002" } }
     ]
   }],
   "ui": { "components": { "controls": { "defaultCollapsed": false } } },
   "conversation": { "send": { "variants": [
     { "id": "first", "when": { "path": "conversation.id", "operator": "notExists" },
-      "body": { "custid": { "$value": "controls.user.custid" }, "bdcun": { "$value": "controls.user.bdcun" } } },
+      "body": { "customerId": { "$value": "controls.user.customerId" }, "regionCode": { "$value": "controls.user.regionCode" } } },
     { "id": "next", "when": { "path": "conversation.id", "operator": "exists" },
-      "body": { "custid": { "$value": "controls.user.custid" }, "bdcun": { "$value": "controls.user.bdcun" }, "conversationId": { "$value": "conversation.id" } } }
+      "body": { "customerId": { "$value": "controls.user.customerId" }, "regionCode": { "$value": "controls.user.regionCode" }, "conversationId": { "$value": "conversation.id" } } }
   ] } }
 }
 ```
@@ -529,12 +529,40 @@ For Markdown-mapped messages, a Profile can configure the two renderers independ
 "ui": {
   "responseContent": {
     "markdown": true,
-    "html": true
+    "html": true,
+    "classStyles": {
+      "response-card": {
+        "backgroundColor": "#183447",
+        "color": "#f4f7fa",
+        "padding": "12px 16px",
+        "borderRadius": "8px"
+      }
+    },
+    "styleRules": {
+      ".response-card > .response-title": { "fontWeight": "700" },
+      ".response-card .response-detail": { "color": "#d7e7f2" },
+      ".response-item + .response-item": { "marginBlock": "6px" },
+      ".response-card:hover": { "backgroundColor": "#234a62" },
+      ".response-card:focus-within": { "borderColor": "#ff955f" }
+    }
   }
 }
 ```
 
-Both settings default to `true` when omitted. Set only `html` to `false` to display HTML tags literally while retaining Markdown, or only `markdown` to `false` to render static HTML while leaving Markdown punctuation literal. Setting both to `false` displays the entire response as literal text. This is a display setting; it does not change the stream mapping or the stored raw/normalized response. It does not enable JavaScript, CSS, forms, embedded documents, or arbitrary browser capabilities. Large tables scroll within the response, and images fit the available width; a backend should use absolute image URLs when its images are hosted separately from the Web app.
+Both settings default to `true` when omitted. Set only `html` to `false` to display HTML tags literally while retaining Markdown, or only `markdown` to `false` to render static HTML while leaving Markdown punctuation literal. Setting both to `false` displays the entire response as literal text. This is a display setting; it does not change the stream mapping or the stored raw/normalized response. It does not enable JavaScript, arbitrary CSS, forms, embedded documents, or arbitrary browser capabilities. Large tables scroll within the response, and images fit the available width; a backend should use absolute image URLs when its images are hosted separately from the Web app.
+
+`classStyles` lets response HTML such as `<div class="response-card">...</div>` assign a safe base style to each class. `styleRules` adds relationships and states while keeping every selector scoped to the current response. It accepts class and safe HTML-tag descendants (`.card .detail`, `.body ul`), direct children (`.card > .title`, `.body ul > li`), adjacent siblings (`.item + .item`), compound classes (`.card.featured`), a bounded single class/tag `:has()` argument (`.body:has(p) ul`), and the pseudo-classes `:hover`, `:active`, `:focus`, `:focus-visible`, `:focus-within`, `:first-child`, `:last-child`, `:only-child`, `:first-of-type`, `:last-of-type`, `:disabled`, and `:checked`. A selector can contain up to four compounds; up to 64 rules are allowed.
+
+Both settings apply the same bounded presentation properties: colors, directional borders, border radius, flex alignment, bounded font/element sizes, overflow, list markers, line height, spacing, text alignment/decoration, and white-space. Class names are limited to letters, numbers, underscores, and hyphens. Attribute selectors, selector lists, pseudo-elements, complex/unrestricted `:has()`, positioning, transforms, animations, external stylesheets, `url()`, and arbitrary inline CSS are rejected. Class names absent from both `classStyles` and `styleRules` are removed, and every generated rule is prefixed with a unique response scope so it cannot style TurnStage itself or another response. Up to 40 properties per class or rule are allowed. See [`examples/response-style-rules.jsonc`](../examples/response-style-rules.jsonc) for a complete importable Profile.
+
+Clicking an Assistant response opens a full TurnStage content view. **Preview** uses the same configured Markdown, HTML, `classStyles`, and `styleRules` renderer as the conversation. **Raw content** concatenates the mapped text and Markdown fragments in normalized event sequence order, preserving the exact assembled payload before rendering; it can be copied and links to the associated diagnostic events. This viewer does not change the stored response.
+
+TurnStage measures TTFT and total duration itself by default. If a backend
+event contains authoritative values, map it with `message.timing.updated` as
+shown in [Event mapping](event-mapping.md#per-message-metrics). Configure
+`timing.ttftMs` and/or `timing.totalDurationMs` with paths to numeric
+millisecond fields. The paths are Profile data; no backend field name is
+hard-coded into TurnStage. Existing Profiles keep host-measured timing.
 
 `tls.allowInvalidCertificates` defaults to `false`. When explicitly set to
 `true`, TurnStage uses a request-local HTTPS dispatcher that skips validation

@@ -461,6 +461,7 @@ function htmlReport(items: Array<StoredArtifact<RetainedEvidence>>, kind: TestRe
         passedChecks: checks.filter((check) => check.passed).length,
         failedChecks: checks.filter((check) => !check.passed).length,
         findingCount: result.adversarial?.findings.length,
+        facts: webReportFacts(result, locale),
         ...(result.repetitions ? { completedAttempts: result.repetitions.completedAttempts, requestedAttempts: result.repetitions.requestedAttempts, stability: result.repetitions.stability } : {}),
       };
     }),
@@ -499,9 +500,27 @@ function runScopedReport(run: TestRunHistoryRecord, artifacts: Array<StoredArtif
       id: item.name || item.scenarioId, profileId: item.profileId,
       outcome: state === 'incomplete' ? 'incomplete' : item.outcome ?? 'incomplete',
       durationMs: item.durationMs, completedAttempts: item.completedAttempts, requestedAttempts: item.requestedAttempts,
-      ...(evidence ? { passedChecks: [...evidence.result.steps.flatMap((step) => step.checks), ...evidence.result.checks].filter((check) => check.passed).length, failedChecks: [...evidence.result.steps.flatMap((step) => step.checks), ...evidence.result.checks].filter((check) => !check.passed).length, findingCount: evidence.result.adversarial?.findings.length } : {}),
+      ...(evidence ? { passedChecks: [...evidence.result.steps.flatMap((step) => step.checks), ...evidence.result.checks].filter((check) => check.passed).length, failedChecks: [...evidence.result.steps.flatMap((step) => step.checks), ...evidence.result.checks].filter((check) => !check.passed).length, findingCount: evidence.result.adversarial?.findings.length, facts: webReportFacts(evidence.result, locale) } : {}),
     })),
   });
+}
+function webReportFacts(result: ScenarioRunResult, locale: string): Array<{ label: string; value: string }> {
+  const language = locale.toLowerCase();
+  const labels = language.startsWith('zh')
+    ? { failedCheck: '失敗的檢查', finding: '紅隊發現', issue: '執行問題', stability: '穩定性', comparison: '比較差異' }
+    : language.startsWith('ja')
+      ? { failedCheck: '失敗したチェック', finding: 'レッドチームの検出', issue: '実行上の問題', stability: '安定性', comparison: '比較差分' }
+      : language.startsWith('ko')
+        ? { failedCheck: '실패한 검사', finding: '레드팀 발견', issue: '실행 문제', stability: '안정성', comparison: '비교 차이' }
+        : { failedCheck: 'Failed check', finding: 'Red-team finding', issue: 'Execution issue', stability: 'Stability', comparison: 'Comparison difference' };
+  const checks = [...result.steps.flatMap((step) => step.checks), ...result.checks];
+  return [
+    ...checks.filter((check) => !check.passed).map((check) => ({ label: labels.failedCheck, value: check.id })),
+    ...(result.adversarial?.findings ?? []).map((finding) => ({ label: labels.finding, value: finding.label })),
+    ...(result.adversarial?.issues ?? []).map((issue) => ({ label: labels.issue, value: issue.label })),
+    ...(result.repetitions ? [{ label: labels.stability, value: result.repetitions.stability }] : []),
+    ...(result.comparison ? [{ label: labels.comparison, value: `${result.comparison.differenceCount}: ${result.comparison.differencePaths.join(', ')}` }] : []),
+  ];
 }
 function localizedRunStatus(status: string, locale: string): string {
   const translated = {

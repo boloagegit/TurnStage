@@ -52,14 +52,14 @@ describe('ProfileCodec', () => {
 describe('ProfileValidator', () => {
   it('accepts object-valued select options and configured initial expansion', () => {
     const profile = validProfile();
-    profile.controls = [{ id: 'user', type: 'select', label: 'User', default: { custid: 'C001', bdcun: 'B001' }, options: [{ label: 'User A', value: { custid: 'C001', bdcun: 'B001' } }] }];
+    profile.controls = [{ id: 'user', type: 'select', label: 'User', default: { customerId: 'C001', regionCode: 'R001' }, options: [{ label: 'User A', value: { customerId: 'C001', regionCode: 'R001' } }] }];
     profile.ui = { components: { controls: { defaultCollapsed: false } } };
-    profile.conversation.send.variants![0]!.body = { custid: { $value: 'controls.user.custid' } };
+    profile.conversation.send.variants![0]!.body = { customerId: { $value: 'controls.user.customerId' } };
     expect(new ProfileValidator().validate(profile)).toEqual([]);
 
-    profile.controls[0]!.options![0]!.value = { custid: 123 } as never;
+    profile.controls[0]!.options![0]!.value = { customerId: 123 } as never;
     expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain('Select option value must be a string or a flat object of string fields.');
-    profile.controls[0]!.options![0]!.value = { custid: 'C001', bdcun: 'B001' };
+    profile.controls[0]!.options![0]!.value = { customerId: 'C001', regionCode: 'R001' };
     profile.ui.components!.controls!.defaultCollapsed = 'yes' as never;
     expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain('Controls defaultCollapsed must be a boolean.');
   });
@@ -76,6 +76,59 @@ describe('ProfileValidator', () => {
     expect(new ProfileValidator().validate(profile)).toEqual([]);
     profile.ui.responseContent!.html = 'yes' as never;
     expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain('Response content html must be a boolean.');
+  });
+
+  it('accepts safe response class styles and rejects active or unsupported CSS', () => {
+    const profile = validProfile();
+    profile.ui = { responseContent: { classStyles: { notice: { color: '#123456', padding: '12px', fontWeight: '700' } } } };
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
+
+    profile.ui.responseContent!.classStyles = { notice: { position: 'fixed' } as never };
+    expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain('Response class style property or value is not supported.');
+    profile.ui.responseContent!.classStyles = { notice: { backgroundColor: 'url(https://bad.test/x)' } };
+    expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain('Response class style property or value is not supported.');
+  });
+
+  it('accepts scoped response style selectors and rejects selectors that can escape the response', () => {
+    const profile = validProfile();
+    profile.ui = { responseContent: { styleRules: {
+      '.card:hover': { backgroundColor: '#eeeeee' },
+      '.card > .title': { fontWeight: '700' },
+      '.card .detail': { padding: '8px' },
+      '.item + .item': { marginBlock: '6px' },
+      '.body ul > li': { listStyle: 'disc', lineHeight: '2' },
+      '.body:has(p) ul': { paddingBottom: '20px' },
+    } } };
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
+
+    for (const selector of ['body .card', '.card, .other', '.card::before', '.card:has(body .secret)', '.card:has(*)', '.card[data-state="open"]']) {
+      profile.ui.responseContent!.styleRules = { [selector]: { color: '#123456' } };
+      expect(new ProfileValidator().validate(profile).map((item) => item.message)).toContain('Response style selector is not supported.');
+    }
+  });
+
+  it('accepts bounded response layout properties used by structured HTML cards', () => {
+    const profile = validProfile();
+    profile.ui = { responseContent: { classStyles: {
+      'card-features': { margin: '32px 0', padding: '32px 0', borderTopStyle: 'solid', borderTopWidth: '1px', borderTopColor: '#E3E3E3', borderBottomStyle: 'solid', borderBottomWidth: '1px', borderBottomColor: '#E3E3E3' },
+      'card-features-item': { padding: '32px 0' },
+      'card-features-header': { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+      'card-features-header-lt': {},
+      'card-features-title': { fontWeight: '700', color: '#36444D', fontSize: '20px', marginTop: '12px' },
+      'card-features-sub': { fontWeight: '700', color: '#36444D', fontSize: '16px' },
+      'card-features-header-cover': { display: 'flex', flex: 'none', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', width: '80px', height: '80px', marginLeft: '12px' },
+      'card-features-body': {},
+    }, styleRules: {
+      '.card-features-item + .card-features-item': { borderTopStyle: 'solid', borderTopWidth: '1px', borderTopColor: '#E3E3E3' },
+      '.card-features-item:first-child': { paddingTop: '0' },
+      '.card-features-item:last-child': { paddingBottom: '0' },
+      '.card-features-body ul': { marginTop: '8px', padding: '0 0 0 16px' },
+      '.card-features-body:has(p) ul': { marginTop: '8px', padding: '0 0 20px 16px' },
+      '.card-features-body ul > li': { listStyle: 'disc', lineHeight: '2', color: '#36444D' },
+      '.card-features-body p': { paddingBottom: '0', fontSize: '16px', color: '#36444D' },
+      '.card-features-header-cover img': { maxWidth: '100%', maxHeight: '100%' },
+    } } };
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
   });
 
   it('accepts an explicit TLS bypass boolean and rejects malformed TLS configuration', () => {
@@ -520,6 +573,17 @@ describe('ProfileValidator', () => {
       'Message metrics require id and value fields.',
       'Unknown message metric aggregation: average.',
       'Unknown message metric format: clock.',
+    ]));
+  });
+
+  it('validates backend timing mappings as bounded milliseconds or paths', () => {
+    const profile = validProfile();
+    profile.stream.mappings = [{ id: 'timing', match: { event: 'done' }, emit: { type: 'message.timing.updated', timing: { ttftMs: { path: '$.timing.first' }, totalDurationMs: { path: '$.timing.total' } } } }];
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
+    profile.stream.mappings[0]!.emit.timing = { ttftMs: -1, seconds: { path: '$.seconds' } };
+    expect(new ProfileValidator().validate(profile).map((entry) => entry.message)).toEqual(expect.arrayContaining([
+      'Unknown message timing field: seconds.',
+      'Message timing must be milliseconds or a path mapping.',
     ]));
   });
 

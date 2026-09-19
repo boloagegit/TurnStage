@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve TurnStage Web and forward same-origin /api/ requests to one fixed API.
+"""Serve TurnStage Web with an optional same-origin /api/ proxy.
 
 Requires only Python 3.6+ standard-library modules. Run this file from the
 extracted Web ZIP directory (the directory containing index.html).
@@ -8,6 +8,7 @@ extracted Web ZIP directory (the directory containing index.html).
 import argparse
 from http.client import HTTPConnection, HTTPException
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+import os
 from pathlib import Path
 import socket
 from socketserver import ThreadingMixIn
@@ -63,6 +64,11 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_error(405, "Only /api/ accepts this method")
 
     def _proxy(self):
+        upstream = self.server.upstream
+        if upstream is None:
+            self.send_error(503, "API proxy is not configured")
+            self.close_connection = True
+            return
         if self.headers.get("Transfer-Encoding"):
             self.send_error(501, "Chunked request bodies are not supported")
             self.close_connection = True
@@ -87,7 +93,6 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_error(400, "Invalid API path")
             return
 
-        upstream = self.server.upstream
         connection = HTTPConnection(upstream.hostname, upstream.port, timeout=300)
         request_hop = HOP_HEADERS | set(token.strip().lower() for token in self.headers.get("Connection", "").split(","))
         headers = {key: value for key, value in self.headers.items() if key.lower() not in request_hop}
@@ -144,17 +149,32 @@ class Handler(SimpleHTTPRequestHandler):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=9095)
-    parser.add_argument("--bind", default="0.0.0.0")
-    parser.add_argument("--upstream", default="http://127.0.0.1:9098")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=os.environ.get("TURNSTAGE_WEB_PORT", "8000"),
+        help="Web listen port (env: TURNSTAGE_WEB_PORT; default: 8000)",
+    )
+    parser.add_argument(
+        "--bind",
+        default=os.environ.get("TURNSTAGE_WEB_BIND", "127.0.0.1"),
+        help="Web listen address (env: TURNSTAGE_WEB_BIND; default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--upstream",
+        default=os.environ.get("TURNSTAGE_API_UPSTREAM"),
+        help="Optional HTTP origin for /api/ (env: TURNSTAGE_API_UPSTREAM)",
+    )
     args = parser.parse_args(argv)
-    upstream = urlsplit(args.upstream)
-    try:
-        upstream_port = upstream.port
-    except ValueError:
-        parser.error("--upstream needs a valid port")
-    if upstream.scheme != "http" or not upstream.hostname or not upstream_port or upstream.username or upstream.password or upstream.path not in ("", "/") or upstream.query or upstream.fragment:
-        parser.error("--upstream must be an HTTP origin such as http://127.0.0.1:9098")
+    upstream = None
+    if args.upstream:
+        upstream = urlsplit(args.upstream)
+        try:
+            upstream_port = upstream.port
+        except ValueError:
+            parser.error("--upstream needs a valid port")
+        if upstream.scheme != "http" or not upstream.hostname or not upstream_port or upstream.username or upstream.password or upstream.path not in ("", "/") or upstream.query or upstream.fragment:
+            parser.error("--upstream must be an HTTP origin such as http://127.0.0.1:9000")
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
     if not Path("index.html").is_file():
@@ -165,7 +185,10 @@ def main(argv=None):
     except OSError as error:
         parser.error("cannot listen on {}:{} ({})".format(args.bind, args.port, error))
     server.upstream = upstream
-    print("TurnStage Web on {}:{}; /api/ -> {}".format(args.bind, args.port, args.upstream), flush=True)
+    if args.upstream:
+        print("TurnStage Web on {}:{}; /api/ -> {}".format(args.bind, args.port, args.upstream), flush=True)
+    else:
+        print("TurnStage Web on {}:{}; /api/ proxy disabled".format(args.bind, args.port), flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

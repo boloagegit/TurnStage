@@ -49,7 +49,7 @@ describe('Inspector keyboard helpers', () => {
   });
 
   it('keeps message selection and its toolbar reachable without a mouse', () => {
-    expect(mobileSource).toContain('tabIndex={onSelectMessage ? 0 : undefined}');
+    expect(mobileSource).toContain('tabIndex={onOpenResponse || onSelectMessage ? 0 : undefined}');
     expect(mobileSource).toContain('onKeyDown={onMessageKeyDown}');
     expect(mobileSource).toContain("event.key !== 'Enter' && event.key !== ' '");
     expect(mobileSource).toContain('role="group" aria-label={t(\'Message actions\')}');

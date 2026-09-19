@@ -129,6 +129,15 @@ class ServeWebTests(unittest.TestCase):
         response.read()
         connection.close()
 
+    def test_unconfigured_proxy_is_disabled(self):
+        self.web.upstream = None
+        connection = self.connection()
+        connection.request("POST", "/api/chat", body=b'{}', headers={"Content-Type": "application/json"})
+        response = connection.getresponse()
+        self.assertEqual(response.status, 503)
+        self.assertIn(b"API proxy is not configured", response.read())
+        connection.close()
+
     def test_upstream_redirect_stays_on_the_web_origin(self):
         connection = self.connection()
         connection.request("GET", "/api/redirect")

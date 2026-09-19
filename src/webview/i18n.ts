@@ -1590,7 +1590,20 @@ const zhTw: Record<string, string> = {
   'Close CTA details': '關閉 CTA 詳細資料',
   'Action': '動作',
   'Preview only — no external target was opened.': '僅預覽，未開啟外部目標。',
-  'The action was handled inside TurnStage.': '此動作已在 TurnStage 內處理。'
+  'The action was handled inside TurnStage.': '此動作已在 TurnStage 內處理。',
+  'Response content': '回應內容',
+  'Close response content': '關閉回應內容',
+  'Response content view': '回應內容檢視方式',
+  'Preview': '預覽',
+  'Raw content': '原始內容',
+  'Mixed': '混合內容',
+  'Markdown / HTML': 'Markdown／HTML',
+  '{count} content fragments': '{count} 個內容片段',
+  'Wrap lines': '自動換行',
+  'Copy raw content': '複製原始內容',
+  'View related events': '查看相關事件',
+  'Content was truncated at the safety limit.': '內容已達安全上限並被截斷。',
+  '{role} message, {status}. Open response content.': '{role}訊息，{status}。開啟回應內容。',
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {
