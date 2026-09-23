@@ -1,10 +1,10 @@
-import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { clearTimeout } from 'node:timers';
 import { fileURLToPath } from 'node:url';
-import { downloadAndUnzipVSCode, runTests } from '@vscode/test-electron';
+import { downloadAndUnzipVSCode, runTests, runVSCodeCommand } from '@vscode/test-electron';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const temporaryRoots = [];
@@ -23,6 +23,30 @@ try {
     await access(vscodeExecutablePath);
   }
   mockServer = await startMockServer();
+  const packagedVsixSetting = process.env.TURNSTAGE_TEST_VSIX?.trim();
+  const packageVersion = JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8')).version;
+  const packagedVsix = packagedVsixSetting === 'auto' ? path.join(projectRoot, `turnstage-${packageVersion}.vsix`) : packagedVsixSetting;
+  let extensionsDirectory;
+  let installedExtensionPath;
+  if (packagedVsix) {
+    await access(packagedVsix);
+    extensionsDirectory = await mkdtemp(path.join(tmpdir(), 'turnstage-installed-extensions-'));
+    const installUserData = await mkdtemp(path.join(tmpdir(), 'turnstage-install-user-data-'));
+    temporaryRoots.push(extensionsDirectory, installUserData);
+    const cliOptions = { version: requestedVersion };
+    await runVSCodeCommand(['--install-extension', path.resolve(packagedVsix), '--force', '--extensions-dir', extensionsDirectory, '--user-data-dir', installUserData], cliOptions);
+    const listed = await runVSCodeCommand(['--list-extensions', '--show-versions', '--extensions-dir', extensionsDirectory, '--user-data-dir', installUserData], cliOptions);
+    if (!listed.stdout.includes(`turnstage.turnstage@${packageVersion}`)) throw new Error(`Installed VSIX version was not listed: ${listed.stderr || listed.stdout}`);
+    const installedExtensionName = (await readdir(extensionsDirectory)).find((name) => name === `turnstage.turnstage-${packageVersion}`);
+    if (!installedExtensionName) throw new Error('Installed TurnStage extension directory was not found.');
+    installedExtensionPath = path.join(extensionsDirectory, installedExtensionName);
+    // VS Code's test loader requires the entrypoint to belong to the tested
+    // development extension. Copy only test code into the isolated install;
+    // the product files remain exactly those extracted from the VSIX.
+    await mkdir(path.join(installedExtensionPath, 'test-runner'), { recursive: true });
+    await copyFile(path.join(projectRoot, 'dist', 'test', 'index.js'), path.join(installedExtensionPath, 'test-runner', 'index.js'));
+    console.log(`Testing installed VSIX: ${listed.stdout.trim()}`);
+  }
   for (const trustMode of ['trusted', 'untrusted']) {
     const workspace = await createWorkspace(trustMode, mockServer.port);
     if (trustMode === 'trusted') await runCliSmoke(workspace);
@@ -30,10 +54,10 @@ try {
     temporaryRoots.push(workspace, userDataDirectory);
     const options = {
       vscodeExecutablePath,
-      extensionDevelopmentPath: projectRoot,
-      extensionTestsPath: path.join(projectRoot, 'dist', 'test', 'index.js'),
-      extensionTestsEnv: { TURNSTAGE_EXPECT_TRUST: trustMode, TURNSTAGE_MOCK_BASE_URL: `http://127.0.0.1:${mockServer.port}` },
-      launchArgs: [workspace, '--disable-extensions', '--user-data-dir', userDataDirectory]
+      extensionDevelopmentPath: installedExtensionPath ?? projectRoot,
+      extensionTestsPath: path.join(installedExtensionPath ?? projectRoot, installedExtensionPath ? 'test-runner' : 'dist/test', 'index.js'),
+      extensionTestsEnv: { TURNSTAGE_EXPECT_TRUST: trustMode, TURNSTAGE_MOCK_BASE_URL: `http://127.0.0.1:${mockServer.port}`, ...(extensionsDirectory ? { TURNSTAGE_EXPECT_INSTALLED_EXTENSIONS_DIR: extensionsDirectory } : {}) },
+      launchArgs: [workspace, ...(extensionsDirectory ? ['--extensions-dir', extensionsDirectory] : ['--disable-extensions']), '--user-data-dir', userDataDirectory]
     };
     if (trustMode === 'trusted') await runTests(options);
     else await runUntrustedTests(options);
