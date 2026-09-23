@@ -15,7 +15,7 @@
     "sourceBinding": { "$ref": "#/$defs/sourceBinding" },
     "defaults": { "$ref": "#/$defs/defaults" },
     "runPolicy": { "$ref": "#/$defs/runPolicy" },
-    "cases": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/case" } }
+    "cases": { "type": "array", "items": { "$ref": "#/$defs/case" } }
   },
   "$defs": {
     "defaults": {

@@ -50,6 +50,19 @@ describe('ProfileCodec', () => {
 });
 
 describe('ProfileValidator', () => {
+  it('accepts more than 100 inline scenarios without an arbitrary total-case ceiling', () => {
+    const profile = validProfile();
+    profile.tests = {
+      scenarios: Array.from({ length: 1_001 }, (_, index) => ({
+        id: `case-${index + 1}`,
+        name: `Case ${index + 1}`,
+        steps: [{ id: 'turn-1', input: `Prompt ${index + 1}` }],
+      })),
+    };
+
+    expect(new ProfileValidator().validate(profile)).toEqual([]);
+  });
+
   it('accepts object-valued select options and configured initial expansion', () => {
     const profile = validProfile();
     profile.controls = [{ id: 'user', type: 'select', label: 'User', default: { customerId: 'C001', regionCode: 'R001' }, options: [{ label: 'User A', value: { customerId: 'C001', regionCode: 'R001' } }] }];

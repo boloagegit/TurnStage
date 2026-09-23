@@ -31,8 +31,6 @@ const MAX_SUITE_BYTES = 5 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 20 * 1024 * 1024;
 const MAX_EVIDENCE_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_TOTAL_EVIDENCE_BYTES = 100 * 1024 * 1024;
-const MAX_CLI_CASES = 500;
-const DEFAULT_MAX_REQUESTS = 10_000;
 
 export class NodeCliRuntime implements CliExecutionRuntime {
   constructor(private readonly version: string, private readonly cwd = process.cwd()) {}
@@ -48,7 +46,6 @@ export class NodeCliRuntime implements CliExecutionRuntime {
         selected = selected.filter((item) => ids.has(item.key));
       }
       if (!selected.length) return { records: [{ id: 'selection', outcome: 'policy' }] };
-      if (selected.length > MAX_CLI_CASES) return { records: [{ id: 'selection-cap', outcome: 'policy' }] };
 
       const repetitions = request.policy.repetitions;
       const selectedWithPolicy = selected.map((item) => ({ ...item, scenario: applyPolicy(item.scenario, repetitions, request.policy.timeoutMs, request.policy.failFast) }));
@@ -58,7 +55,7 @@ export class NodeCliRuntime implements CliExecutionRuntime {
         const opening = item.profile.opening?.mode === 'request' ? 1 : 0;
         return sum + (turns + opening) * executions;
       }, 0);
-      if (plannedRequests > (request.policy.maxRequests ?? DEFAULT_MAX_REQUESTS)) return { records: [{ id: 'request-budget', outcome: 'policy' }] };
+      if (request.policy.maxRequests !== undefined && plannedRequests > request.policy.maxRequests) return { records: [{ id: 'request-budget', outcome: 'policy' }] };
 
       const records = await runPool(selectedWithPolicy, request.policy.concurrency ?? 3, signal, (item) => runCase(item, workspaceRoot, signal));
       const runId = crypto.randomUUID();
@@ -102,7 +99,6 @@ export class NodeCliRuntime implements CliExecutionRuntime {
 async function loadCases(workspaceRoot: string, configured: readonly string[]): Promise<LoadedCase[]> {
   const profileFiles = configured.length ? configured.map((value) => resolveSafe(workspaceRoot, value)) : await discoverFiles(resolve(workspaceRoot, '.vscode/turnstage/profiles'), /\.turnstage\.jsonc?$/i);
   if (!profileFiles.length) throw new Error('No TurnStage profiles were found.');
-  if (profileFiles.length > MAX_CLI_CASES) throw new Error('Too many profile files were selected.');
   const environments = [builtInEnvironment(), ...(await Promise.all((await discoverFiles(resolve(workspaceRoot, '.vscode/turnstage/environments'), /\.environment\.jsonc?$/i)).map((path) => readJsonc<TurnStageEnvironment>(path, MAX_ENVIRONMENT_BYTES))))];
   const uniqueEnvironments = [...new Map(environments.map((item) => [item.id, item])).values()];
   const result: LoadedCase[] = [];
@@ -114,7 +110,6 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
     if (issues.some((issue) => issue.severity === 'error')) throw new Error('Profile validation failed.');
     for (const scenario of profile.tests?.scenarios ?? []) {
       if (!isScenarioReady(scenario)) continue;
-      if (result.length >= MAX_CLI_CASES) throw new Error('The selected profiles contain too many test cases.');
       result.push({ key: `${profile.id}/inline/${scenario.id}`, profile, scenario, environments: uniqueEnvironments });
     }
     for (const suitePath of profile.tests?.contractSuites ?? []) {
@@ -125,7 +120,6 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
       if (validateContractScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new Error('Test suite is incompatible with its profile.');
       for (const scenario of scenarios) {
         if (!isScenarioReady(scenario)) continue;
-        if (result.length >= MAX_CLI_CASES) throw new Error('The selected profiles contain too many test cases.');
         result.push({ key: `${profile.id}/${parsed.suite.id}/${scenario.id}`, profile, scenario, suiteId: parsed.suite.id, suite: parsed.suite, environments: uniqueEnvironments });
       }
     }
@@ -137,7 +131,6 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
       if (validateAdversarialScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new Error('Adversarial suite is incompatible with its profile.');
       for (const scenario of scenarios) {
         if (!isScenarioReady(scenario)) continue;
-        if (result.length >= MAX_CLI_CASES) throw new Error('The selected profiles contain too many test cases.');
         result.push({ key: `${profile.id}/${parsed.suite.id}/${scenario.id}`, profile, scenario, suiteId: parsed.suite.id, suite: parsed.suite, environments: uniqueEnvironments });
       }
     }
@@ -208,7 +201,7 @@ async function runPool<T, R>(items: readonly T[], concurrency: number, signal: A
 }
 
 async function discoverFiles(directory: string, pattern: RegExp): Promise<string[]> {
-  try { return (await readdir(directory, { withFileTypes: true })).filter((item) => item.isFile() && pattern.test(item.name)).map((item) => resolve(directory, item.name)).sort().slice(0, MAX_CLI_CASES); }
+  try { return (await readdir(directory, { withFileTypes: true })).filter((item) => item.isFile() && pattern.test(item.name)).map((item) => resolve(directory, item.name)).sort(); }
   catch { return []; }
 }
 

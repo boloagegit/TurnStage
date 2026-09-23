@@ -1,5 +1,6 @@
 import { findNodeAtLocation, type Node } from 'jsonc-parser';
 import type { TurnStageEnvironment, TurnStageProfile } from '../../src/shared/types';
+import { webNeedsPerformanceBaseline } from '../../src/shared/webTestCapabilities';
 import { validateProfile, type SchemaValidationError } from './generated/profileSchemaValidator.mjs';
 
 export interface ProfileSourceDiagnostic {
@@ -30,7 +31,7 @@ export function webCompatibilityDiagnostics(profile: TurnStageProfile, tree: Nod
   for (const [index, scenario] of (profile.tests?.scenarios ?? []).entries()) {
     if (scenario.faults) add('web.unsupported.faults', ['tests', 'scenarios', index, 'faults'], messages.faults);
     if (scenario.comparison) add('web.unsupported.comparison', ['tests', 'scenarios', index, 'comparison'], messages.comparison);
-    if (scenario.performance) add('web.unsupported.performance', ['tests', 'scenarios', index, 'performance'], messages.performance);
+    if (webNeedsPerformanceBaseline(scenario)) add('web.unsupported.performance', ['tests', 'scenarios', index, 'performance'], messages.performance);
   }
   if (profile.tests?.reporting?.outputDirectory) add('web.ignored.reportingOutputDirectory', ['tests', 'reporting', 'outputDirectory'], messages.outputDirectory, ['vscode', 'cli']);
   if (profile.tests?.visual?.baselineDirectory) add('web.ignored.visualBaselineDirectory', ['tests', 'visual', 'baselineDirectory'], messages.baselineDirectory, ['vscode', 'cli']);
@@ -81,8 +82,8 @@ const schemaMessages = {
 } satisfies Record<DiagnosticLocale, Record<string, (...values: string[]) => string>>;
 
 const compatibilityMessages = {
-  en: { environment: 'Choose an Environment so this Profile behaves consistently in every browser.', faults: 'Web cannot run network fault simulation. Use VS Code or CLI.', comparison: 'Web cannot run baseline and candidate comparisons. Use VS Code or CLI.', performance: 'Web cannot run performance checks. Use VS Code or CLI.', outputDirectory: 'Web downloads reports and does not use outputDirectory.', baselineDirectory: 'Web stores visual baselines in this browser and does not use baselineDirectory.' },
-  'zh-TW': { environment: '請指定環境，讓此設定檔在不同瀏覽器中的行為一致。', faults: 'Web 無法執行網路故障模擬，請使用 VS Code 或 CLI。', comparison: 'Web 無法執行基準與候選版本比較，請使用 VS Code 或 CLI。', performance: 'Web 無法執行效能檢查，請使用 VS Code 或 CLI。', outputDirectory: 'Web 會下載報告，不會使用 outputDirectory。', baselineDirectory: 'Web 會將視覺基準儲存在此瀏覽器，不會使用 baselineDirectory。' },
-  ja: { environment: 'どのブラウザーでも同じ動作になるように環境を指定してください。', faults: 'Web ではネットワーク障害をシミュレーションできません。VS Code または CLI を使用してください。', comparison: 'Web ではベースラインと候補を比較できません。VS Code または CLI を使用してください。', performance: 'Web ではパフォーマンス検査を実行できません。VS Code または CLI を使用してください。', outputDirectory: 'Web はレポートをダウンロードし、outputDirectory は使用しません。', baselineDirectory: 'Web は視覚ベースラインをこのブラウザーに保存し、baselineDirectory は使用しません。' },
-  ko: { environment: '모든 브라우저에서 동일하게 작동하도록 환경을 지정하세요.', faults: 'Web에서는 네트워크 장애 시뮬레이션을 실행할 수 없습니다. VS Code 또는 CLI를 사용하세요.', comparison: 'Web에서는 기준과 후보 비교를 실행할 수 없습니다. VS Code 또는 CLI를 사용하세요.', performance: 'Web에서는 성능 검사를 실행할 수 없습니다. VS Code 또는 CLI를 사용하세요.', outputDirectory: 'Web은 보고서를 다운로드하며 outputDirectory를 사용하지 않습니다.', baselineDirectory: 'Web은 시각적 기준을 이 브라우저에 저장하며 baselineDirectory를 사용하지 않습니다.' },
+  en: { environment: 'Choose an Environment so this Profile behaves consistently in every browser.', faults: 'Web cannot run network fault simulation. Use VS Code or CLI.', comparison: 'Web cannot run baseline and candidate comparisons. Use VS Code or CLI.', performance: 'Web cannot run performance regression checks without a VS Code baseline.', outputDirectory: 'Web downloads reports and does not use outputDirectory.', baselineDirectory: 'Web stores visual baselines in this browser and does not use baselineDirectory.' },
+  'zh-TW': { environment: '請指定環境，讓此設定檔在不同瀏覽器中的行為一致。', faults: 'Web 無法執行網路故障模擬，請使用 VS Code 或 CLI。', comparison: 'Web 無法執行基準與候選版本比較，請使用 VS Code 或 CLI。', performance: 'Web 無法使用 VS Code 基準執行效能回歸檢查。', outputDirectory: 'Web 會下載報告，不會使用 outputDirectory。', baselineDirectory: 'Web 會將視覺基準儲存在此瀏覽器，不會使用 baselineDirectory。' },
+  ja: { environment: 'どのブラウザーでも同じ動作になるように環境を指定してください。', faults: 'Web ではネットワーク障害をシミュレーションできません。VS Code または CLI を使用してください。', comparison: 'Web ではベースラインと候補を比較できません。VS Code または CLI を使用してください。', performance: 'Web では VS Code の基準を使った性能回帰チェックを実行できません。', outputDirectory: 'Web はレポートをダウンロードし、outputDirectory は使用しません。', baselineDirectory: 'Web は視覚ベースラインをこのブラウザーに保存し、baselineDirectory は使用しません。' },
+  ko: { environment: '모든 브라우저에서 동일하게 작동하도록 환경을 지정하세요.', faults: 'Web에서는 네트워크 장애 시뮬레이션을 실행할 수 없습니다. VS Code 또는 CLI를 사용하세요.', comparison: 'Web에서는 기준과 후보 비교를 실행할 수 없습니다. VS Code 또는 CLI를 사용하세요.', performance: 'Web에서는 VS Code 기준을 사용하는 성능 회귀 검사를 실행할 수 없습니다.', outputDirectory: 'Web은 보고서를 다운로드하며 outputDirectory를 사용하지 않습니다.', baselineDirectory: 'Web은 시각적 기준을 이 브라우저에 저장하며 baselineDirectory를 사용하지 않습니다.' },
 } satisfies Record<DiagnosticLocale, Record<string, string>>;

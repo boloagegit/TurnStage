@@ -41,7 +41,7 @@ describe('profile source validation', () => {
   });
 
   it('reports unsupported settings and Web-only capability differences at their source offsets', () => {
-    const profile = { ...base, controls: [{ id: 'bad', type: 'text', label: 'Bad', unexpected: true }], tests: { scenarios: [{ id: 's', name: 'S', steps: [], faults: { disconnectAfterEvents: 1 }, performance: { warmupRuns: 1, measuredRuns: 1 } }] } } as unknown as TurnStageProfile;
+    const profile = { ...base, controls: [{ id: 'bad', type: 'text', label: 'Bad', unexpected: true }], tests: { scenarios: [{ id: 's', name: 'S', steps: [], faults: { disconnectAfterEvents: 1 }, performance: { regression: { 'scenario.durationMs': { maxIncreaseMs: 100 } } } }] } } as unknown as TurnStageProfile;
     const raw = JSON.stringify(profile, null, 2);
     const tree = parseTree(raw);
     expect(schemaDiagnostics(profile, tree).some((item) => item.code === 'schema.additionalProperties' && item.offset > 0)).toBe(true);

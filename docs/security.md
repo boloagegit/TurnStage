@@ -368,7 +368,7 @@ state, bound to the exact Profile URI, and limited to the newest 100 grants.
 Resolution rechecks the reference and Profile binding and fails closed when the
 local grant is absent. External absolute paths are not sent to the Webview or
 written into the Profile. Linked sources are validated before execution and
-never rewritten. The Red Team catalog sends at most 500 structural summaries
+never rewritten. The Red Team catalog sends structural summaries for every loaded case
 and excludes prompts and rule values. Spreadsheet-leading formula characters
 are escaped on export.
 Evidence Bundle CSVs contain structural metadata only; they exclude prompts,

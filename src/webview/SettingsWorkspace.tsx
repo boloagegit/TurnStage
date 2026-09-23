@@ -9,6 +9,7 @@ import { useConfirmAction } from './ConfirmAction';
 import { JsonViewer } from './JsonViewer';
 import { formatDuration, formatNumber, localizeHumanized, t } from './i18n';
 import { testCaseKey, type TestCaseIdentity } from '../shared/testSelection';
+import { webUnsupportedTestFeature } from '../shared/webTestCapabilities';
 import './settingsWorkspace.css';
 
 /**
@@ -663,8 +664,8 @@ function ScenarioTestsSection({ view, automationSection = 'settings', onAutomati
   const adversarialEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => scenario.adversarial);
   const contractEntries = scenarios.map((scenario, index) => ({ scenario, index })).filter(({ scenario }) => !scenario.adversarial);
   const contractRows = useMemo<ContractCaseRow[]>(() => [
-    ...contractEntries.map(({ scenario, index }) => ({ key: `inline:${index}:${scenario.id}`, source: 'inline' as const, sourceLabel: t('Inline'), scenarioId: scenario.id, scenarioName: scenario.name || scenario.id, tags: scenario.tags ?? [], turns: scenario.steps.length, assertions: contractAssertionCount(scenario), comparison: Boolean(scenario.comparison), performance: Boolean(scenario.performance), faults: Boolean(scenario.faults), capture: scenario.capture, scenario, index })),
-    ...(linkedContractCatalog?.entries ?? []).map((entry) => ({ key: linkedContractCaseRowKey(entry), source: 'linked' as const, sourceLabel: entry.suiteName || linkedSuiteLabel(entry.sourcePath), scenarioId: entry.scenarioId, scenarioName: entry.scenarioName || entry.scenarioId, tags: entry.tags, turns: entry.turns, assertions: entry.assertions, comparison: entry.comparison, performance: entry.performance, faults: entry.faults, capture: entry.capture, sourcePath: entry.sourcePath, suiteId: entry.suiteId, revision: entry.revision })),
+    ...contractEntries.map(({ scenario, index }) => ({ key: `inline:${index}:${scenario.id}`, source: 'inline' as const, sourceLabel: t('Inline'), scenarioId: scenario.id, scenarioName: scenario.name || scenario.id, tags: scenario.tags ?? [], turns: scenario.steps.length, assertions: contractAssertionCount(scenario), comparison: Boolean(scenario.comparison), performance: Boolean(scenario.performance), faults: Boolean(scenario.faults), webUnsupported: Boolean(webUnsupportedTestFeature(scenario)), capture: scenario.capture, scenario, index })),
+    ...(linkedContractCatalog?.entries ?? []).map((entry) => ({ key: linkedContractCaseRowKey(entry), source: 'linked' as const, sourceLabel: entry.suiteName || linkedSuiteLabel(entry.sourcePath), scenarioId: entry.scenarioId, scenarioName: entry.scenarioName || entry.scenarioId, tags: entry.tags, turns: entry.turns, assertions: entry.assertions, comparison: entry.comparison, performance: entry.performance, faults: entry.faults, webUnsupported: entry.webUnsupported, capture: entry.capture, sourcePath: entry.sourcePath, suiteId: entry.suiteId, revision: entry.revision })),
   ], [contractEntries, linkedContractCatalog]);
   const canExportContractCases = trusted && (vscodeFeatures ? contractEntries.length > 0 : contractRows.length > 0);
   const canExportAdversarialCases = trusted && (vscodeFeatures ? adversarialEntries.length > 0 : adversarialEntries.length + (linkedCaseCatalog?.entries.length ?? 0) > 0);
@@ -991,18 +992,18 @@ function linkedCaseRowKey(entry: Pick<LinkedAdversarialCaseSummary, 'sourcePath'
 function automationResultKey(result: AutomationResultSummary, index: number): string { return result.evidenceId ?? `${result.suiteId ?? 'inline'}:${result.scenarioId}:${index}`; }
 function cloneScenario(scenario: ScenarioDefinition): ScenarioDefinition { return JSON.parse(JSON.stringify(scenario)) as ScenarioDefinition; }
 function captureNeedsReview(capture: ScenarioDefinition['capture'], tags: readonly string[] = []): boolean { return capture?.status === 'needsReview' || tags.includes('needs-review'); }
-function caseSelectionBlockReason(row: { capture?: ScenarioDefinition['capture']; tags: readonly string[]; scenario?: ScenarioDefinition; comparison?: boolean; performance?: boolean; faults?: boolean }, vscodeFeatures: boolean): string | undefined {
+function caseSelectionBlockReason(row: { capture?: ScenarioDefinition['capture']; tags: readonly string[]; scenario?: ScenarioDefinition; comparison?: boolean; performance?: boolean; faults?: boolean; webUnsupported?: boolean }, vscodeFeatures: boolean): string | undefined {
   if (captureNeedsReview(row.capture, row.tags)) return t('Review this case before selecting it.');
   if (row.scenario && !row.scenario.name?.trim()) return t('Add a case name.');
   if (row.scenario && !row.scenario.steps.length) return t('Add a test message.');
   const missingStep = row.scenario?.steps.findIndex((step) => !step.input?.trim()) ?? -1;
   if (missingStep >= 0) return t('Add the message for step {number}.', { number: formatNumber(missingStep + 1) });
-  if (!vscodeFeatures && (row.comparison || row.performance || row.faults)) return t('This case needs the VS Code extension.');
+  if (!vscodeFeatures && (row.webUnsupported ?? Boolean(row.comparison || row.performance || row.faults))) return t('This case needs the VS Code extension.');
   return undefined;
 }
 
 function SelectAllCases({ rows, profileId, kind, selectedCaseKeys, onToggleCase, testRunActive, vscodeFeatures, filtered }: {
-  rows: readonly { scenarioId: string; suiteId?: string; capture?: ScenarioDefinition['capture']; tags: readonly string[]; scenario?: ScenarioDefinition; comparison?: boolean; performance?: boolean; faults?: boolean }[];
+  rows: readonly { scenarioId: string; suiteId?: string; capture?: ScenarioDefinition['capture']; tags: readonly string[]; scenario?: ScenarioDefinition; comparison?: boolean; performance?: boolean; faults?: boolean; webUnsupported?: boolean }[];
   profileId: string;
   kind: TestCaseIdentity['kind'];
   selectedCaseKeys?: ReadonlySet<string>;
@@ -1254,6 +1255,7 @@ interface ContractCaseRow {
   comparison: boolean;
   performance: boolean;
   faults: boolean;
+  webUnsupported?: boolean;
   capture?: ScenarioDefinition['capture'];
   scenario?: ScenarioDefinition;
   index?: number;

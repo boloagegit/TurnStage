@@ -1,5 +1,5 @@
 import type { AdversarialContentRule, AdversarialForbidDefinition, ScenarioCaptureDefinition, ScenarioDefinition } from '../../shared/types';
-import { createAdversarialSuite, MAX_ADVERSARIAL_CASES_PER_SUITE, MAX_ADVERSARIAL_REPETITIONS, MAX_ADVERSARIAL_TURNS_PER_CASE, MAX_ADVERSARIAL_TURNS_PER_SUITE, validateAdversarialSuite } from './adversarialSuite';
+import { createAdversarialSuite, MAX_ADVERSARIAL_REPETITIONS, MAX_ADVERSARIAL_TURNS_PER_CASE, validateAdversarialSuite } from './adversarialSuite';
 
 export const ADVERSARIAL_CSV_COLUMNS = [
   'case_id', 'case_name', 'description', 'tags', 'enabled', 'turn_index', 'turn_id', 'turn_name', 'user_message',
@@ -20,7 +20,6 @@ export function parseAdversarialCsv(text: string): ParsedAdversarialCsv {
   if (missing.length) return { scenarios: [], issues: missing.map((column) => ({ row: 1, column, message: `Missing required column: ${column}.` })), rowCount: Math.max(0, rows.length - 1) };
   const records = rows.slice(1).filter((row) => row.some((cell) => cell.trim())).map((row) => Object.fromEntries(header.map((key, column) => [key, row[column] ?? ''])) as Record<string, string>);
   const issues: AdversarialCsvIssue[] = [];
-  if (records.length > MAX_ADVERSARIAL_TURNS_PER_SUITE) return { scenarios: [], issues: [{ row: 1, message: `CSV can contain at most ${MAX_ADVERSARIAL_TURNS_PER_SUITE} turn rows.` }], rowCount: records.length };
   const groups = new Map<string, Array<{ row: number; value: Record<string, string> }>>();
   records.forEach((value, index) => {
     const row = index + 2;
@@ -31,7 +30,6 @@ export function parseAdversarialCsv(text: string): ParsedAdversarialCsv {
     groups.set(caseId, entries);
   });
   const scenarios: ScenarioDefinition[] = [];
-  if (groups.size > MAX_ADVERSARIAL_CASES_PER_SUITE) return { scenarios: [], issues: [{ row: 1, message: `CSV can contain at most ${MAX_ADVERSARIAL_CASES_PER_SUITE} cases.` }], rowCount: records.length };
   for (const [caseId, entries] of groups) {
     const first = entries[0]!;
     validateConsistent(entries, ['case_name', 'description', 'tags', 'enabled', 'forbidden_content_json', 'forbid_urls', 'forbid_ctas', 'forbid_tools', 'forbidden_events_json', 'max_turns', 'timeout_ms', 'stop_on_attack_succeeded', 'repetitions', 'fail_fast', 'capture_json'], issues);

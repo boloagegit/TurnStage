@@ -2,16 +2,30 @@ import type { TurnStageEnvironment, TurnStageProfile } from '../../src/shared/ty
 
 export const WEB_PROFILE_BUNDLE_FORMAT = 'turnstage-web-profile-bundle';
 export const WEB_PROFILE_BUNDLE_VERSION = 1;
+export const WEB_PROFILE_WITH_CASES_VERSION = 2;
 
 const MAX_BUNDLE_BYTES = 1024 * 1024;
 const MAX_ENTRY_BYTES = 512 * 1024;
 
+export interface PortableWebSuite {
+  suiteId: string;
+  kind: 'contract' | 'adversarial';
+  format: 'csv' | 'jsonc' | 'jsonl';
+  fileName: string;
+  raw: string;
+}
+
 export interface WebProfileBundle {
   format: typeof WEB_PROFILE_BUNDLE_FORMAT;
-  version: typeof WEB_PROFILE_BUNDLE_VERSION;
+  version: typeof WEB_PROFILE_BUNDLE_VERSION | typeof WEB_PROFILE_WITH_CASES_VERSION;
   exportedAt: string;
   profile: TurnStageProfile;
   environment: TurnStageEnvironment;
+  suites?: PortableWebSuite[];
+}
+
+export function encodeWebProfileWithCases(profile: TurnStageProfile, environment: TurnStageEnvironment, suites: readonly PortableWebSuite[], exportedAt = new Date()): string {
+  return JSON.stringify({ format: WEB_PROFILE_BUNDLE_FORMAT, version: WEB_PROFILE_WITH_CASES_VERSION, exportedAt: exportedAt.toISOString(), profile: { ...profile, environment: environment.id }, environment, suites }, null, 2);
 }
 
 export function encodeWebProfileBundle(profile: TurnStageProfile, environment: TurnStageEnvironment, exportedAt = new Date()): string {
@@ -23,20 +37,34 @@ export function encodeWebProfileBundle(profile: TurnStageProfile, environment: T
     environment,
   };
   const source = JSON.stringify(bundle, null, 2);
+  assertSize(JSON.stringify(bundle.profile), MAX_ENTRY_BYTES, 'The Profile exceeds 512 KiB. Use Export profile and cases for a larger Profile.');
+  assertSize(JSON.stringify(bundle.environment), MAX_ENTRY_BYTES, 'The Environment exceeds 512 KiB. Use Export profile and cases for a larger Environment.');
   assertSize(source, MAX_BUNDLE_BYTES, 'The exported Profile bundle exceeds 1 MiB.');
   return source;
 }
 
 export function decodeWebProfileBundle(source: string): WebProfileBundle | undefined {
-  assertSize(source, MAX_BUNDLE_BYTES, 'The selected Profile bundle exceeds 1 MiB.');
+  // Version 2 can contain browser-local test suites of any case count.
   let value: unknown;
-  try { value = JSON.parse(source); } catch { return undefined; }
+  try { value = JSON.parse(source); } catch {
+    if (new TextEncoder().encode(source).byteLength > MAX_BUNDLE_BYTES) throw new Error('The selected Profile bundle exceeds 1 MiB.');
+    return undefined;
+  }
   if (!isRecord(value) || value.format !== WEB_PROFILE_BUNDLE_FORMAT) return undefined;
-  if (value.version !== WEB_PROFILE_BUNDLE_VERSION) throw new Error(`Unsupported TurnStage Web Profile bundle version: ${String(value.version)}.`);
+  if (value.version !== WEB_PROFILE_BUNDLE_VERSION && value.version !== WEB_PROFILE_WITH_CASES_VERSION) throw new Error(`Unsupported TurnStage Web Profile bundle version: ${String(value.version)}.`);
   if (typeof value.exportedAt !== 'string' || !Number.isFinite(Date.parse(value.exportedAt))) throw new Error('The selected Profile bundle has an invalid export timestamp.');
   if (!isRecord(value.profile) || !isRecord(value.environment)) throw new Error('The selected Profile bundle must contain a Profile and Environment.');
-  assertSize(JSON.stringify(value.profile), MAX_ENTRY_BYTES, 'The bundled Profile exceeds 512 KiB.');
-  assertSize(JSON.stringify(value.environment), MAX_ENTRY_BYTES, 'The bundled Environment exceeds 512 KiB.');
+  if (value.version === WEB_PROFILE_BUNDLE_VERSION) {
+    if (value.suites !== undefined) throw new Error('Version 1 Profile bundles cannot contain test suites.');
+    assertSize(source, MAX_BUNDLE_BYTES, 'The selected Profile bundle exceeds 1 MiB.');
+    assertSize(JSON.stringify(value.profile), MAX_ENTRY_BYTES, 'The bundled Profile exceeds 512 KiB.');
+    assertSize(JSON.stringify(value.environment), MAX_ENTRY_BYTES, 'The bundled Environment exceeds 512 KiB.');
+  } else if (!Array.isArray(value.suites) || !value.suites.every((item) => isRecord(item)
+    && typeof item.suiteId === 'string' && Boolean(item.suiteId)
+    && (item.kind === 'contract' || item.kind === 'adversarial')
+    && (item.format === 'csv' || item.format === 'jsonc' || item.format === 'jsonl')
+    && typeof item.fileName === 'string' && Boolean(item.fileName)
+    && typeof item.raw === 'string')) throw new Error('The Profile bundle has invalid test suites.');
   return value as unknown as WebProfileBundle;
 }
 

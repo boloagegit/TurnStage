@@ -217,7 +217,7 @@ function validateCampaigns(value: unknown, tree: Node | undefined, out: Validati
       if (!selectors || typeof selectors !== 'object' || Array.isArray(selectors)) out.push(issue(tree, [...path, 'selectors'], localize('Campaign selectors must be an object.')));
       else {
         const selection = selectors as Record<string, unknown>;
-        validateCampaignStringList(selection.caseIds, 500, 512, tree, [...path, 'selectors', 'caseIds'], out);
+        validateCampaignStringList(selection.caseIds, Number.MAX_SAFE_INTEGER, 512, tree, [...path, 'selectors', 'caseIds'], out);
         validateCampaignStringList(selection.suiteIds, 100, 256, tree, [...path, 'selectors', 'suiteIds'], out);
         validateCampaignStringList(selection.tags, 100, 64, tree, [...path, 'selectors', 'tags'], out);
         if (selection.tagMode !== undefined && selection.tagMode !== 'all' && selection.tagMode !== 'any') out.push(issue(tree, [...path, 'selectors', 'tagMode'], localize('Campaign tagMode must be all or any.')));
@@ -366,7 +366,6 @@ export class ProfileValidator {
     }
     const campaigns = profile.tests?.campaigns as unknown;
     if (campaigns !== undefined) validateCampaigns(campaigns, tree, out);
-    if (scenarios.length > 100) out.push(issue(tree, ['tests', 'scenarios'], localize('A profile can define at most 100 scenarios.')));
     for (const duplicate of duplicates(scenarios.flatMap((scenario) => scenario && typeof scenario === 'object' && !Array.isArray(scenario) && typeof scenario.id === 'string' ? [scenario.id] : []))) out.push(issue(tree, ['tests', 'scenarios'], localize('Duplicate scenario id: {id}.', { id: duplicate })));
     scenarios.forEach((scenario, scenarioIndex) => {
       const scenarioPath: Array<string | number> = ['tests', 'scenarios', scenarioIndex];

@@ -9,9 +9,8 @@ export const BATCH_RESUME_CURSOR_VERSION = 1 as const;
 
 export const DEFAULT_BATCH_CONCURRENCY = 3;
 export const MAX_BATCH_CONCURRENCY = 8;
-export const MAX_BATCH_CASES = 500;
-export const MAX_BATCH_ATTEMPTS = 10_000;
-export const MAX_BATCH_REQUESTS = 100_000;
+export const MAX_BATCH_ATTEMPTS = Number.MAX_SAFE_INTEGER;
+export const MAX_BATCH_REQUESTS = Number.MAX_SAFE_INTEGER;
 export const MAX_BATCH_TEXT_LENGTH = 512;
 
 export type BatchExecutionStatus = 'pending' | 'running' | 'completed' | 'cancelled';
@@ -223,7 +222,6 @@ export function matchesBatchFilter(item: BatchCaseInput, filter: BatchCaseFilter
 export function createBatchRunPlan(cases: readonly BatchCaseInput[], options: BatchRunPlanOptions = {}): BatchRunPlanV1 {
   const issues: BatchPlanIssue[] = [];
   const selected = filterBatchCases(cases, options.filter);
-  if (selected.length > MAX_BATCH_CASES) issues.push({ code: 'selection', message: `The batch contains ${selected.length} cases; the safety cap is ${MAX_BATCH_CASES}.` });
 
   const maxConcurrency = normalizePolicyInteger(options.maxConcurrency, DEFAULT_BATCH_CONCURRENCY, 1, MAX_BATCH_CONCURRENCY, issues, 'maxConcurrency');
   const maxAttempts = normalizeOptionalPolicyInteger(options.maxAttempts, MAX_BATCH_ATTEMPTS, issues, 'maxAttempts');
@@ -232,7 +230,7 @@ export function createBatchRunPlan(cases: readonly BatchCaseInput[], options: Ba
 
   const seen = new Set<string>();
   const plans: BatchCasePlan[] = [];
-  for (const item of selected.slice(0, MAX_BATCH_CASES)) {
+  for (const item of selected) {
     const key = stableCaseKey(item);
     if (!safeText(item.id)) {
       issues.push({ code: 'invalid-case', message: 'Batch case id must be a non-empty bounded string.' });

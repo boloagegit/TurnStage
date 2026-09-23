@@ -2,13 +2,13 @@
 
 import importlib.util
 from http.client import HTTPConnection
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler
 import os
 from pathlib import Path
 import tempfile
 from threading import Event, Thread
-from socketserver import ThreadingMixIn
 import unittest
+from unittest.mock import patch
 from urllib.parse import urlsplit
 
 
@@ -18,8 +18,8 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-class UpstreamServer(ThreadingMixIn, HTTPServer):
-    daemon_threads = True
+class UpstreamServer(MODULE.ThreadingServer):
+    pass
 
 
 class UpstreamHandler(BaseHTTPRequestHandler):
@@ -59,6 +59,15 @@ class UpstreamHandler(BaseHTTPRequestHandler):
 
 
 class ServeWebTests(unittest.TestCase):
+    def test_static_server_starts_without_reverse_dns(self):
+        with patch("socket.getfqdn", side_effect=AssertionError("reverse DNS must not be required")):
+            server = MODULE.ThreadingServer(("127.0.0.1", 0), MODULE.Handler)
+        try:
+            self.assertEqual(server.server_name, "127.0.0.1")
+            self.assertGreater(server.server_port, 0)
+        finally:
+            server.server_close()
+
     def setUp(self):
         self.previous_directory = os.getcwd()
         self.temporary = tempfile.TemporaryDirectory()

@@ -40,6 +40,14 @@ version control. Search and select cases in the Profile editor, run one or
 several, and see why a case is unavailable before trying to run it. VS Code
 Test Explorer and the headless CLI can also run ready cases.
 
+Case lists, imports, and manual runs have no fixed total-case ceiling. Per-case
+validation remains in place; browser storage, device capacity, and the target
+API's rate limits are practical considerations for large Web runs. Web imports
+large suites without blocking the case-list UI and saves completed-case
+checkpoints. If a page closes during a run, review its history and explicitly
+choose **Run remaining cases**; TurnStage does not automatically resend a
+request whose outcome is unknown.
+
 ![Synthetic general-test case list in the Profile editor](media/marketplace/test-case-management.png)
 
 Results stay separate from case setup. Pick a previous run, compare it with an
@@ -82,6 +90,9 @@ deployment-owned read-only Profile presets or make browser-local copies.
 Browser-local Profiles can be edited as JSONC with syntax and schema diagnostics,
 formatting, problem navigation, and recoverable unsaved drafts; deployment-owned
 files remain read-only until copied.
+Web users can export a Profile with its imported General tests and Red Team
+suites as one portable file. Older Profile-only exports still import normally;
+neither export includes run history or detailed evidence.
 VS Code-only actions are disabled in Web. The browser calls the configured API
 directly, so that API must allow the Web origin through CORS.
 
@@ -214,10 +225,10 @@ The included `update_profiles.py` generates `turnstage-catalog.json`; Python
 is not needed while a separate static Web server runs. Users can duplicate a
 default Profile or create, import, edit, and export their own browser-local
 Profiles, including direct JSONC editing in the Web app. Default Profiles stay
-read-only until duplicated. A
-portable Profile export includes its referenced Environment and any plaintext
-credentials in those settings. Browser requests pointed at the same-origin
-`/api/` route use the fixed server-side proxy; requests pointed directly at
+read-only until duplicated. A portable Profile export includes its referenced
+Environment and any plaintext credentials in those settings. Browser requests
+pointed at the same-origin `/api/` route use the fixed server-side proxy;
+requests pointed directly at
 other origins must be reachable from the user's device and allow the Web
 origin through CORS. See the [Web deployment guide](docs/web-deployment.md) for
 administrator setup and security boundaries, and the
@@ -243,7 +254,7 @@ administrator setup and security boundaries, and the
    automation.
 7. Open the Profile's **Tests** tab to author and run conversation contracts,
    inspect functional/comparison/performance results, and select several cases
-   for a bounded run. Small cases can stay inline; use **Link suite** for an existing
+   together. Small cases can stay inline; use **Link suite** for an existing
    `.tests.jsonc`, `.tests.json`, or CSV file without copying it into the
    Profile. Report, advisory-review, and visual-regression defaults remain
    under **Configure Profile → Test settings**. Run

@@ -104,6 +104,7 @@ export interface LinkedContractCaseSummary {
   comparison: boolean;
   performance: boolean;
   faults: boolean;
+  webUnsupported?: boolean;
 }
 export interface ContractCaseCatalog {
   entries: LinkedContractCaseSummary[];
@@ -170,7 +171,7 @@ export type WebviewMessage = Envelope & (
   | { type: 'test.runContracts' }
   | { type: 'test.runCase'; scenarioId: string; suiteId?: string; kind?: 'adversarial' | 'contract' }
   | { type: 'test.runSelection'; cases: import('./testSelection').TestCaseIdentity[] }
-  | { type: 'test.history.rerun'; runId: string; kind?: 'contract' | 'adversarial' }
+  | { type: 'test.history.rerun'; runId: string; kind?: 'contract' | 'adversarial'; only?: 'unfinished' }
   | { type: 'test.history.export'; runId: string; format: 'json' | 'junit' | 'html'; kind?: 'contract' | 'adversarial' }
   | { type: 'test.history.request' }
   | { type: 'test.history.clear'; kind: 'contract' | 'adversarial' }
@@ -346,8 +347,8 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
     case 'contract.case.save': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId) && isRevision(message.expectedRevision) && isRecord(message.scenario) && isStructuredValue(message.scenario, MAX_HOST_VALUE_NODES);
     case 'contract.case.delete': return isBoundedString(message.sourcePath, 4096) && Boolean(message.sourcePath.trim()) && isBoundedId(message.scenarioId) && isRevision(message.expectedRevision);
     case 'test.runCase': return isBoundedId(message.scenarioId) && (message.suiteId === undefined || isBoundedId(message.suiteId)) && (message.kind === undefined || message.kind === 'adversarial' || message.kind === 'contract');
-    case 'test.runSelection': return Array.isArray(message.cases) && message.cases.length > 0 && message.cases.length <= 500 && message.cases.every((item) => isRecord(item) && isBoundedId(item.profileId) && isBoundedId(item.scenarioId) && (item.suiteId === undefined || isBoundedId(item.suiteId)) && (item.kind === 'contract' || item.kind === 'adversarial'));
-    case 'test.history.rerun': return isBoundedId(message.runId) && (message.kind === undefined || message.kind === 'contract' || message.kind === 'adversarial');
+    case 'test.runSelection': return Array.isArray(message.cases) && message.cases.length > 0 && message.cases.every((item) => isRecord(item) && isBoundedId(item.profileId) && isBoundedId(item.scenarioId) && (item.suiteId === undefined || isBoundedId(item.suiteId)) && (item.kind === 'contract' || item.kind === 'adversarial'));
+    case 'test.history.rerun': return isBoundedId(message.runId) && (message.kind === undefined || message.kind === 'contract' || message.kind === 'adversarial') && (message.only === undefined || message.only === 'unfinished');
     case 'test.history.export': return isBoundedId(message.runId) && ['json', 'junit', 'html'].includes(String(message.format)) && (message.kind === undefined || message.kind === 'contract' || message.kind === 'adversarial');
     case 'test.history.clear': return message.kind === 'contract' || message.kind === 'adversarial';
     case 'test.baseline.accept': return isBoundedId(message.runId);
@@ -417,9 +418,9 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
       && ['running', 'cancelling', 'completed', 'cancelled', 'failed'].includes(String(message.operation.state))
       && optionalBoundedString(message.operation.detail)
       && (message.operation.progress === undefined || isTestOperationProgress(message.operation.progress));
-    case 'test.results': return isAdversarialResults(message.results) && isStructuredValue(message.results, MAX_HOST_VALUE_NODES)
-      && (message.automationResults === undefined || (isAutomationResults(message.automationResults) && isStructuredValue(message.automationResults, MAX_HOST_VALUE_NODES)));
-    case 'test.history': return isBoundedId(message.profileId) && Array.isArray(message.runs) && message.runs.length <= 21 && isStructuredValue(message.runs, MAX_HOST_VALUE_NODES) && (message.baselineRunId === undefined || isBoundedId(message.baselineRunId));
+    case 'test.results': return isAdversarialResults(message.results)
+      && (message.automationResults === undefined || isAutomationResults(message.automationResults));
+    case 'test.history': return isBoundedId(message.profileId) && Array.isArray(message.runs) && message.runs.length <= 21 && message.runs.every(isTestRunHistoryRecord) && (message.baselineRunId === undefined || isBoundedId(message.baselineRunId));
     case 'campaign.dashboard': return isRecord(message.dashboard) && isStructuredValue(message.dashboard, MAX_HOST_VALUE_NODES);
     case 'campaign.preview': return isBoundedString(message.campaignId) && [message.selectedCases, message.plannedAttempts, message.plannedRequests, message.maximumDurationMs, message.maxConcurrency].every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0) && Array.isArray(message.warnings) && message.warnings.length <= 100 && message.warnings.every((entry) => isBoundedString(entry, 4096));
     case 'campaign.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedId(message.artifactId);
@@ -444,7 +445,7 @@ function isTestCaptureSource(value: unknown): value is TestCaptureSource {
 }
 
 function isAdversarialCaseCatalog(value: unknown): boolean {
-  if (!isRecord(value) || !Array.isArray(value.entries) || value.entries.length > 100 || !Number.isSafeInteger(value.total) || Number(value.total) < 0 || Number(value.total) > 50_000 || typeof value.truncated !== 'boolean') return false;
+  if (!isRecord(value) || !Array.isArray(value.entries) || !Number.isSafeInteger(value.total) || Number(value.total) < 0 || typeof value.truncated !== 'boolean') return false;
   if (!Array.isArray(value.issues) || value.issues.length > 100 || !value.issues.every((issue) => isRecord(issue) && isBoundedString(issue.sourcePath, 4096) && isBoundedString(issue.message, 4096))) return false;
   return value.entries.every((entry) => isRecord(entry)
     && [entry.sourcePath, entry.suiteId, entry.suiteName, entry.scenarioId, entry.scenarioName].every((item) => isBoundedString(item, 4096))
@@ -468,7 +469,7 @@ function isLinkedAdversarialCaseDetail(value: unknown): boolean {
 }
 
 function isContractCaseCatalog(value: unknown): boolean {
-  if (!isRecord(value) || !Array.isArray(value.entries) || value.entries.length > 100 || !Number.isSafeInteger(value.total) || Number(value.total) < 0 || Number(value.total) > 50_000 || typeof value.truncated !== 'boolean') return false;
+  if (!isRecord(value) || !Array.isArray(value.entries) || !Number.isSafeInteger(value.total) || Number(value.total) < 0 || typeof value.truncated !== 'boolean') return false;
   if (!Array.isArray(value.issues) || value.issues.length > 100 || !value.issues.every((entry) => isRecord(entry) && isBoundedString(entry.sourcePath, 4096) && isBoundedString(entry.message, 4096))) return false;
   return value.entries.every((entry) => isRecord(entry)
     && [entry.sourcePath, entry.suiteId, entry.suiteName, entry.scenarioId, entry.scenarioName].every((item) => isBoundedString(item, 4096))
@@ -477,7 +478,8 @@ function isContractCaseCatalog(value: unknown): boolean {
     && (entry.capture === undefined || isScenarioCapture(entry.capture))
     && boundedNonNegativeInteger(entry.turns, 100)
     && boundedNonNegativeInteger(entry.assertions, 10_100)
-    && ['comparison', 'performance', 'faults'].every((key) => typeof entry[key] === 'boolean'));
+    && ['comparison', 'performance', 'faults'].every((key) => typeof entry[key] === 'boolean')
+    && (entry.webUnsupported === undefined || typeof entry.webUnsupported === 'boolean'));
 }
 
 function isLinkedContractCaseDetail(value: unknown): boolean {
@@ -527,17 +529,40 @@ function isAdversarialProhibitSummary(value: unknown): boolean {
     && ['urls', 'ctas', 'tools'].every((key) => typeof value[key] === 'boolean');
 }
 
+function isTestRunHistoryRecord(value: unknown): boolean {
+  if (!isRecord(value) || value.format !== 'turnstage-test-run-history' || value.version !== 1
+    || !isBoundedId(value.id) || !isBoundedId(value.profileId)
+    || !Number.isSafeInteger(value.startedAt) || !Number.isSafeInteger(value.finishedAt)
+    || !['completed', 'cancelled', 'failed'].includes(String(value.status))
+    || !['web', 'vscode', 'cli'].includes(String(value.runner))
+    || !Number.isSafeInteger(value.evaluatorVersion)
+    || !isBoundedString(value.profileDigest, 256) || !isBoundedString(value.environmentDigest, 256)
+    || !optionalBoundedString(value.sourceRunId) || !Array.isArray(value.cases)) return false;
+  return value.cases.every((item) => isRecord(item)
+    && isBoundedId(item.profileId) && optionalBoundedString(item.suiteId)
+    && isBoundedId(item.scenarioId) && ['contract', 'adversarial'].includes(String(item.kind))
+    && isBoundedString(item.key, 4096) && isBoundedString(item.name, 512)
+    && isBoundedString(item.definitionDigest, 256) && isBoundedString(item.environmentDigest, 256)
+    && Number.isSafeInteger(item.requestedAttempts) && Number(item.requestedAttempts) >= 1
+    && Number.isSafeInteger(item.completedAttempts) && Number(item.completedAttempts) >= 0
+    && Number(item.completedAttempts) <= Number(item.requestedAttempts)
+    && (item.outcome === undefined || ['passed', 'failed', 'error', 'resisted', 'attackSucceeded', 'indeterminate', 'infrastructureError'].includes(String(item.outcome)))
+    && (item.durationMs === undefined || boundedNonNegativeNumber(item.durationMs))
+    && optionalBoundedString(item.evidenceId)
+    && (item.evidenceAvailable === undefined || typeof item.evidenceAvailable === 'boolean'));
+}
+
 function isTestOperationProgress(value: unknown): boolean {
   if (!isRecord(value)) return false;
   const counts = [value.totalCases, value.completedCases, value.totalAttempts, value.completedAttempts];
-  if (!counts.every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0 && Number(entry) <= 100_000)) return false;
+  if (!counts.every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0)) return false;
   if (Number(value.completedCases) > Number(value.totalCases) || Number(value.completedAttempts) > Number(value.totalAttempts)) return false;
   if (!Number.isSafeInteger(value.maxConcurrency) || Number(value.maxConcurrency) < 1 || Number(value.maxConcurrency) > 8) return false;
   return value.activeCaseNames === undefined || (Array.isArray(value.activeCaseNames) && value.activeCaseNames.length <= 8 && value.activeCaseNames.every((entry) => isBoundedString(entry, 256)));
 }
 
 function isAdversarialResults(value: unknown): boolean {
-  if (!Array.isArray(value) || value.length > 500) return false;
+  if (!Array.isArray(value)) return false;
   return value.every((result) => {
     if (!isRecord(result)
       || !isBoundedString(result.profileId) || !optionalBoundedString(result.suiteId)
@@ -573,7 +598,7 @@ function isAdversarialResults(value: unknown): boolean {
 }
 
 function isAutomationResults(value: unknown): boolean {
-  if (!Array.isArray(value) || value.length > 500) return false;
+  if (!Array.isArray(value)) return false;
   return value.every((result) => isRecord(result)
     && isBoundedString(result.profileId)
     && optionalBoundedString(result.suiteId)

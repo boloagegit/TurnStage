@@ -5,8 +5,9 @@ TurnStage has separate **General tests** and **Red Team** top-level tabs beside
 use the same search, paging, and case-management pattern, but selection and
 results stay separate because their judgments differ:
 general cases check configured assertions; Red Team cases evaluate prohibited
-effects and repeated samples. Comparison, performance, and Fault Lab checks
-require the VS Code extension; Web disables those cases before sending traffic.
+effects and repeated samples. Comparison, performance regression against a
+VS Code baseline, and Fault Lab checks require the extension. Web can evaluate
+absolute performance thresholds and disables unsupported cases before sending traffic.
 
 ## Inline and linked cases
 
@@ -20,9 +21,13 @@ The case menu also exports JSONC or CSV. In VS Code, export includes the
 Profile's inline general-test cases; linked suite files stay separate and can
 be opened directly. In Web, export includes inline cases and the imported
 browser-local copies for the active Profile. Web can import a JSONC or CSV
-copy; it never changes the original file. If cases from different sources use
-the same ID or exceed suite limits, combined export stops with an error rather
-than downloading an invalid suite. Red Team offers the same JSONC/CSV choices
+copy; it never changes the original file. Reimporting a suite with the same ID
+asks before replacing its browser copy, preserving its case identity. Use a
+different suite ID to keep both copies. The Profile menu can export the Profile,
+its Environment, and imported suites together in one portable JSON file. If
+cases from different sources use the same ID or fail per-case validation,
+combined export stops with an error rather than downloading an invalid suite.
+This portable file does not contain run history or detailed evidence. Red Team offers the same JSONC/CSV choices
 plus its own JSONL format.
 
 Use **Save as test…** from Chat, a recorded run with a snapshot, or a test
@@ -45,8 +50,8 @@ its General tests and Red Team cases from the Profile editor. Test Explorer
 discovers matching workspace and user Profiles by default; a directly run
 Profile is also shown while its editor remains open.
 
-The Profile editor receives at most 500 prompt-free linked-case summaries per
-test type and shows 25 at a time. Each type's case list searches by name, ID,
+The Profile editor receives every prompt-free linked-case summary and shows 25
+at a time. Each type's case list searches by name, ID,
 tag, or source. Select a case in its list to edit it; each test type keeps its
 own add, import, and link actions in that same view. Opening one linked
 case loads only that case's full content.
@@ -83,8 +88,8 @@ JSONC is the lossless format for shared source bindings and case metadata:
 }
 ```
 
-A suite can contain at most 500 cases, 100 steps per case, and 10,000 enabled
-steps. Unsupported fields, duplicate IDs, invalid paths, malformed assertions,
+A suite has no case-count or aggregate-step ceiling. A single case can contain
+at most 100 steps. Unsupported fields, duplicate IDs, invalid paths, malformed assertions,
 and executable-looking additions fail validation rather than being ignored.
 
 ## CSV format
@@ -104,10 +109,11 @@ choose **Run selected** to start immediately.
 except drafts needing review, incomplete cases, and cases requiring VS Code-only
 checks in Web. Each excluded row shows the exact reason; the button shows the
 selectable and total counts. With search active it selects only matching cases.
-Selection is limited to 500 cases
-per run; the UI explains when a search would exceed that limit. A truncated linked catalog cannot
-represent cases it has not loaded; use Test Explorer or CLI for the complete
-source rather than treating the loaded selection as all cases.
+TurnStage Web selection and manual execution have no fixed case, attempt, or
+request ceiling. Browser storage and the user's device remain the practical
+limit; executing cases still sends requests to the configured target service.
+If a suite or campaign defines its own request or duration budget, that explicit
+user configuration is still checked before a run starts.
 Drafts marked **Needs review** and Web-unsupported cases cannot be selected or
 run. If a previously selected case becomes unavailable, the selection is
 rejected before any request is sent instead of running a partial batch. A
@@ -117,7 +123,10 @@ can be accepted as a comparison baseline; future runs classify new failures,
 recoveries, changed case definitions or settings, execution errors, and
 incomplete results. Select an earlier run and use **Rerun non-passing cases**
 to resolve its exact case identities again; the new history entry retains a
-reference to that source run. Missing, renamed, or still-unreviewed cases stop
+source-run reference. Web also checkpoints each completed case. After a browser
+reload interrupts a run, its history shows completed and unfinished cases;
+**Run remaining cases** sends only the unfinished ones after the user chooses it.
+Missing, renamed, or still-unreviewed cases stop
 the rerun before any request is sent. A cancelled repeated case retains the
 number of attempts that actually completed instead of being treated as a pass.
 History keeps 20 recent runs plus the accepted baseline. **Clear history**

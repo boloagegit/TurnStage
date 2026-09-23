@@ -131,8 +131,8 @@ export class CampaignRepository {
 function sanitizeRun(value: unknown): CampaignRunRecordV1 | undefined {
   if (!object(value) || value.format !== CAMPAIGN_RUN_FORMAT || value.version !== CAMPAIGN_RUN_VERSION) return undefined;
   if (!safeId(value.id) || !safeId(value.campaignId) || !safeText(value.campaignName, 512) || !safeId(value.profileId) || !timestamp(value.createdAt) || !timestamp(value.updatedAt) || value.updatedAt < value.createdAt || !['planned', 'running', 'cancelled', 'completed'].includes(String(value.status)) || !safeDigest(value.sourceDigest)) return undefined;
-  if (!object(value.plan) || !boundedInteger(value.plan.selectedCases, 0, 500) || !boundedInteger(value.plan.plannedAttempts, 0, 10_000) || !boundedInteger(value.plan.plannedTurns, 0, 100_000) || !boundedInteger(value.plan.plannedRequests, 0, 100_000) || !boundedInteger(value.plan.maximumDurationMs, 0, Number.MAX_SAFE_INTEGER) || !boundedInteger(value.plan.maxConcurrency, 1, 8)) return undefined;
-  if (!Array.isArray(value.cases) || value.cases.length !== value.plan.selectedCases || value.cases.length > 500 || !object(value.coverage)) return undefined;
+  if (!object(value.plan) || !boundedInteger(value.plan.selectedCases, 0, Number.MAX_SAFE_INTEGER) || !boundedInteger(value.plan.plannedAttempts, 0, Number.MAX_SAFE_INTEGER) || !boundedInteger(value.plan.plannedTurns, 0, Number.MAX_SAFE_INTEGER) || !boundedInteger(value.plan.plannedRequests, 0, Number.MAX_SAFE_INTEGER) || !boundedInteger(value.plan.maximumDurationMs, 0, Number.MAX_SAFE_INTEGER) || !boundedInteger(value.plan.maxConcurrency, 1, 8)) return undefined;
+  if (!Array.isArray(value.cases) || value.cases.length !== value.plan.selectedCases || !object(value.coverage)) return undefined;
   const cases = value.cases.flatMap((item) => validCase(item) ? [sanitizeCampaignCase(item as CampaignRunRecordV1['cases'][number])] : []);
   if (cases.length !== value.cases.length || new Set(cases.map((item) => item.key)).size !== cases.length) return undefined;
   const coverage = sanitizeCoverage(value.coverage);
@@ -171,7 +171,7 @@ function sanitizeCoverage(value: Record<string, any>) {
   if (arrays.some((items) => items.length > 100 || items.some((tag: unknown) => !safeText(tag, 64)))) return undefined;
   const counts: Record<string, number> = {};
   for (const [key, count] of Object.entries(value.caseCountByTag)) {
-    if (!safeText(key, 64) || !boundedInteger(count, 0, 500)) return undefined;
+    if (!safeText(key, 64) || !boundedInteger(count, 0, Number.MAX_SAFE_INTEGER)) return undefined;
     counts[key] = count as number;
   }
   return { requiredTags: [...value.requiredTags], coveredTags: [...value.coveredTags], missingTags: [...value.missingTags], caseCountByTag: counts, percent: value.percent };

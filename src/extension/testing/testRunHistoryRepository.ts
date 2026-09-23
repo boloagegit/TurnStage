@@ -4,7 +4,7 @@ import { clearTestRunHistoryKind, TEST_RUN_HISTORY_FORMAT, TEST_RUN_HISTORY_VERS
 import { testCaseKey } from '../../shared/testSelection';
 import { sha256Hex } from '../../shared/sha256';
 
-const MAX_HISTORY_BYTES = 4 * 1024 * 1024;
+const MAX_HISTORY_BYTES = 20 * 1024 * 1024;
 const RETAIN_RUNS = 20;
 const queue = new Map<string, Promise<void>>();
 
@@ -98,7 +98,7 @@ function safeId(value: unknown): value is string { return typeof value === 'stri
 function safeFilePart(value: string): string { return `${value.replace(/[^A-Za-z0-9_.-]/gu, '-').slice(0, 60)}-${sha256Hex(value).slice(0, 16)}`; }
 function isDigest(value: unknown): value is string { return typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value); }
 function validRun(value: unknown): value is TestRunHistoryRecord {
-  if (!isRecord(value) || value.format !== TEST_RUN_HISTORY_FORMAT || value.version !== TEST_RUN_HISTORY_VERSION || !safeId(value.id) || !safeId(value.profileId) || (value.sourceRunId !== undefined && !safeId(value.sourceRunId)) || !Number.isSafeInteger(value.startedAt) || !Number.isSafeInteger(value.finishedAt) || Number(value.finishedAt) < Number(value.startedAt) || !['completed', 'cancelled', 'failed'].includes(String(value.status)) || !['web', 'vscode', 'cli'].includes(String(value.runner)) || value.evaluatorVersion !== 1 || !isDigest(value.profileDigest) || !isDigest(value.environmentDigest) || !Array.isArray(value.cases) || value.cases.length < 1 || value.cases.length > 500) return false;
+  if (!isRecord(value) || value.format !== TEST_RUN_HISTORY_FORMAT || value.version !== TEST_RUN_HISTORY_VERSION || !safeId(value.id) || !safeId(value.profileId) || (value.sourceRunId !== undefined && !safeId(value.sourceRunId)) || !Number.isSafeInteger(value.startedAt) || !Number.isSafeInteger(value.finishedAt) || Number(value.finishedAt) < Number(value.startedAt) || !['completed', 'cancelled', 'failed'].includes(String(value.status)) || !['web', 'vscode', 'cli'].includes(String(value.runner)) || value.evaluatorVersion !== 1 || !isDigest(value.profileDigest) || !isDigest(value.environmentDigest) || !Array.isArray(value.cases) || value.cases.length < 1) return false;
   const validCases = value.cases.every((item) => isRecord(item) && item.profileId === value.profileId && safeId(item.scenarioId) && (item.suiteId === undefined || safeId(item.suiteId)) && (item.kind === 'contract' || item.kind === 'adversarial') && item.key === testCaseKey(item as unknown as TestRunHistoryRecord['cases'][number]) && typeof item.name === 'string' && item.name.length <= 512 && isDigest(item.definitionDigest) && (item.environmentDigest === undefined || isDigest(item.environmentDigest)) && Number.isSafeInteger(item.requestedAttempts) && Number(item.requestedAttempts) >= 1 && Number.isSafeInteger(item.completedAttempts) && Number(item.completedAttempts) >= 0 && Number(item.completedAttempts) <= Number(item.requestedAttempts) && (item.outcome === undefined || ['passed', 'failed', 'error', 'resisted', 'attackSucceeded', 'indeterminate', 'infrastructureError'].includes(String(item.outcome))) && (item.durationMs === undefined || Number.isFinite(item.durationMs)) && (item.evidenceId === undefined || safeId(item.evidenceId)));
   return validCases && new Set(value.cases.map((item) => item.key)).size === value.cases.length;
 }

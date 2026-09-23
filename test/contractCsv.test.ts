@@ -20,11 +20,9 @@ describe('functional contract CSV', () => {
     expect(parsed.scenarios.at(-1)?.id).toBe('case-100');
   });
 
-  it('keeps the documented 500-case ceiling bounded and rejects case 501', () => {
-    const scenarios = Array.from({ length: 500 }, (_, index): ScenarioDefinition => ({ id: `case-${index + 1}`, name: `Case ${index + 1}`, steps: [{ id: 'turn-1', input: `Prompt ${index + 1}` }] }));
-    expect(parseContractCsv(serializeContractCsv(scenarios))).toMatchObject({ issues: [], scenarios: { length: 500 }, rowCount: 500 });
-    const overflow = [...scenarios, { id: 'case-501', name: 'Case 501', steps: [{ id: 'turn-1', input: 'Overflow' }] }];
-    expect(parseContractCsv(serializeContractCsv(overflow)).issues).toContainEqual(expect.objectContaining({ message: 'CSV can contain at most 500 cases.' }));
+  it('imports more than 10,000 cases without an arbitrary case-count ceiling', () => {
+    const scenarios = Array.from({ length: 12_000 }, (_, index): ScenarioDefinition => ({ id: `case-${index + 1}`, name: `Case ${index + 1}`, steps: [{ id: 'turn-1', input: `Prompt ${index + 1}` }] }));
+    expect(parseContractCsv(serializeContractCsv(scenarios))).toMatchObject({ issues: [], scenarios: { length: 12_000 }, rowCount: 12_000 });
   });
 
   it('reports malformed JSON and turn gaps with row and column evidence', () => {

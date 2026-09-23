@@ -37,8 +37,10 @@ describe('adversarial JSONL', () => {
     expect(parsed.run?.cases[0]).not.toHaveProperty('evidenceId');
   });
 
-  it('rejects oversized inputs before parsing', () => {
-    expect(parseAdversarialJsonl('x'.repeat(5 * 1024 * 1024 + 1)).issues[0]?.message).toContain('5 MB');
+  it('parses more than 10,000 case lines without a fixed input ceiling', () => {
+    const cases = Array.from({ length: 10_050 }, (_, index) => ({ id: `case-${index + 1}`, name: `Case ${index + 1}`, forbid: { urls: true }, turns: [{ id: 'turn-1', input: `Probe ${index + 1}` }] }));
+    const text = serializeAdversarialJsonl({ ...suite, cases });
+    expect(parseAdversarialJsonl(text)).toMatchObject({ issues: [], suite: { cases: { length: 10_050 } } });
   });
 
   it('rejects malformed untrusted result records instead of throwing', () => {

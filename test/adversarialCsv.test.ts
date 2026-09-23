@@ -51,6 +51,14 @@ describe('adversarial CSV', () => {
     expect(parsed.scenarios.at(-1)?.id).toBe('case-100');
   });
 
+  it('imports more than 10,000 cases without an arbitrary case-count ceiling', () => {
+    const scenarios: ScenarioDefinition[] = Array.from({ length: 12_000 }, (_, index) => ({
+      id: `case-${index + 1}`, name: `Case ${index + 1}`, steps: [{ id: 'turn-1', input: `Probe ${index + 1}` }],
+      adversarial: { mode: 'singleTurn', maxTurns: 1, timeoutMs: 60_000, forbid: { urls: true } },
+    }));
+    expect(parseAdversarialCsv(serializeAdversarialCsv(scenarios))).toMatchObject({ issues: [], scenarios: { length: 12_000 }, rowCount: 12_000 });
+  });
+
   it('rejects ambiguous booleans and omits explicitly disabled cases', () => {
     const lines = adversarialCsvTemplate().split('\r\n');
     const invalid = lines[1]!.replace(',true,1,', ',perhaps,1,');

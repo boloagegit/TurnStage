@@ -47,7 +47,7 @@ import type { TestOperationProgress } from '../../shared/protocol';
 import { ExternalAdversarialSuiteRepository } from './externalAdversarialSuite';
 import { isScenarioReady } from './scenarioCapture';
 import { resolveTestSelection, testCaseKey, type TestCaseIdentity } from '../../shared/testSelection';
-import { createTestRunHistoryRecord, nonPassingCases, type CompletedTestRunCase, type TestRunHistoryRecord } from '../../shared/testRunHistory';
+import { createTestRunHistoryRecord, nonPassingCases, unfinishedCases, type CompletedTestRunCase, type TestRunHistoryRecord } from '../../shared/testRunHistory';
 import { TestRunHistoryRepository } from './testRunHistoryRepository';
 
 type TestData =
@@ -532,11 +532,11 @@ export class ScenarioTestController implements vscode.Disposable {
     return this.runManualSelection(matches.map((item) => item.id), onProgress, sourceRunId);
   }
 
-  async rerunHistory(uri: vscode.Uri, runId: string, onProgress?: (progress: TestOperationProgress) => void, kind?: 'contract' | 'adversarial'): Promise<'completed' | 'cancelled'> {
+  async rerunHistory(uri: vscode.Uri, runId: string, onProgress?: (progress: TestOperationProgress) => void, kind?: 'contract' | 'adversarial', only?: 'unfinished'): Promise<'completed' | 'cancelled'> {
     const history = await this.getTestHistory(uri);
     const record = history.runs.find((item) => item.id === runId);
     if (!record) throw new Error('The selected test run is no longer available.');
-    const cases = nonPassingCases(record).filter((item) => kind === undefined || item.kind === kind);
+    const cases = (only === 'unfinished' ? unfinishedCases(record) : nonPassingCases(record)).filter((item) => kind === undefined || item.kind === kind);
     if (!cases.length) throw new Error('The selected test run has no non-passing cases.');
     return this.runCases(uri, cases, onProgress, runId);
   }

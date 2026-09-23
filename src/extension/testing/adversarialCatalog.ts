@@ -3,8 +3,6 @@ import type { AdversarialCaseCatalog, LinkedAdversarialCaseSummary } from '../..
 import type { ScenarioDefinition, TurnStageProfile } from '../../shared/types';
 import { loadAdversarialSuite } from './adversarialSuiteRepository';
 
-export const MAX_LINKED_CASE_CATALOG_ENTRIES = 500;
-
 /**
  * Load only enough linked-suite metadata to fill the Webview catalog. Prompts,
  * assertions, and rule values never cross into the Webview catalog payload.
@@ -17,22 +15,17 @@ export async function loadLinkedAdversarialCaseCatalog(
   const entries: LinkedAdversarialCaseSummary[] = [];
   const issues: AdversarialCaseCatalog['issues'] = [];
   let total = 0;
-  let truncated = false;
-
   for (const sourcePath of profile.tests?.adversarialSuites ?? []) {
-    if (entries.length >= MAX_LINKED_CASE_CATALOG_ENTRIES) { truncated = true; break; }
     try {
       const loaded = await loadAdversarialSuite(profileUri, sourcePath, resolveExternal);
       total += loaded.scenarios.length;
-      const remaining = MAX_LINKED_CASE_CATALOG_ENTRIES - entries.length;
-      entries.push(...loaded.scenarios.slice(0, remaining).map((scenario) => ({ ...summarizeLinkedCase(sourcePath, loaded.suite.id, loaded.suite.name, scenario), revision: loaded.revision })));
-      if (loaded.scenarios.length > remaining) truncated = true;
+      entries.push(...loaded.scenarios.map((scenario) => ({ ...summarizeLinkedCase(sourcePath, loaded.suite.id, loaded.suite.name, scenario), revision: loaded.revision })));
     } catch (error) {
       issues.push({ sourcePath, message: boundedMessage(error) });
     }
   }
 
-  return { entries, total, truncated, issues };
+  return { entries, total, truncated: false, issues };
 }
 
 function summarizeLinkedCase(sourcePath: string, suiteId: string, suiteName: string, scenario: ScenarioDefinition): LinkedAdversarialCaseSummary {
