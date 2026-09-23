@@ -17,15 +17,15 @@ vi.mock('vscode', () => {
 });
 
 import * as vscode from 'vscode';
-import { loadLinkedContractCaseCatalog, MAX_LINKED_CONTRACT_CATALOG_ENTRIES } from '../src/extension/testing/contractCatalog';
+import { loadLinkedContractCaseCatalog } from '../src/extension/testing/contractCatalog';
 import { createContractSuite, serializeContractSuite } from '../src/extension/testing/contractSuite';
 import type { ScenarioDefinition, TurnStageProfile } from '../src/shared/types';
 
 describe('linked functional case catalog', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('bounds the Webview catalog and excludes prompt and assertion values', async () => {
-    const scenarios = Array.from({ length: 500 }, (_, index): ScenarioDefinition => ({
+  it('sends every prompt-free summary and excludes prompt and assertion values', async () => {
+    const scenarios = Array.from({ length: 1_000 }, (_, index): ScenarioDefinition => ({
       id: `case-${index + 1}`, name: `Case ${index + 1}`, tags: ['release'],
       steps: [{ id: 'turn-1', input: `PRIVATE PROMPT ${index + 1}`, assertions: [{ path: 'assistant.text', operator: 'contains', value: `PRIVATE ASSERTION ${index + 1}` }] }],
     }));
@@ -39,8 +39,8 @@ describe('linked functional case catalog', () => {
 
     const catalog = await loadLinkedContractCaseCatalog(vscode.Uri.parse('file:///workspace/profile.turnstage.jsonc'), profile);
 
-    expect(catalog.entries).toHaveLength(MAX_LINKED_CONTRACT_CATALOG_ENTRIES);
-    expect(catalog).toMatchObject({ total: 500, truncated: false, issues: [] });
+    expect(catalog.entries).toHaveLength(1_000);
+    expect(catalog).toMatchObject({ total: 1_000, truncated: false, issues: [] });
     expect(JSON.stringify(catalog)).not.toContain('PRIVATE PROMPT');
     expect(JSON.stringify(catalog)).not.toContain('PRIVATE ASSERTION');
   });

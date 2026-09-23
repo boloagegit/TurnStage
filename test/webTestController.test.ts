@@ -1,8 +1,9 @@
 import 'fake-indexeddb/auto';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TurnStageEnvironment, TurnStageProfile } from '../src/shared/types';
 import type { HostPayload } from '../src/shared/protocol';
 import type { TestRunHistoryRecord } from '../src/shared/testRunHistory';
+import { createTestRunHistoryRecord } from '../src/shared/testRunHistory';
 import { WebTestController } from '../web/src/webTestController';
 import { ArtifactStore } from '../web/src/artifactStore';
 import { serializeContractCsv } from '../src/extension/testing/contractCsv';
@@ -11,9 +12,128 @@ import { parseContractSuite } from '../src/extension/testing/contractSuite';
 import { serializeAdversarialCsv } from '../src/extension/testing/adversarialCsv';
 import { parseAdversarialSuite } from '../src/extension/testing/adversarialSuite';
 
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => {
+  const values = new Map<string, string>();
+  vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } });
+});
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('WebTestController', () => {
+  it('keeps latest results and exports isolated when profiles reuse a case ID', async () => {
+    const scenario = { id: 'shared-id', name: 'Same case ID', steps: [{ id: 'turn', input: 'Hello' }] };
+    const base: TurnStageProfile = { version: 1, id: `isolation-a-${crypto.randomUUID()}`, name: 'A', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios: [scenario] } };
+    const second = { ...base, id: `isolation-b-${crypto.randomUUID()}`, name: 'B' };
+    let active = base;
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('event: done\ndata: {}\n\n', { status: 200 })));
+    const messages: HostPayload[] = [];
+    const controller = new WebTestController(() => active, () => environment, new Map(), (payload) => { messages.push(payload); });
+    await controller.run('runContracts');
+    active = second;
+    controller.onProfileChanged();
+    expect(messages.filter((message): message is Extract<HostPayload, { type: 'test.results' }> => message.type === 'test.results').at(-1)?.automationResults).toEqual([]);
+    await controller.run('runContracts');
+    const secondResults = messages.filter((message): message is Extract<HostPayload, { type: 'test.results' }> => message.type === 'test.results').at(-1)?.automationResults;
+    expect(secondResults).toHaveLength(1);
+    expect(secondResults?.[0]?.profileId).toBe(second.id);
+    active = base;
+    controller.onProfileChanged();
+    const firstResults = messages.filter((message): message is Extract<HostPayload, { type: 'test.results' }> => message.type === 'test.results').at(-1)?.automationResults;
+    expect(firstResults).toHaveLength(1);
+    expect(firstResults?.[0]?.profileId).toBe(base.id);
+    let report: Blob | undefined;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => { if (blob instanceof Blob) report = blob; return 'blob:profile-isolation'; });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    vi.stubGlobal('document', { createElement: () => ({ click: () => undefined }) });
+    await controller.exportReport('json', undefined, 'contract');
+    const content = await report!.text();
+    expect(content).toContain(base.id);
+    expect(content).not.toContain(second.id);
+  });
+
+  it('recovers completed checkpoints after a browser restart and reruns only unfinished cases', async () => {
+    const scenarios = ['done', 'remaining'].map((id) => ({ id, name: id, steps: [{ id: 'turn', input: id }] }));
+    const profile: TurnStageProfile = { version: 1, id: `recovery-${crypto.randomUUID()}`, name: 'Recovery', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios } };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    const runId = crypto.randomUUID();
+    const planned = scenarios.map((scenario) => ({ profileId: profile.id, kind: 'contract' as const, scenarioId: scenario.id, name: scenario.name, scenario }));
+    const pending = { ...createTestRunHistoryRecord({ id: runId, profileId: profile.id, startedAt: 1, finishedAt: 1, status: 'cancelled', runner: 'web', profile, environment, cases: planned, completed: [] }), checkpointState: 'running' };
+    const store = new ArtifactStore();
+    await store.put('runs', { id: `test-batch:${profile.id}:${runId}`, profileId: profile.id, kind: 'test-batch', name: 'Interrupted run', updatedAt: 1, value: pending });
+    await store.put('runs', { id: `test-checkpoint:${profile.id}:${runId}:0`, profileId: profile.id, kind: 'test-checkpoint', name: 'done', updatedAt: 2, value: { runId, completed: { profileId: profile.id, kind: 'contract', scenarioId: 'done', outcome: 'passed', completedAttempts: 1, durationMs: 10 } } });
+    const messages: HostPayload[] = [];
+    const controller = new WebTestController(() => profile, () => environment, new Map(), (payload) => { messages.push(payload); });
+    await controller.postHistory();
+    const recovered = messages.filter((message): message is Extract<HostPayload, { type: 'test.history' }> => message.type === 'test.history').at(-1)?.runs[0];
+    expect(recovered).toMatchObject({ status: 'cancelled', cases: [{ scenarioId: 'done', outcome: 'passed' }, { scenarioId: 'remaining', completedAttempts: 0 }] });
+    expect(await store.get('runs', `test-checkpoint:${profile.id}:${runId}:0`)).toBeUndefined();
+    const fetch = vi.fn(async () => new Response('event: done\ndata: {}\n\n', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    await controller.rerunHistory(runId, 'contract', 'unfinished');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const rerun = messages.filter((message): message is Extract<HostPayload, { type: 'test.history' }> => message.type === 'test.history').at(-1)?.runs[0];
+    expect(rerun?.sourceRunId).toBe(runId);
+    expect(rerun?.cases.map((item) => item.scenarioId)).toEqual(['remaining']);
+  });
+
+  it('does not recover a live run owned by another browser tab', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } });
+    const profile: TurnStageProfile = { version: 1, id: `two-tabs-${crypto.randomUUID()}`, name: 'Two tabs', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios: [{ id: 'one', name: 'One', steps: [{ id: 'turn', input: 'Hello' }] }] } };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    let releaseRequest: (() => void) | undefined;
+    let requestStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { requestStarted = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      requestStarted?.();
+      await new Promise<void>((resolve) => { releaseRequest = resolve; });
+      return new Response('event: done\ndata: {}\n\n', { status: 200 });
+    }));
+    const first = new WebTestController(() => profile, () => environment, new Map(), vi.fn());
+    const secondMessages: HostPayload[] = [];
+    const second = new WebTestController(() => profile, () => environment, new Map(), (payload) => { secondMessages.push(payload); });
+    const running = first.run('runContracts');
+    await started;
+    const pending = (await new ArtifactStore().listByKind<TestRunHistoryRecord>('runs', profile.id, 'test-batch'))[0]!;
+    await second.postHistory();
+    expect((await new ArtifactStore().get('runs', pending.id))?.value).toMatchObject({ checkpointState: 'running' });
+    expect(secondMessages.filter((message): message is Extract<HostPayload, { type: 'test.history' }> => message.type === 'test.history').at(-1)?.runs).toEqual([]);
+    await second.clearHistory('contract');
+    expect((await new ArtifactStore().get('runs', pending.id))?.value).toMatchObject({ checkpointState: 'running' });
+    releaseRequest?.();
+    await running;
+    await second.postHistory();
+    expect(secondMessages.filter((message): message is Extract<HostPayload, { type: 'test.history' }> => message.type === 'test.history').at(-1)?.runs[0]).toMatchObject({ status: 'completed' });
+    second.onProfileChanged();
+  });
+
+  it('does not send a test request when its cross-tab recovery lease cannot be saved', async () => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => { throw new Error('Quota exceeded'); }, removeItem: () => undefined });
+    const profile: TurnStageProfile = { version: 1, id: `lease-failure-${crypto.randomUUID()}`, name: 'Lease failure', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [] }, tests: { scenarios: [{ id: 'one', name: 'One', steps: [{ id: 'turn', input: 'Hello' }] }] } };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const controller = new WebTestController(() => profile, () => environment, new Map(), vi.fn());
+    await expect(controller.run('runContracts')).rejects.toThrow(/Browser storage is unavailable/u);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await new ArtifactStore().listByKind('runs', profile.id, 'test-batch')).toEqual([]);
+  });
+
+  it('updates an imported suite with the same ID without duplicating its cases', async () => {
+    const profile: TurnStageProfile = { version: 1, id: `import-update-${crypto.randomUUID()}`, name: 'Import update', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [] } };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    const controller = new WebTestController(() => profile, () => environment, new Map(), vi.fn(), () => 'zh-TW');
+    vi.stubGlobal('window', { confirm: vi.fn(() => true) });
+    const first = serializeContractCsv([{ id: 'case-one', name: 'One', steps: [{ id: 'turn', input: 'first' }] }]);
+    const second = serializeContractCsv([{ id: 'case-two', name: 'Two', steps: [{ id: 'turn', input: 'second' }] }]);
+    await controller.importSuiteText('contract', 'csv', 'same.csv', first);
+    const before = await new ArtifactStore().list('suites', profile.id);
+    await controller.importSuiteText('contract', 'csv', 'same.csv', second);
+    const after = await new ArtifactStore().list('suites', profile.id);
+    expect(after).toHaveLength(1);
+    expect(after[0]?.id).toBe(before[0]?.id);
+    expect((await controller.scenarioEntries()).map((item) => item.scenario.id)).toEqual(['case-two']);
+  });
   it('exports inline and imported general cases as valid JSONC and CSV, and rejects duplicate IDs', async () => {
     const inline = { id: 'inline-case', name: 'Inline case', steps: [{ id: 'turn-one', input: 'Hello' }] };
     const imported = { id: 'imported-case', name: 'Imported case', steps: [{ id: 'turn-one', input: 'Search' }] };
@@ -215,18 +335,31 @@ describe('WebTestController', () => {
     expect(post.mock.calls.filter(([message]) => message.type === 'test.history').at(-1)?.[0]).toMatchObject({ type: 'test.history', profileId: profile.id, runs: [] });
   });
 
-  it('rejects unsupported comparison and performance cases without a network request', async () => {
+  it('rejects performance regression without a baseline before sending a request', async () => {
     const profile: TurnStageProfile = {
       version: 1, id: `unsupported-web-${crypto.randomUUID()}`, name: 'Unsupported Web', opening: { mode: 'static', message: 'Ready', starters: [] },
       conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [] },
-      tests: { scenarios: [{ id: 'performance', name: 'Performance', steps: [{ id: 'turn', input: 'hello' }], performance: { thresholds: { 'scenario.durationMs': 1_000 } } }] },
+      tests: { scenarios: [{ id: 'performance', name: 'Performance', steps: [{ id: 'turn', input: 'hello' }], performance: { regression: { 'scenario.durationMs': { maxIncreaseMs: 1_000 } } } }] },
     };
     const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     const controller = new WebTestController(() => profile, () => environment, new Map(), vi.fn());
-    await expect(controller.run('runContracts')).rejects.toThrow(/Performance checks are not available in Web/u);
+    await expect(controller.run('runContracts')).rejects.toThrow(/Performance regression checks require/u);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('evaluates absolute performance thresholds in Web and records a failing check', async () => {
+    const scenario = { id: 'threshold', name: 'Threshold', steps: [{ id: 'turn', input: 'hello' }], performance: { thresholds: { 'scenario.durationMs': 0 } } };
+    const profile: TurnStageProfile = { version: 1, id: `threshold-${crypto.randomUUID()}`, name: 'Threshold', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios: [scenario] } };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    const fetch = vi.fn(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); return new Response('event: done\ndata: {}\n\n', { status: 200 }); });
+    vi.stubGlobal('fetch', fetch);
+    const controller = new WebTestController(() => profile, () => environment, new Map(), vi.fn());
+    const execution = await controller.executeScenario({ key: 'threshold', itemId: 'inline:threshold', scenario });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(execution.result.checks).toContainEqual(expect.objectContaining({ id: 'performance.threshold.scenario.durationMs', kind: 'performance', passed: false }));
+    expect(execution.result.passed).toBe(false);
   });
 
   it('keeps the initial endpoint for every case when the live profile changes mid-run', async () => {

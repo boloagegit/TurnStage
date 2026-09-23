@@ -1,43 +1,42 @@
 import type { AdversarialCaseCatalog, ContractCaseCatalog, HostPayload, LinkedAdversarialCaseDetail, LinkedContractCaseDetail, TestOperationAction } from '../../src/shared/protocol';
 import type { AdversarialResultSummary, AutomationResultSummary, ScenarioDefinition, ScenarioRunResult, TurnStageEnvironment, TurnStageProfile } from '../../src/shared/types';
-import { adversarialCsvTemplate, parseAdversarialCsv, serializeAdversarialCsv } from '../../src/extension/testing/adversarialCsv';
-import { contractCsvTemplate, parseContractCsv, serializeContractCsv } from '../../src/extension/testing/contractCsv';
-import { parseAdversarialJsonl, serializeAdversarialJsonl } from '../../src/extension/testing/adversarialJsonl';
-import { createAdversarialSuite, normalizeAdversarialSuite, parseAdversarialSuite, serializeAdversarialSuite, validateAdversarialSuite } from '../../src/extension/testing/adversarialSuite';
-import { createContractSuite, normalizeContractSuite, parseContractSuite, serializeContractSuite, validateContractSuite } from '../../src/extension/testing/contractSuite';
+import { adversarialCsvTemplate, serializeAdversarialCsv } from '../../src/extension/testing/adversarialCsv';
+import { contractCsvTemplate, serializeContractCsv } from '../../src/extension/testing/contractCsv';
+import { serializeAdversarialJsonl } from '../../src/extension/testing/adversarialJsonl';
+import { createAdversarialSuite, serializeAdversarialSuite, validateAdversarialSuite } from '../../src/extension/testing/adversarialSuite';
+import { createContractSuite, serializeContractSuite, validateContractSuite } from '../../src/extension/testing/contractSuite';
 import { runScenario } from '../../src/extension/testing/scenarioRunner';
-import { MAX_RUN_PLAN_ATTEMPTS, MAX_RUN_PLAN_REQUESTS, runScenarioGroup } from '../../src/extension/testing/scenarioExecution';
+import { runScenarioGroup } from '../../src/extension/testing/scenarioExecution';
 import { BrowserSession } from './browserSession';
 import { ArtifactStore, type StoredArtifact } from './artifactStore';
 import { redactKnownSecrets } from '../../src/shared/redaction';
 import { buildEvidenceTimeline } from '../../src/extension/testing/evidenceTimeline';
 import { isScenarioReady } from '../../src/extension/testing/scenarioCapture';
 import { resolveTestSelection, testCaseKey, type TestCaseIdentity } from '../../src/shared/testSelection';
-import { createTestRunHistoryRecord, nonPassingCases, type CompletedTestRunCase, type TestRunHistoryRecord } from '../../src/shared/testRunHistory';
+import { createTestRunHistoryRecord, nonPassingCases, unfinishedCases, type CompletedTestRunCase, type TestRunHistoryRecord } from '../../src/shared/testRunHistory';
 import { strToU8, zipSync } from 'fflate';
 import { browserSha256, browserUuid } from './browserCrypto';
 import { renderTestReportHtml, type TestReportKind, type TestReportOutcome } from '../../src/shared/testReportHtml';
 import { buildTestReportEvidence } from '../../src/shared/testReportEvidence';
+import { webUnsupportedTestFeature } from '../../src/shared/webTestCapabilities';
+import { evaluatePerformance } from '../../src/extension/testing/performanceEvaluator';
+import { parseWebSuiteInWorker, type WebSuite } from './suiteParser';
 
-interface WebSuite {
-  suiteId: string;
-  name: string;
-  kind: 'contract' | 'adversarial';
-  sourceFormat: 'csv' | 'jsonc' | 'jsonl';
-  sourcePath: string;
-  revision: string;
-  scenarios: ScenarioDefinition[];
-  raw: string;
-}
+const WEB_TEST_CONCURRENCY = 4;
+const RUN_LEASE_MS = 120_000;
+const RUN_LEASE_REFRESH_MS = 10_000;
 
 interface RetainedEvidence { scenario: ScenarioDefinition; result: ScenarioRunResult }
+interface WebCaseCheckpoint { runId: string; completed: CompletedTestRunCase }
+type WebPendingRun = TestRunHistoryRecord & { checkpointState?: 'running' };
 export interface WebScenarioEntry { key: string; itemId: string; suiteId?: string; scenario: ScenarioDefinition }
 interface WebRunContext { profile: TurnStageProfile; environment: TurnStageEnvironment; secrets: Map<string, string> }
 
 export function webCaseUnsupportedReason(scenario: ScenarioDefinition): string | undefined {
-  if (scenario.faults) return 'Network fault simulation requires the VS Code extension. No request was sent.';
-  if (scenario.comparison) return 'Baseline/candidate comparison is not available in Web. No request was sent.';
-  if (scenario.performance) return 'Performance checks are not available in Web. No request was sent.';
+  const feature = webUnsupportedTestFeature(scenario);
+  if (feature === 'faults') return 'Network fault simulation requires the VS Code extension. No request was sent.';
+  if (feature === 'comparison') return 'Baseline/candidate comparison is not available in Web. No request was sent.';
+  if (feature === 'performanceRegression') return 'Performance regression checks require a VS Code baseline. No request was sent.';
   return undefined;
 }
 
@@ -50,9 +49,14 @@ export class WebTestController {
   private readonly store = new ArtifactStore();
   private automationResults: AutomationResultSummary[] = [];
   private adversarialResults: AdversarialResultSummary[] = [];
+  private readonly automationResultIndexes = new Map<string, number>();
+  private readonly adversarialResultIndexes = new Map<string, number>();
   private cancelled = false;
   private activeRun = false;
+  private activeRunId?: string;
+  private activeAction?: TestOperationAction;
   private readonly cancellationListeners = new Set<() => void>();
+  private readonly historyPollTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly profile: () => TurnStageProfile,
@@ -61,6 +65,21 @@ export class WebTestController {
     private readonly post: (payload: HostPayload, requestId?: string) => void,
     private readonly reportLocale: () => string = () => navigator.language,
   ) {}
+
+  postResults(profileId = this.profile().id): void {
+    if (this.profile().id !== profileId) return;
+    this.post({ type: 'test.results', results: this.adversarialResults.filter((item) => item.profileId === profileId), automationResults: this.automationResults.filter((item) => item.profileId === profileId) });
+  }
+
+  onProfileChanged(): void {
+    for (const timer of this.historyPollTimers.values()) clearTimeout(timer);
+    this.historyPollTimers.clear();
+    if (this.activeRun && this.activeAction) {
+      this.cancel();
+      this.post({ type: 'test.operation', operation: { action: this.activeAction, state: 'cancelled' } });
+    }
+    this.postResults();
+  }
 
   async run(action: TestOperationAction, scenarioId?: string, kind?: 'contract' | 'adversarial', suiteId?: string): Promise<void> {
     if (action !== 'runAll' && action !== 'runContracts' && action !== 'runCase') return;
@@ -82,11 +101,11 @@ export class WebTestController {
     await this.runResolved('runSelection', resolveTestSelection(entries, { cases }), context, sourceRunId);
   }
 
-  async rerunHistory(runId: string, kind?: 'contract' | 'adversarial'): Promise<void> {
+  async rerunHistory(runId: string, kind?: 'contract' | 'adversarial', only?: 'unfinished'): Promise<void> {
     const profileId = this.profile().id;
     const record = (await this.store.get<TestRunHistoryRecord>('runs', `test-batch:${profileId}:${runId}`))?.value;
     if (!record || record.profileId !== profileId) throw new Error('The selected test run is no longer available.');
-    const cases = nonPassingCases(record).filter((item) => kind === undefined || item.kind === kind);
+    const cases = (only === 'unfinished' ? unfinishedCases(record) : nonPassingCases(record)).filter((item) => kind === undefined || item.kind === kind);
     if (!cases.length) throw new Error('The selected test run has no non-passing cases.');
     await this.runCases(cases, runId);
   }
@@ -96,59 +115,150 @@ export class WebTestController {
   private async runResolved(action: TestOperationAction, selected: readonly WebScenarioEntry[], context: WebRunContext, sourceRunId?: string): Promise<void> {
     if (this.activeRun) throw new Error('A TurnStage test run is already active.');
     if (this.profile().id !== context.profile.id) throw new Error('The active profile changed before this test run. No request was sent.');
-    if (selected.length > 500) throw new Error('A test run can contain at most 500 cases. Run a smaller selection.');
     for (const item of selected) assertWebCaseSupported(item.scenario);
     const attempts = selected.reduce((total, item) => total + (item.scenario.adversarial?.repetitions ?? 1), 0);
     const { profile, environment, secrets } = context;
     const cases = structuredClone(selected);
-    const requests = cases.reduce((total, item) => total + (item.scenario.steps.length + Number(profile.opening?.mode === 'request')) * (item.scenario.adversarial?.repetitions ?? 1), 0);
-    if (attempts > MAX_RUN_PLAN_ATTEMPTS || requests > MAX_RUN_PLAN_REQUESTS) throw new Error('The selected cases exceed the bounded test-run attempt or request limit. Run a smaller selection.');
-    this.activeRun = true;
-    this.cancelled = false;
     const startedAt = Date.now();
     const runId = browserUuid();
+    const leaseOwner = browserUuid();
     const completedCases: CompletedTestRunCase[] = [];
-    this.post({ type: 'test.operation', operation: { action, state: 'running', progress: { totalCases: selected.length, completedCases: 0, totalAttempts: attempts, completedAttempts: 0, maxConcurrency: 1 } } });
+    const checkpointIds: string[] = [];
+    const plannedCases = cases.map((item) => ({ profileId: profile.id, suiteId: item.suiteId, scenarioId: item.scenario.id, kind: item.scenario.adversarial ? 'adversarial' as const : 'contract' as const, name: item.scenario.name, scenario: item.scenario }));
+    const pending: WebPendingRun = { ...createTestRunHistoryRecord({ id: runId, profileId: profile.id, startedAt, finishedAt: startedAt, status: 'cancelled', runner: 'web', profile, environment, sourceRunId, secretValues: [...secrets.values()], cases: plannedCases, completed: [] }), checkpointState: 'running' };
+    const maxConcurrency = Math.max(1, Math.min(WEB_TEST_CONCURRENCY, cases.length));
     let completed = 0;
     let completedAttempts = 0;
     let historyFailure: unknown;
+    let workerFailure: unknown;
+    let nextCaseIndex = 0;
+    let lastResultsPostAt = 0;
+    let lastProgressPostAt = 0;
+    writeRunLease(profile.id, runId, leaseOwner);
+    this.activeRun = true;
+    this.cancelled = false;
+    this.activeAction = action;
+    this.activeRunId = runId;
+    const leaseRefresh = setInterval(() => {
+      try { writeRunLease(profile.id, runId, leaseOwner); }
+      catch (error) { workerFailure = error; this.cancel(); }
+    }, RUN_LEASE_REFRESH_MS);
+    const onPageHide = () => clearRunLease(profile.id, runId, leaseOwner);
+    if (typeof window !== 'undefined') window.addEventListener('pagehide', onPageHide, { once: true });
+    const postResults = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastResultsPostAt < 1_000) return;
+      lastResultsPostAt = now;
+      this.postResults(profile.id);
+    };
+    const postProgress = (state: 'running' | 'completed' | 'cancelled' | 'failed', force = false) => {
+      if (this.profile().id !== profile.id) return;
+      const now = Date.now();
+      if (!force && now - lastProgressPostAt < 250) return;
+      lastProgressPostAt = now;
+      this.post({ type: 'test.operation', operation: { action, state, progress: { totalCases: selected.length, completedCases: completed, totalAttempts: attempts, completedAttempts, maxConcurrency } } });
+    };
     try {
-      for (const item of cases) {
-        if (this.cancelled) break;
-        if (this.profile().id !== profile.id) throw new Error('The active profile changed during this test run. The remaining cases were not sent.');
-        const execution = await this.executeScenario(item, true, { profile, environment, secrets });
-        const outcome = execution.result.adversarial?.outcome ?? (execution.result.evidence.snapshot.errors.some((error) => error.type === 'WebTestExecutionError') ? 'error' : execution.result.passed ? 'passed' : 'failed');
-        completedCases.push({ profileId: profile.id, suiteId: item.suiteId, scenarioId: item.scenario.id, kind: item.scenario.adversarial ? 'adversarial' : 'contract', outcome, completedAttempts: execution.result.repetitions?.completedAttempts ?? 1, durationMs: execution.result.durationMs, evidenceId: execution.evidenceId });
-        completed += 1;
-        completedAttempts += execution.result.repetitions?.completedAttempts ?? 1;
-        this.post({ type: 'test.results', results: this.adversarialResults, automationResults: this.automationResults });
-        this.post({ type: 'test.operation', operation: { action, state: 'running', progress: { totalCases: selected.length, completedCases: completed, totalAttempts: attempts, completedAttempts, maxConcurrency: 1 } } });
-      }
-      this.post({ type: 'test.operation', operation: { action, state: this.cancelled ? 'cancelled' : 'completed', progress: { totalCases: selected.length, completedCases: completed, totalAttempts: attempts, completedAttempts, maxConcurrency: 1 } } });
+      await this.store.put('runs', { id: `test-batch:${profile.id}:${runId}`, profileId: profile.id, kind: 'test-batch', name: 'Test run', updatedAt: startedAt, value: pending });
+      postProgress('running', true);
+      const runWorker = async () => {
+        while (!this.cancelled && workerFailure === undefined) {
+          const index = nextCaseIndex++;
+          if (index >= cases.length) return;
+          const item = cases[index]!;
+          try {
+            if (this.profile().id !== profile.id) throw new Error('The active profile changed during this test run. The remaining cases were not sent.');
+            const execution = await this.executeScenario(item, true, { profile, environment, secrets });
+            const outcome = execution.result.adversarial?.outcome ?? (execution.result.evidence.snapshot.errors.some((error) => error.type === 'WebTestExecutionError') ? 'error' : execution.result.passed ? 'passed' : 'failed');
+            const result: CompletedTestRunCase = { profileId: profile.id, suiteId: item.suiteId, scenarioId: item.scenario.id, kind: item.scenario.adversarial ? 'adversarial' : 'contract', outcome, completedAttempts: execution.result.repetitions?.completedAttempts ?? 1, durationMs: execution.result.durationMs, evidenceId: execution.evidenceId };
+            completedCases.push(result);
+            const checkpointId = `test-checkpoint:${profile.id}:${runId}:${index}`;
+            await this.store.put<WebCaseCheckpoint>('runs', { id: checkpointId, profileId: profile.id, kind: 'test-checkpoint', name: item.scenario.name, updatedAt: Date.now(), value: { runId, completed: result } });
+            checkpointIds.push(checkpointId);
+            completed += 1;
+            completedAttempts += execution.result.repetitions?.completedAttempts ?? 1;
+            postResults();
+            postProgress('running');
+          } catch (error) {
+            workerFailure = error;
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: maxConcurrency }, () => runWorker()));
+      if (workerFailure !== undefined) throw workerFailure;
+      postResults(true);
     } catch (error) {
-      this.post({ type: 'test.operation', operation: { action, state: 'failed', progress: { totalCases: selected.length, completedCases: completed, totalAttempts: attempts, completedAttempts, maxConcurrency: 1 } } });
+      postResults(true);
+      postProgress('failed', true);
       throw error;
     } finally {
       try {
-        const record = createTestRunHistoryRecord({ id: runId, profileId: profile.id, startedAt, finishedAt: Date.now(), status: this.cancelled ? 'cancelled' : completed === cases.length ? 'completed' : 'failed', runner: 'web', profile, environment, sourceRunId, secretValues: [...secrets.values()], cases: cases.map((item) => ({ profileId: profile.id, suiteId: item.suiteId, scenarioId: item.scenario.id, kind: item.scenario.adversarial ? 'adversarial' as const : 'contract' as const, name: item.scenario.name, scenario: item.scenario })), completed: completedCases });
+        const record = finishWebRun(pending, completedCases, this.cancelled ? 'cancelled' : completed === cases.length ? 'completed' : 'failed', Date.now());
         await this.store.put('runs', { id: `test-batch:${profile.id}:${runId}`, profileId: profile.id, kind: 'test-batch', name: 'Test run', updatedAt: record.finishedAt, value: record });
+        await this.store.deleteMany('runs', checkpointIds);
         await this.trimRunHistory(profile.id);
         await this.postHistory(profile.id);
       } catch (error) {
         historyFailure = error;
       } finally {
+        clearInterval(leaseRefresh);
+        clearRunLease(profile.id, runId, leaseOwner);
+        if (typeof window !== 'undefined') window.removeEventListener('pagehide', onPageHide);
         this.activeRun = false;
+        this.activeRunId = undefined;
+        this.activeAction = undefined;
       }
     }
-    if (historyFailure) throw historyFailure;
+    if (historyFailure) { postProgress('failed', true); throw historyFailure; }
+    postProgress(this.cancelled ? 'cancelled' : completed === cases.length ? 'completed' : 'failed', true);
   }
 
   async postHistory(profileId = this.profile().id): Promise<void> {
     const evidenceIds = new Set((await this.store.keys('evidence', profileId)).map(String));
-    const runs = (await this.store.list<TestRunHistoryRecord>('runs', profileId)).filter((item) => item.kind === 'test-batch').map((item) => item.value).slice(0, 21)
+    const [storedBatches, storedCheckpoints] = await Promise.all([
+      this.store.listByKind<WebPendingRun>('runs', profileId, 'test-batch'),
+      this.store.listByKind<WebCaseCheckpoint>('runs', profileId, 'test-checkpoint'),
+    ]);
+    const stored: Array<StoredArtifact<WebPendingRun | WebCaseCheckpoint>> = [...storedBatches, ...storedCheckpoints];
+    const checkpoints = new Map<string, CompletedTestRunCase[]>();
+    for (const item of stored) if (item.kind === 'test-checkpoint') {
+      const checkpoint = item.value as WebCaseCheckpoint;
+      const group = checkpoints.get(checkpoint.runId) ?? [];
+      group.push(checkpoint.completed);
+      checkpoints.set(checkpoint.runId, group);
+    }
+    const batches = storedBatches;
+    const liveRunIds = new Set<string>();
+    for (const item of batches) {
+      if (item.value.checkpointState !== 'running') continue;
+      if (item.value.id === this.activeRunId) { liveRunIds.add(item.value.id); continue; }
+      if (hasLiveRunLease(profileId, item.value.id)) {
+        liveRunIds.add(item.value.id);
+        this.scheduleHistoryPoll(profileId);
+        continue;
+      }
+      const latest = await this.store.get<WebPendingRun>('runs', item.id);
+      if (!latest) continue;
+      if (latest.value.checkpointState !== 'running') { item.value = latest.value; continue; }
+      if (hasLiveRunLease(profileId, item.value.id)) { liveRunIds.add(item.value.id); this.scheduleHistoryPoll(profileId); continue; }
+      const recovered = finishWebRun(item.value, checkpoints.get(item.value.id) ?? [], 'cancelled', Date.now());
+      await this.store.put('runs', { ...item, updatedAt: recovered.finishedAt, value: recovered });
+      item.value = recovered;
+      await this.store.deleteMany('runs', stored.filter((checkpoint) => checkpoint.kind === 'test-checkpoint' && (checkpoint.value as WebCaseCheckpoint).runId === item.value.id).map((checkpoint) => checkpoint.id));
+    }
+    const runs = batches.filter((item) => !liveRunIds.has(item.value.id)).map((item) => item.value).slice(0, 21)
       .map((run) => ({ ...run, cases: run.cases.map((item) => ({ ...item, evidenceAvailable: Boolean(item.evidenceId && evidenceIds.has(item.evidenceId)) })) }));
     const baselineRunId = (await this.store.get<{ runId: string }>('runs', `test-baseline:${profileId}`))?.value.runId;
-    this.post({ type: 'test.history', profileId, runs, ...(baselineRunId ? { baselineRunId } : {}) });
+    if (this.profile().id === profileId) this.post({ type: 'test.history', profileId, runs, ...(baselineRunId ? { baselineRunId } : {}) });
+  }
+
+  private scheduleHistoryPoll(profileId: string): void {
+    if (this.historyPollTimers.has(profileId)) return;
+    const timer = setTimeout(() => {
+      this.historyPollTimers.delete(profileId);
+      if (this.profile().id === profileId) void this.postHistory(profileId).catch(() => undefined);
+    }, 5_000);
+    this.historyPollTimers.set(profileId, timer);
   }
 
   async acceptBaseline(runId: string): Promise<void> {
@@ -167,7 +277,7 @@ export class WebTestController {
   }
 
   private async trimRunHistory(profileId: string): Promise<void> {
-    const runs = (await this.store.list<TestRunHistoryRecord>('runs', profileId)).filter((item) => item.kind === 'test-batch');
+    const runs = (await this.store.listByKind<WebPendingRun>('runs', profileId, 'test-batch')).filter((item) => item.value.checkpointState !== 'running');
     const pinned = (await this.store.get<{ runId: string }>('runs', `test-baseline:${profileId}`))?.value.runId;
     for (const item of runs.slice(20)) if (item.value.id !== pinned) await this.store.delete('runs', item.id);
   }
@@ -178,8 +288,8 @@ export class WebTestController {
     const context = this.runContext();
     const profileId = context.profile.id;
     const identities: TestCaseIdentity[] = [
-      ...this.adversarialResults.filter((item) => status === 'failed' ? item.outcome !== 'resisted' : status === 'unstable' ? item.repetitions?.stability === 'unstable' : item.repetitions?.sampleComplete === false).map((item) => ({ profileId, suiteId: item.suiteId, scenarioId: item.scenarioId, kind: 'adversarial' as const })),
-      ...(status === 'failed' ? this.automationResults.filter((item) => item.outcome !== 'passed').map((item) => ({ profileId, suiteId: item.suiteId, scenarioId: item.scenarioId, kind: 'contract' as const })) : []),
+      ...this.adversarialResults.filter((item) => item.profileId === profileId && (status === 'failed' ? item.outcome !== 'resisted' : status === 'unstable' ? item.repetitions?.stability === 'unstable' : item.repetitions?.sampleComplete === false)).map((item) => ({ profileId, suiteId: item.suiteId, scenarioId: item.scenarioId, kind: 'adversarial' as const })),
+      ...(status === 'failed' ? this.automationResults.filter((item) => item.profileId === profileId && item.outcome !== 'passed').map((item) => ({ profileId, suiteId: item.suiteId, scenarioId: item.scenarioId, kind: 'contract' as const })) : []),
     ];
     const unique = [...new Map(identities.map((item) => [testCaseKey(item), item])).values()];
     const entries = (await this.scenarioEntries(context.profile)).map((item) => ({ ...item, profileId, scenarioId: item.scenario.id, kind: item.scenario.adversarial ? 'adversarial' as const : 'contract' as const, ready: isScenarioReady(item.scenario) }));
@@ -210,10 +320,13 @@ export class WebTestController {
       ? (await runScenarioGroup(profile.id, item.scenario, async () => new BrowserSession(profile, environment, secrets, () => undefined), { cancellation, runId: browserUuid() })).result
       : await runScenario(profile.id, item.scenario, runtime, cancellation); }
     catch (error) { result = executionError(profile.id, item.scenario, error); }
+    if (!item.scenario.adversarial && item.scenario.performance && !result.evidence.snapshot.errors.some((error) => error.type === 'WebTestExecutionError')) {
+      const checks = evaluatePerformance(item.scenario.performance, result);
+      result = { ...result, checks: [...result.checks, ...checks], passed: result.passed && checks.every((check) => check.passed) };
+    }
     result = redactKnownSecrets(result, [...secrets.values()]) as ScenarioRunResult;
     const evidenceId = browserUuid();
     await this.store.put<RetainedEvidence>('evidence', { id: evidenceId, profileId: profile.id, kind: item.scenario.adversarial ? 'adversarial' : 'contract', name: item.scenario.name, updatedAt: Date.now(), value: { scenario: item.scenario, result } });
-    await this.store.put<ScenarioRunResult>('runs', { id: browserUuid(), profileId: profile.id, kind: 'test', name: item.scenario.name, updatedAt: Date.now(), value: result });
     if (result.adversarial) this.upsertAdversarial(adversarialSummary(profile.id, item.scenario, result, evidenceId, item.suiteId));
     else this.upsertAutomation(automationSummary(profile.id, item.scenario, result, evidenceId, item.suiteId));
     return { result, evidenceId };
@@ -263,7 +376,7 @@ export class WebTestController {
       if (!selected || selected.profileId !== profileId || (kind && selected.kind !== kind)) throw new Error('The selected test evidence is no longer available for this profile and test type.');
       artifacts = [selected];
     } else if (kind) {
-      const ids = kind === 'contract' ? this.automationResults.map((item) => item.evidenceId) : this.adversarialResults.map((item) => item.evidenceId);
+      const ids = kind === 'contract' ? this.automationResults.filter((item) => item.profileId === profileId).map((item) => item.evidenceId) : this.adversarialResults.filter((item) => item.profileId === profileId).map((item) => item.evidenceId);
       artifacts = (await Promise.all(ids.map((id) => id ? this.store.get<RetainedEvidence>('evidence', id) : undefined))).filter((item): item is StoredArtifact<RetainedEvidence> => Boolean(item));
       if (artifacts.length !== ids.length || artifacts.some((item) => item.profileId !== profileId || item.kind !== kind)) throw new Error('Some latest test evidence is no longer available. Run the cases again before exporting.');
     } else artifacts = await this.store.list<RetainedEvidence>('evidence', profileId);
@@ -289,13 +402,25 @@ export class WebTestController {
   }
 
   async importSuite(kind: 'contract' | 'adversarial', format: 'csv' | 'jsonc' | 'jsonl'): Promise<void> {
+    const profileId = this.profile().id;
     const selected = await pickTextFile(format === 'csv' ? '.csv,text/csv' : '.json,.jsonc,.jsonl,application/json');
     if (!selected) return;
-    const suite = await parseSuite(kind, format, selected.name, selected.text);
-    await this.store.put<WebSuite>('suites', { id: `${this.profile().id}:${suite.sourcePath}`, profileId: this.profile().id, kind, name: suite.name, updatedAt: Date.now(), value: suite });
+    await this.importSuiteText(kind, format, selected.name, selected.text, profileId);
+  }
+
+  async importSuiteText(kind: 'contract' | 'adversarial', format: 'csv' | 'jsonc' | 'jsonl', fileName: string, raw: string, expectedProfileId = this.profile().id): Promise<void> {
+    const profileId = expectedProfileId;
+    const suite = await parseWebSuiteInWorker(kind, format, fileName, raw);
+    if (this.profile().id !== profileId) throw new Error('The active profile changed during import. Select the file again for the intended profile.');
+    const matches = (await this.store.list<WebSuite>('suites', profileId)).filter((item) => item.value.kind === kind && item.value.suiteId === suite.suiteId);
+    if (matches.length > 1) throw new Error(`Multiple imported suites already use the ID "${suite.suiteId}". Remove the duplicates before importing again.`);
+    const existing = matches[0];
+    if (existing && !confirmSuiteReplacement(suite.suiteId, this.reportLocale())) return;
+    const value = existing ? { ...suite, sourcePath: existing.value.sourcePath } : suite;
+    await this.store.put<WebSuite>('suites', { id: existing?.id ?? `${profileId}:${suite.sourcePath}`, profileId, kind, name: value.name, updatedAt: Date.now(), value });
     this.post(kind === 'adversarial'
-      ? { type: 'adversarial.operation', action: format === 'csv' ? 'importCsv' : format === 'jsonl' ? 'importJsonl' : 'importJsonc', status: 'completed', detail: `Imported ${suite.scenarios.length} cases from ${selected.name}.`, path: suite.sourcePath }
-      : { type: 'contract.operation', action: format === 'csv' ? 'importCsv' : 'importJsonc', status: 'completed', detail: `Imported ${suite.scenarios.length} cases from ${selected.name}.`, path: suite.sourcePath });
+      ? { type: 'adversarial.operation', action: format === 'csv' ? 'importCsv' : format === 'jsonl' ? 'importJsonl' : 'importJsonc', status: 'completed', detail: importedSuiteMessage(value.scenarios.length, Boolean(existing), this.reportLocale()), path: value.sourcePath }
+      : { type: 'contract.operation', action: format === 'csv' ? 'importCsv' : 'importJsonc', status: 'completed', detail: importedSuiteMessage(value.scenarios.length, Boolean(existing), this.reportLocale()), path: value.sourcePath });
     await this.postCatalog(kind);
   }
 
@@ -307,10 +432,10 @@ export class WebTestController {
         mode: scenario.adversarial?.mode ?? 'singleTurn', turns: scenario.steps.length, maxTurns: scenario.adversarial?.maxTurns ?? scenario.steps.length, repetitions: scenario.adversarial?.repetitions ?? 1, timeoutMs: scenario.adversarial?.timeoutMs ?? 60_000,
         prohibit: { content: scenario.adversarial?.forbid?.content?.length ?? 0, events: scenario.adversarial?.forbid?.events?.length ?? 0, urls: scenario.adversarial?.forbid?.urls === true, ctas: scenario.adversarial?.forbid?.ctas === true, tools: scenario.adversarial?.forbid?.tools === true },
       })));
-      this.post({ type: 'adversarial.catalog', catalog: { entries: entries.slice(0, 100), total: entries.length, truncated: entries.length > 100, issues: [] } });
+      this.post({ type: 'adversarial.catalog', catalog: { entries, total: entries.length, truncated: false, issues: [] } });
     } else {
-      const entries: ContractCaseCatalog['entries'] = suites.flatMap(({ value }) => value.scenarios.map((scenario) => ({ sourcePath: value.sourcePath, revision: value.revision, suiteId: value.suiteId, suiteName: value.name, scenarioId: scenario.id, scenarioName: scenario.name, tags: scenario.tags ?? [], capture: scenario.capture, turns: scenario.steps.length, assertions: scenario.steps.reduce((sum, step) => sum + (step.assertions?.length ?? 0), scenario.assertions?.length ?? 0), comparison: Boolean(scenario.comparison), performance: Boolean(scenario.performance), faults: Boolean(scenario.faults) })));
-      this.post({ type: 'contract.catalog', catalog: { entries: entries.slice(0, 100), total: entries.length, truncated: entries.length > 100, issues: [] } });
+      const entries: ContractCaseCatalog['entries'] = suites.flatMap(({ value }) => value.scenarios.map((scenario) => ({ sourcePath: value.sourcePath, revision: value.revision, suiteId: value.suiteId, suiteName: value.name, scenarioId: scenario.id, scenarioName: scenario.name, tags: scenario.tags ?? [], capture: scenario.capture, turns: scenario.steps.length, assertions: scenario.steps.reduce((sum, step) => sum + (step.assertions?.length ?? 0), scenario.assertions?.length ?? 0), comparison: Boolean(scenario.comparison), performance: Boolean(scenario.performance), faults: Boolean(scenario.faults), webUnsupported: Boolean(webUnsupportedTestFeature(scenario)) })));
+      this.post({ type: 'contract.catalog', catalog: { entries, total: entries.length, truncated: false, issues: [] } });
     }
   }
 
@@ -380,8 +505,74 @@ export class WebTestController {
     return suite;
   }
 
-  private upsertAutomation(summary: AutomationResultSummary): void { this.automationResults = [...this.automationResults.filter((item) => item.scenarioId !== summary.scenarioId || item.suiteId !== summary.suiteId), summary]; }
-  private upsertAdversarial(summary: AdversarialResultSummary): void { this.adversarialResults = [...this.adversarialResults.filter((item) => item.scenarioId !== summary.scenarioId || item.suiteId !== summary.suiteId), summary]; }
+  private upsertAutomation(summary: AutomationResultSummary): void {
+    const key = testCaseKey({ profileId: summary.profileId, kind: 'contract', suiteId: summary.suiteId, scenarioId: summary.scenarioId });
+    const index = this.automationResultIndexes.get(key);
+    if (index === undefined) { this.automationResultIndexes.set(key, this.automationResults.length); this.automationResults.push(summary); }
+    else this.automationResults[index] = summary;
+  }
+  private upsertAdversarial(summary: AdversarialResultSummary): void {
+    const key = testCaseKey({ profileId: summary.profileId, kind: 'adversarial', suiteId: summary.suiteId, scenarioId: summary.scenarioId });
+    const index = this.adversarialResultIndexes.get(key);
+    if (index === undefined) { this.adversarialResultIndexes.set(key, this.adversarialResults.length); this.adversarialResults.push(summary); }
+    else this.adversarialResults[index] = summary;
+  }
+}
+
+function confirmSuiteReplacement(suiteId: string, locale: string): boolean {
+  const messages: Record<string, string> = {
+    'zh-TW': `測試套件「${suiteId}」已存在。要更新現有套件嗎？現有案例會被這次匯入的內容取代。`,
+    ja: `テストスイート「${suiteId}」は既に存在します。今回のファイルで既存のケースを置き換えますか？`,
+    ko: `테스트 모음 "${suiteId}"이(가) 이미 있습니다. 이번 파일의 케이스로 바꿀까요?`,
+    en: `Test suite "${suiteId}" already exists. Replace its cases with this file?`,
+  };
+  return window.confirm(messages[locale] ?? messages.en!);
+}
+
+function importedSuiteMessage(count: number, replaced: boolean, locale: string): string {
+  const messages: Record<string, string> = {
+    'zh-TW': `${replaced ? '已更新' : '已匯入'} ${count} 筆案例。`,
+    ja: `${count} 件のケースを${replaced ? '更新' : 'インポート'}しました。`,
+    ko: `${count}개 케이스를 ${replaced ? '업데이트' : '가져왔습니다'}.`,
+    en: `${replaced ? 'Updated' : 'Imported'} ${count} cases.`,
+  };
+  return messages[locale] ?? messages.en!;
+}
+
+function runLeaseKey(profileId: string, runId: string): string { return `turnstage.web.test-run-lease:${profileId}:${runId}`; }
+
+function writeRunLease(profileId: string, runId: string, owner: string): void {
+  try { localStorage.setItem(runLeaseKey(profileId, runId), JSON.stringify({ owner, expiresAt: Date.now() + RUN_LEASE_MS })); }
+  catch { throw new Error('Browser storage is unavailable. Test execution cannot continue safely because interrupted runs could not be recovered.'); }
+}
+
+function hasLiveRunLease(profileId: string, runId: string): boolean {
+  try {
+    const raw = localStorage.getItem(runLeaseKey(profileId, runId));
+    if (!raw) return false;
+    const lease = JSON.parse(raw) as { expiresAt?: unknown };
+    return typeof lease.expiresAt === 'number' && lease.expiresAt > Date.now();
+  } catch { return false; }
+}
+
+function clearRunLease(profileId: string, runId: string, owner: string): void {
+  try {
+    const key = runLeaseKey(profileId, runId);
+    const raw = localStorage.getItem(key);
+    if (raw && (JSON.parse(raw) as { owner?: string }).owner === owner) localStorage.removeItem(key);
+  } catch { /* An expired lease is ignored by recovery. */ }
+}
+
+function finishWebRun(pending: WebPendingRun, completedCases: readonly CompletedTestRunCase[], status: TestRunHistoryRecord['status'], finishedAt: number): TestRunHistoryRecord {
+  const completed = new Map(completedCases.map((item) => [testCaseKey(item), item]));
+  const cases = pending.cases.map((entry) => {
+    const result = completed.get(entry.key);
+    return result ? { ...entry, outcome: result.outcome, completedAttempts: result.completedAttempts, durationMs: result.durationMs, ...(result.evidenceId ? { evidenceId: result.evidenceId } : {}) } : entry;
+  });
+  const allComplete = cases.every((item) => item.outcome !== undefined && item.completedAttempts === item.requestedAttempts);
+  const record = { ...pending };
+  delete record.checkpointState;
+  return { ...record, cases, finishedAt, status: status === 'completed' && !allComplete ? 'cancelled' : status };
 }
 
 function automationSummary(profileId: string, scenario: ScenarioDefinition, result: ScenarioRunResult, evidenceId: string, suiteId?: string): AutomationResultSummary {
@@ -399,32 +590,6 @@ function adversarialSummary(profileId: string, scenario: ScenarioDefinition, res
 function executionError(profileId: string, scenario: ScenarioDefinition, error: unknown): ScenarioRunResult {
   const message = error instanceof Error ? error.message : String(error);
   return { scenarioId: scenario.id, passed: false, durationMs: 0, steps: [], checks: [{ id: 'web-execution-error', label: message, passed: false, kind: 'invariant', location: { kind: 'profile', path: 'tests.scenarios' } }], evidence: { profileId, scenarioId: scenario.id, snapshot: { sessionId: browserUuid(), sessionState: 'failed', turnState: 'failed', messages: [], rawEvents: [], normalizedEvents: [], metrics: { eventCount: 0, byteCount: 0, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0 }, errors: [{ type: 'WebTestExecutionError', message }], droppedEventCount: 0, trusted: true, controls: {} }, networkEntries: [] } };
-}
-
-async function parseSuite(kind: 'contract' | 'adversarial', format: 'csv' | 'jsonc' | 'jsonl', fileName: string, raw: string): Promise<WebSuite> {
-  let name = fileName; let suiteId = fileName.replace(/\.[^.]+$/u, '').replaceAll(/[^A-Za-z0-9_-]+/gu, '-'); let scenarios: ScenarioDefinition[] = [];
-  if (format === 'csv') {
-    const parsed = kind === 'adversarial' ? parseAdversarialCsv(raw) : parseContractCsv(raw);
-    if (parsed.issues.length) throw new Error(parsed.issues.slice(0, 5).map((issue) => `Row ${issue.row}: ${issue.message}`).join(' '));
-    scenarios = parsed.scenarios;
-  } else if (format === 'jsonl') {
-    if (kind !== 'adversarial') throw new Error('JSONL is supported only for adversarial suites.');
-    const parsed = parseAdversarialJsonl(raw);
-    if (!parsed.suite || parsed.issues.length) throw new Error(parsed.issues.slice(0, 5).map((issue) => `Line ${issue.line}: ${issue.message}`).join(' ') || 'Invalid adversarial JSONL.');
-    suiteId = parsed.suite.id; name = parsed.suite.name; scenarios = normalizeAdversarialSuite(parsed.suite);
-  } else {
-    if (kind === 'adversarial') {
-      const parsed = parseAdversarialSuite(raw);
-      if (!parsed.suite || parsed.parseErrors.length || parsed.issues.length) throw new Error(parsed.issues.slice(0, 5).map((issue) => `${issue.path}: ${issue.message}`).join(' ') || 'Invalid adversarial suite JSONC.');
-      suiteId = parsed.suite.id; name = parsed.suite.name; scenarios = normalizeAdversarialSuite(parsed.suite);
-    } else {
-      const parsed = parseContractSuite(raw);
-      if (!parsed.suite || parsed.parseErrors.length || parsed.issues.length) throw new Error(parsed.issues.slice(0, 5).map((issue) => `${issue.path}: ${issue.message}`).join(' ') || 'Invalid contract suite JSONC.');
-      suiteId = parsed.suite.id; name = parsed.suite.name; scenarios = normalizeContractSuite(parsed.suite);
-    }
-  }
-  if (!scenarios.length) throw new Error('The selected suite contains no cases.');
-  return { suiteId, name, kind, sourceFormat: format, sourcePath: `browser://suite/${browserUuid()}/${fileName}`, revision: await digest(raw), scenarios, raw };
 }
 
 function serializeSuite(suite: WebSuite, scenarios: ScenarioDefinition[]): string {

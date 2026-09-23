@@ -1,12 +1,10 @@
 import type { AdversarialSuiteCaseDefinition, AdversarialSuiteDefinition, CampaignCaseResultV1, CampaignRunRecordV1 } from '../../shared/types';
 import { sanitizeCampaignCase } from './campaign';
-import { MAX_ADVERSARIAL_CASES_PER_SUITE, MAX_ADVERSARIAL_TURNS_PER_SUITE, validateAdversarialSuite } from './adversarialSuite';
+import { validateAdversarialSuite } from './adversarialSuite';
 
 export const ADVERSARIAL_JSONL_FORMAT = 'turnstage-adversarial-jsonl' as const;
 export const CAMPAIGN_RESULTS_JSONL_FORMAT = 'turnstage-campaign-results-jsonl' as const;
 export const JSONL_VERSION = 1 as const;
-export const MAX_JSONL_BYTES = 5 * 1024 * 1024;
-export const MAX_JSONL_LINES = 10_002;
 
 export interface JsonlIssue { line: number; message: string }
 export interface ParsedAdversarialJsonl { suite?: AdversarialSuiteDefinition; issues: JsonlIssue[] }
@@ -24,23 +22,17 @@ export function serializeAdversarialJsonl(suite: AdversarialSuiteDefinition): st
 
 export function parseAdversarialJsonl(text: string): ParsedAdversarialJsonl {
   const issues: JsonlIssue[] = [];
-  if (new TextEncoder().encode(text).byteLength > MAX_JSONL_BYTES) return { issues: [{ line: 0, message: 'JSONL input exceeds the 5 MB safety limit.' }] };
   const lines = nonEmptyLines(text);
-  if (lines.length > MAX_JSONL_LINES) return { issues: [{ line: 0, message: `JSONL input exceeds the ${MAX_JSONL_LINES} line safety limit.` }] };
   const header = parseLine(lines[0], issues);
   if (!record(header) || header.format !== ADVERSARIAL_JSONL_FORMAT || header.version !== JSONL_VERSION || header.type !== 'suite' || !record(header.suite)) {
     issues.push({ line: lines[0]?.number ?? 1, message: 'The first JSONL record must be a supported TurnStage suite header.' });
     return { issues };
   }
   const cases: AdversarialSuiteCaseDefinition[] = [];
-  let turns = 0;
   for (const line of lines.slice(1)) {
     const value = parseLine(line, issues);
     if (!record(value) || value.type !== 'case' || !record(value.case)) { issues.push({ line: line.number, message: 'Expected a case record.' }); continue; }
-    if (cases.length >= MAX_ADVERSARIAL_CASES_PER_SUITE) { issues.push({ line: line.number, message: `Suite exceeds the ${MAX_ADVERSARIAL_CASES_PER_SUITE} case safety limit.` }); break; }
     const testCase = value.case as unknown as AdversarialSuiteCaseDefinition;
-    turns += Array.isArray(testCase.turns) ? testCase.turns.length : 0;
-    if (turns > MAX_ADVERSARIAL_TURNS_PER_SUITE) { issues.push({ line: line.number, message: `Suite exceeds the ${MAX_ADVERSARIAL_TURNS_PER_SUITE} turn safety limit.` }); break; }
     cases.push(testCase);
   }
   const suite = { ...(header.suite as unknown as Omit<AdversarialSuiteDefinition, 'cases'>), cases } as AdversarialSuiteDefinition;
@@ -59,7 +51,6 @@ export function serializeCampaignResultsJsonl(run: CampaignRunRecordV1): string 
 
 export function parseCampaignResultsJsonl(text: string): ParsedCampaignResultsJsonl {
   const issues: JsonlIssue[] = [];
-  if (new TextEncoder().encode(text).byteLength > MAX_JSONL_BYTES) return { issues: [{ line: 0, message: 'JSONL input exceeds the 5 MB safety limit.' }] };
   const lines = nonEmptyLines(text);
   const header = parseLine(lines[0], issues);
   if (!record(header) || header.format !== CAMPAIGN_RESULTS_JSONL_FORMAT || header.version !== JSONL_VERSION || header.type !== 'campaign' || !record(header.run)) return { issues: [...issues, { line: lines[0]?.number ?? 1, message: 'The first JSONL record must be a supported campaign header.' }] };
@@ -67,7 +58,6 @@ export function parseCampaignResultsJsonl(text: string): ParsedCampaignResultsJs
   for (const line of lines.slice(1)) {
     const value = parseLine(line, issues);
     if (!record(value) || value.type !== 'result' || !isCampaignCase(value.result)) { issues.push({ line: line.number, message: 'Expected a valid, bounded result record.' }); continue; }
-    if (cases.length >= MAX_ADVERSARIAL_CASES_PER_SUITE) { issues.push({ line: line.number, message: `Campaign exceeds the ${MAX_ADVERSARIAL_CASES_PER_SUITE} result safety limit.` }); break; }
     cases.push(sanitizeCampaignCase(value.result as unknown as CampaignCaseResultV1));
   }
   const run = { ...(header.run as unknown as Omit<CampaignRunRecordV1, 'cases'>), cases } as CampaignRunRecordV1;

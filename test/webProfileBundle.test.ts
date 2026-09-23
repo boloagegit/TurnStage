@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeWebProfileBundle, encodeWebProfileBundle, WEB_PROFILE_BUNDLE_FORMAT } from '../web/src/profileBundle';
+import { decodeWebProfileBundle, encodeWebProfileBundle, encodeWebProfileWithCases, WEB_PROFILE_BUNDLE_FORMAT } from '../web/src/profileBundle';
 import type { TurnStageEnvironment, TurnStageProfile } from '../src/shared/types';
 
 const profile: TurnStageProfile = {
@@ -41,7 +41,7 @@ describe('TurnStage Web portable Profile bundle', () => {
   });
 
   it('rejects malformed, unsupported, and oversized portable bundles', () => {
-    expect(() => decodeWebProfileBundle(JSON.stringify({ format: WEB_PROFILE_BUNDLE_FORMAT, version: 2 }))).toThrow('Unsupported');
+    expect(() => decodeWebProfileBundle(JSON.stringify({ format: WEB_PROFILE_BUNDLE_FORMAT, version: 3 }))).toThrow('Unsupported');
     expect(() => decodeWebProfileBundle(JSON.stringify({ format: WEB_PROFILE_BUNDLE_FORMAT, version: 1, exportedAt: 'bad', profile: {}, environment: {} }))).toThrow('timestamp');
     expect(() => decodeWebProfileBundle(' '.repeat(1024 * 1024 + 1))).toThrow('exceeds 1 MiB');
   });
@@ -50,5 +50,14 @@ describe('TurnStage Web portable Profile bundle', () => {
     const mismatched = { ...profile, environment: 'old-environment' };
     const bundle = decodeWebProfileBundle(encodeWebProfileBundle(mismatched, environment));
     expect(bundle?.profile.environment).toBe(environment.id);
+  });
+
+  it('round trips browser-local suites without a total case count ceiling', () => {
+    const rows = Array.from({ length: 12_000 }, (_, index) => `case-${index},Case ${index},Prompt ${index} ${'x'.repeat(60)}`).join('\n');
+    const raw = `id,name,input\n${rows}`;
+    const source = encodeWebProfileWithCases(profile, environment, [{ suiteId: 'bulk', kind: 'contract', format: 'csv', fileName: 'bulk.csv', raw }]);
+    const bundle = decodeWebProfileBundle(source);
+    expect(bundle).toMatchObject({ version: 2, suites: [{ suiteId: 'bulk', kind: 'contract', format: 'csv', raw }] });
+    expect(source.length).toBeGreaterThan(1024 * 1024);
   });
 });

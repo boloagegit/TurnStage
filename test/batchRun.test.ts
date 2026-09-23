@@ -131,9 +131,11 @@ describe('batch planning and resume contracts', () => {
     expect(duplicate.valid).toBe(false);
     expect(duplicate.issues.some((issue) => issue.code === 'duplicate-case')).toBe(true);
 
-    const capped = createBatchRunPlan([batchCase('too-many', { requestedAttempts: 10_001 })]);
+    const uncapped = createBatchRunPlan([batchCase('large-user-selection', { requestedAttempts: 10_001 })]);
+    expect(uncapped.valid).toBe(true);
+    const capped = createBatchRunPlan([batchCase('user-budget', { requestedAttempts: 10_001 })], { maxAttempts: 10_000 });
     expect(capped.valid).toBe(false);
-    expect(capped.issues.some((issue) => issue.code === 'invalid-case')).toBe(true);
+    expect(capped.issues.some((issue) => issue.code === 'attempt-cap')).toBe(true);
 
     const overflow = createBatchRunPlan([batchCase('overflow', { requestedAttempts: 10, turnsPerAttempt: Number.MAX_VALUE })]);
     expect(overflow.valid).toBe(false);

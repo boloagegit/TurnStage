@@ -67,7 +67,7 @@ export function createTestRunHistoryRecord(input: {
   sourceRunId?: string;
   secretValues?: readonly unknown[];
 }): TestRunHistoryRecord {
-  if (!input.cases.length || input.cases.length > 500) throw new Error('A recorded test run must contain between 1 and 500 cases.');
+  if (!input.cases.length) throw new Error('A recorded test run must contain at least one case.');
   const completed = new Map(input.completed.map((item) => [testCaseKey(item), item]));
   if (completed.size !== input.completed.length) throw new Error('The completed results contain duplicate case identities.');
   const cases = input.cases.map((item): TestRunCaseRecord => {
@@ -108,6 +108,11 @@ export function createTestRunHistoryRecord(input: {
 
 export function nonPassingCases(run: TestRunHistoryRecord): TestCaseIdentity[] {
   return run.cases.filter((item) => !['passed', 'resisted'].includes(item.outcome ?? '') || item.completedAttempts < item.requestedAttempts)
+    .map(({ profileId, suiteId, scenarioId, kind }) => ({ profileId, suiteId, scenarioId, kind }));
+}
+
+export function unfinishedCases(run: TestRunHistoryRecord): TestCaseIdentity[] {
+  return run.cases.filter((item) => item.outcome === undefined || item.completedAttempts < item.requestedAttempts)
     .map(({ profileId, suiteId, scenarioId, kind }) => ({ profileId, suiteId, scenarioId, kind }));
 }
 

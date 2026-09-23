@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.34.0
+
+- General tests and Red Team no longer impose a fixed total-case or aggregate-turn ceiling on suite imports, linked catalogs, manual selection, and results. Per-case validation and explicitly configured run budgets remain in effect; large Web runs still depend on browser storage, device capacity, and the target API.
+- Web parses imported test suites off the main UI thread, shows Profile-scoped results, and checkpoints completed cases during a run. After an interrupted run, users can inspect its history and explicitly rerun only unfinished cases; unknown requests are never retried automatically.
+- Web can export a Profile, its Environment, and browser-imported test suites in one portable file. Imports of the new bundle format preserve older Profile-only bundles, avoid overwriting existing Profile IDs, and confirm before replacing a suite with the same ID. Run history and detailed evidence are not included.
+- Web now evaluates absolute performance thresholds while keeping VS Code baseline regression, comparison, and Fault Lab checks unavailable. General-test and Red Team result selection borders remain complete in narrow and high-contrast layouts.
+- The optional Python Web server no longer waits for a reverse-DNS lookup before listening, avoiding startup delays on hosts with an unavailable resolver. Its listener, proxy route, and upstream configuration are unchanged.
+- Compatibility: existing Profiles, suite files, and version-1 Web Profile bundles remain supported. Web artifact storage upgrades in place; no manual migration is required. Browser-local data should still be exported before changing site origin or clearing browser storage.
+
 ## 0.33.0
 
 - Browser-local Web Profiles now open in a CodeMirror JSONC editor with line numbers, search, formatting, syntax and schema diagnostics, Web capability warnings, problem navigation, and recoverable unsaved drafts. Server-managed Profiles remain read-only until duplicated, while VS Code continues to use its native text editor.

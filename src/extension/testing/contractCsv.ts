@@ -1,6 +1,6 @@
 import type { ScenarioDefinition } from '../../shared/types';
 import { parseCsvRows } from './adversarialCsv';
-import { createContractSuite, MAX_CONTRACT_CASES_PER_SUITE, MAX_CONTRACT_STEPS_PER_SUITE, validateContractSuite } from './contractSuite';
+import { createContractSuite, validateContractSuite } from './contractSuite';
 
 export const CONTRACT_CSV_COLUMNS = ['case_id', 'case_name', 'description', 'tags', 'enabled', 'turn_index', 'turn_id', 'turn_name', 'user_message', 'step_assertions_json', 'case_assertions_json', 'source_binding_json', 'controls_json', 'comparison_json', 'performance_json', 'faults_json', 'capture_json'] as const;
 const REQUIRED = ['case_id', 'case_name', 'enabled', 'turn_index', 'turn_id', 'user_message'] as const;
@@ -15,7 +15,6 @@ export function parseContractCsv(text: string): ParsedContractCsv {
   if (missing.length) return { scenarios: [], issues: missing.map((column) => ({ row: 1, column, message: `Missing required column: ${column}.` })), rowCount: Math.max(0, rows.length - 1) };
   if (new Set(header).size !== header.length) return { scenarios: [], issues: [{ row: 1, message: 'CSV column names must be unique.' }], rowCount: Math.max(0, rows.length - 1) };
   const records = rows.slice(1).filter((row) => row.some((cell) => cell.trim())).map((row) => Object.fromEntries(header.map((key, index) => [key, row[index] ?? ''])) as Record<string, string>);
-  if (records.length > MAX_CONTRACT_STEPS_PER_SUITE) return { scenarios: [], issues: [{ row: 1, message: `CSV can contain at most ${MAX_CONTRACT_STEPS_PER_SUITE} turn rows.` }], rowCount: records.length };
   const issues: ContractCsvIssue[] = [];
   const groups = new Map<string, Array<{ row: number; value: Record<string, string> }>>();
   records.forEach((value, index) => {
@@ -25,7 +24,6 @@ export function parseContractCsv(text: string): ParsedContractCsv {
     const entries = groups.get(caseId) ?? [];
     entries.push({ row, value }); groups.set(caseId, entries);
   });
-  if (groups.size > MAX_CONTRACT_CASES_PER_SUITE) return { scenarios: [], issues: [{ row: 1, message: `CSV can contain at most ${MAX_CONTRACT_CASES_PER_SUITE} cases.` }], rowCount: records.length };
   const scenarios: ScenarioDefinition[] = [];
   for (const [caseId, entries] of groups) {
     const first = entries[0]!;

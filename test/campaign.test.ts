@@ -61,12 +61,12 @@ describe('test campaigns', () => {
     expect(() => attachCampaignBaseline(current, baseline)).toThrow('different profile or campaign');
   });
 
-  it('plans 500 cases at the aggregate safety ceiling without expanding 10,000 attempts', () => {
-    const bulk = Array.from({ length: 500 }, (_, index): CampaignCaseInput => ({ key: `demo/red/case-${index}`, itemId: `item-${index}`, profileId: 'demo', suiteId: 'red', scenarioId: `case-${index}`, scenarioName: `Case ${index}`, adversarial: true, tags: ['bulk'], plannedTurns: 10, requestsPerAttempt: 10, timeoutMs: 1000 }));
+  it('plans 1,000 cases at the aggregate safety ceiling without expanding beyond 10,000 attempts', () => {
+    const bulk = Array.from({ length: 1_000 }, (_, index): CampaignCaseInput => ({ key: `demo/red/case-${index}`, itemId: `item-${index}`, profileId: 'demo', suiteId: 'red', scenarioId: `case-${index}`, scenarioName: `Case ${index}`, adversarial: true, tags: ['bulk'], plannedTurns: 10, requestsPerAttempt: 10, timeoutMs: 1000 }));
     const startedAt = performance.now();
-    const plan = createCampaignPlan(definition({ runPolicy: { repetitions: 20, maxConcurrency: 8, maxRequests: 100_000, maxDurationMs: 10_000_000 } }), bulk);
-    expect(plan.batch).toMatchObject({ selectedCases: 500, plannedAttempts: 10_000, plannedRequests: 100_000, valid: true, withinBudget: true });
-    expect(plan.batch.cases).toHaveLength(500);
+    const plan = createCampaignPlan(definition({ runPolicy: { repetitions: 10, maxConcurrency: 8, maxRequests: 100_000, maxDurationMs: 10_000_000 } }), bulk);
+    expect(plan.batch).toMatchObject({ selectedCases: 1_000, plannedAttempts: 10_000, plannedRequests: 100_000, valid: true, withinBudget: true });
+    expect(plan.batch.cases).toHaveLength(1_000);
     expect(performance.now() - startedAt).toBeLessThan(1000);
   });
 });

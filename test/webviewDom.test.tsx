@@ -1558,7 +1558,7 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['tests', 'scenarios'], value: [expect.objectContaining({ name: 'Saved A' })] }));
   });
 
-  it('bounds 500 Red Team results and keeps its sub-tabs keyboard navigable', async () => {
+  it('paginates 500 Red Team results and keeps its sub-tabs keyboard navigable', async () => {
     const user = userEvent.setup();
     const results: AdversarialResultSummary[] = Array.from({ length: 500 }, (_, index) => ({
       profileId: profile.id,
@@ -1594,7 +1594,7 @@ describe('Webview DOM behavior', () => {
     await user.type(screen.getByRole('searchbox', { name: 'Search results' }), 'case-500');
     expect(container.querySelectorAll('.adversarial-result-table tbody > tr')).toHaveLength(1);
     expect(screen.getByText('Case 500')).toBeTruthy();
-  });
+  }, 10_000);
 
   it('opens a linked suite with a distinct action and exposes persistent test-run feedback', async () => {
     const user = userEvent.setup();

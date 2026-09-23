@@ -60,7 +60,7 @@ describe('case selection guidance', () => {
   it('uses the same row guidance for review-required red-team cases and Web-only exclusions', () => {
     const onToggleCase = vi.fn();
     const mixedProfile: TurnStageProfile = { ...profile, tests: { scenarios: [
-      { id: 'web-only', name: 'VS Code check', steps: [{ id: 'step-1', input: 'Hello' }], performance: { thresholds: {} } },
+      { id: 'web-only', name: 'VS Code check', steps: [{ id: 'step-1', input: 'Hello' }], performance: { regression: { 'scenario.durationMs': { maxIncreaseMs: 100 } } } },
       { id: 'red-ready', name: 'Ready red', steps: [{ id: 'turn-1', input: 'Probe' }], adversarial: { forbid: { urls: true } } },
       { id: 'red-review', name: 'Draft red', steps: [{ id: 'turn-1', input: 'Probe' }], capture: { source: 'chat', status: 'needsReview', capturedAt: 1, sourceId: '1' }, adversarial: { forbid: { urls: true } } },
     ] } };

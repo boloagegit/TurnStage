@@ -18,7 +18,7 @@ vi.mock('vscode', () => {
 
 import * as vscode from 'vscode';
 import { ExternalAdversarialSuiteRepository, isExternalAdversarialSuiteReference } from '../src/extension/testing/externalAdversarialSuite';
-import { loadLinkedAdversarialCaseCatalog, MAX_LINKED_CASE_CATALOG_ENTRIES } from '../src/extension/testing/adversarialCatalog';
+import { loadLinkedAdversarialCaseCatalog } from '../src/extension/testing/adversarialCatalog';
 import { loadAdversarialSuite } from '../src/extension/testing/adversarialSuiteRepository';
 import { serializeAdversarialCsv } from '../src/extension/testing/adversarialCsv';
 
@@ -79,20 +79,20 @@ describe('external adversarial suite grants', () => {
     expect(loaded.scenarios[0]?.steps[0]?.input).toBe('Probe');
   });
 
-  it('sends only bounded prompt-free summaries to the Webview catalog', async () => {
+  it('sends every prompt-free summary to the Webview catalog', async () => {
     const repository = new ExternalAdversarialSuiteRepository(context);
     const profileUri = vscode.Uri.parse('file:///workspace/profile.turnstage.jsonc');
     const suiteUri = vscode.Uri.parse('file:///outside/security.csv');
     const reference = await repository.grant(profileUri, suiteUri);
-    const scenarios = Array.from({ length: 500 }, (_, index) => ({ id: `case-${index + 1}`, name: `Case ${index + 1}`, tags: ['scale'], steps: [{ id: 'turn-1', input: `secret prompt ${index + 1}` }], adversarial: { repetitions: 3, forbid: { urls: true, content: ['private marker'] } } }));
+    const scenarios = Array.from({ length: 1_000 }, (_, index) => ({ id: `case-${index + 1}`, name: `Case ${index + 1}`, tags: ['scale'], steps: [{ id: 'turn-1', input: `secret prompt ${index + 1}` }], adversarial: { repetitions: 3, forbid: { urls: true, content: ['private marker'] } } }));
     const csv = serializeAdversarialCsv(scenarios);
     vi.mocked(vscode.workspace.fs.stat).mockResolvedValue({ size: csv.length } as never);
     vi.mocked(vscode.workspace.fs.readFile).mockResolvedValue(new TextEncoder().encode(csv));
 
     const catalog = await loadLinkedAdversarialCaseCatalog(profileUri, { version: 1, id: 'profile', name: 'Profile', conversation: { send: { method: 'POST', url: 'https://example.test', variants: [] } }, stream: { transport: 'sse', mappings: [] }, tests: { scenarios: [], adversarialSuites: [reference] } }, (value) => repository.resolve(profileUri, value));
 
-    expect(catalog.entries).toHaveLength(MAX_LINKED_CASE_CATALOG_ENTRIES);
-    expect(catalog.total).toBe(500);
+    expect(catalog.entries).toHaveLength(1_000);
+    expect(catalog.total).toBe(1_000);
     expect(catalog.truncated).toBe(false);
     expect(JSON.stringify(catalog)).not.toContain('secret prompt');
     expect(JSON.stringify(catalog)).not.toContain('private marker');

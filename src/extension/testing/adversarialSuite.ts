@@ -10,10 +10,7 @@ import { isSafeReportDirectory } from './scenarioConfig';
 import { isSafeAssertionRegex } from './assertionEvaluator';
 import { validateSourceBinding } from './impactMapping';
 import { isExternalAdversarialSuiteReference } from './externalAdversarialSuiteReference';
-
-export const MAX_ADVERSARIAL_CASES_PER_SUITE = 500;
 export const MAX_ADVERSARIAL_TURNS_PER_CASE = 10;
-export const MAX_ADVERSARIAL_TURNS_PER_SUITE = 2_000;
 export const MAX_ADVERSARIAL_RULES = 50;
 export const DEFAULT_ADVERSARIAL_TIMEOUT_MS = 60_000;
 export const DEFAULT_ADVERSARIAL_REPETITIONS = 1;
@@ -75,10 +72,7 @@ export function validateAdversarialSuite(suite: AdversarialSuiteDefinition): Adv
   if (suite.runPolicy?.defaultRepetitions !== undefined && suite.defaults?.defaultRepetitions !== undefined && suite.runPolicy.defaultRepetitions !== suite.defaults.defaultRepetitions) issues.push(issue('runPolicy.defaultRepetitions', 'runPolicy.defaultRepetitions must match defaults.defaultRepetitions when both are provided.'));
   if (suite.runPolicy?.failFast !== undefined && suite.defaults?.failFast !== undefined && suite.runPolicy.failFast !== suite.defaults.failFast) issues.push(issue('runPolicy.failFast', 'runPolicy.failFast must match defaults.failFast when both are provided.'));
   if (!Array.isArray(suite.cases)) return [...issues, issue('cases', 'Suite cases must be an array.')];
-  if (suite.cases.length > MAX_ADVERSARIAL_CASES_PER_SUITE) issues.push(issue('cases', `A suite can contain at most ${MAX_ADVERSARIAL_CASES_PER_SUITE} cases.`));
   const caseIds = new Set<string>();
-  let totalTurns = 0;
-  let totalAttempts = 0;
   let totalRequests = 0;
   suite.cases.forEach((testCase, caseIndex) => {
     const path = `cases[${caseIndex}]`;
@@ -103,7 +97,6 @@ export function validateAdversarialSuite(suite: AdversarialSuiteDefinition): Adv
     if (testCase.repetitions !== undefined && testCase.runPolicy?.repetitions !== undefined && testCase.repetitions !== testCase.runPolicy.repetitions) issues.push(issue(path, 'repetitions and runPolicy.repetitions must match when both are provided.'));
     if (testCase.failFast !== undefined && testCase.runPolicy?.failFast !== undefined && testCase.failFast !== testCase.runPolicy.failFast) issues.push(issue(path, 'failFast and runPolicy.failFast must match when both are provided.'));
     if (!Array.isArray(testCase.turns) || !testCase.turns.length) { issues.push(issue(`${path}.turns`, 'Case requires at least one turn.')); return; }
-    if (testCase.enabled !== false) totalTurns += testCase.turns.length;
     const mode = testCase.mode ?? (testCase.turns.length > 1 ? 'multiTurn' : 'singleTurn');
     const maxTurns = testCase.maxTurns ?? suite.defaults?.maxTurns ?? (mode === 'multiTurn' ? testCase.turns.length : 1);
     if (mode === 'singleTurn' && testCase.turns.length !== 1) issues.push(issue(`${path}.turns`, 'Single-turn cases must contain exactly one turn.'));
@@ -113,7 +106,6 @@ export function validateAdversarialSuite(suite: AdversarialSuiteDefinition): Adv
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000) issues.push(issue(`${path}.timeoutMs`, 'timeoutMs must be an integer from 1000 to 300000.'));
     const repetitions = resolveCaseRepetitions(suite, testCase);
     if (testCase.enabled !== false && Number.isSafeInteger(repetitions)) {
-      totalAttempts += repetitions;
       totalRequests += repetitions * testCase.turns.length;
     }
     const forbid = mergeSuiteForbid(suite.defaults?.forbid, testCase.forbid);
@@ -131,9 +123,6 @@ export function validateAdversarialSuite(suite: AdversarialSuiteDefinition): Adv
       validateForbid(turn.additionalForbid ?? {}, `${turnPath}.additionalForbid`, issues, true);
     });
   });
-  if (totalTurns > MAX_ADVERSARIAL_TURNS_PER_SUITE) issues.push(issue('cases', `A suite can contain at most ${MAX_ADVERSARIAL_TURNS_PER_SUITE} turns.`));
-  if (totalAttempts > MAX_ADVERSARIAL_ATTEMPTS_PER_SUITE) issues.push(issue('cases', `A suite can plan at most ${MAX_ADVERSARIAL_ATTEMPTS_PER_SUITE} adversarial attempts.`));
-  if (totalRequests > MAX_ADVERSARIAL_REQUESTS_PER_SUITE) issues.push(issue('cases', `A suite can plan at most ${MAX_ADVERSARIAL_REQUESTS_PER_SUITE} user-turn requests.`));
   const configuredRequestBudget = suite.runPolicy?.maxRequests ?? suite.defaults?.maxRequests;
   if (configuredRequestBudget !== undefined && totalRequests > configuredRequestBudget) issues.push(issue('cases', `The suite plans ${totalRequests} user-turn requests, above its configured budget of ${configuredRequestBudget}.`));
   const configuredDurationBudget = suite.runPolicy?.maxDurationMs ?? suite.defaults?.maxDurationMs;

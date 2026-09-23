@@ -526,7 +526,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
                 : message.type === 'test.runSelection'
                   ? await this.scenarioTests.runCases(document.uri, message.cases, onProgress)
                 : message.type === 'test.history.rerun'
-                  ? await this.scenarioTests.rerunHistory(document.uri, message.runId, onProgress, message.kind)
+                  ? await this.scenarioTests.rerunHistory(document.uri, message.runId, onProgress, message.kind, message.only)
                 : await this.scenarioTests.rerunLatest(document.uri, message.status, onProgress);
             await postTestOperation({ action, state, ...(detail ? { detail } : {}), ...(progress ? { progress } : {}) }, message.requestId);
             await post({ type: 'test.history', ...(await this.scenarioTests.getTestHistory(document.uri)) }, message.requestId);
@@ -1126,7 +1126,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
 
     const suites = kind === 'adversarial' ? profile.tests?.adversarialSuites ?? [] : profile.tests?.contractSuites ?? [];
     const destinations = [
-      ...((profile.tests?.scenarios?.length ?? 0) < 100 ? [{ label: localize('Profile (inline draft)'), description: localize('Best for a small number of cases.'), value: 'inline' as const }] : []),
+      { label: localize('Profile (inline draft)'), description: localize('Best for a small number of cases.'), value: 'inline' as const },
       ...suites.map((path) => ({ label: linkedSuiteDisplayLabel(path), description: localize('Append to this linked suite.'), value: path })),
       ...(suites.length < 100 ? [{ label: localize('New JSONC suite…'), description: localize('Create and link a Git-friendly suite.'), value: 'new' as const }] : []),
     ];

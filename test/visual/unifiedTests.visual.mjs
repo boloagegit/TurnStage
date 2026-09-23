@@ -69,7 +69,7 @@ try {
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-run-selected.png') });
 
   const key = JSON.stringify(['slow-sse-proof', 'contract', null, 'slow-stream-contract']);
-  const caseBase = { profileId: 'slow-sse-proof', scenarioId: 'slow-stream-contract', kind: 'contract', key, name: 'Slow stream contract', definitionDigest: 'a'.repeat(64), requestedAttempts: 1, completedAttempts: 1, durationMs: 20 };
+  const caseBase = { profileId: 'slow-sse-proof', scenarioId: 'slow-stream-contract', kind: 'contract', key, name: 'Slow stream contract', definitionDigest: 'a'.repeat(64), environmentDigest: 'c'.repeat(64), requestedAttempts: 1, completedAttempts: 1, durationMs: 20 };
   const base = { format: 'turnstage-test-run-history', version: 1, id: 'base', profileId: 'slow-sse-proof', startedAt: 1_790_000_000_000, finishedAt: 1_790_000_000_020, status: 'completed', runner: 'vscode', evaluatorVersion: 1, profileDigest: 'b'.repeat(64), environmentDigest: 'c'.repeat(64), cases: [{ ...caseBase, outcome: 'passed' }] };
   const current = { ...base, id: 'current', startedAt: base.startedAt + 1000, finishedAt: base.finishedAt + 1000, cases: [{ ...caseBase, outcome: 'failed' }] };
   await page.evaluate(({ base, current }) => globalThis.__turnstageHarness.dispatch({ type: 'test.history', profileId: 'slow-sse-proof', runs: [current, base], baselineRunId: 'base' }), { base, current });
@@ -83,6 +83,7 @@ try {
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-run-history.png') });
   await page.setViewportSize({ width: 760, height: 720 });
   assert.equal(await page.locator('.debug-pane').evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'Narrow test pane must not overflow horizontally');
+  await page.locator('.automation-result-table').scrollIntoViewIfNeeded();
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-run-history-narrow.png') });
   await page.evaluate(() => {
     const style = document.documentElement.style;

@@ -11,7 +11,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 import os
 from pathlib import Path
 import socket
-from socketserver import ThreadingMixIn
+from socketserver import TCPServer, ThreadingMixIn
 import sys
 from urllib.parse import urlsplit
 
@@ -27,6 +27,12 @@ HOP_HEADERS = frozenset((
 class ThreadingServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def server_bind(self):
+        # HTTPServer normally performs a reverse-DNS lookup here. This static
+        # server does not need it, and a broken DNS resolver can stall startup.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class Handler(SimpleHTTPRequestHandler):

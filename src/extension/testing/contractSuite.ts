@@ -3,10 +3,7 @@ import type { ContractSuiteCaseDefinition, ContractSuiteDefinition, ScenarioAsse
 import { isSafeReportDirectory } from './scenarioConfig';
 import { validateSourceBinding } from './impactMapping';
 import { isExternalAdversarialSuiteReference } from './externalAdversarialSuiteReference';
-
-export const MAX_CONTRACT_CASES_PER_SUITE = 500;
 export const MAX_CONTRACT_STEPS_PER_CASE = 100;
-export const MAX_CONTRACT_STEPS_PER_SUITE = 10_000;
 const MAX_ASSERTIONS = 100;
 const ASSERTION_OPERATORS = new Set<ScenarioAssertionDefinition['operator']>(['equals', 'notEquals', 'exists', 'notExists', 'contains', 'regex', 'oneOf', 'lessThan', 'lessThanOrEqual', 'greaterThan', 'greaterThanOrEqual', 'sequenceEquals', 'sequenceContains']);
 const ASSERTIONS_WITHOUT_VALUE = new Set<ScenarioAssertionDefinition['operator']>(['exists', 'notExists']);
@@ -31,9 +28,7 @@ export function validateContractSuite(suite: ContractSuiteDefinition): ContractS
   if (suite.description !== undefined && (typeof suite.description !== 'string' || suite.description.length > 10_000)) issues.push(issue('description', 'Suite description must be a string of at most 10000 characters.'));
   validateBinding(suite.sourceBinding, 'sourceBinding', issues);
   if (!Array.isArray(suite.cases)) return [...issues, issue('cases', 'Suite cases must be an array.')];
-  if (suite.cases.length > MAX_CONTRACT_CASES_PER_SUITE) issues.push(issue('cases', `A suite can contain at most ${MAX_CONTRACT_CASES_PER_SUITE} cases.`));
   const caseIds = new Set<string>();
-  let totalSteps = 0;
   suite.cases.forEach((testCase, caseIndex) => {
     const path = `cases[${caseIndex}]`;
     if (!isRecord(testCase)) { issues.push(issue(path, 'Case must be an object.')); return; }
@@ -50,7 +45,6 @@ export function validateContractSuite(suite: ContractSuiteDefinition): ContractS
     if (testCase.controls !== undefined && !isRecord(testCase.controls)) issues.push(issue(`${path}.controls`, 'Case controls must be an object.'));
     if (!Array.isArray(testCase.steps) || !testCase.steps.length) { issues.push(issue(`${path}.steps`, 'Case requires at least one step.')); return; }
     if (testCase.steps.length > MAX_CONTRACT_STEPS_PER_CASE) issues.push(issue(`${path}.steps`, `A case can contain at most ${MAX_CONTRACT_STEPS_PER_CASE} steps.`));
-    if (testCase.enabled !== false) totalSteps += testCase.steps.length;
     const stepIds = new Set<string>();
     testCase.steps.forEach((step, stepIndex) => {
       const stepPath = `${path}.steps[${stepIndex}]`;
@@ -64,7 +58,6 @@ export function validateContractSuite(suite: ContractSuiteDefinition): ContractS
     });
     validateAssertions(testCase.assertions, `${path}.assertions`, issues);
   });
-  if (totalSteps > MAX_CONTRACT_STEPS_PER_SUITE) issues.push(issue('cases', `A suite can contain at most ${MAX_CONTRACT_STEPS_PER_SUITE} enabled steps.`));
   return issues;
 }
 

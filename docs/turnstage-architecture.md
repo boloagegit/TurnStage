@@ -126,7 +126,7 @@ workspace state, are bound to the exact Profile URI, retain at most 100 entries,
 and fail closed when missing. Batch workers are limited by
 `turnstage.adversarialConcurrency` (1–8, default 3); each case still owns an
 isolated `SessionController` and whole-case timeout. The Red Team Webview catalog
-receives at most 500 structural case summaries and never receives linked prompts
+receives structural case summaries for every loaded case and never receives linked prompts
 or rule values.
 
 The last 100 Scenario evidence records are cached only in Extension Host
