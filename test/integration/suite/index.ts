@@ -20,6 +20,10 @@ export async function run(): Promise<void> {
   const expectedTrust = process.env.TURNSTAGE_EXPECT_TRUST ?? 'trusted';
   const extension = vscode.extensions.getExtension('turnstage.turnstage');
   assert.ok(extension, 'TurnStage extension should be discoverable');
+  const installedExtensionsDirectory = process.env.TURNSTAGE_EXPECT_INSTALLED_EXTENSIONS_DIR;
+  if (installedExtensionsDirectory) {
+    assert.ok(extension.extensionPath.startsWith(installedExtensionsDirectory), `The tested extension must load from the isolated VSIX installation: ${extension.extensionPath}`);
+  }
   assert.equal(extension.isActive, true, 'A workspace profile should activate TurnStage so Test Explorer can discover its scenarios');
 
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -34,7 +38,7 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('turnstage.openOutput');
   assert.equal(extension.isActive, true, 'The activated extension should keep commands available');
 
-  await assertRegisteredCommands();
+  await assertRegisteredCommands(extension);
   await assertManifestCapabilities(extension);
   await assertSecretStorageCommandPath();
   await assertCurlImportBoundary(workspaceRoot);
@@ -115,8 +119,12 @@ async function assertLinkedCaseDeleteAndUndo(profileUri: vscode.Uri): Promise<vo
   }
 }
 
-async function assertRegisteredCommands(): Promise<void> {
+async function assertRegisteredCommands(extension: vscode.Extension<unknown>): Promise<void> {
   const commands = new Set(await vscode.commands.getCommands(true));
+  const manifestCommands = (extension.packageJSON.contributes?.commands ?? []) as Array<{ command?: string }>;
+  for (const command of manifestCommands.map((item) => item.command)) {
+    assert.ok(command && commands.has(command), `${command ?? '<missing command id>'} should be registered from the VSIX manifest`);
+  }
   for (const command of [
     'turnstage.initializeWorkspace',
     'turnstage.initializeUser',

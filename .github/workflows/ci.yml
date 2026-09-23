@@ -46,7 +46,24 @@ jobs:
           TURNSTAGE_VSCODE_VERSION: 1.106.0
         run: xvfb-run -a npm run test:integration
       - run: npm run package
+      - name: Installed VSIX mock integration tests
+        if: runner.os != 'Linux'
+        timeout-minutes: 10
+        env:
+          TURNSTAGE_TEST_VSIX: auto
+        run: node test/integration/runTest.mjs
+      - name: Installed VSIX mock integration tests (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        env:
+          TURNSTAGE_TEST_VSIX: auto
+        run: xvfb-run -a node test/integration/runTest.mjs
       - run: npm run package:web
+      - name: Archive integrity (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          unzip -t "turnstage-$(node -p "require('./package.json').version").vsix"
+          unzip -t "turnstage-web-$(node -p "require('./package.json').version").zip"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: runner.os == 'Linux'
         with:
@@ -95,9 +112,20 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: xvfb-run -a npm run test:visual
+      - run: npm run web:build
+      - name: Web and Webview mock journeys
+        timeout-minutes: 20
+        run: |
+          node test/visual/interfacePolish.visual.mjs
+          node test/visual/webJsoncVisual.visual.mjs
+          node test/visual/richContent.visual.mjs
+          node test/visual/webLibrary.visual.mjs
+          node test/visual/webAbServices.visual.mjs
+          node test/visual/webCaseScale.visual.mjs
+          node test/visual/testReport.visual.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: turnstage-visual-regression
-          path: artifacts/visual-regression/**
+          path: artifacts/**
           retention-days: 14
