@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
-import { setTimeout } from 'node:timers';
+import { clearInterval, setInterval, setTimeout } from 'node:timers';
 import { chromium } from 'playwright';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -47,7 +47,7 @@ const profile = {
     { id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } },
   ] }, tests: { scenarios: [] },
 };
-const executablePath = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'].find(existsSync);
+const executablePath = process.env.TURNSTAGE_CHROMIUM_EXECUTABLE === 'bundled' ? undefined : [process.env.TURNSTAGE_CHROMIUM_EXECUTABLE, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'].filter(Boolean).find(existsSync);
 const browser = await chromium.launch(executablePath ? { headless: true, executablePath } : { headless: true });
 const results = [];
 const pageErrors = [];
@@ -118,7 +118,18 @@ try {
     await page.setViewportSize({ width: 1440, height: 900 });
     probe.hold = false;
     await resume.press('Enter');
-    await page.getByText('Test run completed', { exact: true }).waitFor({ timeout: 300000 });
+    const progressLog = setInterval(() => console.log(JSON.stringify({ kind, requests: probe.requests.length, pending: probe.pending.size })), 15000);
+    try {
+      await page.getByText('Test run completed', { exact: true }).waitFor({ timeout: 300000 });
+    } catch (error) {
+      const diagnostic = { kind, requests: probe.requests.length, pending: probe.pending.size, status: await page.locator('.test-operation-status').innerText(), pageErrors, body: (await page.locator('body').innerText()).slice(-8000) };
+      await writeFile(resolve(output, `${kind}-completion-failed.json`), JSON.stringify(diagnostic, null, 2));
+      await page.screenshot({ path: resolve(output, `${kind}-completion-failed.png`) });
+      console.error(JSON.stringify(diagnostic));
+      throw error;
+    } finally {
+      clearInterval(progressLog);
+    }
     const elapsedMs = Date.now() - started;
     assert.equal(probe.requests.length, count);
     assert.equal(new Set(probe.requests).size, count, 'Resume must not resend completed cases');
