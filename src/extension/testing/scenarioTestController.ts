@@ -221,6 +221,7 @@ export class ScenarioTestController implements vscode.Disposable {
   private readonly latestAutomationResults = new Map<string, AutomationResultSummary[]>();
   private latestRunSummaries: ScenarioControllerRunSummary[] = [];
   private refreshing?: Promise<void>;
+  private refreshRequested = false;
   private activeManualRun?: vscode.CancellationTokenSource;
   private activeManualControl?: TestRunControl;
   private manualProfileUri?: vscode.Uri;
@@ -279,9 +280,19 @@ export class ScenarioTestController implements vscode.Disposable {
     this.historyEmitter.fire({ uri, ...(await this.getTestHistory(uri)) });
   }
 
-  async refresh(): Promise<void> {
+  refresh(): Promise<void> {
+    this.refreshRequested = true;
     if (this.refreshing) return this.refreshing;
-    this.refreshing = this.discover().finally(() => { this.refreshing = undefined; });
+    this.refreshing = Promise.resolve().then(async () => {
+      try {
+        do {
+          this.refreshRequested = false;
+          await this.discover();
+        } while (this.refreshRequested);
+      } finally {
+        this.refreshing = undefined;
+      }
+    });
     return this.refreshing;
   }
 

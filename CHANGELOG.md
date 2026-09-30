@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.35.1
+
+- Fixed a VS Code test-discovery race that could omit newly added or edited cases when another refresh was already running. Refresh now waits for pending source changes before a manual run starts. Web behavior and existing Profile, suite, and history formats are unchanged.
+
 ## 0.35.0
 
 - General and Red Team runs in Web and VS Code can pause new case dispatch, resume the same run, or cancel active requests. A requested pause waits for active cases to finish their turns and repetitions; cancellation also works while paused and retains completed results and unfinished-case history.
