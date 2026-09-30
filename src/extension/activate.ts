@@ -193,6 +193,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   command('exportRun', async (item?: ProfileTreeItem | vscode.Uri) => { if (!requireWorkspaceTrust()) return; const uri = asUri(item) ?? activeCustomEditorUri(); if (!uri) { void showNotification('error', vscode.l10n.t('Open a profile in the TurnStage editor first.')); return; } const controller = await openAndWaitForController(editor, uri, true); if (!controller) { void showNotification('error', vscode.l10n.t('The TurnStage profile editor did not become ready in time.')); return; } const exported = await editor.exportRun(uri); if (exported) { void showNotification('information', vscode.l10n.t('Run exported to {path}.', { path: displayExportUri(exported) })); return; } await editor.showSection(uri, 'test'); void showNotification('information', vscode.l10n.t('No recorded runs are available. Open Test to run a profile first.')); });
   command('openOutput', () => output.show(true));
   command('runContractTests', () => scenarioTests.runAll());
+  command('pauseTests', () => scenarioTests.pauseActiveManualRun());
+  command('resumeTests', () => scenarioTests.resumeActiveManualRun());
+  command('cancelTests', () => scenarioTests.cancelActiveManualRun());
   command('rerunLatestTests', async (uri?: vscode.Uri, status?: unknown) => {
     if (!requireWorkspaceTrust()) return;
     if (!uri || (status !== 'failed' && status !== 'unstable' && status !== 'incomplete')) return;

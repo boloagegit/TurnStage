@@ -4,7 +4,6 @@ import { clearTestRunHistoryKind, TEST_RUN_HISTORY_FORMAT, TEST_RUN_HISTORY_VERS
 import { testCaseKey } from '../../shared/testSelection';
 import { sha256Hex } from '../../shared/sha256';
 
-const MAX_HISTORY_BYTES = 20 * 1024 * 1024;
 const RETAIN_RUNS = 20;
 const queue = new Map<string, Promise<void>>();
 
@@ -59,9 +58,7 @@ export class TestRunHistoryRepository {
     if (!safeId(profileId)) throw new Error('Profile ID is invalid for test history.');
     const uri = this.uri(profileId);
     try {
-      if ((await vscode.workspace.fs.stat(uri)).size > MAX_HISTORY_BYTES) throw new Error('Test history is larger than the safety limit.');
       const bytes = await vscode.workspace.fs.readFile(uri);
-      if (bytes.byteLength > MAX_HISTORY_BYTES) throw new Error('Test history is larger than the safety limit.');
       const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
       if (!isRecord(parsed) || parsed.format !== 'turnstage-test-history-store' || parsed.version !== 1 || !Array.isArray(parsed.runs)) throw new Error('Test history has an unsupported format.');
       const runs = parsed.runs.filter((value): value is TestRunHistoryRecord => validRun(value) && value.profileId === profileId).slice(0, RETAIN_RUNS + 1);
@@ -78,7 +75,6 @@ export class TestRunHistoryRepository {
     const previous = queue.get(key) ?? Promise.resolve();
     const pending = previous.catch(() => undefined).then(async () => {
       const bytes = new TextEncoder().encode(JSON.stringify(change(await this.read(profileId))));
-      if (bytes.byteLength > MAX_HISTORY_BYTES) throw new Error('Test history would exceed its safety limit.');
       await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(this.root, 'test-history'));
       const temporary = vscode.Uri.joinPath(this.root, 'test-history', `${safeFilePart(profileId)}.json.tmp`);
       await vscode.workspace.fs.writeFile(temporary, bytes);

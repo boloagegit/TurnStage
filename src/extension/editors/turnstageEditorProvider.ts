@@ -506,7 +506,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         if (message.type === 'test.runAll' || message.type === 'test.runContracts' || message.type === 'test.runCase' || message.type === 'test.runSelection' || message.type === 'test.history.rerun' || message.type === 'test.rerun') {
           if (!this.scenarioTests) throw new Error(localize('Test runtime is unavailable.'));
           const current = this.latestTestOperations.get(documentKey);
-          if (current?.state === 'running' || current?.state === 'cancelling') throw new Error(localize('A TurnStage test run is already active.'));
+          if (current && ['running', 'pausing', 'paused', 'cancelling'].includes(current.state)) throw new Error(localize('A TurnStage test run is already active.'));
           const action: TestOperationAction = message.type === 'test.runAll' ? 'runAll' : message.type === 'test.runContracts' ? 'runContracts' : message.type === 'test.runCase' ? 'runCase' : message.type === 'test.runSelection' || message.type === 'test.history.rerun' ? 'runSelection' : message.status === 'failed' ? 'rerunFailed' : message.status === 'unstable' ? 'rerunUnstable' : 'rerunIncomplete';
           const detail = message.type === 'test.runCase' ? message.scenarioId : undefined;
           await postTestOperation({ action, state: 'running', ...(detail ? { detail } : {}) }, message.requestId);
@@ -514,7 +514,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           const onProgress = (next: NonNullable<TestOperationSnapshot['progress']>): void => {
             progress = next;
             const currentState = this.latestTestOperations.get(documentKey)?.state;
-            observeBackground(postTestOperation({ action, state: currentState === 'cancelling' ? 'cancelling' : 'running', ...(detail ? { detail } : {}), progress: next }), 'test-progress');
+            observeBackground(postTestOperation({ action, state: currentState === 'cancelling' ? 'cancelling' : next.runState ?? 'running', ...(detail ? { detail } : {}), progress: next }), 'test-progress');
           };
           try {
             const state = message.type === 'test.runAll'
@@ -538,8 +538,15 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         }
         if (message.type === 'test.cancel') {
           const active = this.latestTestOperations.get(documentKey);
-          if (!active || active.state !== 'running' || !this.scenarioTests?.cancelActiveManualRun()) throw new Error(localize('No active TurnStage test run is available to stop.'));
+          if (!active || !['running', 'pausing', 'paused'].includes(active.state) || !this.scenarioTests?.cancelActiveManualRun()) throw new Error(localize('No active TurnStage test run is available to stop.'));
           await postTestOperation({ action: active.action, state: 'cancelling', ...(active.progress ? { progress: active.progress } : {}) }, message.requestId);
+          return;
+        }
+        if (message.type === 'test.pause' || message.type === 'test.resume') {
+          const active = this.latestTestOperations.get(documentKey);
+          if (!active || !['running', 'pausing', 'paused'].includes(active.state)) return;
+          if (message.type === 'test.pause') this.scenarioTests?.pauseActiveManualRun();
+          else this.scenarioTests?.resumeActiveManualRun();
           return;
         }
         if (message.type === 'test.timeline.open') {
@@ -961,7 +968,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const uri = selected?.[0];
     if (!uri) return cancelledOperation();
     if (!/(?:\.tests\.(?:jsonc|json)|\.csv)$/iu.test(uri.path)) throw new Error(localize('Linked test suites must be a .tests.jsonc/.tests.json file or a CSV file.'));
-    const parsed = parseContractSource(uri.path, await readBoundedTextFile(uri));
+    const parsed = parseContractSource(uri.path, await readSuiteTextFile(uri));
     if (!parsed.suite || parsed.issues.length) throw new Error(parsed.issues.slice(0, 20).join('\n') || localize('The selected test suite is invalid.'));
     const environmentEntries = await this.environments.discover(document.uri);
     const firstError = validateContractScenariosAgainstProfile(profile, parsed.scenarios, environmentEntries.map((entry) => entry.environment))[0];
@@ -1014,7 +1021,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       const sourcePath = uri.path;
       if (!/(?:\.adversarial\.(?:jsonc|json)|\.csv)$/iu.test(sourcePath)) throw new Error(localize('Linked suites must be an adversarial JSONC/JSON file or a CSV file.'));
       if (action === 'linkJsonc' && /\.csv$/iu.test(sourcePath)) throw new Error(localize('The legacy JSONC link action cannot link CSV files.'));
-      const parsed = parseAdversarialSource(sourcePath, await readBoundedTextFile(uri));
+      const parsed = parseAdversarialSource(sourcePath, await readSuiteTextFile(uri));
       if (!parsed.suite || parsed.issues.length) throw new Error(parsed.issues.slice(0, 20).join('\n') || localize('The selected adversarial suite is invalid.'));
       const scenarios = parsed.scenarios;
       this.assertAdversarialScenariosCompatible(profile, scenarios);
@@ -1024,7 +1031,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       if (!paths.includes(reference)) await this.patchDocument(document, ['tests', 'adversarialSuites'], [...paths, reference]);
       return completedOperation(localize('Linked {count} adversarial cases.', { count: String(scenarios.length) }), uri);
     }
-    const contents = await readBoundedTextFile(uri);
+    const contents = await readSuiteTextFile(uri);
     let imported: ScenarioDefinition[];
     if (action === 'importCsv') {
       const parsed = parseAdversarialCsv(contents);
@@ -1383,9 +1390,7 @@ function boundedEditorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return Array.from(message, (character) => { const code = character.charCodeAt(0); return code <= 31 || code === 127 ? ' ' : character; }).join('').slice(0, 4096);
 }
-async function readBoundedTextFile(uri: vscode.Uri): Promise<string> {
-  if ((await vscode.workspace.fs.stat(uri)).size > 5 * 1024 * 1024) throw new Error(localize('Adversarial import files cannot exceed 5 MB.'));
+async function readSuiteTextFile(uri: vscode.Uri): Promise<string> {
   const bytes = await vscode.workspace.fs.readFile(uri);
-  if (bytes.byteLength > 5 * 1024 * 1024) throw new Error(localize('Adversarial import files cannot exceed 5 MB.'));
   return new TextDecoder().decode(bytes);
 }

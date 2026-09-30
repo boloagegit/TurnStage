@@ -15,8 +15,8 @@ export const MAX_ADVERSARIAL_RULES = 50;
 export const DEFAULT_ADVERSARIAL_TIMEOUT_MS = 60_000;
 export const DEFAULT_ADVERSARIAL_REPETITIONS = 1;
 export const MAX_ADVERSARIAL_REPETITIONS = 50;
-export const MAX_ADVERSARIAL_ATTEMPTS_PER_SUITE = 10_000;
-export const MAX_ADVERSARIAL_REQUESTS_PER_SUITE = 100_000;
+export const MAX_ADVERSARIAL_ATTEMPTS_PER_SUITE = Number.MAX_SAFE_INTEGER;
+export const MAX_ADVERSARIAL_REQUESTS_PER_SUITE = Number.MAX_SAFE_INTEGER;
 
 // Descriptive aliases keep the cap discoverable to callers that use the
 // planning terminology rather than the suite terminology.

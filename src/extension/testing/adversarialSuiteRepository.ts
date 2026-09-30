@@ -5,8 +5,6 @@ import { isSafeAdversarialSuitePath } from './adversarialSuite';
 import { parseAdversarialSource } from './adversarialSource';
 import { isExternalAdversarialSuiteReference } from './externalAdversarialSuiteReference';
 
-const MAX_SUITE_BYTES = 5 * 1024 * 1024;
-
 export interface LoadedAdversarialSuite {
   uri: vscode.Uri;
   path: string;
@@ -22,9 +20,9 @@ export async function loadAdversarialSuite(profileUri: vscode.Uri, path: string,
   if (!external && !folder) throw new Error(`Adversarial suite ${path} cannot be resolved because the profile is not inside a workspace folder.`);
   const uri = external ? resolveExternal?.(path) : vscode.Uri.joinPath(folder!.uri, ...path.split('/'));
   if (!uri) throw new Error('External adversarial suite access is not authorized on this machine. Link the file again from the Profile editor.');
-  if ((await vscode.workspace.fs.stat(uri)).size > MAX_SUITE_BYTES) throw new Error(`Adversarial suite ${path} exceeds the 5 MB limit.`);
+
   const bytes = await vscode.workspace.fs.readFile(uri);
-  if (bytes.byteLength > MAX_SUITE_BYTES) throw new Error(`Adversarial suite ${path} exceeds the 5 MB limit.`);
+
   const text = new TextDecoder().decode(bytes);
   const parsed = parseAdversarialSource(external ? uri.path : path, text);
   if (!parsed.suite || parsed.issues.length) throw new Error(parsed.issues.join('\n') || `Adversarial suite ${path} is empty.`);

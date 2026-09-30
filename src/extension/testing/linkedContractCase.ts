@@ -6,7 +6,7 @@ import { parseCsvRows } from './adversarialCsv';
 import { CONTRACT_CSV_COLUMNS, parseContractCsv, serializeContractCsv } from './contractCsv';
 import { isExternalAdversarialSuiteReference } from './externalAdversarialSuiteReference';
 import { createContractSuite, isSafeContractSuitePath, validateContractSuite } from './contractSuite';
-import { MAX_CONTRACT_SUITE_BYTES } from './contractSuiteRepository';
+
 import { parseContractSource } from './contractSource';
 
 const REVISION_PATTERN = /^[0-9a-f]{64}$/u;
@@ -22,20 +22,20 @@ export class LinkedContractCaseConflictError extends Error {
 
 export async function loadEditableLinkedContractCase(profileUri: vscode.Uri, sourcePath: string, scenarioId: string, resolveExternal?: (reference: string) => vscode.Uri | undefined): Promise<EditableLinkedContractCase> {
   const uri = resolveSuiteUri(profileUri, sourcePath, resolveExternal);
-  return editableCaseFromText(sourcePath, await readBoundedSource(uri, sourcePath), scenarioId);
+  return editableCaseFromText(sourcePath, await readSource(uri), scenarioId);
 }
 
 export async function saveEditableLinkedContractCase(input: SaveLinkedContractCaseInput): Promise<EditableLinkedContractCase> {
   if (!REVISION_PATTERN.test(input.expectedRevision)) throw new Error('The linked suite revision is invalid. Reload the case before saving.');
   if (input.scenario.adversarial) throw new Error('Functional test suites cannot contain adversarial settings.');
   const uri = resolveSuiteUri(input.profileUri, input.sourcePath, input.resolveExternal);
-  const source = await readBoundedSource(uri, input.sourcePath);
+  const source = await readSource(uri);
   if (digest(source) !== input.expectedRevision) throw new LinkedContractCaseConflictError();
   const updated = updateLinkedContractCaseSource(input.sourcePath, source, input.scenarioId, input.scenario);
   const bytes = new TextEncoder().encode(updated.text);
-  if (bytes.byteLength > MAX_CONTRACT_SUITE_BYTES) throw new Error(`Test suite ${input.sourcePath} exceeds the 5 MB limit after editing.`);
+
   if (updated.text !== source) await vscode.workspace.fs.writeFile(uri, bytes);
-  const persisted = await readBoundedSource(uri, input.sourcePath);
+  const persisted = await readSource(uri);
   const saved = editableCaseFromText(input.sourcePath, persisted, input.scenario.id);
   if (saved.revision !== updated.revision) throw new LinkedContractCaseConflictError();
   return saved;
@@ -44,13 +44,13 @@ export async function saveEditableLinkedContractCase(input: SaveLinkedContractCa
 export async function appendLinkedContractCase(input: AppendLinkedContractCaseInput): Promise<EditableLinkedContractCase> {
   if (input.scenario.adversarial) throw new Error('Functional test suites cannot contain adversarial settings.');
   const uri = resolveSuiteUri(input.profileUri, input.sourcePath, input.resolveExternal);
-  const source = await readBoundedSource(uri, input.sourcePath);
+  const source = await readSource(uri);
   const updated = appendLinkedContractCaseSource(input.sourcePath, source, input.scenario);
   const bytes = new TextEncoder().encode(updated.text);
-  if (bytes.byteLength > MAX_CONTRACT_SUITE_BYTES) throw new Error(`Test suite ${input.sourcePath} exceeds the 5 MB limit after appending.`);
-  if (digest(await readBoundedSource(uri, input.sourcePath)) !== digest(source)) throw new LinkedContractCaseConflictError();
+
+  if (digest(await readSource(uri)) !== digest(source)) throw new LinkedContractCaseConflictError();
   await vscode.workspace.fs.writeFile(uri, bytes);
-  const saved = editableCaseFromText(input.sourcePath, await readBoundedSource(uri, input.sourcePath), input.scenario.id);
+  const saved = editableCaseFromText(input.sourcePath, await readSource(uri), input.scenario.id);
   if (saved.revision !== updated.revision) throw new LinkedContractCaseConflictError();
   return saved;
 }
@@ -58,7 +58,7 @@ export async function appendLinkedContractCase(input: AppendLinkedContractCaseIn
 export async function deleteLinkedContractCase(input: DeleteLinkedContractCaseInput): Promise<void> {
   if (!REVISION_PATTERN.test(input.expectedRevision)) throw new Error('The linked suite revision is invalid. Refresh the case list before deleting.');
   const uri = resolveSuiteUri(input.profileUri, input.sourcePath, input.resolveExternal);
-  const source = await readBoundedSource(uri, input.sourcePath);
+  const source = await readSource(uri);
   if (digest(source) !== input.expectedRevision) throw new LinkedContractCaseConflictError();
   const document = await vscode.workspace.openTextDocument(uri);
   if (document.getText() !== source) throw new LinkedContractCaseConflictError();
@@ -66,7 +66,7 @@ export async function deleteLinkedContractCase(input: DeleteLinkedContractCaseIn
   const edit = new vscode.WorkspaceEdit();
   edit.replace(uri, new vscode.Range(document.positionAt(0), document.positionAt(source.length)), updated.text);
   if (!await vscode.workspace.applyEdit(edit) || !await document.save()) throw new Error('Could not save the deleted test case. Check the source file before retrying.');
-  if (digest(await readBoundedSource(uri, input.sourcePath)) !== updated.revision) throw new LinkedContractCaseConflictError();
+  if (digest(await readSource(uri)) !== updated.revision) throw new LinkedContractCaseConflictError();
 }
 
 export function deleteLinkedContractCaseSource(path: string, text: string, scenarioId: string): { text: string; revision: string } {
@@ -216,7 +216,7 @@ function resolveSuiteUri(profileUri: vscode.Uri, path: string, resolveExternal?:
   if (!folder) throw new Error(`Test suite ${path} cannot be resolved because the profile is not inside a workspace folder.`);
   return vscode.Uri.joinPath(folder.uri, ...path.split('/'));
 }
-async function readBoundedSource(uri: vscode.Uri, path: string): Promise<string> { if ((await vscode.workspace.fs.stat(uri)).size > MAX_CONTRACT_SUITE_BYTES) throw new Error(`Test suite ${path} exceeds the 5 MB limit.`); const bytes = await vscode.workspace.fs.readFile(uri); if (bytes.byteLength > MAX_CONTRACT_SUITE_BYTES) throw new Error(`Test suite ${path} exceeds the 5 MB limit.`); return new TextDecoder().decode(bytes); }
+async function readSource(uri: vscode.Uri): Promise<string> { return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri)); }
 function digest(text: string): string { return sha256Hex(text); }
 function spreadsheetText(value: string): string { return /^'[=+\-@]/u.test(value) ? value.slice(1) : value; }
 function csvCell(value: string): string { return /[",\r\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value; }

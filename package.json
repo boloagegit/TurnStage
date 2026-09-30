@@ -2,7 +2,7 @@
   "name": "turnstage",
   "displayName": "TurnStage",
   "description": "%extension.description%",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "publisher": "turnstage",
   "author": {
     "name": "TurnStage contributors",
@@ -294,6 +294,24 @@
         "category": "%command.category%",
         "icon": "$(run-all)",
         "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "turnstage.pauseTests",
+        "title": "%command.pauseTests%",
+        "category": "%command.category%",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "turnstage.resumeTests",
+        "title": "%command.resumeTests%",
+        "category": "%command.category%",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "turnstage.cancelTests",
+        "title": "%command.cancelTests%",
+        "category": "%command.category%",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "turnstage.exportTestReport",
@@ -1617,6 +1635,7 @@
     "test:visual:web-library": "npm run build:all && node test/visual/webLibrary.visual.mjs",
     "test:visual:web-ab": "npm run build:all && node test/visual/webAbServices.visual.mjs",
     "test:visual:web-scale": "npm run web:build && node test/visual/webCaseScale.visual.mjs",
+    "test:visual:web-run-control": "npm run web:build && node test/visual/webRunControl.visual.mjs",
     "benchmark": "vitest bench --config test/benchmark.vitest.config.ts --run",
     "mock-server": "node examples/mock-server/server.mjs",
     "package": "npm run compile && vsce package --no-dependencies",
@@ -1643,7 +1662,7 @@
     "rehype-sanitize": "^6.0.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
-    "undici": "^7.29.0"
+    "undici": "^7.29.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",

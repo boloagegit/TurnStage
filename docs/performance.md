@@ -36,10 +36,13 @@ with the session rather than copied into Recorded Runs.
 Connection Doctor inspects at most 1,000 raw and normalized events and an
 8 KiB response prefix, and returns no response content. The causal timeline
 retains at most 256 structural entries; the Profile Webview renders at most 16
-at once. Failure clustering processes at most 500 result items. Batch planning
-rejects plans above its case, attempt, request, or concurrency ceilings before
-execution, while reliability aggregation processes a bounded attempt sample and
-ignores non-finite durations.
+at once. Failure clustering processes at most 500 result items. Manual batch
+planning has no fixed aggregate case, attempt, request, or suite-file byte
+ceiling; explicit budgets and bounded concurrency still apply. Pause drains
+active cases before stopping dispatch, and Stop aborts active requests. Manual
+result evidence remains available for every completed case in the live host;
+large runs still consume device memory and storage. Copilot-initiated execution
+uses separate budgets. Reliability aggregation ignores non-finite durations.
 
 ## Host-to-Webview update path
 

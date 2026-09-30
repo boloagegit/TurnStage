@@ -289,7 +289,7 @@ export class BrowserSession {
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     let idleHandle: ReturnType<typeof setTimeout> | undefined;
     let turnNetwork: NetworkExchange | undefined;
-    metrics.start();
+    metrics.start(startedAt);
     this.abortController = new AbortController();
     const controller = this.abortController;
     this.state.snapshot.turnState = 'submitting';

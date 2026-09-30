@@ -169,6 +169,8 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       case 'test.baseline.accept': await tests.acceptBaseline(message.runId); break;
       case 'test.rerun': await tests.rerun(message.status); break;
       case 'test.cancel': tests.cancel(); break;
+      case 'test.pause': tests.pause(); break;
+      case 'test.resume': tests.resume(); break;
       case 'test.capture': await captureTest(message.source, message.suggestedKind ?? 'contract', message.requestId); break;
       case 'adversarial.capture': await captureTest({ kind: 'conversation' }, 'adversarial', message.requestId); break;
       case 'test.evidence.open': await tests.openEvidence(message.evidenceId); post({ type: 'inspector.focus', tab: message.location.kind === 'network' ? 'Network' : message.location.kind === 'normalizedEvent' ? 'Normalized' : 'Raw Events', evidenceId: message.evidenceId, networkId: message.location.kind === 'network' ? message.location.networkId : undefined, sequence: message.location.kind === 'rawEvent' || message.location.kind === 'normalizedEvent' ? message.location.sequence : undefined }); break;

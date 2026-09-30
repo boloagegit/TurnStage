@@ -44,6 +44,7 @@ import { CampaignRepository } from './campaignRepository';
 import { digestValue } from './provenance';
 import { logAt, startLogOperation } from '../logging';
 import type { TestOperationProgress } from '../../shared/protocol';
+import { TestRunControl } from '../../shared/testRunControl';
 import { ExternalAdversarialSuiteRepository } from './externalAdversarialSuite';
 import { isScenarioReady } from './scenarioCapture';
 import { resolveTestSelection, testCaseKey, type TestCaseIdentity } from '../../shared/testSelection';
@@ -100,6 +101,7 @@ interface ScenarioRunScope {
   progress?: (progress: TestOperationProgress) => void;
   manualHistory?: boolean;
   sourceRunId?: string;
+  control?: TestRunControl;
 }
 
 interface CompletedScenario {
@@ -186,16 +188,11 @@ export interface ScenarioIntegrityMaterial {
   cases: Record<string, unknown>;
 }
 
-// An adversarial run stores one attempt capsule plus one aggregate capsule per
-// selected case. Keep retention aligned with the aggregate attempt cap so a
-// legal run can still be inspected after it completes.
-// Enough for the largest Copilot run plus one aggregate record per attempt,
-// without retaining the much larger manual-suite ceiling in memory.
-const MAX_EVIDENCE_ENTRIES = MAX_COPILOT_RUN_ATTEMPTS * 2;
+// Copilot evidence has a separate bounded store aligned with its attempt cap.
+// Manual-run evidence is retained for the lifetime of the Extension Host.
 const MAX_PROTECTED_EVIDENCE_ENTRIES = MAX_COPILOT_RUN_ATTEMPTS;
 const MAX_MESSAGE_EVIDENCE_ENTRIES = 500;
 const MESSAGE_EVIDENCE_PREFIX = 'turnstage.evidence.';
-const MANUAL_BATCH_CONFIRM_REQUESTS = 250;
 
 export class ScenarioTestController implements vscode.Disposable {
   readonly controller: vscode.TestController;
@@ -225,6 +222,7 @@ export class ScenarioTestController implements vscode.Disposable {
   private latestRunSummaries: ScenarioControllerRunSummary[] = [];
   private refreshing?: Promise<void>;
   private activeManualRun?: vscode.CancellationTokenSource;
+  private activeManualControl?: TestRunControl;
   private manualProfileUri?: vscode.Uri;
 
   constructor(
@@ -497,11 +495,14 @@ export class ScenarioTestController implements vscode.Disposable {
     if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
     const cancellation = new vscode.CancellationTokenSource();
     this.activeManualRun = cancellation;
+    const control = this.activeManualControl = new TestRunControl();
     try {
-      const snapshot = await this.run(new vscode.TestRunRequest(), cancellation.token, {}, { progress: onProgress });
+      const snapshot = await this.run(new vscode.TestRunRequest(), cancellation.token, {}, { progress: onProgress, control });
       return snapshot.cancelled ? 'cancelled' : 'completed';
     } finally {
       if (this.activeManualRun === cancellation) this.activeManualRun = undefined;
+      if (this.activeManualControl === control) this.activeManualControl = undefined;
+      control.cancel();
       cancellation.dispose();
     }
   }
@@ -566,19 +567,15 @@ export class ScenarioTestController implements vscode.Disposable {
     };
     this.controller.items.forEach(visit);
     if (!itemIds.length) throw new Error('The matching Test Explorer items are no longer available. Refresh the tests and try again.');
-    const cancellation = new vscode.CancellationTokenSource();
-    this.activeManualRun = cancellation;
-    try {
-      const snapshot = await this.runSelection({ itemIds }, cancellation.token, { progress: onProgress, manualHistory: true });
-      return snapshot.cancelled ? 'cancelled' : 'completed';
-    } finally {
-      if (this.activeManualRun === cancellation) this.activeManualRun = undefined;
-      cancellation.dispose();
-    }
+    return this.runManualSelection(itemIds, onProgress);
   }
+
+  pauseActiveManualRun(): boolean { return this.activeManualControl?.pause() ?? false; }
+  resumeActiveManualRun(): boolean { return this.activeManualControl?.resume() ?? false; }
 
   cancelActiveManualRun(): boolean {
     if (!this.activeManualRun || this.activeManualRun.token.isCancellationRequested) return false;
+    this.activeManualControl?.cancel();
     this.activeManualRun.cancel();
     return true;
   }
@@ -587,11 +584,14 @@ export class ScenarioTestController implements vscode.Disposable {
     if (this.activeManualRun) throw new Error(localize('A TurnStage test run is already active.'));
     const cancellation = new vscode.CancellationTokenSource();
     this.activeManualRun = cancellation;
+    const control = this.activeManualControl = new TestRunControl();
     try {
-      const snapshot = await this.runSelection({ itemIds }, cancellation.token, { progress: onProgress, manualHistory: true, sourceRunId });
+      const snapshot = await this.runSelection({ itemIds }, cancellation.token, { progress: onProgress, manualHistory: true, sourceRunId, control });
       return snapshot.cancelled ? 'cancelled' : 'completed';
     } finally {
       if (this.activeManualRun === cancellation) this.activeManualRun = undefined;
+      if (this.activeManualControl === control) this.activeManualControl = undefined;
+      control.cancel();
       cancellation.dispose();
     }
   }
@@ -876,6 +876,7 @@ export class ScenarioTestController implements vscode.Disposable {
     let retainCopilotEvidence = false;
     const operation = startLogOperation(this.output, 'test', scope.campaign ? 'campaign-batch' : scope.runId ? 'copilot-batch' : 'batch');
     let cancelProgressTimer: (() => void) | undefined;
+    let unsubscribeControl: (() => void) | undefined;
     const trustCancellation = scope.runId ? createTrustAwareCancellation(token) : undefined;
     const effectiveToken = trustCancellation?.token ?? token;
     try {
@@ -914,6 +915,8 @@ export class ScenarioTestController implements vscode.Disposable {
       let completedAttempts = 0;
       const completedAttemptsByJob = new Map<string, number>();
       const activeCases = new Map<string, string>();
+      const control = scope.control ?? new TestRunControl();
+      const cancellationListener = effectiveToken.onCancellationRequested(() => control.cancel());
       let lastProgressAt = 0;
       let progressTimer: ReturnType<typeof setTimeout> | undefined;
       cancelProgressTimer = () => { if (progressTimer) clearTimeout(progressTimer); progressTimer = undefined; };
@@ -930,6 +933,7 @@ export class ScenarioTestController implements vscode.Disposable {
             completedAttempts: Math.min(batchPlan.plannedAttempts, completedAttempts),
             maxConcurrency: concurrency,
             activeCaseNames: [...activeCases.values()].slice(0, 8),
+            runState: control.state,
           });
         };
         if (force || now - lastProgressAt >= 100) {
@@ -937,6 +941,8 @@ export class ScenarioTestController implements vscode.Disposable {
           emit();
         } else if (!progressTimer) progressTimer = setTimeout(emit, Math.max(1, 100 - (now - lastProgressAt)));
       };
+      const removeControlListener = control.subscribe(() => publishProgress(true));
+      unsubscribeControl = () => { removeControlListener(); cancellationListener.dispose(); control.cancel(); };
       const markAttemptComplete = (job: ScenarioJob): void => {
         const planned = plannedAttemptsByJob.get(job.item.id) ?? 1;
         const current = completedAttemptsByJob.get(job.item.id) ?? 0;
@@ -949,21 +955,6 @@ export class ScenarioTestController implements vscode.Disposable {
       if (!batchPlan.valid || !batchPlan.withinBudget) {
         operation.fail({ reason: 'budget-rejected', issues: batchPlan.issues.length });
         throw new Error(batchPlan.issues.map((issue) => issue.message).join('\n'));
-      }
-      if (!scope.runId && vscode.workspace.isTrusted && batchPlan.plannedRequests > MANUAL_BATCH_CONFIRM_REQUESTS) {
-        const confirm = localize('Run batch');
-        const selected = await vscode.window.showWarningMessage(
-          localize('This batch can send up to {requests} requests across {attempts} attempts. Continue?', { requests: batchPlan.plannedRequests, attempts: batchPlan.plannedAttempts }),
-          { modal: true },
-          confirm,
-        );
-        if (selected !== confirm) {
-          for (const job of jobs) run.skipped(job.item);
-          run.appendOutput(`${localize('Batch run cancelled before any requests were sent.')}\r\n`);
-          operation.cancel({ reason: 'user-declined', completedCases: 0 });
-          this.latestRunSummaries = [];
-          return { summaries: [], results: [], cancelled: true };
-        }
       }
       for (const uriKey of new Set(jobs.map((job) => job.uri.toString()))) {
         const uri = vscode.Uri.parse(uriKey);
@@ -984,14 +975,15 @@ export class ScenarioTestController implements vscode.Disposable {
         let cursor = 0;
         await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
           while (!effectiveToken.isCancellationRequested) {
+            if (cursor >= prepared.length || !await control.acquire()) return;
             const index = cursor++;
             const preparedJob = prepared[index];
-            if (!preparedJob) return;
+            if (!preparedJob || effectiveToken.isCancellationRequested) { control.release(); return; }
             activeCases.set(preparedJob.job.item.id, String(preparedJob.job.item.label));
             publishProgress(true);
             let result: CompletedScenario | undefined;
             try { result = await this.runJob(preparedJob.job, run, effectiveToken, selection, preparedJob.loaded, runEvidenceIds, persistedGroups, Boolean(scope.runId), scope.campaign, () => markAttemptComplete(preparedJob.job)); }
-            finally { activeCases.delete(preparedJob.job.item.id); }
+            finally { activeCases.delete(preparedJob.job.item.id); control.release(); }
             if (result) { completed.push(result); completedCases += 1; }
             publishProgress(true);
           }
@@ -1175,6 +1167,7 @@ export class ScenarioTestController implements vscode.Disposable {
       }
       trustCancellation?.dispose();
       cancelProgressTimer?.();
+      unsubscribeControl?.();
       run.end();
     }
   }
@@ -1263,9 +1256,9 @@ export class ScenarioTestController implements vscode.Disposable {
             onAttemptComplete: async (record, attempt) => {
               onAttemptComplete?.();
               if (attempt.result) {
-                // Attempt capsules remain bounded and evictable. The aggregate
-                // case capsule below contains the complete repetition result
-                // and is the evidence a Copilot diagnosis must retain.
+                // The aggregate case capsule below contains the complete
+                // repetition result. Copilot evidence has separate retention;
+                // manual attempt evidence remains available in this host.
                 const evidenceId = this.storeEvidence({ evidence: attempt.result.evidence, result: attempt.result, location: { kind: 'profile', path: 'tests' }, uri: job.uri });
                 runEvidenceIds.push(evidenceId);
                 attempt.summary.evidenceId = evidenceId;
@@ -1456,15 +1449,6 @@ export class ScenarioTestController implements vscode.Disposable {
         throw new Error('The Copilot evidence retention budget was exhausted.');
       }
       this.protectedCopilotEvidence.add(id);
-    }
-    while (this.evidence.size > MAX_EVIDENCE_ENTRIES) {
-      const evictable = [...this.evidence.keys()].find((candidate) => !this.protectedCopilotEvidence.has(candidate));
-      if (!evictable) {
-        this.evidence.delete(id);
-        this.protectedCopilotEvidence.delete(id);
-        throw new Error('The TurnStage evidence retention budget was exhausted.');
-      }
-      this.evidence.delete(evictable);
     }
     return id;
   }

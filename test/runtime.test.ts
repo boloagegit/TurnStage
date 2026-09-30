@@ -142,6 +142,23 @@ describe('MetricsCollector', () => {
     expect(metrics.value.reconnectCount).toBe(3);
   });
 
+  it('uses the transport start timestamp and never reports a negative fast-stream duration', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1001);
+    const metrics = new MetricsCollector();
+    metrics.start(1000);
+    metrics.headers(1);
+    metrics.raw(rawEvent(1001));
+    metrics.finish();
+    expect(metrics.value).toMatchObject({ requestStartedAt: 1000, firstEventLatency: 1, totalDuration: 1, streamDuration: 0 });
+    vi.setSystemTime(999);
+    const adjusted = new MetricsCollector();
+    adjusted.start(1000);
+    adjusted.headers(1);
+    adjusted.finish();
+    expect(adjusted.value).toMatchObject({ totalDuration: 0, streamDuration: 0 });
+  });
+
   it('lets an explicit timing mapping override host-measured TTFT and total duration', () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

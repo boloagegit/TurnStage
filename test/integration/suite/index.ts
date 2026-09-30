@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
 import { deleteLinkedContractCase, loadEditableLinkedContractCase } from '../../../src/extension/testing/linkedContractCase';
 import { deleteLinkedAdversarialCase, loadEditableLinkedAdversarialCase } from '../../../src/extension/testing/linkedAdversarialCase';
 import { parseContractSource } from '../../../src/extension/testing/contractSource';
@@ -49,6 +50,7 @@ export async function run(): Promise<void> {
 
   await assertProfileDiscovery(profileUri);
   await assertConversationContractReports(workspaceRoot);
+  if (vscode.workspace.isTrusted) await assertManualRunControls(workspaceRoot);
   await assertScopedTestHistoryClear();
   await assertCopilotToolBoundary(workspaceRoot);
   await assertCustomEditorAndTextFallback(profileUri, process.env.TURNSTAGE_MOCK_BASE_URL);
@@ -57,6 +59,101 @@ export async function run(): Promise<void> {
   await assertFileDiscoveryAfterCreateAndChange(profileDirectory);
   if (vscode.workspace.isTrusted) await assertLinkedCaseDeleteAndUndo(profileUri);
   await assertWorkspaceTrustBehavior(profileDirectory);
+}
+
+async function assertManualRunControls(workspaceRoot: vscode.Uri): Promise<void> {
+  const pending = new Set<() => void>();
+  const messages: string[] = [];
+  let hold = true;
+  const server = createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    messages.push((JSON.parse(body) as { message: string }).message);
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.flushHeaders();
+    const finish = () => {
+      pending.delete(finish);
+      if (!response.destroyed) response.end('event: message\ndata: {"text":"Mock result."}\n\nevent: done\ndata: {}\n\n');
+    };
+    response.once('close', () => pending.delete(finish));
+    if (hold) pending.add(finish); else finish();
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const originals = await Promise.all((await vscode.workspace.findFiles('.vscode/turnstage/profiles/*.turnstage.jsonc')).map(async (uri) => ({ uri, text: await readText(uri) })));
+  const profileUri = vscode.Uri.joinPath(workspaceRoot, '.vscode', 'turnstage', 'profiles', 'run-control.turnstage.jsonc');
+  try {
+    for (const item of originals) {
+      const value = JSON.parse(item.text) as Record<string, unknown>;
+      value.tests = { scenarios: [] };
+      await vscode.workspace.fs.writeFile(item.uri, Buffer.from(JSON.stringify(value)));
+    }
+    for (const kind of ['contract', 'adversarial'] as const) {
+      const scenarios = Array.from({ length: 12 }, (_, index) => ({
+        id: `case-${index + 1}`, name: `Case ${index + 1}`,
+        steps: [{ id: 'first', input: `case-${index + 1}:first`, ...(kind === 'contract' ? { assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }] } : {}) }, { id: 'second', input: `case-${index + 1}:second` }],
+        ...(kind === 'adversarial' ? { adversarial: { mode: 'multiTurn', maxTurns: 2, timeoutMs: 120000, repetitions: 2, forbid: { content: ['forbidden-marker'] } } } : {}),
+      }));
+      const profile = { version: 1, id: 'run-control', name: 'Run control', conversation: { send: { method: 'POST', url: `http://127.0.0.1:${address.port}/stream`, timeoutMs: 120000, idleTimeoutMs: 120000, variants: [{ id: 'send', body: { message: { $value: 'input.text' } } }] } }, stream: { transport: 'sse', dataFormat: 'json', mappings: [{ id: 'message', match: { event: 'message' }, emit: { type: 'content.text.delta', text: { path: '$.text' } } }, { id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios, reporting: { formats: ['json'], outputDirectory: '.turnstage/reports' } } };
+      const profileText = JSON.stringify(profile);
+      await vscode.workspace.fs.writeFile(profileUri, Buffer.from(profileText));
+      await waitFor(async () => (await vscode.workspace.openTextDocument(profileUri)).getText() === profileText ? true : undefined, `${kind} source refreshed in VS Code`);
+      await vscode.commands.executeCommand('turnstage.refreshProfiles');
+      for (const cancel of [false, true]) {
+        messages.length = 0;
+        hold = true;
+        let settled = false;
+        const run = Promise.resolve(vscode.commands.executeCommand<'completed' | 'cancelled'>('turnstage.runContractTests')).then((value) => { settled = true; return value; });
+        void run.catch(() => undefined);
+        await waitFor(async () => messages.length === 3 ? true : undefined, `${kind} first three active cases`);
+        assert.equal(await vscode.commands.executeCommand('turnstage.pauseTests'), true);
+        hold = false;
+        for (const finish of [...pending]) finish();
+        const requestsPerCase = kind === 'contract' ? 2 : 4;
+        try {
+          await waitFor(async () => messages.length === 3 * requestsPerCase && pending.size === 0 ? true : undefined, `${kind} active cases drained`);
+        } catch (error) {
+          console.error(`Run-control drain failed: ${JSON.stringify({ kind, messages, pending: pending.size, settled })}`);
+          throw error;
+        }
+        await new Promise((done) => setTimeout(done, 250));
+        assert.equal(settled, false, `${kind} must stay paused, not finish or dispatch further cases`);
+        assert.equal(new Set(messages.map((message) => message.split(':')[0])).size, 3);
+        assert.equal(await vscode.commands.executeCommand(cancel ? 'turnstage.cancelTests' : 'turnstage.resumeTests'), true);
+        assert.equal(await run, cancel ? 'cancelled' : 'completed');
+        assert.equal(messages.length, (cancel ? 3 : 12) * requestsPerCase);
+        assert.equal(new Set(messages.map((message) => message.split(':')[0])).size, cancel ? 3 : 12);
+        assert.equal(await vscode.commands.executeCommand('turnstage.pauseTests'), false, 'No stale run control remains after completion');
+        if (!cancel) {
+          const report = JSON.parse(await readText(vscode.Uri.joinPath(workspaceRoot, '.turnstage', 'reports', 'run-control.turnstage-contract-results.json'))) as { summary: { total: number; passed: number } };
+          assert.equal(report.summary.total, 12);
+          assert.equal(report.summary.passed, 12);
+        }
+        console.log(`Extension Host ${kind}: pause/drain/${cancel ? 'cancel' : 'resume'} passed (${messages.length} requests).`);
+      }
+      messages.length = 0;
+      hold = true;
+      const aborted = Promise.resolve(vscode.commands.executeCommand('turnstage.runContractTests'));
+      void aborted.catch(() => undefined);
+      await waitFor(async () => messages.length === 3 ? true : undefined, `${kind} active cancellation requests`);
+      assert.equal(await vscode.commands.executeCommand('turnstage.cancelTests'), true);
+      assert.equal(await aborted, 'cancelled');
+      await waitFor(async () => pending.size === 0 ? true : undefined, `${kind} cancelled sockets closed`);
+      assert.equal(messages.length, 3, 'Cancellation aborts current requests without dispatching new cases');
+      console.log(`Extension Host ${kind}: active cancellation passed (3 aborted requests).`);
+    }
+  } finally {
+    await vscode.commands.executeCommand('turnstage.cancelTests');
+    for (const finish of [...pending]) finish();
+    await new Promise<void>((done) => server.close(() => done()));
+    await vscode.workspace.fs.delete(profileUri, { useTrash: false });
+    for (const item of originals) {
+      await vscode.workspace.fs.writeFile(item.uri, Buffer.from(item.text));
+      await waitFor(async () => (await vscode.workspace.openTextDocument(item.uri)).getText() === item.text ? true : undefined, 'original profile source restored in VS Code');
+    }
+    await vscode.commands.executeCommand('turnstage.refreshProfiles');
+  }
 }
 
 async function assertScopedTestHistoryClear(): Promise<void> {

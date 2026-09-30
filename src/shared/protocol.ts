@@ -46,7 +46,7 @@ export type TestCaptureSource =
   | { kind: 'evidence'; evidenceId: string };
 
 export type TestOperationAction = 'runAll' | 'runContracts' | 'runCase' | 'runSelection' | 'rerunFailed' | 'rerunUnstable' | 'rerunIncomplete';
-export type TestOperationState = 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
+export type TestOperationState = 'running' | 'pausing' | 'paused' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
 export interface TestOperationProgress {
   totalCases: number;
   completedCases: number;
@@ -55,8 +55,13 @@ export interface TestOperationProgress {
   /** Configured case-level worker limit. Turns and repetitions within one case remain sequential. */
   maxConcurrency: number;
   activeCaseNames?: string[];
+  runState?: 'running' | 'pausing' | 'paused' | 'cancelling';
 }
 export interface TestOperationSnapshot { action: TestOperationAction; state: TestOperationState; detail?: string; progress?: TestOperationProgress }
+
+export function isTestRunActive(operation?: TestOperationSnapshot): boolean {
+  return operation !== undefined && ['running', 'pausing', 'paused', 'cancelling'].includes(operation.state);
+}
 
 /** Bounded, prompt-free metadata for browsing linked adversarial cases in the Webview. */
 export interface LinkedAdversarialCaseSummary {
@@ -178,6 +183,8 @@ export type WebviewMessage = Envelope & (
   | { type: 'test.baseline.accept'; runId: string }
   | { type: 'test.rerun'; status: 'failed' | 'unstable' | 'incomplete' }
   | { type: 'test.cancel' }
+  | { type: 'test.pause' }
+  | { type: 'test.resume' }
   | { type: 'test.timeline.open'; evidenceId: string }
   | { type: 'test.evidence.open'; evidenceId: string; location: ScenarioEvidenceLocation }
   | { type: 'test.report.export'; format: 'json' | 'junit' | 'html'; evidenceId?: string; kind?: 'contract' | 'adversarial' }
@@ -333,6 +340,7 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   if (!isRecord(value) || !hasEnvelope(value, instanceId)) return false;
   const message = value;
   switch (message.type) {
+    case 'test.pause': case 'test.resume': return true;
     case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'profile.duplicate': case 'profile.save': case 'profile.openFirstIssue': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'testExplorer.open': case 'test.runAll': case 'test.runContracts': case 'test.cancel': case 'test.evidenceBundle.export': case 'test.history.request': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
     case 'adversarial.catalog.request': return message.force === undefined || typeof message.force === 'boolean';
     case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
@@ -415,7 +423,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'contract.case.error': return isBoundedString(message.sourcePath, 4096) && isBoundedId(message.scenarioId) && isBoundedString(message.message, 4096) && typeof message.conflict === 'boolean';
     case 'test.operation': return isRecord(message.operation)
       && ['runAll', 'runContracts', 'runCase', 'runSelection', 'rerunFailed', 'rerunUnstable', 'rerunIncomplete'].includes(String(message.operation.action))
-      && ['running', 'cancelling', 'completed', 'cancelled', 'failed'].includes(String(message.operation.state))
+      && ['running', 'pausing', 'paused', 'cancelling', 'completed', 'cancelled', 'failed'].includes(String(message.operation.state))
       && optionalBoundedString(message.operation.detail)
       && (message.operation.progress === undefined || isTestOperationProgress(message.operation.progress));
     case 'test.results': return isAdversarialResults(message.results)
@@ -558,6 +566,7 @@ function isTestOperationProgress(value: unknown): boolean {
   if (!counts.every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0)) return false;
   if (Number(value.completedCases) > Number(value.totalCases) || Number(value.completedAttempts) > Number(value.totalAttempts)) return false;
   if (!Number.isSafeInteger(value.maxConcurrency) || Number(value.maxConcurrency) < 1 || Number(value.maxConcurrency) > 8) return false;
+  if (value.runState !== undefined && !['running', 'pausing', 'paused', 'cancelling'].includes(String(value.runState))) return false;
   return value.activeCaseNames === undefined || (Array.isArray(value.activeCaseNames) && value.activeCaseNames.length <= 8 && value.activeCaseNames.every((entry) => isBoundedString(entry, 256)));
 }
 

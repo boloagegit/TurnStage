@@ -27,7 +27,7 @@ interface LoadedCase {
 
 const MAX_PROFILE_BYTES = 5 * 1024 * 1024;
 const MAX_ENVIRONMENT_BYTES = 1024 * 1024;
-const MAX_SUITE_BYTES = 5 * 1024 * 1024;
+
 const MAX_MANIFEST_BYTES = 20 * 1024 * 1024;
 const MAX_EVIDENCE_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_TOTAL_EVIDENCE_BYTES = 100 * 1024 * 1024;
@@ -114,7 +114,7 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
     }
     for (const suitePath of profile.tests?.contractSuites ?? []) {
       const path = resolveSafe(workspaceRoot, suitePath);
-      const parsed = parseContractSource(suitePath, await readBoundedUtf8(path, MAX_SUITE_BYTES));
+      const parsed = parseContractSource(suitePath, await readFile(path, 'utf8'));
       if (!parsed.suite || parsed.issues.length) throw new Error('Test suite validation failed.');
       const scenarios = parsed.scenarios;
       if (validateContractScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new Error('Test suite is incompatible with its profile.');
@@ -125,7 +125,7 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
     }
     for (const suitePath of profile.tests?.adversarialSuites ?? []) {
       const path = resolveSafe(workspaceRoot, suitePath);
-      const parsed = parseAdversarialSource(suitePath, await readBoundedUtf8(path, MAX_SUITE_BYTES));
+      const parsed = parseAdversarialSource(suitePath, await readFile(path, 'utf8'));
       if (!parsed.suite || parsed.issues.length) throw new Error('Adversarial suite validation failed.');
       const scenarios = parsed.scenarios;
       if (validateAdversarialScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new Error('Adversarial suite is incompatible with its profile.');

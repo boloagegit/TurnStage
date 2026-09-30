@@ -28,7 +28,7 @@
         "repetitions": { "type": "integer", "minimum": 1, "maximum": 50 },
         "defaultRepetitions": { "type": "integer", "minimum": 1, "maximum": 50 },
         "failFast": { "type": "boolean" },
-        "maxRequests": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "maxRequests": { "type": "integer", "minimum": 1 },
         "maxDurationMs": { "type": "integer", "minimum": 1 },
         "forbid": { "$ref": "#/$defs/forbid" }
       }
@@ -39,7 +39,7 @@
       "properties": {
         "defaultRepetitions": { "type": "integer", "minimum": 1, "maximum": 50 },
         "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 8 },
-        "maxRequests": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "maxRequests": { "type": "integer", "minimum": 1 },
         "maxDurationMs": { "type": "integer", "minimum": 1 },
         "failFast": { "type": "boolean" }
       }
