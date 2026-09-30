@@ -87,7 +87,7 @@ async function assertManualRunControls(workspaceRoot: vscode.Uri): Promise<void>
     for (const item of originals) {
       const value = JSON.parse(item.text) as Record<string, unknown>;
       value.tests = { scenarios: [] };
-      await vscode.workspace.fs.writeFile(item.uri, Buffer.from(JSON.stringify(value)));
+      await writeSyncedProfile(item.uri, JSON.stringify(value));
     }
     for (const kind of ['contract', 'adversarial'] as const) {
       const scenarios = Array.from({ length: 12 }, (_, index) => ({
@@ -97,16 +97,24 @@ async function assertManualRunControls(workspaceRoot: vscode.Uri): Promise<void>
       }));
       const profile = { version: 1, id: 'run-control', name: 'Run control', conversation: { send: { method: 'POST', url: `http://127.0.0.1:${address.port}/stream`, timeoutMs: 120000, idleTimeoutMs: 120000, variants: [{ id: 'send', body: { message: { $value: 'input.text' } } }] } }, stream: { transport: 'sse', dataFormat: 'json', mappings: [{ id: 'message', match: { event: 'message' }, emit: { type: 'content.text.delta', text: { path: '$.text' } } }, { id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios, reporting: { formats: ['json'], outputDirectory: '.turnstage/reports' } } };
       const profileText = JSON.stringify(profile);
-      await vscode.workspace.fs.writeFile(profileUri, Buffer.from(profileText));
-      await waitFor(async () => (await vscode.workspace.openTextDocument(profileUri)).getText() === profileText ? true : undefined, `${kind} source refreshed in VS Code`);
+      await writeSyncedProfile(profileUri, profileText);
       await vscode.commands.executeCommand('turnstage.refreshProfiles');
       for (const cancel of [false, true]) {
         messages.length = 0;
         hold = true;
         let settled = false;
+        let runOutcome: unknown;
         const run = Promise.resolve(vscode.commands.executeCommand<'completed' | 'cancelled'>('turnstage.runContractTests')).then((value) => { settled = true; return value; });
-        void run.catch(() => undefined);
-        await waitFor(async () => messages.length === 3 ? true : undefined, `${kind} first three active cases`);
+        void run.then((value) => { runOutcome = value; }, (error: unknown) => { settled = true; runOutcome = String(error); });
+        try {
+          await waitFor(async () => {
+            if (settled) throw new Error(`Run settled before three active cases: ${JSON.stringify({ kind, runOutcome, messages })}`);
+            return messages.length === 3 ? true : undefined;
+          }, `${kind} first three active cases`);
+        } catch (error) {
+          console.error(`Run-control start failed: ${JSON.stringify({ kind, messages, pending: pending.size, settled, runOutcome })}`);
+          throw error;
+        }
         assert.equal(await vscode.commands.executeCommand('turnstage.pauseTests'), true);
         hold = false;
         for (const finish of [...pending]) finish();
@@ -149,11 +157,25 @@ async function assertManualRunControls(workspaceRoot: vscode.Uri): Promise<void>
     await new Promise<void>((done) => server.close(() => done()));
     await vscode.workspace.fs.delete(profileUri, { useTrash: false });
     for (const item of originals) {
-      await vscode.workspace.fs.writeFile(item.uri, Buffer.from(item.text));
-      await waitFor(async () => (await vscode.workspace.openTextDocument(item.uri)).getText() === item.text ? true : undefined, 'original profile source restored in VS Code');
+      await writeSyncedProfile(item.uri, item.text);
     }
     await vscode.commands.executeCommand('turnstage.refreshProfiles');
   }
+}
+
+async function writeSyncedProfile(uri: vscode.Uri, text: string): Promise<void> {
+  if (!await exists(uri)) await vscode.workspace.fs.writeFile(uri, Buffer.from(text));
+  // Discovery intentionally reads open documents, including unsaved edits.
+  // File-system writes alone race VS Code's document reload on CI platforms.
+  const document = await vscode.workspace.openTextDocument(uri);
+  if (document.getText() !== text) {
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), text);
+    assert.equal(await vscode.workspace.applyEdit(edit), true, 'Fixture edit must update the open profile document');
+  }
+  assert.equal(document.getText(), text, 'Discovery must see the exact fixture source');
+  assert.equal(await document.save(), true, 'Fixture source must be saved before discovery');
+  assert.equal(await readText(uri), text, 'Disk and open profile source must agree');
 }
 
 async function assertScopedTestHistoryClear(): Promise<void> {
