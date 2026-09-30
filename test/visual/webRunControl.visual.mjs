@@ -118,9 +118,25 @@ try {
     await page.setViewportSize({ width: 1440, height: 900 });
     probe.hold = false;
     await resume.press('Enter');
-    const progressLog = setInterval(() => console.log(JSON.stringify({ kind, requests: probe.requests.length, pending: probe.pending.size })), 15000);
+    // Shared CI runners can take over ten minutes for 5,000 red-team cases.
+    // Keep the complete workload, but fail independently if progress stops.
+    const { promise: stalled, reject: rejectStall } = Promise.withResolvers();
+    let lastRequestCount = probe.requests.length;
+    let lastProgressAt = Date.now();
+    const progressLog = setInterval(() => {
+      if (probe.requests.length !== lastRequestCount) {
+        lastRequestCount = probe.requests.length;
+        lastProgressAt = Date.now();
+      } else if (Date.now() - lastProgressAt >= 90000) {
+        rejectStall(new Error(`${kind} run made no request progress for 90 seconds (${lastRequestCount}/${count})`));
+      }
+      console.log(JSON.stringify({ kind, requests: probe.requests.length, pending: probe.pending.size }));
+    }, 15000);
     try {
-      await page.getByText('Test run completed', { exact: true }).waitFor({ timeout: 300000 });
+      await Promise.race([
+        page.getByText('Test run completed', { exact: true }).waitFor({ timeout: 900000 }),
+        stalled,
+      ]);
     } catch (error) {
       const diagnostic = { kind, requests: probe.requests.length, pending: probe.pending.size, status: await page.locator('.test-operation-status').innerText(), pageErrors, body: (await page.locator('body').innerText()).slice(-8000) };
       await writeFile(resolve(output, `${kind}-completion-failed.json`), JSON.stringify(diagnostic, null, 2));
