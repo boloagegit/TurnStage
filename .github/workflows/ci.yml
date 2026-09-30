@@ -114,7 +114,7 @@ jobs:
       - run: xvfb-run -a npm run test:visual
       - run: npm run web:build
       - name: Web and Webview mock journeys
-        timeout-minutes: 20
+        timeout-minutes: 45
         run: |
           node test/visual/interfacePolish.visual.mjs
           node test/visual/webJsoncVisual.visual.mjs

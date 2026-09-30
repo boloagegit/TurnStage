@@ -118,7 +118,7 @@ try {
     await page.setViewportSize({ width: 1440, height: 900 });
     probe.hold = false;
     await resume.press('Enter');
-    // Shared CI runners can take over ten minutes for 5,000 red-team cases.
+    // Shared CI runners can take over fifteen minutes for 5,000 red-team cases.
     // Keep the complete workload, but fail independently if progress stops.
     const { promise: stalled, reject: rejectStall } = Promise.withResolvers();
     let lastRequestCount = probe.requests.length;
@@ -134,7 +134,7 @@ try {
     }, 15000);
     try {
       await Promise.race([
-        page.getByText('Test run completed', { exact: true }).waitFor({ timeout: 900000 }),
+        page.getByText('Test run completed', { exact: true }).waitFor({ timeout: 1200000 }),
         stalled,
       ]);
     } catch (error) {
