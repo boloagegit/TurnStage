@@ -34,15 +34,19 @@ The Profile result surface also reports completed/requested coverage, a Wilson
 confidence interval for resistance, and p95 TTFT and total duration when those
 measurements exist. The interval is omitted when the denominator is zero, and
 non-finite or malformed measurements are ignored instead of rendering a false
-number. **Rerun failures**, **Unstable**, and **Incomplete** derive a new bounded
+number. **Rerun failures**, **Unstable**, and **Incomplete** derive a new
 plan from the latest result set; authoritative four-state outcomes remain
 unchanged.
 
-Before execution, the shared runner produces a bounded preflight containing
+Before execution, the shared runner produces a preflight containing
 selected cases, attempts, turns, user-turn requests, per-attempt timeout, and
-the upper-bound duration. Safety caps reject oversized plans rather than
-truncating them. Cancellation is observed between attempts; a cancelled active
-attempt is recorded as indeterminate and resume starts at the next attempt.
+the upper-bound duration. Manual runs have no fixed aggregate case, attempt,
+request, or suite-file byte ceiling. Explicitly configured budgets still apply.
+Pause stops dispatching new cases while current cases finish their turns and
+repetitions. Resume continues that same run without resending completed cases.
+Stop aborts active requests and preserves completed results; an interrupted
+attempt is not reported as passing. Starting unfinished cases after Stop or a
+restart is a separate, explicit run, not a continuation of a paused request.
 
 ## Inline cases
 
@@ -119,7 +123,17 @@ Each reference remains an independent Suite. Keep case IDs unique across linked 
 
 Test Explorer runs isolated cases with bounded concurrency. `turnstage.adversarialConcurrency` defaults to 3 and accepts 1–8; reduce it for rate-limited targets. Each case has a whole-case timeout in addition to the Profile request and idle timeouts.
 
-Latest results appear as a searched, filtered, and paginated compact list in the Profile GUI and link to available Chat, Network, Raw Events, or Normalized Events evidence. Search work is deferred while input stays responsive; attention presets, active-filter counts, clear actions, sticky headings, and actionable empty states keep large runs scannable without mounting every row. Inline and linked case authoring uses collection state instead of rendering every case. The linked catalog sends every safe metadata summary and excludes prompts, assertion values, and rule content; direct editing loads one selected case on demand rather than mounting all case bodies. Test Explorer remains the complete discovery surface for valid suites. Opening evidence adds a persistent review bar for switching between the latest cases and retained repeated attempts. An attempt whose in-memory evidence has been evicted is explicitly unavailable rather than silently falling back to another run.
+Manual runs have no fixed aggregate case, attempt, request, or linked-suite
+file-size ceiling. A suite's explicitly configured request/duration budget
+still applies. **Pause tests** stops new case dispatch and waits for active
+cases to finish all their turns and repetitions. **Resume tests** continues
+the same run; **Stop test run** aborts active requests and preserves completed
+results and unfinished-case history, including when the run is paused.
+Keep the browser page or Extension Host open while paused. After a restart,
+explicitly choose **Run remaining cases** rather than automatically resending
+requests whose outcome may be unknown.
+
+Latest results appear as a searched, filtered, and paginated compact list in the Profile GUI and link to available Chat, Network, Raw Events, or Normalized Events evidence. Search work is deferred while input stays responsive; attention presets, active-filter counts, clear actions, sticky headings, and actionable empty states keep large runs scannable without mounting every row. Inline and linked case authoring uses collection state instead of rendering every case. The linked catalog sends every safe metadata summary and excludes prompts, assertion values, and rule content; direct editing loads one selected case on demand rather than mounting all case bodies. Test Explorer remains the complete discovery surface for valid suites. Opening evidence adds a persistent review bar for switching between the latest cases and retained repeated attempts. Manual-run evidence remains available for the lifetime of the Extension Host. Evidence from a closed or restarted Extension Host is explicitly unavailable rather than silently falling back to another run.
 
 The latest result header can export the full run as HTML, JSON, JUnit XML, or an Evidence Bundle. Completed exports expose Open, Reveal, and Copy Path through a short-lived Host-owned artifact handle; the Webview cannot request an arbitrary path. A result can also copy a safe structural summary containing IDs, outcome, duration, turn/attempt counts, and stability only. Prompts, assistant content, URLs, headers, payloads, and event bodies are excluded from that summary.
 

@@ -81,12 +81,13 @@ describe('shared scenario execution and repetition planning', () => {
     expect(plan.cases.map((item) => item.repetitions)).toEqual([3, 5]);
   });
 
-  it('fails closed on repetition, attempt, request, and duration caps', () => {
+  it('allows large manual plans while honoring per-case validation and explicit budgets', () => {
     expect(createScenarioRunPlan([adversarial('too-many', 51)])).toMatchObject({ valid: false, issues: expect.arrayContaining([expect.objectContaining({ code: 'invalid-repetitions' })]) });
     const scenarios = Array.from({ length: 500 }, (_, index) => adversarial(`case-${index + 1}`, 50));
     const plan = createScenarioRunPlan(scenarios);
-    expect(plan.valid).toBe(false);
-    expect(plan.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(['attempt-cap']));
+    expect(plan).toMatchObject({ valid: true, plannedAttempts: 25_000 });
+    const large = Array.from({ length: 5_000 }, (_, index) => ({ ...adversarial(`case-${index + 1}`, 3), steps: Array.from({ length: 10 }, (_, turn) => ({ id: `turn-${turn + 1}`, input: 'probe' })) }));
+    expect(createScenarioRunPlan(large)).toMatchObject({ valid: true, plannedAttempts: 15_000, maximumRequests: 150_000 });
     expect(createScenarioRunPlan([adversarial('budget')], { defaultRepetitions: 2, maxRequests: 1, maxDurationMs: 1 })).toMatchObject({ valid: false, withinBudget: false, issues: expect.arrayContaining([expect.objectContaining({ code: 'request-cap' }), expect.objectContaining({ code: 'duration-cap' })]) });
   });
 

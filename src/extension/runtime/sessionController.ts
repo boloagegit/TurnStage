@@ -317,7 +317,7 @@ export class SessionController implements vscode.Disposable {
       startedAt,
       turnIndex: this.nextTurnIndex++,
     };
-    this.snapshot.turnState = 'submitting'; this.snapshot.errors = []; this.finalized = false; this.lastInteraction = { text, interaction }; this.metrics = new MetricsCollector(); this.metrics.start();
+    this.snapshot.turnState = 'submitting'; this.snapshot.errors = []; this.finalized = false; this.lastInteraction = { text, interaction }; this.metrics = new MetricsCollector(); this.metrics.start(startedAt);
     try {
       const request = await this.requestBuilder().build(this.profile.conversation.send, this.contextFor(text, interaction, clientRequestId, startedAt));
       this.registerRequestSecrets(request);

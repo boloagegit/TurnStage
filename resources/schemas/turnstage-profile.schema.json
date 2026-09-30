@@ -363,7 +363,7 @@
         "repetitions": { "type": "integer", "minimum": 1, "maximum": 100 },
         "failFast": { "type": "boolean" },
         "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 8 },
-        "maxRequests": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "maxRequests": { "type": "integer", "minimum": 1 },
         "maxDurationMs": { "type": "integer", "minimum": 1000, "maximum": 86400000 }
       }
     },

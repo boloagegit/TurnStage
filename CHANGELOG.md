@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.35.1
+
+- Fixed a VS Code test-discovery race that could omit newly added or edited cases when another refresh was already running. Refresh now waits for pending source changes before a manual run starts. Web behavior and existing Profile, suite, and history formats are unchanged.
+
+## 0.35.0
+
+- General and Red Team runs in Web and VS Code can pause new case dispatch, resume the same run, or cancel active requests. A requested pause waits for active cases to finish their turns and repetitions; cancellation also works while paused and retains completed results and unfinished-case history.
+- VS Code and CLI no longer reject manual runs at the old aggregate attempt/request ceilings or reject linked/imported test suites above 5 MiB. Explicitly configured execution budgets and per-case validation still apply; Copilot runs retain their separate budgets.
+- VS Code retains all manual-case evidence for the current Extension Host session instead of expiring results after 1,000 evidence entries. Large metadata histories no longer fail at a fixed byte ceiling; existing run-count retention is unchanged.
+- Added localized Pause, Resume, and Cancel commands in VS Code and shared test-run controls in all four UI languages. Existing Profiles, suite formats, and stored history remain compatible. Paused runs require the page/host to remain open; after a restart, users explicitly rerun unfinished cases.
+- Fixed an ultra-fast response timing race that could report a negative stream duration and incorrectly fail an otherwise completed test in Web or VS Code.
+- Updated the HTTP client and URI-validation dependencies to patched versions, including development-tool dependencies. Profile formats, TLS opt-in behavior, and Web proxy configuration are unchanged.
+
 ## 0.34.0
 
 - General tests and Red Team no longer impose a fixed total-case or aggregate-turn ceiling on suite imports, linked catalogs, manual selection, and results. Per-case validation and explicitly configured run budgets remain in effect; large Web runs still depend on browser storage, device capacity, and the target API.

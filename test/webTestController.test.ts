@@ -19,6 +19,60 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('WebTestController', () => {
+  it.each(['contract', 'adversarial'] as const)('pauses %s dispatch, drains active cases, and resumes without duplicates', async (kind) => {
+    const scenarios = Array.from({ length: 12 }, (_, index) => ({ id: `case-${index}`, name: `Case ${index}`, steps: [{ id: 'turn', input: `Prompt ${index}`, assertions: [{ path: 'turn.state', operator: 'equals' as const, value: 'completed' }] }], ...(kind === 'adversarial' ? { adversarial: { mode: 'singleTurn' as const, maxTurns: 1, forbid: { content: ['forbidden'] } } } : {}) }));
+    const profile: TurnStageProfile = { version: 1, id: `pause-${crypto.randomUUID()}`, name: 'Pause', conversation: { send: { method: 'POST', url: 'https://example.test/stream', body: { message: { $value: 'input.text' } } } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios } };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    const releases: Array<() => void> = [];
+    const fetch = vi.fn(async () => { await new Promise<void>((resolve) => releases.push(resolve)); return new Response('event: done\ndata: {}\n\n', { status: 200 }); });
+    vi.stubGlobal('fetch', fetch);
+    const messages: HostPayload[] = [];
+    const controller = new WebTestController(() => profile, () => environment, new Map(), (payload) => messages.push(payload));
+    const running = controller.run(kind === 'contract' ? 'runContracts' : 'runAll');
+    await vi.waitFor(() => expect(releases).toHaveLength(4));
+    expect(controller.pause()).toBe(true);
+    expect(messages.filter((item) => item.type === 'test.operation').at(-1)).toMatchObject({ operation: { state: 'pausing' } });
+    for (const release of releases.splice(0)) release();
+    await vi.waitFor(() => expect(messages.filter((item) => item.type === 'test.operation').at(-1)).toMatchObject({ operation: { state: 'paused', progress: { completedCases: 4 } } }));
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(controller.resume()).toBe(true);
+    for (let batch = 0; batch < 2; batch++) {
+      await vi.waitFor(() => expect(releases).toHaveLength(4));
+      for (const release of releases.splice(0)) release();
+    }
+    await running;
+    expect(fetch).toHaveBeenCalledTimes(12);
+    const history = messages.filter((item): item is Extract<HostPayload, { type: 'test.history' }> => item.type === 'test.history').at(-1)!.runs[0]!;
+    expect(history.status).toBe('completed');
+    expect(history.cases).toHaveLength(12);
+    expect(history.cases.every((item) => item.completedAttempts === 1)).toBe(true);
+    expect(new Set(history.cases.map((item) => item.scenarioId)).size).toBe(12);
+    expect(controller.pause()).toBe(false);
+  });
+
+  it('cancels a paused run and preserves completed and unfinished cases', async () => {
+    const scenarios = Array.from({ length: 8 }, (_, index) => ({ id: `case-${index}`, name: `Case ${index}`, steps: [{ id: 'turn', input: 'Hello' }] }));
+    const profile: TurnStageProfile = { version: 1, id: `pause-cancel-${crypto.randomUUID()}`, name: 'Pause cancel', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios } };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    const releases: Array<() => void> = [];
+    const fetch = vi.fn(async () => { await new Promise<void>((resolve) => releases.push(resolve)); return new Response('event: done\ndata: {}\n\n', { status: 200 }); });
+    vi.stubGlobal('fetch', fetch);
+    const messages: HostPayload[] = [];
+    const controller = new WebTestController(() => profile, () => environment, new Map(), (payload) => messages.push(payload));
+    const running = controller.run('runContracts');
+    await vi.waitFor(() => expect(releases).toHaveLength(4));
+    controller.pause();
+    for (const release of releases) release();
+    await vi.waitFor(() => expect(messages.filter((item) => item.type === 'test.operation').at(-1)).toMatchObject({ operation: { state: 'paused' } }));
+    controller.cancel();
+    await running;
+    expect(fetch).toHaveBeenCalledTimes(4);
+    const history = messages.filter((item): item is Extract<HostPayload, { type: 'test.history' }> => item.type === 'test.history').at(-1)!.runs[0]!;
+    expect(history.status).toBe('cancelled');
+    expect(history.cases.filter((item) => item.completedAttempts === 1)).toHaveLength(4);
+    expect(history.cases.filter((item) => item.completedAttempts === 0)).toHaveLength(4);
+  });
+
   it('keeps latest results and exports isolated when profiles reuse a case ID', async () => {
     const scenario = { id: 'shared-id', name: 'Same case ID', steps: [{ id: 'turn', input: 'Hello' }] };
     const base: TurnStageProfile = { version: 1, id: `isolation-a-${crypto.randomUUID()}`, name: 'A', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios: [scenario] } };

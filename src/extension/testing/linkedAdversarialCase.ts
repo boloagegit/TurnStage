@@ -7,7 +7,6 @@ import { parseAdversarialSource } from './adversarialSource';
 import { isExternalAdversarialSuiteReference } from './externalAdversarialSuiteReference';
 import { createAdversarialSuite, isSafeAdversarialSuitePath, validateAdversarialSuite } from './adversarialSuite';
 
-const MAX_SUITE_BYTES = 5 * 1024 * 1024;
 const REVISION_PATTERN = /^[a-f0-9]{64}$/u;
 
 export type LinkedAdversarialSourceFormat = 'csv' | 'jsonc';
@@ -45,20 +44,19 @@ export async function loadEditableLinkedAdversarialCase(
   resolveExternal?: (reference: string) => vscode.Uri | undefined,
 ): Promise<EditableLinkedAdversarialCase> {
   const uri = resolveSuiteUri(profileUri, sourcePath, resolveExternal);
-  const text = await readBoundedSource(uri, sourcePath);
+  const text = await readSource(uri);
   return editableCaseFromText(sourcePath, text, scenarioId);
 }
 
 export async function saveEditableLinkedAdversarialCase(input: SaveLinkedAdversarialCaseInput): Promise<EditableLinkedAdversarialCase> {
   if (!REVISION_PATTERN.test(input.expectedRevision)) throw new Error('The linked suite revision is invalid. Reload the case before saving.');
   const uri = resolveSuiteUri(input.profileUri, input.sourcePath, input.resolveExternal);
-  const source = await readBoundedSource(uri, input.sourcePath);
+  const source = await readSource(uri);
   if (digest(source) !== input.expectedRevision) throw new LinkedAdversarialCaseConflictError();
   const updated = updateLinkedAdversarialCaseSource(input.sourcePath, source, input.scenarioId, input.scenario);
   const bytes = new TextEncoder().encode(updated.text);
-  if (bytes.byteLength > MAX_SUITE_BYTES) throw new Error(`Adversarial suite ${input.sourcePath} exceeds the 5 MB limit after editing.`);
   if (updated.text !== source) await vscode.workspace.fs.writeFile(uri, bytes);
-  const persisted = await readBoundedSource(uri, input.sourcePath);
+  const persisted = await readSource(uri);
   const saved = editableCaseFromText(input.sourcePath, persisted, input.scenario.id);
   if (saved.revision !== updated.revision) throw new LinkedAdversarialCaseConflictError();
   return saved;
@@ -67,13 +65,13 @@ export async function saveEditableLinkedAdversarialCase(input: SaveLinkedAdversa
 export async function appendLinkedAdversarialCase(input: AppendLinkedAdversarialCaseInput): Promise<EditableLinkedAdversarialCase> {
   if (!input.scenario.adversarial) throw new Error('The linked case must contain an adversarial definition.');
   const uri = resolveSuiteUri(input.profileUri, input.sourcePath, input.resolveExternal);
-  const source = await readBoundedSource(uri, input.sourcePath);
+  const source = await readSource(uri);
   const updated = appendLinkedAdversarialCaseSource(input.sourcePath, source, input.scenario);
   const bytes = new TextEncoder().encode(updated.text);
-  if (bytes.byteLength > MAX_SUITE_BYTES) throw new Error(`Adversarial suite ${input.sourcePath} exceeds the 5 MB limit after appending.`);
-  if (digest(await readBoundedSource(uri, input.sourcePath)) !== digest(source)) throw new LinkedAdversarialCaseConflictError();
+
+  if (digest(await readSource(uri)) !== digest(source)) throw new LinkedAdversarialCaseConflictError();
   await vscode.workspace.fs.writeFile(uri, bytes);
-  const saved = editableCaseFromText(input.sourcePath, await readBoundedSource(uri, input.sourcePath), input.scenario.id);
+  const saved = editableCaseFromText(input.sourcePath, await readSource(uri), input.scenario.id);
   if (saved.revision !== updated.revision) throw new LinkedAdversarialCaseConflictError();
   return saved;
 }
@@ -81,7 +79,7 @@ export async function appendLinkedAdversarialCase(input: AppendLinkedAdversarial
 export async function deleteLinkedAdversarialCase(input: DeleteLinkedAdversarialCaseInput): Promise<void> {
   if (!REVISION_PATTERN.test(input.expectedRevision)) throw new Error('The linked suite revision is invalid. Refresh the case list before deleting.');
   const uri = resolveSuiteUri(input.profileUri, input.sourcePath, input.resolveExternal);
-  const source = await readBoundedSource(uri, input.sourcePath);
+  const source = await readSource(uri);
   if (digest(source) !== input.expectedRevision) throw new LinkedAdversarialCaseConflictError();
   const document = await vscode.workspace.openTextDocument(uri);
   if (document.getText() !== source) throw new LinkedAdversarialCaseConflictError();
@@ -89,7 +87,7 @@ export async function deleteLinkedAdversarialCase(input: DeleteLinkedAdversarial
   const edit = new vscode.WorkspaceEdit();
   edit.replace(uri, new vscode.Range(document.positionAt(0), document.positionAt(source.length)), updated.text);
   if (!await vscode.workspace.applyEdit(edit) || !await document.save()) throw new Error('Could not save the deleted red-team case. Check the source file before retrying.');
-  if (digest(await readBoundedSource(uri, input.sourcePath)) !== updated.revision) throw new LinkedAdversarialCaseConflictError();
+  if (digest(await readSource(uri)) !== updated.revision) throw new LinkedAdversarialCaseConflictError();
 }
 
 export function deleteLinkedAdversarialCaseSource(path: string, text: string, scenarioId: string): { text: string; revision: string } {
@@ -312,10 +310,8 @@ function resolveSuiteUri(profileUri: vscode.Uri, path: string, resolveExternal?:
   return vscode.Uri.joinPath(folder.uri, ...path.split('/'));
 }
 
-async function readBoundedSource(uri: vscode.Uri, path: string): Promise<string> {
-  if ((await vscode.workspace.fs.stat(uri)).size > MAX_SUITE_BYTES) throw new Error(`Adversarial suite ${path} exceeds the 5 MB limit.`);
+async function readSource(uri: vscode.Uri): Promise<string> {
   const bytes = await vscode.workspace.fs.readFile(uri);
-  if (bytes.byteLength > MAX_SUITE_BYTES) throw new Error(`Adversarial suite ${path} exceeds the 5 MB limit.`);
   return new TextDecoder().decode(bytes);
 }
 

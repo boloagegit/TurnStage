@@ -109,11 +109,21 @@ choose **Run selected** to start immediately.
 except drafts needing review, incomplete cases, and cases requiring VS Code-only
 checks in Web. Each excluded row shows the exact reason; the button shows the
 selectable and total counts. With search active it selects only matching cases.
-TurnStage Web selection and manual execution have no fixed case, attempt, or
-request ceiling. Browser storage and the user's device remain the practical
+TurnStage Web and VS Code selection and manual execution have no fixed case,
+aggregate attempt, request, or suite-file byte ceiling. Browser storage and the user's device remain the practical
 limit; executing cases still sends requests to the configured target service.
 If a suite or campaign defines its own request or duration budget, that explicit
 user configuration is still checked before a run starts.
+
+While a run is active, **Pause tests** stops dispatching new cases and lets
+active cases finish their turns and repetitions. The status changes from
+**Pausing test run…** to **Test run paused** when those cases finish.
+**Resume tests** continues the same run without repeating finished cases.
+**Stop test run** aborts active requests, also works while paused, and keeps
+completed results and unfinished-case history. VS Code exposes the same
+actions as **TurnStage: Pause Tests**, **Resume Tests**, and **Cancel Tests**.
+A paused run requires keeping the page or Extension Host open; after a
+restart, choose **Run remaining cases** explicitly.
 Drafts marked **Needs review** and Web-unsupported cases cannot be selected or
 run. If a previously selected case becomes unavailable, the selection is
 rejected before any request is sent instead of running a partial batch. A

@@ -40,13 +40,23 @@ version control. Search and select cases in the Profile editor, run one or
 several, and see why a case is unavailable before trying to run it. VS Code
 Test Explorer and the headless CLI can also run ready cases.
 
-Case lists, imports, and manual runs have no fixed total-case ceiling. Per-case
+Case lists, imports, linked suite files, and manual runs have no fixed total-case,
+aggregate attempt, request, or suite-file size ceiling. Per-case
 validation remains in place; browser storage, device capacity, and the target
 API's rate limits are practical considerations for large Web runs. Web imports
 large suites without blocking the case-list UI and saves completed-case
 checkpoints. If a page closes during a run, review its history and explicitly
 choose **Run remaining cases**; TurnStage does not automatically resend a
 request whose outcome is unknown.
+
+Use **Pause tests** to stop dispatching new cases. Cases already running finish
+their turns and repetitions before the run becomes paused. **Resume tests**
+continues the same run without repeating completed cases; **Stop test run**
+aborts active requests and preserves completed results and unfinished-case
+history. These controls work in Web and VS Code. Pausing requires keeping the
+page or editor host open; reopening an interrupted run requires explicitly
+running its remaining cases. Explicitly configured request/duration budgets
+still apply. Copilot-triggered runs retain their separate execution budgets.
 
 ![Synthetic general-test case list in the Profile editor](media/marketplace/test-case-management.png)
 

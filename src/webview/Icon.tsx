@@ -38,6 +38,7 @@ export type ProductIconName =
   | 'list-tree'
   | 'lock'
   | 'loading'
+  | 'debug-pause'
   | 'refresh'
   | 'remove'
   | 'save'
@@ -69,6 +70,7 @@ const codicons: Record<ProductIconName, string> = {
   copy: 'copy',
   'desktop-download': 'desktop-download',
   'debug-start': 'debug-start',
+  'debug-pause': 'debug-pause',
   'debug-restart': 'debug-restart',
   'debug-rerun': 'debug-rerun',
   'device-camera': 'device-camera',

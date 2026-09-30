@@ -78,6 +78,8 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'evidence', evidenceId: '' } }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'conversation', runId: 'smuggled' } }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.cancel' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.pause' }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.resume' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'connection.analyze' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.evidence.open', evidenceId: 'evidence-1', location: { kind: 'network', networkId: 'network-1' } }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.report.export', format: 'html', evidenceId: 'evidence-1' }, 'editor-1')).toBe(true);
@@ -162,6 +164,10 @@ describe('cross-boundary message validation', () => {
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 10, completedCases: 11, totalAttempts: 10, completedAttempts: 0, maxConcurrency: 3 } } }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 10, completedCases: 0, totalAttempts: 10, completedAttempts: 0, maxConcurrency: 9 } } }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runAll', state: 'unknown' } }, 'editor-1')).toBe(false);
+    for (const state of ['pausing', 'paused', 'cancelling']) {
+      expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runSelection', state, progress: { totalCases: 5000, completedCases: 4, totalAttempts: 5000, completedAttempts: 4, maxConcurrency: 4, runState: state } } }, 'editor-1')).toBe(true);
+    }
+    expect(isHostMessage({ ...envelope, type: 'test.operation', operation: { action: 'runSelection', state: 'running', progress: { totalCases: 5, completedCases: 0, totalAttempts: 5, completedAttempts: 0, maxConcurrency: 4, runState: 'unknown' } } }, 'editor-1')).toBe(false);
     expect(isHostMessage({ ...envelope, type: 'test.timeline', evidenceId: 'evidence-1', timeline: { version: 1, baseTime: 0, entries: [], completeness: 'missing', missingPhases: ['request'], truncated: false } }, 'editor-1')).toBe(true);
     expect(isHostMessage({ ...envelope, type: 'test.timeline', evidenceId: 'evidence-1', timeline: 'untrusted' }, 'editor-1')).toBe(false);
     const networkPath = { runtime: 'local', proxySupport: 'override', proxyConfigured: true, environmentProxyConfigured: false, noProxyConfigured: true, noProxyMatch: false, systemCertificates: true, proxyStrictSSL: true, useLocalProxyConfiguration: false, viaHeaderObserved: false, tlsVerification: 'strict', route: 'likely-proxied', confidence: 'medium', findings: [] };

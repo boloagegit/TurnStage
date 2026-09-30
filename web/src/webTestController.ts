@@ -21,6 +21,7 @@ import { buildTestReportEvidence } from '../../src/shared/testReportEvidence';
 import { webUnsupportedTestFeature } from '../../src/shared/webTestCapabilities';
 import { evaluatePerformance } from '../../src/extension/testing/performanceEvaluator';
 import { parseWebSuiteInWorker, type WebSuite } from './suiteParser';
+import { TestRunControl } from '../../src/shared/testRunControl';
 
 const WEB_TEST_CONCURRENCY = 4;
 const RUN_LEASE_MS = 120_000;
@@ -55,6 +56,7 @@ export class WebTestController {
   private activeRun = false;
   private activeRunId?: string;
   private activeAction?: TestOperationAction;
+  private runControl?: TestRunControl;
   private readonly cancellationListeners = new Set<() => void>();
   private readonly historyPollTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -70,6 +72,9 @@ export class WebTestController {
     if (this.profile().id !== profileId) return;
     this.post({ type: 'test.results', results: this.adversarialResults.filter((item) => item.profileId === profileId), automationResults: this.automationResults.filter((item) => item.profileId === profileId) });
   }
+
+  pause(): boolean { return this.runControl?.pause() ?? false; }
+  resume(): boolean { return this.runControl?.resume() ?? false; }
 
   onProfileChanged(): void {
     for (const timer of this.historyPollTimers.values()) clearTimeout(timer);
@@ -127,11 +132,14 @@ export class WebTestController {
     const plannedCases = cases.map((item) => ({ profileId: profile.id, suiteId: item.suiteId, scenarioId: item.scenario.id, kind: item.scenario.adversarial ? 'adversarial' as const : 'contract' as const, name: item.scenario.name, scenario: item.scenario }));
     const pending: WebPendingRun = { ...createTestRunHistoryRecord({ id: runId, profileId: profile.id, startedAt, finishedAt: startedAt, status: 'cancelled', runner: 'web', profile, environment, sourceRunId, secretValues: [...secrets.values()], cases: plannedCases, completed: [] }), checkpointState: 'running' };
     const maxConcurrency = Math.max(1, Math.min(WEB_TEST_CONCURRENCY, cases.length));
+    const control = new TestRunControl();
+    this.runControl = control;
     let completed = 0;
     let completedAttempts = 0;
     let historyFailure: unknown;
     let workerFailure: unknown;
     let nextCaseIndex = 0;
+    const activeCases = new Map<number, string>();
     let lastResultsPostAt = 0;
     let lastProgressPostAt = 0;
     writeRunLease(profile.id, runId, leaseOwner);
@@ -156,16 +164,20 @@ export class WebTestController {
       const now = Date.now();
       if (!force && now - lastProgressPostAt < 250) return;
       lastProgressPostAt = now;
-      this.post({ type: 'test.operation', operation: { action, state, progress: { totalCases: selected.length, completedCases: completed, totalAttempts: attempts, completedAttempts, maxConcurrency } } });
+      this.post({ type: 'test.operation', operation: { action, state: state === 'running' ? control.state : state, progress: { totalCases: selected.length, completedCases: completed, totalAttempts: attempts, completedAttempts, maxConcurrency, activeCaseNames: [...activeCases.values()], runState: control.state } } });
     };
+    const unsubscribeControl = control.subscribe(() => postProgress('running', true));
     try {
       await this.store.put('runs', { id: `test-batch:${profile.id}:${runId}`, profileId: profile.id, kind: 'test-batch', name: 'Test run', updatedAt: startedAt, value: pending });
       postProgress('running', true);
       const runWorker = async () => {
         while (!this.cancelled && workerFailure === undefined) {
+          if (nextCaseIndex >= cases.length || !await control.acquire()) return;
           const index = nextCaseIndex++;
-          if (index >= cases.length) return;
+          if (index >= cases.length || this.cancelled || workerFailure !== undefined) { control.release(); return; }
           const item = cases[index]!;
+          activeCases.set(index, item.scenario.name);
+          postProgress('running', completed === 0);
           try {
             if (this.profile().id !== profile.id) throw new Error('The active profile changed during this test run. The remaining cases were not sent.');
             const execution = await this.executeScenario(item, true, { profile, environment, secrets });
@@ -181,6 +193,10 @@ export class WebTestController {
             postProgress('running');
           } catch (error) {
             workerFailure = error;
+            control.cancel();
+          } finally {
+            activeCases.delete(index);
+            control.release();
           }
         }
       };
@@ -201,6 +217,9 @@ export class WebTestController {
       } catch (error) {
         historyFailure = error;
       } finally {
+        unsubscribeControl();
+        control.cancel();
+        this.runControl = undefined;
         clearInterval(leaseRefresh);
         clearRunLease(profile.id, runId, leaseOwner);
         if (typeof window !== 'undefined') window.removeEventListener('pagehide', onPageHide);
@@ -282,7 +301,7 @@ export class WebTestController {
     for (const item of runs.slice(20)) if (item.value.id !== pinned) await this.store.delete('runs', item.id);
   }
 
-  cancel(): void { this.cancelled = true; for (const listener of this.cancellationListeners) listener(); }
+  cancel(): void { this.cancelled = true; this.runControl?.cancel(); for (const listener of this.cancellationListeners) listener(); }
 
   async rerun(status: 'failed' | 'unstable' | 'incomplete'): Promise<void> {
     const context = this.runContext();
