@@ -318,31 +318,3 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
 @media (forced-colors: active) {
   .case-run-summary__filters button[aria-pressed='true'] { outline: 1px solid Highlight; }
 }
-
-/*
- * Narrow editors: chat and workspace become tabs in one header instead of a
- * vertical split. The workspace pane spans the whole area (its tab row on top);
- * the chat sits under that tab row in the same area. Both stay mounted and the
- * hidden one keeps its rendering state (content-visibility), so switching never
- * reflows or reloads either side.
- */
-:root { --ts-pane-heading: 44px; }
-.right-pane-tab--chat { display: none !important; }
-@media (max-width: 64em) {
-  .test-workspace:has(> .debug-pane) { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--ts-pane-heading) minmax(0, 1fr); overflow: hidden; }
-  .test-workspace > .debug-pane { grid-row: 1 / -1; grid-column: 1; min-height: 0; }
-  .test-workspace > .debug-pane > .right-pane-heading { box-sizing: border-box; height: var(--ts-pane-heading); min-height: 0; }
-  .test-workspace:has(> .debug-pane) > .preview-pane { position: relative; z-index: 1; grid-row: 2; grid-column: 1; min-height: 0; }
-  .test-workspace:has(> .debug-pane) .right-pane-tab--chat { display: inline-flex !important; }
-  .test-workspace[data-narrow-view='chat'] > .debug-pane > :not(.right-pane-heading),
-  .test-workspace[data-narrow-view='pane'] > .preview-pane { visibility: hidden; content-visibility: hidden; pointer-events: none; }
-  .test-workspace[data-narrow-view='pane'] > .preview-pane .conversation-drawer { display: none; }
-  .test-workspace > .splitter { display: none; }
-}
-.right-pane-tabs .right-pane-tab__icon { display: none; }
-@container (max-width: 460px) {
-  .right-pane-tabs { gap: 0; }
-  .right-pane-tabs button { padding-inline: 4px; }
-  .right-pane-tabs .right-pane-tab__icon { display: inline-block; }
-  .right-pane-tab--chat .right-pane-tab__label { display: none; }
-}
