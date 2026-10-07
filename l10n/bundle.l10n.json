@@ -773,5 +773,12 @@
   "Certificate verification is disabled for this request.": "Certificate verification is disabled for this request.",
   "TurnStage will ask again if the destination, secret references, or TLS settings change.": "TurnStage will ask again if the destination, secret references, or TLS settings change.",
   "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "Local stream stopped. The remote stop request was not sent because connection access was not allowed.",
-  "Importing a browser-local suite copy is available only in TurnStage Web.": "Importing a browser-local suite copy is available only in TurnStage Web."
+  "Importing a browser-local suite copy is available only in TurnStage Web.": "Importing a browser-local suite copy is available only in TurnStage Web.",
+  "This Profile does not configure a conversation {kind} request.": "This Profile does not configure a conversation {kind} request.",
+  "Connection access was not allowed.": "Connection access was not allowed.",
+  "The conversation history request timed out.": "The conversation history request timed out.",
+  "The conversation history response exceeded the maximum allowed size.": "The conversation history response exceeded the maximum allowed size.",
+  "The conversation history response is not valid JSON.": "The conversation history response is not valid JSON.",
+  "Conversation archive size must be an integer from 1 to 100.": "Conversation archive size must be an integer from 1 to 100.",
+  "The conversation history request should reference conversation.id so TurnStage can load a specific conversation.": "The conversation history request should reference conversation.id so TurnStage can load a specific conversation."
 }

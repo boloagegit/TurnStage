@@ -23,14 +23,19 @@ import { fetchBoundedText } from '../transport/boundedFetch';
 import { networkPathDebugLine, networkPathInfoLine } from '../connection/networkPath';
 import { captureVSCodeNetworkPath, resolveVSCodeInsecureTlsRoute, type VSCodeNetworkPathInspector } from '../connection/vscodeNetworkPath';
 import type { RequestAuthorizationPurpose } from '../security/requestAuthorization';
+import { ConversationManager, type ConversationStorage } from '../../shared/conversationHistory';
+import type { ConversationDirectory } from '../../shared/types';
 
 const MAX_NETWORK_ENTRIES = 50;
 const MAX_NETWORK_RESPONSE_PREVIEW_CHARS = 64 * 1024;
 const MAX_OPENING_RESPONSE_BYTES = 1024 * 1024;
+const MAX_CONVERSATION_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 export interface SessionRuntimeOptions {
   faults?: ScenarioFaultDefinition;
   authorizeRequest?: (request: PreparedRequest, purpose: RequestAuthorizationPurpose, hasSecrets: boolean) => Promise<boolean>;
+  /** Enables the conversation drawer (archive, server list/history, consistency checks). Omitted for test runs. */
+  conversations?: { storage?: ConversationStorage; changed: (directory: ConversationDirectory) => void };
 }
 
 export class SessionController implements vscode.Disposable {
@@ -66,6 +71,7 @@ export class SessionController implements vscode.Disposable {
   private environmentSecretValues: string[] = [];
   private readonly remoteSessionRepository: RemoteSessionRepository;
   private networkEntries: NetworkExchange[] = [];
+  private readonly conversations?: ConversationManager;
 
   constructor(
     readonly profile: TurnStageProfile,
@@ -91,7 +97,19 @@ export class SessionController implements vscode.Disposable {
       this.controls[control.id] = this.persistedControl(control) ?? defaultValue;
     }
     this.refreshSnapshotControls();
+    if (runtimeOptions.conversations) {
+      const options = runtimeOptions.conversations;
+      this.conversations = new ConversationManager(profile, {
+        storage: vscode.workspace.isTrusted ? options.storage : undefined,
+        fetchJson: (kind, conversationId) => this.fetchConversationJson(kind, conversationId),
+        createId: () => crypto.randomUUID(),
+      }, options.changed);
+    }
   }
+
+  getConversationDirectory(): ConversationDirectory | undefined { return this.conversations?.directory; }
+  /** True when a new conversation keeps the current one in the drawer, so no confirmation is needed. */
+  preservesConversations(): boolean { return this.conversations?.preservesConversations === true && vscode.workspace.isTrusted; }
 
   async loadRuns(): Promise<LocalRun[]> {
     await this.migrateGlobalControls();
@@ -100,6 +118,7 @@ export class SessionController implements vscode.Disposable {
     this.runs = vscode.workspace.isTrusted ? (await this.runRepository.list(this.profile.id)).map((run) => this.publicRun(run)) : [];
     this.refreshRunStorageBytes();
     this.snapshot.remoteSessions = this.profile.history?.remoteSessions?.mode === 'referenceOnly' ? this.publicRemoteSessions(this.remoteSessionRepository.list(this.remoteSessionKey())) : [];
+    await this.conversations?.load();
     return this.runs;
   }
   getRuns(): LocalRun[] { return this.runs; }
@@ -476,16 +495,92 @@ export class SessionController implements vscode.Disposable {
 
   async newConversation(): Promise<void> {
     if (isActive(this.snapshot.turnState)) return;
+    this.conversations?.beginNew();
     for (const definition of this.profile.controls ?? []) if (definition.resetOnNewConversation) await this.setControl(definition.id, definition.default);
     const controls = { ...this.controls }; const remoteSessions = this.publicRemoteSessions(this.remoteSessionRepository.list(this.remoteSessionKey())); this.snapshot = createSnapshot(vscode.workspace.isTrusted); this.networkEntries = []; this.requestPreview = undefined; this.currentTurn = undefined; this.nextEventSequence = 1; this.nextTurnIndex = 0; this.controls = controls; this.refreshSnapshotControls(); this.snapshot.remoteSessions = remoteSessions; this.rawBuffer.clear(); this.lastInteraction = undefined; await this.startSession();
   }
-  clearConversation(): void { if (isActive(this.snapshot.turnState)) return; this.snapshot.messages = []; this.snapshot.conversationId = undefined; this.snapshot.rawEvents = []; this.snapshot.normalizedEvents = []; resetReducerState(this.snapshot); this.snapshot.metrics = createSnapshot(this.snapshot.trusted).metrics; this.snapshot.errors = []; this.snapshot.droppedEventCount = 0; this.snapshot.droppedNormalizedEventCount = 0; this.snapshot.droppedMessageCount = 0; this.networkEntries = []; this.requestPreview = undefined; this.currentTurn = undefined; this.nextEventSequence = 1; this.nextTurnIndex = 0; this.rawBuffer.clear(); this.changed(); }
+  clearConversation(): void { if (isActive(this.snapshot.turnState)) return; this.conversations?.beginNew(); this.snapshot.messages = []; this.snapshot.conversationId = undefined; this.snapshot.rawEvents = []; this.snapshot.normalizedEvents = []; resetReducerState(this.snapshot); this.snapshot.metrics = createSnapshot(this.snapshot.trusted).metrics; this.snapshot.errors = []; this.snapshot.droppedEventCount = 0; this.snapshot.droppedNormalizedEventCount = 0; this.snapshot.droppedMessageCount = 0; this.networkEntries = []; this.requestPreview = undefined; this.currentTurn = undefined; this.nextEventSequence = 1; this.nextTurnIndex = 0; this.rawBuffer.clear(); this.changed(); }
 
-  applyRemoteSession(conversationId: string): void {
+  async applyRemoteSession(conversationId: string): Promise<void> {
     if (isActive(this.snapshot.turnState)) return;
     const reference = this.snapshot.remoteSessions?.find((item) => item.conversationId === conversationId); if (!reference) return;
+    if (this.conversations && this.profile.conversations?.history && vscode.workspace.isTrusted) {
+      const restored = await this.conversations.openRemote(reference.conversationId, reference.title);
+      if (restored && !isActive(this.snapshot.turnState)) { this.restoreConversation(restored); return; }
+    }
     const remoteSessions = this.publicRemoteSessions(this.snapshot.remoteSessions ?? []); this.snapshot = createSnapshot(vscode.workspace.isTrusted); this.networkEntries = []; this.requestPreview = undefined; this.currentTurn = undefined; this.nextEventSequence = 1; this.nextTurnIndex = 0; this.refreshSnapshotControls(); this.snapshot.remoteSessions = remoteSessions; this.snapshot.conversationId = reference.conversationId; this.snapshot.title = reference.title; this.snapshot.sessionState = 'ready'; this.rawBuffer.clear(); this.lastInteraction = undefined;
     this.snapshot.messages.push({ id: `remote-reference-${reference.conversationId}`, role: 'system', status: 'completed', createdAt: Date.now(), completedAt: Date.now(), parts: [{ type: 'text', text: localize('Previous messages were not loaded. This profile only stores a remote session reference.') }], citations: [], actions: [], followups: [] }); this.changed(true);
+  }
+
+  /** Switches the editor to an archived or server conversation without a request. */
+  async openConversation(key: string): Promise<boolean> {
+    if (!this.conversations || isActive(this.snapshot.turnState) || this.snapshot.replay?.status === 'playing') return false;
+    if (key === this.conversations.currentKey) return true;
+    const restored = await this.conversations.open(key);
+    if (!restored || isActive(this.snapshot.turnState)) return false;
+    this.restoreConversation(restored);
+    return true;
+  }
+  async deleteConversation(key: string): Promise<boolean> { return this.conversations ? this.conversations.remove(key) : false; }
+  async refreshConversationList(): Promise<void> { if (vscode.workspace.isTrusted) await this.conversations?.refreshRemote(); }
+  async verifyConversationHistory(): Promise<void> { if (vscode.workspace.isTrusted && !isActive(this.snapshot.turnState)) await this.conversations?.verify(structuredClone(this.snapshot)); }
+
+  private restoreConversation(restored: { conversationId?: string; title?: string; opening?: SessionSnapshot['opening']; messages: ChatMessage[] }): void {
+    this.replayEngine?.dispose(); this.replayEngine = undefined;
+    const remoteSessions = this.publicRemoteSessions(this.snapshot.remoteSessions ?? []);
+    this.snapshot = createSnapshot(vscode.workspace.isTrusted);
+    this.networkEntries = []; this.requestPreview = undefined; this.currentTurn = undefined; this.nextEventSequence = 1; this.nextTurnIndex = 0; this.rawBuffer.clear(); this.lastInteraction = undefined; this.finalized = true;
+    this.refreshSnapshotControls();
+    this.snapshot.remoteSessions = remoteSessions;
+    if (restored.conversationId) this.snapshot.conversationId = restored.conversationId;
+    if (restored.title) this.snapshot.title = restored.title;
+    this.snapshot.opening = restored.opening ? this.publicValue(restored.opening) : this.snapshot.opening;
+    this.snapshot.messages = this.publicValue(restored.messages);
+    this.snapshot.sessionState = 'ready';
+    this.boundSnapshotCollections();
+    this.changed(true);
+  }
+
+  private async fetchConversationJson(kind: 'list' | 'history', conversationId?: string): Promise<unknown> {
+    if (!vscode.workspace.isTrusted) throw errors.trust();
+    const definition = kind === 'list' ? this.profile.conversations?.list?.request : this.profile.conversations?.history?.request;
+    if (!definition) throw errors.request(localize('This Profile does not configure a conversation {kind} request.', { kind }));
+    const context = this.contextFor('', { kind: 'manual' });
+    context.conversation = { ...(context.conversation as Record<string, unknown>), id: conversationId ?? this.snapshot.conversationId };
+    const request = await this.requestBuilder().build(definition as never, context);
+    this.registerRequestSecrets(request);
+    if (!await this.authorizeRequest(request, kind === 'list' ? 'conversationList' : 'conversationHistory') || this.disposed || !vscode.workspace.isTrusted) throw new TurnStageError('AuthorizationError', localize('Connection access was not allowed.'));
+    const startedAt = Date.now();
+    const networkEntry = this.beginNetworkExchange('history', request, startedAt);
+    const logId = `history-${crypto.randomUUID().slice(0, 8)}`;
+    logAt(this.log, 'info', `[${logId}] start ${requestScopeEvidence(this.profile.id, this.environment.id)} kind=${kind} method=${request.method} url=${diagnosticUrl(this.publicValue(request.url))}`);
+    try {
+      const bounded = await fetchBoundedText(request, {
+        controller: new AbortController(),
+        timeoutMs: request.timeoutMs ?? 30_000,
+        maxBytes: MAX_CONVERSATION_RESPONSE_BYTES,
+        rejectOnTruncate: true,
+        timeoutMessage: localize('The conversation history request timed out.'),
+        tooLargeMessage: localize('The conversation history response exceeded the maximum allowed size.'),
+        onHeaders: (response) => this.recordNetworkHeaders(networkEntry, response.status, response.headers, Date.now() - startedAt),
+        onTruncate: () => { networkEntry.responseBodyTruncated = true; },
+        ...(request.tls?.allowInvalidCertificates === true ? { insecureTlsRoute: resolveVSCodeInsecureTlsRoute(request.url) } : {}),
+      });
+      this.appendNetworkResponse(networkEntry, bounded.text);
+      if (!bounded.response.ok) throw new TurnStageError('HttpStatusError', localize('HTTP {status}.', { status: bounded.response.status }), { status: bounded.response.status });
+      let data: unknown;
+      try { data = bounded.text ? JSON.parse(bounded.text) : {}; }
+      catch { throw new TurnStageError('ParseError', localize('The conversation history response is not valid JSON.')); }
+      this.finishNetworkExchange(networkEntry, 'completed');
+      logAt(this.log, 'info', `[${logId}] completed status=${bounded.response.status} elapsed=${formatDuration(Date.now() - startedAt)}`);
+      this.changed();
+      return this.publicValue(data);
+    } catch (error) {
+      this.finishNetworkExchange(networkEntry, 'failed', error);
+      logAt(this.log, 'warn', `[${logId}] failed type=${errorType(error)}${errorStatus(error)} elapsed=${formatDuration(Date.now() - startedAt)}`);
+      this.changed();
+      throw error instanceof TurnStageError ? new Error(this.publicValue(error.message)) : error;
+    }
   }
 
   replay(runId: string, speed: ReplaySpeed = 1): 'started' | 'active' | 'notFound' | 'unavailable' {
@@ -590,6 +685,10 @@ export class SessionController implements vscode.Disposable {
       this.refreshRunStorageBytes();
       this.changed();
     }
+    if (record && this.conversations && vscode.workspace.isTrusted && !this.snapshot.replay) {
+      await this.conversations.record(this.snapshot);
+      if (result.type === 'completed' && this.conversations.shouldVerifyAfterTurn()) { const settled = structuredClone(this.snapshot); void this.conversations.verify(settled).catch(() => undefined); }
+    }
     this.currentTurn = undefined;
   }
 
@@ -681,7 +780,9 @@ export class SessionController implements vscode.Disposable {
   private requestDefinitionUsesSecretControl(purpose: RequestAuthorizationPurpose): boolean {
     const definition = purpose === 'opening'
       ? this.profile.opening?.request
-      : purpose === 'stop' ? this.profile.conversation.stop?.request : this.profile.conversation.send;
+      : purpose === 'stop' ? this.profile.conversation.stop?.request
+        : purpose === 'conversationList' ? this.profile.conversations?.list?.request
+          : purpose === 'conversationHistory' ? this.profile.conversations?.history?.request : this.profile.conversation.send;
     if (!definition) return false;
     const serialized = JSON.stringify(definition);
     return (this.profile.controls ?? []).some((control) => control.persist === 'secret' && serialized.includes(`controls.${control.id}`));

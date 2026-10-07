@@ -768,5 +768,12 @@
   "Certificate verification is disabled for this request.": "このリクエストでは証明書の検証が無効です。",
   "TurnStage will ask again if the destination, secret references, or TLS settings change.": "接続先、シークレット参照、または TLS 設定が変更された場合、TurnStage は再度確認します。",
   "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "ローカルストリームは停止しました。接続が許可されなかったため、リモート停止リクエストは送信されませんでした。",
-  "Importing a browser-local suite copy is available only in TurnStage Web.": "ブラウザー内のスイートコピーのインポートは TurnStage Web でのみ利用できます。"
+  "Importing a browser-local suite copy is available only in TurnStage Web.": "ブラウザー内のスイートコピーのインポートは TurnStage Web でのみ利用できます。",
+  "This Profile does not configure a conversation {kind} request.": "このプロファイルには会話の {kind} リクエストが設定されていません。",
+  "Connection access was not allowed.": "接続へのアクセスが許可されませんでした。",
+  "The conversation history request timed out.": "会話履歴のリクエストがタイムアウトしました。",
+  "The conversation history response exceeded the maximum allowed size.": "会話履歴のレスポンスが許容サイズを超えました。",
+  "The conversation history response is not valid JSON.": "会話履歴のレスポンスが有効な JSON ではありません。",
+  "Conversation archive size must be an integer from 1 to 100.": "会話の保存数は 1〜100 の整数で指定してください。",
+  "The conversation history request should reference conversation.id so TurnStage can load a specific conversation.": "特定の会話を読み込めるように、会話履歴リクエストでは conversation.id を参照してください。"
 }

@@ -34,9 +34,10 @@ The schema requires `version`, `id`, `name`, `conversation`, and `stream`.
 | `controls` | array of controls, optional | Rendered above the chat and sent in request context |
 | `opening` | opening definition, optional | Static/request/disabled opening behavior |
 | `conversation` | object, required | Contains `send` and optional `stop` definitions |
+| `conversations` | object, optional | Server `list` and `history` requests for the conversation drawer and the history consistency check |
 | `stream` | stream definition, required | Transport and mapping rules |
 | `ui` | object, optional | Layout/composer/component hints; schema intentionally allows extra UI keys |
-| `history` | object, optional | Local-run settings; schema and types allow extra keys |
+| `history` | object, optional | Local-run, remote-reference, and conversation-archive settings |
 | `errorPolicy` | boolean-valued object, optional | Error display/continuation hints; not every flag is interpreted by the runtime |
 | `security` | object, optional | URI scheme/domain and VS Code command allowlists |
 | `metrics` | object, optional | Optional list of metric names |
@@ -685,8 +686,64 @@ files.
 `history.remoteSessions.mode: "referenceOnly"` stores conversation ID, title,
 timestamp, actor, and environment in VS Code global state under a workspace-
 and-profile-scoped key. Applying a reference sets the conversation ID and
-clears visible chat content; because no message-load endpoint is configured,
-TurnStage explicitly says that previous messages were not loaded.
+clears visible chat content. When `conversations.history` is configured, the
+reference's messages are loaded from the server; otherwise TurnStage
+explicitly says that previous messages were not loaded.
+
+### Conversation drawer and history
+
+`history.conversations` controls the local conversation archive behind the chat
+preview's conversation drawer. It is enabled by default; `enabled: false` turns
+it off and `maxConversations` (`1`–`100`, default `20`) bounds it. After each
+turn the current conversation's settled messages (at most 200), server
+conversation ID, title, and opening are saved under a workspace + Profile +
+environment scope (VS Code extension global storage, or browser IndexedDB in
+TurnStage Web). Starting a new conversation from the chat toolbar therefore no
+longer asks for confirmation, and switching conversations restores messages in
+place without sending a request. Restricted Mode and test runs do not archive.
+New-conversation and clear actions that arrive from a server response still ask.
+
+The optional root `conversations` object connects the drawer to a stateful
+backend:
+
+```jsonc
+"conversations": {
+  "list": {
+    "request": { "method": "GET", "url": "${env.baseUrl}/conversations" },
+    "response": { "itemsPath": "$.data", "idPath": "id", "titlePath": "title", "updatedAtPath": "updated_at" }
+  },
+  "history": {
+    "request": { "method": "GET", "url": "${env.baseUrl}/conversations/${conversation.id}/messages" },
+    "response": { "messagesPath": "$.messages", "rolePath": "role", "textPath": "content", "createdAtPath": "created_at" },
+    "verifyAfterTurn": true
+  }
+}
+```
+
+Both requests use the normal request definition (headers, secrets, TLS,
+timeouts) and appear in the Network inspector as *Conversation history*. The
+response paths are optional: without them TurnStage looks for common shapes
+(`data`/`items`/`conversations`, `id`/`conversation_id`, `title`/`name`,
+`messages`, `role`, `content`/`text`). Content can be a string, an array of
+content parts, or an object with `text`. Timestamps can be epoch milliseconds,
+epoch seconds, or ISO strings. Roles such as `human`/`ai`/`model` are mapped to
+user and assistant; tool messages are skipped.
+
+* `list` adds server conversations that are not already archived locally.
+* `history` loads a server conversation's persisted messages. They are shown
+  read-only above a divider, and the next turn continues with the same
+  conversation ID.
+* With `history` configured and `verifyAfterTurn` not `false`, TurnStage
+  re-reads the history after every completed turn and compares the newest three
+  user and assistant messages with what was streamed (whitespace-insensitive).
+  The toolbar shows *Matches server copy* or the number of differences; the
+  drawer's *History check* view shows a word-level diff. This catches backends
+  that rewrite or drop content after streaming, which would otherwise change the
+  context of the next turn.
+
+Stateless APIs that expect the full transcript do not need `conversations`:
+send `conversation.messages` in the request body and the archive restores it
+when you switch back to a conversation.
 
 `errorPolicy` fields are booleans: `preservePartialContent`, `showErrorPart`,
 `keepConversationId`, `allowContinuation`, and `releaseAllLocks`. Failed turns

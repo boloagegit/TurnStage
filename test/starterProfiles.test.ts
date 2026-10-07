@@ -44,6 +44,7 @@ describe('starter resources', () => {
         'normal', ...(id === 'agent-flow' ? ['rich-html', 'rich-markdown', 'rich-mixed', 'rich-complex'] : []),
         'slow', 'chunk-split', 'malformed-json', 'unknown-event',
         'partial-error', 'http-401', 'http-500', 'idle-timeout', 'disconnect',
+        ...(id === 'basic-sse-chat' ? ['history-rewrite'] : []),
       ]);
       expect(JSON.stringify(parsed.profile?.conversation.send.variants)).toContain('controls.mode');
     });

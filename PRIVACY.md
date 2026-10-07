@@ -15,6 +15,14 @@ Recorded-run retention defaults to 20 runs per Profile and can be changed in
 the Profile or with the `turnstage.runRetention` setting. You can remove
 individual runs or clear a Profile's run history from the Runs interface.
 
+The conversation drawer keeps up to 20 recent conversations per Profile and
+environment (messages, conversation ID, and title) in VS Code extension storage
+or, in TurnStage Web, in the browser's IndexedDB. Set
+`history.conversations.enabled` to `false` in a Profile to turn this off, or
+delete individual conversations from the drawer. Conversation history requests
+are sent only when a Profile configures `conversations.list` or
+`conversations.history`.
+
 ## Network requests
 
 TurnStage sends requests only to endpoints selected by the active Profile. A

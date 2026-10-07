@@ -14,6 +14,8 @@ export type ProductIconName =
   | 'chevron-down'
   | 'chevron-right'
   | 'circle-filled'
+  | 'comment-discussion'
+  | 'history'
   | 'close'
   | 'clear-all'
   | 'copy'
@@ -65,6 +67,8 @@ const codicons: Record<ProductIconName, string> = {
   'chevron-down': 'chevron-down',
   'chevron-right': 'chevron-right',
   'circle-filled': 'circle-filled',
+  'comment-discussion': 'comment-discussion',
+  history: 'history',
   close: 'close',
   'clear-all': 'clear-all',
   copy: 'copy',
@@ -108,6 +112,6 @@ export function ProductIcon({ name, className = '' }: { name: ProductIconName; c
   return <span className={`codicon codicon-${codicons[name]} product-icon ${className}`.trim()} aria-hidden="true" />;
 }
 
-export function IconButton({ icon, label, title = label, className = '', ...props }: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'aria-label' | 'title'> & { icon: ProductIconName; label: string; title?: string }): React.JSX.Element {
+export function IconButton({ icon, label, title = label, className = '', ...props }: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'aria-label' | 'title'> & { icon: ProductIconName; label: string; title?: string; ref?: React.Ref<HTMLButtonElement> }): React.JSX.Element {
   return <button {...props} className={`icon-button ${className}`.trim()} aria-label={label} title={title}><ProductIcon name={icon} /></button>;
 }

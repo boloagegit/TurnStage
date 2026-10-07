@@ -125,6 +125,69 @@ describe('SessionController end-to-end functional flow', () => {
     expect(outputText).not.toContain('local-api-key');
   });
 
+  it('archives conversations, loads server history, and checks it against the stream', async () => {
+    const { SessionController } = await import('../src/extension/runtime/sessionController');
+    const profile = basicProfile();
+    profile.conversation.send.variants = [
+      { id: 'first-turn', when: { path: 'conversation.id', operator: 'notExists' }, body: { mode: { $value: 'controls.mode' }, message: { $value: 'input.text' } } },
+      { id: 'continuation', when: { path: 'conversation.id', operator: 'exists' }, body: { mode: { $value: 'controls.mode' }, message: { $value: 'input.text' }, conversationId: { $value: 'conversation.id' } } },
+    ];
+    profile.conversations = {
+      list: { request: { method: 'GET', url: '${env.baseUrl}/conversations' }, response: { itemsPath: '$.data', updatedAtPath: 'updated_at' } },
+      history: { request: { method: 'GET', url: '${env.baseUrl}/conversations/${conversation.id}/messages' } },
+    };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: { baseUrl } };
+    let stored: unknown[] = [];
+    const states: Array<{ check?: { status: string; results: Array<{ status: string; role: string }> }; items: Array<{ key: string; source: string; title: string }>; currentKey: string; remote: { status: string } }> = [];
+    const authorize = vi.fn(async () => true);
+    const controller = new SessionController(profile, {} as never, environment, {} as never, { get: vi.fn(async () => 'test-token') } as never, { list: vi.fn(async () => []), save: vi.fn(async () => undefined) } as never, vi.fn(), { appendLine: vi.fn() } as never, {
+      authorizeRequest: authorize,
+      conversations: { storage: { load: async () => stored as never, save: async (items) => { stored = items; } }, changed: (state) => { states.push(structuredClone(state) as never); } },
+    });
+    await controller.loadRuns();
+    await controller.send('Where is my refund?', { kind: 'manual' });
+    const firstKey = controller.getConversationDirectory()!.currentKey;
+    await vi.waitFor(() => expect(controller.getConversationDirectory()?.check?.status).toBe('done'));
+    expect(controller.getConversationDirectory()?.check?.results.map((result) => [result.role, result.status])).toEqual([['user', 'match'], ['assistant', 'match']]);
+    expect(authorize.mock.calls.map((call) => (call as unknown[])[1])).toEqual(['conversation', 'conversationHistory']);
+    expect(controller.getNetworkEntries().map((entry) => entry.kind)).toEqual(['stream', 'history']);
+    expect(stored).toHaveLength(1);
+    const conversationId = controller.snapshot.conversationId!;
+
+    // A new conversation keeps the first one reachable and needs no confirmation.
+    expect(controller.preservesConversations()).toBe(true);
+    await controller.newConversation();
+    expect(controller.snapshot.messages).toEqual([]);
+    expect(controller.getConversationDirectory()?.currentKey).not.toBe(firstKey);
+
+    // The server rewrites its saved answer in this mode, so the check reports a difference.
+    profile.conversation.send.headers = { ...profile.conversation.send.headers, 'x-turnstage-mode': 'history-rewrite' };
+    await controller.send('Second conversation', { kind: 'manual' });
+    await vi.waitFor(() => expect(controller.getConversationDirectory()?.check?.status).toBe('done'));
+    expect(controller.getConversationDirectory()?.check?.results.find((result) => result.role === 'assistant')).toMatchObject({ status: 'mismatch', streamedText: 'Here is the sample result.', persistedText: 'Here is the rewritten result.' });
+
+    // Switching back restores the archived messages and server id without a request.
+    const requestsBefore = controller.getNetworkEntries().length;
+    expect(await controller.openConversation(firstKey)).toBe(true);
+    expect(controller.snapshot.conversationId).toBe(conversationId);
+    expect(controller.snapshot.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(controller.getNetworkEntries().length).toBeLessThanOrEqual(requestsBefore);
+
+    // The server list includes both conversations; loading one reads its persisted messages.
+    await controller.refreshConversationList();
+    expect(controller.getConversationDirectory()?.remote.status).toBe('ready');
+    stored = [];
+    const fresh = new SessionController(profile, {} as never, environment, {} as never, { get: vi.fn(async () => 'test-token') } as never, { list: vi.fn(async () => []), save: vi.fn(async () => undefined) } as never, vi.fn(), { appendLine: vi.fn() } as never, { authorizeRequest: authorize, conversations: { changed: () => undefined } });
+    await fresh.loadRuns();
+    await fresh.refreshConversationList();
+    const remote = fresh.getConversationDirectory()!.items.find((item) => item.conversationId === conversationId);
+    expect(remote).toMatchObject({ key: `remote:${conversationId}`, source: 'remote', title: 'Sample conversation' });
+    expect(await fresh.openConversation(remote!.key)).toBe(true);
+    expect(fresh.snapshot.conversationId).toBe(conversationId);
+    expect(fresh.snapshot.messages.map((message) => [message.role, message.metadata?.historySource])).toEqual([['user', 'server'], ['assistant', 'server']]);
+    expect(fresh.snapshot.sessionState).toBe('ready');
+  });
+
   it('blocks transport when authorization is denied and recognizes transformed secret controls', async () => {
     const { SessionController } = await import('../src/extension/runtime/sessionController');
     const profile = basicProfile();

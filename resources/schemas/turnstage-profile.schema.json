@@ -18,6 +18,28 @@
       "type": "object", "required": ["send"], "additionalProperties": false,
       "properties": { "send": { "$ref": "#/$defs/request" }, "stop": { "$ref": "#/$defs/stop" } }
     },
+    "conversations": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional server endpoints for the conversation drawer: list saved conversations and read a conversation's persisted messages.",
+      "properties": {
+        "list": {
+          "type": "object", "required": ["request"], "additionalProperties": false,
+          "properties": {
+            "request": { "$ref": "#/$defs/request" },
+            "response": { "type": "object", "additionalProperties": false, "properties": { "itemsPath": { "type": "string" }, "idPath": { "type": "string" }, "titlePath": { "type": "string" }, "updatedAtPath": { "type": "string" } } }
+          }
+        },
+        "history": {
+          "type": "object", "required": ["request"], "additionalProperties": false,
+          "properties": {
+            "request": { "$ref": "#/$defs/request", "description": "Use ${conversation.id} for the conversation being loaded or verified." },
+            "response": { "type": "object", "additionalProperties": false, "properties": { "messagesPath": { "type": "string" }, "idPath": { "type": "string" }, "rolePath": { "type": "string" }, "textPath": { "type": "string" }, "createdAtPath": { "type": "string" } } },
+            "verifyAfterTurn": { "type": "boolean", "description": "Re-read history after each completed turn and compare it with the streamed messages. Defaults to true." }
+          }
+        }
+      }
+    },
     "stream": { "$ref": "#/$defs/stream" },
     "ui": {
       "type": "object",
@@ -210,7 +232,8 @@
       "additionalProperties": false,
       "properties": {
         "remoteSessions": { "type": "object", "required": ["mode"], "additionalProperties": false, "properties": { "mode": { "const": "referenceOnly" }, "scope": { "type": "array", "uniqueItems": true, "items": { "enum": ["profile", "actor", "environment"] } } } },
-        "localRuns": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean" }, "maxRuns": { "type": "integer", "minimum": 1, "maximum": 100 }, "recordRawEvents": { "type": "boolean" }, "recordNormalizedEvents": { "type": "boolean" }, "recordChatSnapshot": { "type": "boolean" } } }
+        "localRuns": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean" }, "maxRuns": { "type": "integer", "minimum": 1, "maximum": 100 }, "recordRawEvents": { "type": "boolean" }, "recordNormalizedEvents": { "type": "boolean" }, "recordChatSnapshot": { "type": "boolean" } } },
+        "conversations": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean" }, "maxConversations": { "type": "integer", "minimum": 1, "maximum": 100 } } }
       }
     },
     "errorPolicy": { "type": "object", "additionalProperties": false, "properties": { "preservePartialContent": { "type": "boolean" }, "showErrorPart": { "type": "boolean" }, "keepConversationId": { "type": "boolean" }, "allowContinuation": { "type": "boolean" }, "releaseAllLocks": { "type": "boolean" } } },

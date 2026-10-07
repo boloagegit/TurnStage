@@ -2,7 +2,7 @@ import React, { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom';
 import type { CSSProperties, FormEvent, KeyboardEvent, ReactNode } from 'react';
 import type { WebviewPayload } from '../shared/protocol';
-import type {
+import type { ConversationDirectory,
   ChatMessage,
   Citation,
   FormDefinition,
@@ -28,6 +28,8 @@ import { RichMarkdown } from './RichMarkdown';
 import { CaseEditorOverlay } from './CaseEditorOverlay';
 import type { ResponseClassStyles, ResponseStyleRules } from '../shared/responseClassStyles';
 import { captureChatScreenshot, copyChatScreenshotToClipboard } from './chatScreenshot';
+import { ConversationDrawer, historyCheckSummary, type ConversationDrawerView } from './ConversationDrawer';
+import { isHistoryMessage } from '../shared/conversationHistory';
 import { resolveComposer, resolveMessageActions, resolveMessageActionVisibility, resolveStreaming, type ResolvedStreaming } from './uiConfig';
 import { advanceGraphemeBoundary, calculateRevealStep, resolveRevealPacing } from './streamingReveal';
 import { isSafeRegexPattern } from '../shared/regexSafety';
@@ -115,6 +117,8 @@ export interface MobileChatPreviewProps {
   onMessageScrollTopChange?: (value: number) => void;
   screenshotMode?: 'copy' | 'download';
   className?: string;
+  /** Conversation drawer state from the host; omitted when the host has no conversation archive. */
+  conversations?: ConversationDirectory;
 }
 
 /**
@@ -145,7 +149,8 @@ export function MobileChatPreview({
   initialMessageScrollTop,
   onMessageScrollTopChange,
   screenshotMode = 'copy',
-  className
+  className,
+  conversations
 }: MobileChatPreviewProps): React.JSX.Element {
   const [uncontrolledViewport, setUncontrolledViewport] = useState<ChatViewportState>(controlledViewport ?? DEFAULT_CHAT_VIEWPORT);
   const viewport = controlledViewport ?? uncontrolledViewport;
@@ -168,10 +173,27 @@ export function MobileChatPreview({
   const [capturingVisual, setCapturingVisual] = useState<'baseline' | 'compare'>();
   const [screenshotStatus, setScreenshotStatus] = useState('');
   const [responseDetailId, setResponseDetailId] = useState<string>();
+  const [conversationDrawer, setConversationDrawer] = useState<ConversationDrawerView>();
+  const conversationToggleRef = useRef<HTMLButtonElement>(null);
+  const conversationDrawerId = `${useId()}-conversations`;
+  const closeConversationDrawer = useStableCallback(() => { setConversationDrawer(undefined); conversationToggleRef.current?.focus(); });
+  const setConversationView = useStableCallback((view: ConversationDrawerView) => setConversationDrawer(view));
+  const revealConversationMessage = useStableCallback((messageId: string) => {
+    onSelectMessage?.(messageId);
+    messagesRef.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  });
+  const historyCheck = historyCheckSummary(conversations);
+  const conversationsAvailable = Boolean(conversations && (conversations.enabled || conversations.remote.configured));
   const allSnapshotMessages = snapshot?.messages ?? EMPTY_MESSAGES;
   const [visibleMessageLimit, setVisibleMessageLimit] = useState(DEFAULT_VISIBLE_CHAT_MESSAGES);
   const hiddenMessageCount = Math.max(0, allSnapshotMessages.length - visibleMessageLimit);
   const snapshotMessages = useMemo(() => hiddenMessageCount ? allSnapshotMessages.slice(hiddenMessageCount) : allSnapshotMessages, [allSnapshotMessages, hiddenMessageCount]);
+  // Index (within the visible slice) of the first message of this session after messages loaded from server history.
+  const historyBoundaryIndex = useMemo(() => {
+    let lastHistory = -1;
+    snapshotMessages.forEach((message, index) => { if (isHistoryMessage(message)) lastHistory = index; });
+    return lastHistory >= 0 && lastHistory < snapshotMessages.length - 1 ? lastHistory + 1 : -1;
+  }, [snapshotMessages]);
   const responseDetailMessage = useMemo(() => allSnapshotMessages.find((message) => message.id === responseDetailId), [allSnapshotMessages, responseDetailId]);
   const hasMessageTagRules = Boolean(profile.ui?.messageTags?.length);
   // Tags are the only consumer of this index. Skip indexing every buffered event when no rule exists.
@@ -440,7 +462,12 @@ export function MobileChatPreview({
           <ProductIcon name="circle-filled" />
           <span>{humanize(sessionState)}</span>
         </span>
-        {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon="debug-restart" label={t('Restart session')} type="button" disabled={!trusted || active || snapshot.sessionState === 'loadingOpening'} onClick={() => post({ type: 'conversation.new' })} />}
+        {historyCheck && <button type="button" className={`mobile-chat-preview__history-check mobile-chat-preview__history-check--${historyCheck.status}`} aria-controls={conversationDrawer ? conversationDrawerId : undefined} onClick={() => setConversationDrawer((current) => current === 'check' ? undefined : 'check')}>
+          {historyCheck.status === 'checking' ? <ProductIcon name="loading" className="codicon-modifier-spin" /> : <span className="mobile-chat-preview__history-check-mark" aria-hidden="true" />}
+          <span>{historyCheck.status === 'checking' ? t('Checking server copy…') : historyCheck.status === 'match' ? t('Matches server copy') : historyCheck.status === 'failed' ? t('History check failed') : t('{count} differ from server', { count: formatNumber(historyCheck.differences) })}</span>
+        </button>}
+        {conversationsAvailable && <IconButton ref={conversationToggleRef} className="mobile-chat-preview__conversations" icon="comment-discussion" label={t('Conversations')} type="button" aria-expanded={Boolean(conversationDrawer)} aria-controls={conversationDrawer ? conversationDrawerId : undefined} onClick={() => setConversationDrawer((current) => current ? undefined : 'conversations')} />}
+        {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon={conversations?.enabled ? 'add' : 'debug-restart'} label={t(conversations?.enabled ? 'New conversation' : 'Restart session')} type="button" disabled={!trusted || active || snapshot.sessionState === 'loadingOpening'} onClick={() => post({ type: 'conversation.new' })} />}
       </div>
       <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(screenshotMode === 'download' ? capturingScreenshot ? 'Downloading chat screenshot…' : 'Download chat screenshot' : capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
       {onConfigure && <IconButton icon="settings-gear" label={t('Configure profile')} type="button" onClick={onConfigure} />}
@@ -463,9 +490,9 @@ export function MobileChatPreview({
             {snapshot?.sessionState === 'loadingOpening' && profile.opening?.mode === 'request' && <OpeningLoading headingId={`${previewId}-opening-loading-heading`} />}
             {snapshot?.sessionState === 'failed' && profile.opening?.mode === 'request' && <OpeningError profile={profile} snapshot={snapshot} post={post} trusted={trusted} headingId={`${previewId}-opening-error-heading`} />}
             {opening && componentVisible(profile, 'opening') && <OpeningCard profile={profile} opening={opening} active={active} trusted={trusted} setDraft={setDraft} send={sendAndFollow} post={post} headingId={`${previewId}-opening-heading`} />}
-      {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} messageTagEventIndex={hasMessageTagRules ? messageTagEventIndex : EMPTY_MESSAGE_TAG_INDEX} post={stablePost} send={sendAndFollow} setDraft={stableSetDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage ? stableSelectMessage : undefined} onOpenResponse={message.role === 'assistant' ? openResponse : undefined} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback?.sourceMessageId === message.id ? messageActionFeedback : undefined} onActionFeedback={onMessageActionFeedback ? stableActionFeedback : undefined} />)}
+      {snapshotMessages.map((message, index) => <React.Fragment key={message.id}>{index === historyBoundaryIndex && <p className="mobile-chat-preview__history-divider" role="separator"><span>{t('Earlier messages loaded from the server · new messages below')}</span></p>}<MobileMessage key={message.id} profile={profile} message={message} messageTagEventIndex={hasMessageTagRules ? messageTagEventIndex : EMPTY_MESSAGE_TAG_INDEX} post={stablePost} send={sendAndFollow} setDraft={stableSetDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage ? stableSelectMessage : undefined} onOpenResponse={message.role === 'assistant' ? openResponse : undefined} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback?.sourceMessageId === message.id ? messageActionFeedback : undefined} onActionFeedback={onMessageActionFeedback ? stableActionFeedback : undefined} /></React.Fragment>)}
             {responseActivityPhase && responseActivityPhase !== 'receiving' && !activeAssistant && <ResponseActivity profile={profile} phase={responseActivityPhase} elapsedMs={responseActivityElapsedMs} />}
-            {!snapshot && <p className="mobile-chat-preview__empty" role="status">{t('Loading conversation…')}</p>}
+            {!snapshot && <div className="mobile-chat-preview__loading" role="status" aria-label={t('Loading conversation…')}><span className="ts-skeleton ts-skeleton--bubble" /><span className="ts-skeleton ts-skeleton--bubble" /></div>}
             {snapshot && snapshotMessages.length === 0 && !opening && snapshot.sessionState === 'ready' && <p className="mobile-chat-preview__empty">{t('No messages yet. Send a message to begin.')}</p>}
             {continuationBlocked && <p className="mobile-chat-preview__continuation" role="status">{t('Continuation is disabled after this error. Start a new conversation to send another message.')}</p>}
           </div>
@@ -477,6 +504,7 @@ export function MobileChatPreview({
       </div>
       </div>
     </div>
+    {conversationDrawer && conversations && <ConversationDrawer id={conversationDrawerId} directory={conversations} messages={allSnapshotMessages} view={conversationDrawer} onViewChange={setConversationView} onClose={closeConversationDrawer} post={stablePost} busy={active || !trusted} onRevealMessage={revealConversationMessage} />}
     <p className={`mobile-chat-preview__status${screenshotStatus ? ' is-visible' : ''}`} role="status" aria-live="polite" aria-atomic="true">{screenshotStatus || statusText}</p>
     {responseDetailMessage && <ResponseContentOverlay profile={profile} message={responseDetailMessage} snapshot={snapshot} post={post} onInspect={onSelectMessage ? () => { setResponseDetailId(undefined); onSelectMessage(responseDetailMessage.id); } : undefined} onClose={() => setResponseDetailId(undefined)} />}
   </section>;
@@ -1373,3 +1401,5 @@ function slug(value: string): string {
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
 }
+
+function prefersReducedMotion(): boolean { return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches; }

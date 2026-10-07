@@ -45,7 +45,8 @@ describe('localization catalogs', () => {
       'src/webview/MobileChatPreview.tsx',
       'src/webview/SettingsWorkspace.tsx',
       'src/webview/ConfirmAction.tsx',
-      'src/webview/configEditors.tsx'
+      'src/webview/configEditors.tsx',
+      'src/webview/ConversationDrawer.tsx'
     ].map((path) => readFileSync(resolve(root, path), 'utf8')).join('\n');
     const catalogSource = readFileSync(resolve(root, 'src/webview/i18n.ts'), 'utf8');
     const usedMessages = new Set([...webviewSources.matchAll(/\bt\(\s*(['"])(.*?)\1/g)].map((match) => match[2]));

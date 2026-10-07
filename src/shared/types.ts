@@ -12,11 +12,15 @@ export interface TurnStageProfile {
   controls?: ControlDefinition[];
   opening?: OpeningDefinition;
   conversation: { send: RequestDefinition; stop?: StopDefinition };
+  /** Optional server endpoints that list saved conversations and return a conversation's persisted messages. */
+  conversations?: ConversationsDefinition;
   stream: StreamDefinition;
   ui?: UiDefinition;
   history?: {
     remoteSessions?: { mode: 'referenceOnly'; scope?: Array<'profile' | 'actor' | 'environment'> };
     localRuns?: { enabled?: boolean; maxRuns?: number; recordRawEvents?: boolean; recordNormalizedEvents?: boolean; recordChatSnapshot?: boolean };
+    /** Local conversation archive used by the conversation drawer. Enabled by default. */
+    conversations?: { enabled?: boolean; maxConversations?: number };
   };
   errorPolicy?: { preservePartialContent?: boolean; showErrorPart?: boolean; keepConversationId?: boolean; allowContinuation?: boolean; releaseAllLocks?: boolean };
   security?: { allowedUriSchemes?: string[]; allowedDomains?: string[]; allowedCommands?: string[] };
@@ -979,7 +983,7 @@ export interface MetricsSnapshot {
   abortReason?: string;
 }
 
-export type NetworkExchangeKind = 'opening' | 'stream' | 'stop';
+export type NetworkExchangeKind = 'opening' | 'stream' | 'stop' | 'history';
 export type NetworkExchangeState = 'pending' | 'streaming' | 'completed' | 'failed' | 'aborted';
 export interface NetworkExchange {
   id: string;
@@ -1116,6 +1120,56 @@ export interface ReplaySnapshot {
   speed: 0.25 | 0.5 | 1 | 2 | 4;
   index: number;
   total: number;
+}
+
+export interface ConversationListDefinition {
+  request: Omit<RequestDefinition, 'variants'>;
+  response?: { itemsPath?: string; idPath?: string; titlePath?: string; updatedAtPath?: string };
+}
+
+export interface ConversationHistoryDefinition {
+  /** `${conversation.id}` resolves to the conversation being loaded or verified. */
+  request: Omit<RequestDefinition, 'variants'>;
+  response?: { messagesPath?: string; idPath?: string; rolePath?: string; textPath?: string; createdAtPath?: string };
+  /** Re-read history after each completed turn and compare it with what was streamed. Defaults to true. */
+  verifyAfterTurn?: boolean;
+}
+
+export interface ConversationsDefinition {
+  list?: ConversationListDefinition;
+  history?: ConversationHistoryDefinition;
+}
+
+export interface ConversationSummary {
+  /** Stable drawer key: `local:<id>` for archived conversations, `remote:<conversationId>` for server-only entries. */
+  key: string;
+  source: 'local' | 'remote';
+  conversationId?: string;
+  title: string;
+  preview?: string;
+  updatedAt: number;
+  messageCount?: number;
+}
+
+export interface HistoryConsistencyResult {
+  messageId: string;
+  role: 'user' | 'assistant';
+  status: 'match' | 'mismatch' | 'missing';
+  /** Present only for mismatches; bounded. */
+  streamedText?: string;
+  persistedText?: string;
+}
+
+export interface ConversationDirectory {
+  enabled: boolean;
+  currentKey: string;
+  items: ConversationSummary[];
+  remote: { configured: boolean; status: 'idle' | 'loading' | 'ready' | 'failed'; error?: string };
+  history: { configured: boolean };
+  /** Key of a conversation whose messages are being loaded. */
+  opening?: string;
+  openError?: string;
+  check?: { status: 'checking' | 'done' | 'failed'; checkedAt?: number; error?: string; results: HistoryConsistencyResult[] };
 }
 
 export interface RemoteSessionReference {

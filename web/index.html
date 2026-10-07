@@ -8,11 +8,25 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: http: https:; connect-src http: https: ws: wss:; object-src 'none'; base-uri 'self'; form-action 'none'" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23206d72'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='system-ui' font-size='18' font-weight='700' fill='white'%3ET%3C/text%3E%3C/svg%3E" />
     <title>TurnStage Web</title>
+    <script src="./theme-boot.js"></script>
+    <style>
+      /* First-paint shell: same geometry as the app, replaced when it mounts. */
+      html, body { margin: 0; height: 100%; background: #0e0d0b; }
+      html[data-theme='light'], html[data-theme='light'] body { background: #f7f5f1; }
+      body { background: var(--vscode-editor-background, inherit); }
+      .boot-library { display: grid; align-content: start; gap: 10px; padding: 16px 12px; border-inline-end: 1px solid rgb(128 128 128 / 0.18); }
+      .boot-main { display: grid; grid-template-columns: minmax(0, 64fr) minmax(0, 36fr); }
+      .boot-chat { display: grid; align-content: start; gap: 14px; padding: 56px 24px 0; border-inline-end: 1px solid rgb(128 128 128 / 0.18); }
+      .boot-pane { display: grid; align-content: start; gap: 10px; padding: 56px 16px 0; }
+      .boot-bar { display: block; height: 12px; border-radius: 6px; background: rgb(128 128 128 / 0.14); }
+      .boot-bubble { height: 34px; border-radius: 12px; }
+      @media (max-width: 899px) { .boot-main { grid-template-columns: minmax(0, 1fr); } .boot-pane { display: none; } }
+    </style>
   </head>
   <body>
     <div id="web-shell">
-      <aside id="profile-root" aria-label="TurnStage profiles"></aside>
-      <div id="root" data-instance-id="turnstage-web"></div>
+      <aside id="profile-root" aria-label="TurnStage profiles"><div class="boot-library" aria-hidden="true"><span class="boot-bar" style="width: 60%; height: 20px"></span><span class="boot-bar" style="height: 30px"></span><span class="boot-bar" style="width: 80%"></span><span class="boot-bar" style="width: 70%"></span><span class="boot-bar" style="width: 76%"></span></div></aside>
+      <div id="root" data-instance-id="turnstage-web"><div class="boot-main" aria-busy="true" style="height: 100vh"><div class="boot-chat"><span class="boot-bar boot-bubble" style="justify-self: end; width: 46%"></span><span class="boot-bar boot-bubble" style="width: 72%"></span><span class="boot-bar boot-bubble" style="justify-self: end; width: 40%"></span></div><div class="boot-pane"><span class="boot-bar" style="width: 70%"></span><span class="boot-bar" style="width: 88%"></span><span class="boot-bar" style="width: 64%"></span><span class="boot-bar" style="width: 80%"></span></div></div></div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -31,6 +31,7 @@
   --ts-danger: #ff6b6b;
   --ts-info: #7fb8ee;
   --ts-blue: #7fb8ee;
+  --turnstage-state-run: #3dd6f5;
   --ts-green: #3ee08f;
   --ts-orange: #ffb547;
   --ts-purple: #c7a6ff;
@@ -194,6 +195,7 @@
   --ts-danger: #a82822;
   --ts-info: #155f9c;
   --ts-blue: #155f9c;
+  --turnstage-state-run: #0b7489;
   --ts-green: #176b49;
   --ts-orange: #8a5200;
   --ts-purple: #69409b;

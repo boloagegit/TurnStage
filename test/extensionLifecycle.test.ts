@@ -122,13 +122,15 @@ describe('Extension host editor lifecycle', () => {
 
   it('requires confirmation before a command restarts the current session', () => {
     expect(activateSource).toContain("!await confirmRestartSession()");
-    expect(editorSource).toContain("case 'conversation.new': if (await confirmRestartSession())");
+    // A toolbar restart skips the prompt only when the current conversation stays in the archive.
+    expect(editorSource).toContain("case 'conversation.new': if (controller.preservesConversations() || await confirmRestartSession())");
   });
 
   it('requires confirmation before clearing a conversation from commands or Webview actions', () => {
     expect(activateSource).toContain("if (controller && await confirmClearConversation()) controller.clearConversation()");
-    expect(editorSource).toContain("case 'conversation.clear': if (await confirmClearConversation()) controller.clearConversation()");
-    expect(editorSource.match(/if \(await confirmClearConversation\(\)\) controller\.clearConversation\(\)/g)).toHaveLength(3);
+    expect(editorSource).toContain("case 'conversation.clear': if (controller.preservesConversations() || await confirmClearConversation()) controller.clearConversation()");
+    // Server-provided response actions always ask, even when the conversation is archived.
+    expect(editorSource.match(/if \(await confirmClearConversation\(\)\) controller\.clearConversation\(\)/g)).toHaveLength(2);
   });
 
   it('registers a native Test Explorer controller and a bounded failure-evidence command', () => {

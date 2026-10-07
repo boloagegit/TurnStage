@@ -1,9 +1,9 @@
-import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { Activity, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AdversarialCaseCatalog, ContractCaseCatalog, HostMessage, MappingTestResult, TestOperationSnapshot, WebviewPayload, WorkspaceSection } from '../shared/protocol';
 import { isHostMessage, isWorkspaceSection, isTestRunActive, PROTOCOL_VERSION } from '../shared/protocol';
 import { browserUuid } from '../shared/uuid';
-import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ChatMessage, ConnectionDoctorSummary, EvidenceTimelineEntry, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from '../shared/types';
+import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ChatMessage, ConversationDirectory, ConnectionDoctorSummary, EvidenceTimelineEntry, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { mappingDraftFromRawEvent } from './configEditors';
 import { JsonViewer, safeJson } from './JsonViewer';
 import { IconButton, ProductIcon } from './Icon';
@@ -96,6 +96,7 @@ function App(): React.JSX.Element {
   const [testHistory, setTestHistory] = useState<{ profileId: string; runs: TestRunHistoryRecord[]; baselineRunId?: string }>();
   const [activeTimeline, setActiveTimeline] = useState<{ evidenceId: string; timeline: EvidenceTimelineSummary }>();
   const [connectionResult, setConnectionResult] = useState<ConnectionDoctorSummary>();
+  const [conversations, setConversations] = useState<ConversationDirectory>();
   const [profile, setProfile] = useState<TurnStageProfile>(); const [snapshot, setSnapshot] = useState<SessionSnapshot>(); const [runs, setRuns] = useState<LocalRunSummary[]>([]); const [requestPreview, setRequestPreview] = useState<unknown>(); const [networkEntries, setNetworkEntries] = useState<NetworkExchange[]>([]); const [diagnostics, setDiagnostics] = useState<Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number }>>([]); const [profileDirty, setProfileDirty] = useState(false); const [profileReadOnly, setProfileReadOnly] = useState(false); const [hostKind, setHostKind] = useState<'vscode' | 'web'>('vscode'); const [notice, setNotice] = useState<OperationNotice>(''); const [mappingTestResult, setMappingTestResult] = useState<MappingTestResult>(); const [remoteName, setRemoteName] = useState<string>(); const [, setLocaleVersion] = useState(0);
   useEffect(() => { setSelectedTestCases(new Map()); }, [profile?.id]);
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
@@ -120,6 +121,7 @@ function App(): React.JSX.Element {
       else if (message.type === 'profile.validated') { if (message.valid) setNotice(t('Profile is valid.')); }
       else if (message.type === 'session.snapshot') { snapshotRef.current = message.snapshot; setSnapshot(message.snapshot); setRuns(message.runs); setRequestPreview(message.requestPreview); setNetworkEntries(message.networkEntries ?? []); setConnectionResult(undefined); }
       else if (message.type === 'session.delta') { const next = applySessionDelta(snapshotRef.current, message.delta); if (!next) { post({ type: 'webview.ready' }); return; } snapshotRef.current = next; setSnapshot(next); if (message.delta.runs) setRuns(message.delta.runs); if (message.delta.requestPreviewChanged) setRequestPreview(message.delta.requestPreview); if (message.delta.networkEntries) setNetworkEntries(message.delta.networkEntries); setConnectionResult(undefined); }
+      else if (message.type === 'conversations.state') setConversations(message.state);
       else if (message.type === 'mapping.test.result') setMappingTestResult(message.result);
       else if (message.type === 'request.error') setNotice(message.error.message);
       else if (message.type === 'action.feedback') setMessageActionFeedback({ actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: message.status, message: message.message });
@@ -236,7 +238,8 @@ function App(): React.JSX.Element {
     const message = snapshot?.messages.find((item) => rawSequence !== undefined && rawSequencesForMessage(item).includes(rawSequence));
     setSelectedMessageId(message?.id);
   };
-  if (!profile) return <main className="empty"><h1>TurnStage</h1><p>{diagnostics[0]?.message ?? t('Loading profile…')}</p><button onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></main>;
+  if (!profile && diagnostics[0]) return <main className="empty"><h1>TurnStage</h1><p>{diagnostics[0].message}</p><button onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></main>;
+  if (!profile) return <AppSkeleton splitPercent={splitPercent} />;
   return <main className="app">
     <a className="skip" href="#main-panel">{t('Skip to content')}</a>
     {snapshot?.trusted === false && <div className="trust-banner" role="status"><strong>{t('Restricted mode.')}</strong> {t('This workspace is not trusted. Network requests are disabled; fixture replay remains available.')}</div>}
@@ -276,6 +279,7 @@ function App(): React.JSX.Element {
         expandedContractCaseId={expandedContractCaseId} setExpandedContractCaseId={setExpandedContractCaseId}
         expandedAdversarialCaseId={expandedAdversarialCaseId} setExpandedAdversarialCaseId={setExpandedAdversarialCaseId}
         networkInspector={networkInspector} setNetworkInspector={setNetworkInspector}
+        conversations={conversations}
       />
     </section>
     <div className="sr-status" role="status" aria-live="polite">{terminalAnnouncement(snapshot?.turnState)}</div>
@@ -284,7 +288,7 @@ function App(): React.JSX.Element {
 
 const EMPTY_HISTORY_RUNS: TestRunHistoryRecord[] = [];
 
-function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, automationResults, contractCaseCatalog, linkedContractCaseEditor, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, testsSection, setTestsSection, selectedTestCases, setSelectedTestCases, testHistory, selectedAutomationResultKey, setSelectedAutomationResultKey, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, profileReadOnly, hostKind, diagnostics, scrollPositions, onScrollPositionChange, expandedContractCaseId, setExpandedContractCaseId, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector }: {
+function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, automationResults, contractCaseCatalog, linkedContractCaseEditor, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, testsSection, setTestsSection, selectedTestCases, setSelectedTestCases, testHistory, selectedAutomationResultKey, setSelectedAutomationResultKey, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, profileReadOnly, hostKind, diagnostics, scrollPositions, onScrollPositionChange, expandedContractCaseId, setExpandedContractCaseId, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector, conversations }: {
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
   runs: LocalRunSummary[];
@@ -361,6 +365,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   setExpandedAdversarialCaseId: (id: string | undefined) => void;
   networkInspector: NetworkInspectorState;
   setNetworkInspector: (state: NetworkInspectorState) => void;
+  conversations?: ConversationDirectory;
 }): React.JSX.Element {
   const [testOperation, setTestOperation] = useState<TestOperationSnapshot>();
   const testKind: TestKindFilter = rightPaneMode === 'adversarial' ? 'adversarial' : 'contract';
@@ -517,7 +522,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
     </div>
     <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
     <section ref={previewRef} className="preview-pane">
-      <MobileChatPreview profile={profile} showEnvironment={hostKind === 'vscode'} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} viewport={chatViewport} onViewportChange={setChatViewport} onConfigure={() => setRightPaneMode('configure')} selectedMessageId={rightPaneMode === 'debug' ? selectedMessageId : undefined} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={onMessageActionFeedback} initialMessageScrollTop={scrollPositions.chat} onMessageScrollTopChange={(value) => onScrollPositionChange('chat', value)} screenshotMode={hostKind === 'web' && !window.isSecureContext ? 'download' : 'copy'} />
+      <MobileChatPreview profile={profile} showEnvironment={hostKind === 'vscode'} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} viewport={chatViewport} onViewportChange={setChatViewport} onConfigure={() => setRightPaneMode('configure')} selectedMessageId={rightPaneMode === 'debug' ? selectedMessageId : undefined} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={onMessageActionFeedback} initialMessageScrollTop={scrollPositions.chat} onMessageScrollTopChange={(value) => onScrollPositionChange('chat', value)} screenshotMode={hostKind === 'web' && !window.isSecureContext ? 'download' : 'copy'} conversations={conversations} />
     </section>
     {showRightPane && <>
       <div className={`splitter splitter--${rightPanePosition}`} role="separator" aria-label={t('Resize chat preview and right panel')} aria-orientation={rightPanePosition === 'right' ? 'vertical' : 'horizontal'} aria-valuemin={10} aria-valuemax={90} aria-valuenow={Math.round(splitPercent)} tabIndex={0} onPointerDown={beginResize} onKeyDown={(event) => {
@@ -543,10 +548,8 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
         {profileReadOnly && rightPaneMode !== 'debug' && <ReadOnlyBanner post={post} />}
         <ReadOnlyNoticeContext.Provider value={false}>
         <div id="right-pane-panel" className="right-pane-panel" role="tabpanel" aria-labelledby={`right-pane-${rightPaneMode}-tab`} tabIndex={-1}>
-          {rightPaneMode === 'debug'
-            ? <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} collapsedEventTurns={collapsedEventTurns} onCollapsedEventTurnsChange={setCollapsedEventTurns} onCreateMapping={profileReadOnly ? undefined : onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} scrollPositions={scrollPositions} onScrollPositionChange={onScrollPositionChange} networkInspector={networkInspector} onNetworkInspectorChange={setNetworkInspector} />
-            : rightPaneMode === 'tests' || rightPaneMode === 'adversarial'
-              ? <LiveCaseStatusContext.Provider value={liveCaseStatuses}><div className="unified-test-workspace">
+          <KeepAlivePane active={rightPaneMode === 'debug'} render={() => <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} collapsedEventTurns={collapsedEventTurns} onCollapsedEventTurnsChange={setCollapsedEventTurns} onCreateMapping={profileReadOnly ? undefined : onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} scrollPositions={scrollPositions} onScrollPositionChange={onScrollPositionChange} networkInspector={networkInspector} onNetworkInspectorChange={setNetworkInspector} />} />
+          <KeepAlivePane active={rightPaneMode === 'tests' || rightPaneMode === 'adversarial'} render={() => <LiveCaseStatusContext.Provider value={liveCaseStatuses}><div className="unified-test-workspace">
                   <div className="unified-test-workspace__toolbar">
                     <div className="unified-test-workspace__sections" role="tablist" aria-label={t('Test sections')} onKeyDown={(event) => {
                       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -562,7 +565,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
                   <div className="unified-test-workspace__body" role="tabpanel" aria-labelledby={activeTestSection === 'scenarios' ? 'unified-test-cases-tab' : 'unified-test-results-tab'}>
                     {activeTestSection === 'results' && <section className="unified-test-history" aria-label={t('Run history')}>
                       <div className="unified-test-history__heading"><strong>{t('Run history')}</strong><button type="button" className="danger-subtle" disabled={!visibleHistoryRuns.length || isTestRunActive(testOperation)} onClick={() => confirmHistoryAction({ title: t('Clear run history?'), actionLabel: t('Clear history'), detail: t('This clears the current test type’s run history for this Profile. Its baseline is removed if included. Other test history and evidence remain. This cannot be undone.'), tone: 'danger', onConfirm: () => { setSelectedHistoryRunId(undefined); post({ type: 'test.history.clear', kind: testKind }); } })}>{t('Clear history')}</button></div>
-                      {!visibleHistoryRuns.length ? <p className="unified-test-history__empty">{t('No recorded runs yet.')}</p> : <>
+                      {!testHistory ? <div className="unified-test-history__loading" aria-busy="true" aria-label={t('Loading run history…')}><span className="ts-skeleton ts-skeleton--text" style={{ width: '60%' }} /><span className="ts-skeleton ts-skeleton--text" style={{ width: '82%' }} /></div> : !visibleHistoryRuns.length ? <p className="unified-test-history__empty">{t('No recorded runs yet.')}</p> : <>
                         <label className="unified-test-history__selector"><span>{t('Choose a run')}</span><select value={selectedHistoryRun?.id ?? ''} onChange={(event) => setSelectedHistoryRunId(event.target.value)}>{visibleHistoryRuns.map((run) => <option key={run.id} value={run.id}>{formatDateTime(run.startedAt)} · {formatNumber(run.cases.filter((item) => item.kind === testKind).length)} {t(run.cases.filter((item) => item.kind === testKind).length === 1 ? 'case' : 'cases')} · {testRunStatusLabel(run.status)}</option>)}</select></label>
                         {selectedHistoryRun && <div className="unified-test-history__detail">
                           <div className="unified-test-history__summary"><span>{t('Runner')}: {selectedHistoryRun.runner === 'web' ? t('Web') : selectedHistoryRun.runner === 'vscode' ? 'VS Code' : 'CLI'}</span><span>{t('Status')}: {testRunStatusLabel(selectedHistoryRun.status)}</span><span>{t('Completed')}: {formatNumber(selectedHistoryRun.cases.filter((item) => item.kind === testKind && item.outcome).length)}/{formatNumber(selectedHistoryRun.cases.filter((item) => item.kind === testKind).length)}</span></div>
@@ -577,14 +580,43 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
                   </div>
                   {activeTestSection === 'scenarios' && (selectedForProfile.length > 0 || selectionNotice || completedRunForCurrentKind) && <div className="unified-test-workspace__run-actions" role="region" aria-label={t('Selected cases')}>{selectedForProfile.length > 0 && <span className="unified-test-workspace__selection-count">{t('{count} cases selected', { count: formatNumber(selectedForProfile.length) })}</span>}{selectedForProfile.length > 0 && <button type="button" onClick={() => { setSelectedTestCases((current) => new Map([...current].filter(([, item]) => item.profileId !== profile.id || item.kind !== testKind))); setSelectionNotice(undefined); }}>{t('Clear selection')}</button>}{completedRunForCurrentKind && <button type="button" onClick={() => selectTestSection('results')}>{t('View test results')}</button>}{selectionNotice && <span role="alert">{selectionNotice}</span>}{selectedForProfile.length > 0 && <button type="button" className="primary" disabled={!selectedForProfile.length || isTestRunActive(testOperation)} onClick={() => { if (selectedRunAvailability.unresolved) { setSelectionNotice(t('Some selected cases are no longer available. Refresh the list before running.')); return; } if (selectedRunAvailability.unavailable) { setSelectionNotice(t('Some selected cases need review or are not supported in this app. Open or remove them before running.')); return; } setSelectionNotice(undefined); post({ type: 'test.runSelection', cases: selectedForProfile }); }}>{t('Run selected {count}', { count: formatNumber(selectedForProfile.length) })}</button>}</div>}
                   {historyConfirmation}
-                </div></LiveCaseStatusContext.Provider>
-              : <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} profileDirty={profileDirty} diagnostics={diagnostics} readOnly={profileReadOnly} vscodeFeatures={hostKind === 'vscode'} post={post} scrollStateKey={configurationSection} scrollTop={scrollPositions[`configure.${configurationSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`configure.${configurationSection}`, value)} />}
+                </div></LiveCaseStatusContext.Provider>} />
+          <KeepAlivePane active={rightPaneMode === 'configure'} render={() => <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} profileDirty={profileDirty} diagnostics={diagnostics} readOnly={profileReadOnly} vscodeFeatures={hostKind === 'vscode'} post={post} scrollStateKey={configurationSection} scrollTop={scrollPositions[`configure.${configurationSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`configure.${configurationSection}`, value)} />} />
         </div>
         </ReadOnlyNoticeContext.Provider>
       </aside>
     </>}
     </div>
   </div>;
+}
+
+/** First frame while the host loads the Profile: the same shell geometry as the workspace, with placeholders. */
+export function AppSkeleton({ splitPercent, paneHidden = false }: { splitPercent: number; paneHidden?: boolean }): React.JSX.Element {
+  return <main className="app-skeleton" data-pane={paneHidden ? 'hidden' : 'visible'} aria-busy="true" aria-label={t('Loading profile…')} style={{ '--app-skeleton-split': `${splitPercent}fr`, '--app-skeleton-rest': `${100 - splitPercent}fr` } as React.CSSProperties}>
+    <div className="app-skeleton__chat">
+      <span className="ts-skeleton ts-skeleton--text" style={{ width: '40%' }} />
+      <div className="app-skeleton__messages"><span className="ts-skeleton ts-skeleton--bubble" /><span className="ts-skeleton ts-skeleton--bubble" /><span className="ts-skeleton ts-skeleton--bubble" /></div>
+      <span className="ts-skeleton" style={{ height: '2.6em' }} />
+    </div>
+    <div className="app-skeleton__pane">
+      <div className="app-skeleton__tabs"><span className="ts-skeleton" /><span className="ts-skeleton" /><span className="ts-skeleton" /><span className="ts-skeleton" /></div>
+      <div className="app-skeleton__rows">{[72, 88, 64, 80, 70].map((width, index) => <span key={index} className="ts-skeleton ts-skeleton--text" style={{ width: `${width}%` }} />)}</div>
+    </div>
+    <p className="sr-only" role="status">{t('Loading profile…')}</p>
+  </main>;
+}
+
+/**
+ * Keeps a right-pane view mounted after its first visit so switching tabs never
+ * remounts it (no empty frame, no lost scroll, filters or drafts). While hidden it
+ * keeps the last rendered element, so streaming updates do not re-render it.
+ */
+export function KeepAlivePane({ active, render }: { active: boolean; render: () => React.ReactNode }): React.JSX.Element | null {
+  const lastElement = useRef<React.ReactNode>(undefined);
+  const visited = useRef(false);
+  if (active) { visited.current = true; lastElement.current = render(); }
+  if (!visited.current) return null;
+  return <Activity mode={active ? 'visible' : 'hidden'}><div className="right-pane-view">{lastElement.current}</div></Activity>;
 }
 
 export function adversarialCaseCount(profile: TurnStageProfile, catalog?: AdversarialCaseCatalog): number {
@@ -1023,7 +1055,7 @@ function NetworkHeaderGroup({ title, headers }: { title: string; headers: Record
 function NetworkProperty({ label, value }: { label: string; value: string }): React.JSX.Element { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
 function isSensitiveHeaderName(name: string): boolean { return /^(?:authorization|proxy-authorization|cookie2?|set-cookie|x-api-key|api-key)$/iu.test(name) || /(?:^|[-_])(?:token|secret|credential|password|api[-_]?key)(?:$|[-_])/iu.test(name); }
 function networkRequestName(entry: NetworkExchange): string { try { const url = new URL(entry.url); return url.pathname.split('/').filter(Boolean).at(-1) || url.host; } catch { return entry.kind; } }
-function networkKindLabel(kind: NetworkExchange['kind']): string { return kind === 'opening' ? 'Opening' : kind === 'stop' ? 'Stop request' : 'Conversation stream'; }
+function networkKindLabel(kind: NetworkExchange['kind']): string { return kind === 'opening' ? 'Opening' : kind === 'stop' ? 'Stop request' : kind === 'history' ? 'Conversation history' : 'Conversation stream'; }
 function responseContentType(entry: NetworkExchange): string { return Object.entries(entry.responseHeaders ?? {}).find(([name]) => name.toLocaleLowerCase() === 'content-type')?.[1]?.split(';')[0] ?? 'fetch'; }
 function networkStateIcon(entry: NetworkExchange): 'check' | 'warning' | 'circle-filled' | 'stop' { if (entry.state === 'failed') return 'warning'; if (entry.state === 'aborted') return 'stop'; if (entry.state === 'pending' || entry.state === 'streaming') return 'circle-filled'; return 'check'; }
 function networkRowId(id: string): string { return `network-row-${stableIdToken(id)}`; }

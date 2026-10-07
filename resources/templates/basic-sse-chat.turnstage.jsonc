@@ -14,7 +14,8 @@
       { "label": "Split network chunks", "value": "chunk-split" }, { "label": "Malformed JSON event", "value": "malformed-json" },
       { "label": "Unknown event", "value": "unknown-event" }, { "label": "Partial stream error", "value": "partial-error" },
       { "label": "HTTP 401", "value": "http-401" }, { "label": "HTTP 500", "value": "http-500" },
-      { "label": "Idle timeout", "value": "idle-timeout" }, { "label": "Disconnect", "value": "disconnect" }
+      { "label": "Idle timeout", "value": "idle-timeout" }, { "label": "Disconnect", "value": "disconnect" },
+      { "label": "Server rewrites saved answer", "value": "history-rewrite" }
     ]
   }],
   "opening": {
@@ -35,6 +36,12 @@
       ]
     },
     "stop": { "strategy": "abortThenRequest", "request": { "method": "POST", "url": "${env.baseUrl}/basic/chat/stop", "headers": { "Content-Type": "application/json" }, "body": { "conversationId": { "$value": "conversation.id" }, "assistantMessageId": { "$value": "turn.assistantMessageId" }, "clientRequestId": { "$value": "turn.clientRequestId" }, "reason": "user_cancel" } }, "requiredContext": ["conversation.id", "turn.assistantMessageId"], "onMissingContext": "localAbortWithWarning", "preservePartialContent": true, "appendSystemNotice": true }
+  },
+  // Optional: lets the conversation drawer list server conversations, load their messages, and
+  // check that what was streamed matches what the server saved (used as context next turn).
+  "conversations": {
+    "list": { "request": { "method": "GET", "url": "${env.baseUrl}/conversations" }, "response": { "itemsPath": "$.data", "idPath": "id", "titlePath": "title", "updatedAtPath": "updated_at" } },
+    "history": { "request": { "method": "GET", "url": "${env.baseUrl}/conversations/${conversation.id}/messages" }, "response": { "messagesPath": "$.messages", "rolePath": "role", "textPath": "content" }, "verifyAfterTurn": true }
   },
   "stream": {
     "transport": "sse", "dataFormat": "json", "mappingMode": "firstMatch", "unexpectedEndPolicy": "fail", "doneValue": "[DONE]",

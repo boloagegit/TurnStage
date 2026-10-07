@@ -1,4 +1,4 @@
-import type { ControlDefinition, InteractionContext, LocalRun, MetricsSnapshot, NetworkExchange, NormalizedEvent, PreparedRequest, RawStreamEvent, ReplaySnapshot, SessionSnapshot, TurnStageEnvironment, TurnStageProfile } from '../../src/shared/types';
+import type { ChatMessage, ControlDefinition, InteractionContext, LocalRun, MetricsSnapshot, NetworkExchange, NormalizedEvent, PreparedRequest, RawStreamEvent, ReplaySnapshot, SessionSnapshot, TurnStageEnvironment, TurnStageProfile } from '../../src/shared/types';
 import { controlSecretValues, isControlValue } from '../../src/shared/controlValue';
 import { MappingEngine } from '../../src/extension/mapping/mappingEngine';
 import { RequestBuilder } from '../../src/extension/request/requestBuilder';
@@ -15,6 +15,7 @@ import { redactHeaders, redactKnownSecrets } from '../../src/shared/redaction';
 import { browserUuid } from './browserCrypto';
 
 const MAX_OPENING_RESPONSE_BYTES = 1024 * 1024;
+const MAX_CONVERSATION_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_NETWORK_RESPONSE_PREVIEW_CHARS = 64 * 1024;
 const MAX_EVENTS = 5000;
 const MAX_MESSAGES = 500;
@@ -253,6 +254,76 @@ export class BrowserSession {
       }
     }
     await this.start();
+  }
+
+  get busy(): boolean { return Boolean(this.abortController || this.activeOpening || this.activeStop) || ['submitting', 'waitingStart', 'streaming', 'stopping'].includes(this.state.snapshot.turnState); }
+
+  /** Shows an archived or server conversation in place, without a request. */
+  restoreConversation(restored: { conversationId?: string; title?: string; opening?: SessionSnapshot['opening']; messages: ChatMessage[] }): void {
+    this.cancelActive();
+    this.replay?.dispose();
+    this.replay = undefined;
+    const previousControls = this.state.snapshot.controls;
+    const opening = restored.opening ?? this.state.snapshot.opening;
+    this.state = { snapshot: createSnapshot(true, browserUuid), networkEntries: [] };
+    this.state.snapshot.controls = previousControls;
+    this.sequence = 0;
+    this.turnIndex = 0;
+    this.rawBytes = 0;
+    this.rawSizes.length = 0;
+    if (restored.conversationId) this.state.snapshot.conversationId = restored.conversationId;
+    if (restored.title) this.state.snapshot.title = restored.title;
+    if (opening) this.state.snapshot.opening = structuredClone(opening);
+    this.state.snapshot.messages = structuredClone(restored.messages).slice(-MAX_MESSAGES);
+    this.state.snapshot.sessionState = 'ready';
+    this.emit();
+  }
+
+  /** Performs the Profile's conversation list or history request and returns the parsed body. */
+  async fetchConversationJson(kind: 'list' | 'history', conversationId?: string): Promise<unknown> {
+    const definition = kind === 'list' ? this.profile.conversations?.list?.request : this.profile.conversations?.history?.request;
+    if (!definition) throw new Error(`This Profile does not configure a conversation ${kind} request.`);
+    const startedAt = Date.now();
+    const request = await new RequestBuilder(async (name) => this.secret(name)).build(definition, {
+      conversation: { id: conversationId ?? this.state.snapshot.conversationId, messages: this.state.snapshot.messages },
+      controls: this.templateControls(),
+      env: this.environment.variables,
+      profile: { id: this.profile.id, name: this.profile.name },
+      runtime: { simulationContext: {} },
+    });
+    const browserRequest = enforceBrowserTls(request);
+    this.registerSecrets(browserRequest);
+    const network = this.beginNetwork(browserRequest.redacted, startedAt, 'history');
+    this.emit();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new DOMException('Conversation history request timed out.', 'TimeoutError')), request.timeoutMs ?? 30_000);
+    try {
+      const response = await fetchWithRedirectPolicy(browserRequest, controller.signal);
+      network.status = response.status;
+      network.responseHeaders = this.publicValue(redactHeaders(Object.fromEntries(response.headers.entries()))) as Record<string, string>;
+      network.timing.headers = Date.now() - startedAt;
+      const body = await readBoundedOpeningText(response, MAX_CONVERSATION_RESPONSE_BYTES);
+      network.transferredBytes = body.bytes;
+      const safeText = this.publicValue(body.text);
+      network.responseBodyPreview = safeText.slice(0, MAX_NETWORK_RESPONSE_PREVIEW_CHARS);
+      network.responseBodyTruncated = body.truncated || safeText.length > MAX_NETWORK_RESPONSE_PREVIEW_CHARS;
+      if (body.truncated) throw new Error('The conversation history response exceeded the maximum allowed size.');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      let data: unknown;
+      try { data = body.text ? JSON.parse(body.text) : {}; }
+      catch { throw new Error('The conversation history response is not valid JSON.'); }
+      network.state = 'completed';
+      return this.publicValue(data);
+    } catch (error) {
+      network.state = 'failed';
+      network.error = { type: 'ConversationHistoryError', message: browserErrorMessage(error), ...(network.status === undefined ? {} : { status: network.status }) };
+      throw new Error(browserErrorMessage(error));
+    } finally {
+      clearTimeout(timeout);
+      network.completedAt = Date.now();
+      network.timing.total = network.completedAt - startedAt;
+      this.emit();
+    }
   }
 
   async abort(): Promise<void> {
