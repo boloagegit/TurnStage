@@ -66,6 +66,13 @@ describe('Webview UI checkpoint', () => {
     expect(normalizeWebviewState({ rightPaneMode: 'tests', testKind: 'contract', testsSection: 'scenarios' })).toMatchObject({ rightPaneMode: 'tests', testsSection: 'scenarios', testKind: 'contract' });
   });
 
+  it('restores the narrow editor side and rejects unknown values', () => {
+    expect(normalizeWebviewState({ narrowView: 'pane' })?.narrowView).toBe('pane');
+    expect(normalizeWebviewState({ narrowView: 'chat' })?.narrowView).toBe('chat');
+    expect(normalizeWebviewState({ narrowView: 'unknown' })?.narrowView).toBeUndefined();
+    expect(normalizeWebviewState({})?.narrowView).toBeUndefined();
+  });
+
   it('fails closed for malformed, oversized, and non-finite transient state', () => {
     expect(normalizeWebviewState(null)).toBeUndefined();
     const restored = normalizeWebviewState({
