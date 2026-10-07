@@ -71,7 +71,7 @@ try {
       const values = { case_id: id, case_name: `Case ${id}`, enabled: 'true', turn_index: '1', turn_id: 'turn', user_message: id, step_assertions_json: JSON.stringify([{ path: 'turn.state', operator: 'equals', value: 'completed' }]), forbidden_content_json: JSON.stringify(['forbidden-marker']), max_turns: '1', timeout_ms: '120000' };
       return csvRow(columns.map((column) => values[column] ?? ''));
     });
-    const menu = page.locator('.adversarial-case-file-menu');
+    const menu = page.locator('.adversarial-case-file-menu').filter({ visible: true });
     await menu.locator(':scope > summary').click();
     await menu.locator('.case-format-submenu').first().locator('summary').click();
     const chooser = page.waitForEvent('filechooser');

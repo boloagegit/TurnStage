@@ -487,4 +487,12 @@ export const ko: Record<string, string> = {
   "Yesterday": "어제",
   "{count} differ from server": "서버와 {count}건 다름",
   "{count} of {total} messages differ": "{total}개 중 {count}개가 다름",
+  "All": "전체",
+  "Last results": "최근 결과",
+  "Last run {date}": "마지막 실행 {date}",
+  "{passed} passed · {failed} failed · {notRun} not run": "통과 {passed} · 실패 {failed} · 미실행 {notRun}",
+  "Rerun failed ({count})": "실패 다시 실행 ({count})",
+  "Filter cases by last result": "마지막 결과로 케이스 필터",
+  "Last result: {outcome}, {date}": "마지막 결과: {outcome}, {date}",
+  "No cases match this result filter.": "이 결과 필터와 일치하는 케이스가 없습니다.",
 };

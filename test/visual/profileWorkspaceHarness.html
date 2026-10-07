@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-host="vscode">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -49,6 +49,12 @@
       --vscode-symbolIcon-stringForeground: #ce9178;
       --vscode-symbolIcon-numberForeground: #b5cea8;
       --vscode-symbolIcon-booleanForeground: #569cd6;
+      --vscode-panelTitle-activeBorder: #0078d4;
+      --vscode-panelTitle-activeForeground: #e7e7e7;
+      --vscode-panelTitle-inactiveForeground: #9d9d9d;
+      --vscode-inputOption-activeBackground: #2489db82;
+      --vscode-inputOption-activeForeground: #ffffff;
+      --vscode-actionBar-toggledBackground: #383a49;
       --vscode-badge-background: #4d4d4d;
       --vscode-badge-foreground: #ffffff;
       --vscode-testing-iconPassed: #73c991;
@@ -443,6 +449,23 @@
           dispatch({ type: 'connection.result', result: connectionResult });
           dispatch({ type: 'campaign.dashboard', dashboard: campaignDashboard });
           dispatch({ type: 'test.results', results: JSON.parse(JSON.stringify(testResults)), automationResults: JSON.parse(JSON.stringify(automationResults)) });
+          if (query.get('conversations') === 'true') {
+            const now = Date.now();
+            dispatch({ type: 'conversations.state', state: { enabled: true, currentKey: 'local:current', items: [
+              { key: 'local:current', source: 'local', title: 'Slow SSE Visual Proof', preview: 'Here is the sample result.', updatedAt: now, messageCount: 3 },
+              { key: 'local:older', source: 'local', title: 'Refund follow-up', preview: 'Refunds arrive in 3–5 business days.', updatedAt: now - 3 * 86400000, messageCount: 6 },
+              { key: 'remote:c9', source: 'remote', conversationId: 'c9', title: 'Server conversation', updatedAt: now - 60000 },
+            ], remote: { configured: true, status: 'ready' }, history: { configured: true }, check: { status: 'done', checkedAt: now, results: [{ messageId: 'user-1', role: 'user', status: 'match' }, { messageId: 'assistant-1', role: 'assistant', status: 'mismatch', streamedText: 'Here is the sample result.', persistedText: 'Here is the rewritten result.' }] } } });
+          }
+          if (query.get('history') === 'true') {
+            const historyCase = (scenarioId, name, kind, outcome, durationMs, suiteId) => ({ key: `${profile.id}/${suiteId ?? 'inline'}/${scenarioId}`, name, definitionDigest: 'a'.repeat(64), environmentDigest: 'b'.repeat(64), requestedAttempts: 1, completedAttempts: outcome ? 1 : 0, ...(outcome ? { outcome, durationMs } : {}), profileId: profile.id, ...(suiteId ? { suiteId } : {}), scenarioId, kind });
+            dispatch({ type: 'test.history', profileId: profile.id, runs: [{ format: 'turnstage-test-run-history', version: 1, id: 'visual-history-run', profileId: profile.id, startedAt: 1790000000000, finishedAt: 1790000004000, status: 'completed', runner: 'vscode', evaluatorVersion: 1, profileDigest: 'c'.repeat(64), environmentDigest: 'd'.repeat(64), cases: [
+              historyCase('slow-stream-contract', 'Slow stream contract', 'contract', 'failed', 1808),
+              historyCase('linked-multi-turn-contract', 'Linked multi-turn contract', 'contract', 'passed', 840, 'linked-regression'),
+              historyCase('linked-case-01', 'Linked case 1', 'adversarial', 'resisted', 1200, 'security-regression'),
+              historyCase('linked-case-02', 'Linked case 2', 'adversarial', 'attackSucceeded', 900, 'security-regression'),
+            ] }] });
+          }
         }, 0);
       }
     });
