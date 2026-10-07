@@ -11,6 +11,7 @@ import { parseAdversarialSource } from '../../../src/extension/testing/adversari
 import { TestRunHistoryRepository } from '../../../src/extension/testing/testRunHistoryRepository';
 import { testCaseKey } from '../../../src/shared/testSelection';
 import { TEST_RUN_HISTORY_FORMAT, TEST_RUN_HISTORY_VERSION, type TestRunHistoryRecord } from '../../../src/shared/testRunHistory';
+import { assertConversationHistoryBoundary } from './conversations';
 
 /**
  * The integration suite deliberately uses only public VS Code APIs. It runs
@@ -50,6 +51,7 @@ export async function run(): Promise<void> {
 
   await assertProfileDiscovery(profileUri);
   await assertConversationContractReports(workspaceRoot);
+  await assertConversationHistoryBoundary();
   if (vscode.workspace.isTrusted) await assertManualRunControls(workspaceRoot);
   await assertScopedTestHistoryClear();
   await assertCopilotToolBoundary(workspaceRoot);

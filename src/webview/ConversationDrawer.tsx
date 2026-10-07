@@ -57,6 +57,7 @@ export const ConversationDrawer = memo(function ConversationDrawer({ id, directo
   const checkAvailable = directory.history.configured;
   const activeView = checkAvailable ? view : 'conversations';
   const remoteRequested = useRef(false);
+  const focusDrawerControl = () => panelRef.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus();
 
   useEffect(() => {
     // Load the server list once per open drawer; the archive is already local.
@@ -73,7 +74,18 @@ export const ConversationDrawer = memo(function ConversationDrawer({ id, directo
   }}>
     <header className="conversation-drawer__header">
       {checkAvailable
-        ? <div className="conversation-drawer__views" role="tablist" aria-label={t('Conversation panel views')}>
+        ? <div className="conversation-drawer__views" role="tablist" aria-label={t('Conversation panel views')} onKeyDown={(event) => {
+            const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+            const index = tabs.indexOf(event.target as HTMLButtonElement);
+            if (index < 0) return;
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+              : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
+                : event.key === 'ArrowRight' ? (index + 1) % tabs.length : undefined;
+            if (next === undefined) return;
+            event.preventDefault();
+            onViewChange(next === 0 ? 'conversations' : 'check');
+            tabs[next]?.focus();
+          }}>
             <button type="button" role="tab" aria-selected={activeView === 'conversations'} tabIndex={activeView === 'conversations' ? 0 : -1} data-autofocus={activeView === 'conversations' ? '' : undefined} onClick={() => onViewChange('conversations')}>{t('Conversations')}</button>
             <button type="button" role="tab" aria-selected={activeView === 'check'} tabIndex={activeView === 'check' ? 0 : -1} data-autofocus={activeView === 'check' ? '' : undefined} onClick={() => onViewChange('check')}>{t('History check')}<HistoryCheckMark directory={directory} /></button>
           </div>
@@ -92,7 +104,7 @@ export const ConversationDrawer = memo(function ConversationDrawer({ id, directo
         {(directory.enabled || directory.remote.configured) && groups.length === 0 && directory.remote.status !== 'loading' && <p className="conversation-drawer__empty">{query ? t('No conversations match this search.') : t('Conversations appear here after the first reply.')}</p>}
         {groups.map(({ group, items }) => <div key={group} className="conversation-drawer__group" role="group" aria-labelledby={`${id}-${group}`}>
           <h3 id={`${id}-${group}`}>{t(GROUP_LABELS[group])}</h3>
-          <ul>{items.map((item) => <ConversationRow key={item.key} item={item} current={item.key === directory.currentKey} opening={directory.opening === item.key} disabled={busy || Boolean(directory.opening)} pendingDelete={pendingDelete === item.key} onOpen={() => post({ type: 'conversation.open', key: item.key })} onRequestDelete={() => setPendingDelete(item.key)} onCancelDelete={() => setPendingDelete(undefined)} onDelete={() => { setPendingDelete(undefined); post({ type: 'conversation.delete', key: item.key }); }} />)}</ul>
+          <ul>{items.map((item) => <ConversationRow key={item.key} item={item} current={item.key === directory.currentKey} opening={directory.opening === item.key} disabled={busy || Boolean(directory.opening)} pendingDelete={pendingDelete === item.key} onOpen={() => { focusDrawerControl(); post({ type: 'conversation.open', key: item.key }); }} onRequestDelete={() => setPendingDelete(item.key)} onCancelDelete={() => { focusDrawerControl(); setPendingDelete(undefined); }} onDelete={() => { focusDrawerControl(); setPendingDelete(undefined); post({ type: 'conversation.delete', key: item.key }); }} />)}</ul>
         </div>)}
         {directory.remote.status === 'loading' && <ul className="conversation-drawer__skeleton" aria-hidden="true"><li /><li /><li /></ul>}
       </div>
@@ -106,6 +118,8 @@ export const ConversationDrawer = memo(function ConversationDrawer({ id, directo
 });
 
 function ConversationRow({ item, current, opening, disabled, pendingDelete, onOpen, onRequestDelete, onCancelDelete, onDelete }: { item: ConversationSummary; current: boolean; opening: boolean; disabled: boolean; pendingDelete: boolean; onOpen: () => void; onRequestDelete: () => void; onCancelDelete: () => void; onDelete: () => void }): React.JSX.Element {
+  const confirmDeleteRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (pendingDelete) confirmDeleteRef.current?.focus(); }, [pendingDelete]);
   const title = item.title || t('Untitled conversation');
   return <li className={`conversation-row${current ? ' conversation-row--current' : ''}`}>
     <button type="button" className="conversation-row__open" aria-current={current ? 'true' : undefined} aria-busy={opening || undefined} disabled={!current && disabled} onClick={current ? undefined : onOpen}>
@@ -119,7 +133,7 @@ function ConversationRow({ item, current, opening, disabled, pendingDelete, onOp
       </span>
     </button>
     {item.source === 'local' && !current && (pendingDelete
-      ? <span className="conversation-row__confirm" role="group" aria-label={t('Delete {title}?', { title })}><button type="button" className="danger-subtle" onClick={onDelete}>{t('Delete')}</button><button type="button" onClick={onCancelDelete}>{t('Cancel')}</button></span>
+      ? <span className="conversation-row__confirm" role="group" aria-label={t('Delete {title}?', { title })}><button ref={confirmDeleteRef} type="button" className="danger-subtle" onClick={onDelete}>{t('Delete')}</button><button type="button" onClick={onCancelDelete}>{t('Cancel')}</button></span>
       : <IconButton className="conversation-row__delete" icon="trash" label={t('Delete {title}', { title })} type="button" disabled={disabled} onClick={onRequestDelete} />)}
   </li>;
 }

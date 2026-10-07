@@ -148,6 +148,53 @@ describe('chat preview conversation tools', () => {
     expect(screen.getByRole('tab', { name: 'History check' }).getAttribute('aria-selected')).toBe('true');
   });
 
+  it('switches drawer views with arrow keys and Home/End, then restores focus on Escape', async () => {
+    const user = userEvent.setup();
+    render(<MobileChatPreview {...props} post={vi.fn()} snapshot={snapshot([])} conversations={directory()} />);
+    const toggle = screen.getByRole('button', { name: 'Conversations' });
+    await user.click(toggle);
+    const conversations = screen.getByRole('tab', { name: 'Conversations' });
+    const check = screen.getByRole('tab', { name: 'History check' });
+    expect(document.activeElement).toBe(conversations);
+    await user.keyboard('{ArrowRight}');
+    expect(check.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(check);
+    await user.keyboard('{ArrowRight}');
+    expect(document.activeElement).toBe(conversations);
+    await user.keyboard('{End}');
+    expect(document.activeElement).toBe(check);
+    await user.keyboard('{Home}');
+    expect(document.activeElement).toBe(conversations);
+    await user.keyboard('{ArrowLeft}');
+    expect(document.activeElement).toBe(check);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('region', { name: 'Conversations' })).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it('keeps focus inside the drawer while opening and deleting conversations', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn();
+    const { rerender } = render(<MobileChatPreview {...props} post={post} snapshot={snapshot([])} conversations={directory()} />);
+    const toggle = screen.getByRole('button', { name: 'Conversations' });
+    await user.click(toggle);
+    const tab = screen.getByRole('tab', { name: 'Conversations' });
+    await user.click(screen.getByRole('button', { name: /Untitled conversation/u }));
+    expect(document.activeElement).toBe(tab);
+    rerender(<MobileChatPreview {...props} post={post} snapshot={snapshot([])} conversations={directory({ opening: 'remote:c9' })} />);
+    expect(document.activeElement).toBe(tab);
+    rerender(<MobileChatPreview {...props} post={post} snapshot={snapshot([])} conversations={directory()} />);
+    await user.click(screen.getByRole('button', { name: 'Delete Old topic' }));
+    expect(document.activeElement).toBe(within(screen.getByRole('group', { name: 'Delete Old topic?' })).getByRole('button', { name: 'Delete' }));
+    await user.keyboard('{Enter}');
+    expect(post).toHaveBeenCalledWith({ type: 'conversation.delete', key: 'local:old' });
+    expect(document.activeElement).toBe(tab);
+    rerender(<MobileChatPreview {...props} post={post} snapshot={snapshot([])} conversations={directory({ items: directory().items.filter((item) => item.key !== 'local:old') })} />);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('region', { name: 'Conversations' })).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+  });
+
   it('omits conversation tools when the host has no archive', () => {
     render(<MobileChatPreview {...props} post={vi.fn()} snapshot={snapshot([])} />);
     expect(screen.queryByRole('button', { name: 'Conversations' })).toBeNull();
