@@ -17,13 +17,14 @@ export function liveCaseKey(suiteId: string | undefined, scenarioId: string): st
 /**
  * Accumulates the bounded per-message outcomes a run reports into one map for
  * the current run. A new run (running with nothing completed yet) starts over;
- * finished statuses stay visible after the run until the next one starts.
+ * terminal operations yield to the recorded history, which includes precise
+ * outcomes and durations.
  */
 export function useLiveCaseStatuses(operation: TestOperationSnapshot | undefined): ReadonlyMap<string, LiveCaseState> {
   const finished = useRef(new Map<string, LiveCaseState>());
   const applied = useRef<TestOperationSnapshot | undefined>(undefined);
   return useMemo(() => {
-    if (!operation) return EMPTY_STATUSES;
+    if (!operation || !['running', 'pausing', 'paused', 'cancelling'].includes(operation.state)) return EMPTY_STATUSES;
     if (operation !== applied.current) {
       applied.current = operation;
       const progress = operation.progress;

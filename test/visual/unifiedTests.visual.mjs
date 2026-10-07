@@ -73,7 +73,9 @@ try {
   const base = { format: 'turnstage-test-run-history', version: 1, id: 'base', profileId: 'slow-sse-proof', startedAt: 1_790_000_000_000, finishedAt: 1_790_000_000_020, status: 'completed', runner: 'vscode', evaluatorVersion: 1, profileDigest: 'b'.repeat(64), environmentDigest: 'c'.repeat(64), cases: [{ ...caseBase, outcome: 'passed' }] };
   const current = { ...base, id: 'current', startedAt: base.startedAt + 1000, finishedAt: base.finishedAt + 1000, cases: [{ ...caseBase, outcome: 'failed' }] };
   await page.evaluate(({ base, current }) => globalThis.__turnstageHarness.dispatch({ type: 'test.history', profileId: 'slow-sse-proof', runs: [current, base], baselineRunId: 'base' }), { base, current });
-  await page.evaluate(() => globalThis.__turnstageHarness.dispatch({ type: 'test.operation', operation: { action: 'runSelection', state: 'completed' } }));
+  await page.evaluate(() => globalThis.__turnstageHarness.dispatch({ type: 'test.operation', operation: { action: 'runSelection', state: 'completed', progress: { totalCases: 1, completedCases: 1, totalAttempts: 1, completedAttempts: 1, maxConcurrency: 1, failedCases: 1, passedCases: 0, completedOutcomes: [{ scenarioId: 'slow-stream-contract', outcome: 'failed' }] } } }));
+  await page.locator('.live-case-status--last').filter({ hasText: 'Failed' }).waitFor();
+  assert.equal(await page.locator('.live-case-status--last .live-case-status__metric').first().textContent(), '20 ms', 'Completed progress must yield to the recorded result and duration');
   await page.getByRole('button', { name: 'View test results' }).waitFor();
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-run-completed.png') });
   await page.getByRole('button', { name: 'View test results' }).click();
