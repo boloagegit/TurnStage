@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { t } from './i18n';
+import { captureFocusReturnTarget, restoreFocus } from './focusRestore';
 import './confirmAction.css';
 
 interface Confirmation {
@@ -18,7 +19,7 @@ export function useConfirmAction(): [(confirmation: Confirmation) => void, React
   const dialog = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!pending) return;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    const previous = captureFocusReturnTarget();
     const oldOverflow = document.body.style.overflow;
     const background = [...document.body.children]
       .filter((item): item is HTMLElement => item instanceof HTMLElement && !item.classList.contains('confirm-action-overlay'))
@@ -29,12 +30,12 @@ export function useConfirmAction(): [(confirmation: Confirmation) => void, React
     return () => {
       for (const { item, inert } of background) item.inert = inert;
       document.body.style.overflow = oldOverflow;
-      previous?.focus({ preventScroll: true });
+      restoreFocus(previous);
     };
   }, [pending]);
   const close = () => setPending(undefined);
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
-    if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
     if (event.key !== 'Tab' || !dialog.current) return;
     const controls = [...dialog.current.querySelectorAll<HTMLButtonElement>('button:not([disabled])')];
     const first = controls[0]; const last = controls.at(-1);

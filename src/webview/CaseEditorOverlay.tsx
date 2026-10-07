@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { IconButton } from './Icon';
 import { t } from './i18n';
+import { captureFocusReturnTarget, restoreFocus } from './focusRestore';
 
 export function CaseEditorOverlay({ title, context, children, footer, className, closeLabel, onRequestClose }: {
   title: string;
@@ -14,16 +15,16 @@ export function CaseEditorOverlay({ title, context, children, footer, className,
 }): React.JSX.Element {
   const dialog = useRef<HTMLElement>(null);
   useEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    const previous = captureFocusReturnTarget();
     const oldOverflow = document.body.style.overflow;
     const background = [...document.body.children].filter((item): item is HTMLElement => item instanceof HTMLElement && !item.classList.contains('case-editor-overlay')).map((item) => ({ item, inert: item.inert }));
     for (const { item } of background) item.inert = true;
     document.body.style.overflow = 'hidden';
     dialog.current?.querySelector<HTMLButtonElement>('.case-editor-dialog__header button')?.focus({ preventScroll: true });
-    return () => { for (const { item, inert } of background) item.inert = inert; document.body.style.overflow = oldOverflow; previous?.focus({ preventScroll: true }); };
+    return () => { for (const { item, inert } of background) item.inert = inert; document.body.style.overflow = oldOverflow; restoreFocus(previous); };
   }, []);
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
-    if (event.key === 'Escape') { event.preventDefault(); onRequestClose(); return; }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onRequestClose(); return; }
     if (event.key !== 'Tab' || !dialog.current) return;
     const controls = [...dialog.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')].filter((item) => item.getClientRects().length > 0);
     const first = controls[0]; const last = controls.at(-1);

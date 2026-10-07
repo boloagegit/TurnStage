@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties, FormEvent, KeyboardEvent, ReactNode } from 'react';
 import type { WebviewPayload } from '../shared/protocol';
@@ -31,6 +31,7 @@ import { captureChatScreenshot, copyChatScreenshotToClipboard } from './chatScre
 import { resolveComposer, resolveMessageActions, resolveMessageActionVisibility, resolveStreaming, type ResolvedStreaming } from './uiConfig';
 import { advanceGraphemeBoundary, calculateRevealStep, resolveRevealPacing } from './streamingReveal';
 import { isSafeRegexPattern } from '../shared/regexSafety';
+import { useStableCallback } from './useStableCallback';
 import './mobileChatPreview.css';
 
 export const CHAT_SCROLL_BOTTOM_THRESHOLD = 48;
@@ -156,6 +157,11 @@ export function MobileChatPreview({
   const restoredMessageScroll = useRef(false);
   const onMessageScrollTopChangeRef = useRef(onMessageScrollTopChange);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  // "Follow the conversation" intent. Positional checks alone lose it during
+  // fast streams: content can grow between our scroll and its async scroll
+  // event, which then looks like the reader left the bottom.
+  const stickToBottomRef = useRef(true);
+  const programmaticTopRef = useRef<number | undefined>(undefined);
   const [responsiveSize, setResponsiveSize] = useState({ width: viewport.width, height: viewport.height });
   const [fitScale, setFitScale] = useState(1);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
@@ -167,7 +173,9 @@ export function MobileChatPreview({
   const hiddenMessageCount = Math.max(0, allSnapshotMessages.length - visibleMessageLimit);
   const snapshotMessages = useMemo(() => hiddenMessageCount ? allSnapshotMessages.slice(hiddenMessageCount) : allSnapshotMessages, [allSnapshotMessages, hiddenMessageCount]);
   const responseDetailMessage = useMemo(() => allSnapshotMessages.find((message) => message.id === responseDetailId), [allSnapshotMessages, responseDetailId]);
-  const messageTagEventIndex = useMemo(() => createMessageTagEventIndex(snapshot), [snapshot?.rawEvents, snapshot?.normalizedEvents]);
+  const hasMessageTagRules = Boolean(profile.ui?.messageTags?.length);
+  // Tags are the only consumer of this index. Skip indexing every buffered event when no rule exists.
+  const messageTagEventIndex = useMemo(() => hasMessageTagRules ? createMessageTagEventIndex(snapshot) : EMPTY_MESSAGE_TAG_INDEX, [hasMessageTagRules, snapshot?.rawEvents, snapshot?.normalizedEvents]);
   const messageContentKey = useMemo(() => getMessageContentKey(snapshotMessages), [snapshotMessages]);
   const { activeAssistant, latestUserCreatedAt } = useMemo(() => {
     let assistant: ChatMessage | undefined;
@@ -194,11 +202,17 @@ export function MobileChatPreview({
   const logicalHeight = responsive ? responsiveSize.height : viewport.height;
   const selectedZoom = responsive ? 1 : viewport.zoom === 'fit' ? fitScale : Number(viewport.zoom) / 100;
   const previewScale = Math.max(0.1, Math.min(1, selectedZoom));
-  const sendAndFollow: SendMessage = (text, interaction) => {
+  const sendAndFollow: SendMessage = useStableCallback((text, interaction) => {
     followNextSentMessage.current = true;
     if (interaction === undefined) send(text);
     else send(text, interaction);
-  };
+  });
+  // Stable identities let completed messages skip rendering while a later message streams.
+  const stablePost = useStableCallback(post);
+  const stableSetDraft = useStableCallback(setDraft);
+  const stableSelectMessage = useStableCallback((messageId: string) => onSelectMessage?.(messageId));
+  const stableActionFeedback = useStableCallback((feedback: MessageActionFeedback | undefined) => onMessageActionFeedback?.(feedback));
+  const openResponse = useStableCallback((messageId: string) => setResponseDetailId(messageId));
   const viewportStyle = responsive ? undefined : {
     '--mcp-logical-width': `${logicalWidth}px`,
     '--mcp-logical-height': `${logicalHeight}px`,
@@ -245,6 +259,9 @@ export function MobileChatPreview({
     if (!messages) return;
     const handleScroll = (persist = true) => {
       const nearBottom = isNearBottom(messages);
+      const programmaticTop = programmaticTopRef.current;
+      if (nearBottom) stickToBottomRef.current = true;
+      else if (programmaticTop === undefined || messages.scrollTop < programmaticTop - 1) stickToBottomRef.current = false;
       const current = messageScrollRef.current;
       if (current) {
         messageScrollRef.current = { ...current, nearBottom, scrollHeight: messages.scrollHeight, scrollTop: messages.scrollTop };
@@ -264,24 +281,25 @@ export function MobileChatPreview({
     if (!restoredMessageScroll.current && snapshotMessages.length > 0 && typeof initialMessageScrollTop === 'number' && Number.isFinite(initialMessageScrollTop)) {
       restoredMessageScroll.current = true;
       messages.scrollTop = Math.max(0, initialMessageScrollTop);
+      stickToBottomRef.current = isNearBottom(messages);
     }
     const previous = messageScrollRef.current;
     const firstMessageId = snapshotMessages[0]?.id;
     const changed = previous !== undefined && previous.contentKey !== messageContentKey;
     if (previous && changed) {
-      const wasNearBottom = previous.nearBottom;
+      const wasNearBottom = stickToBottomRef.current;
       const prepended = previous.firstMessageId !== undefined && firstMessageId !== undefined && previous.firstMessageId !== firstMessageId && snapshotMessages.length > previous.messageCount;
       if (snapshotMessages.length === 0) {
         setShowJumpToLatest(false);
       } else if (followNextSentMessage.current) {
         followNextSentMessage.current = false;
-        scrollToLatest(messages);
+        followLatest(messages);
         setShowJumpToLatest(false);
       } else if (prepended && !wasNearBottom) {
         const heightDelta = messages.scrollHeight - previous.scrollHeight;
         if (heightDelta > 0) messages.scrollTop = previous.scrollTop + heightDelta;
       } else if (wasNearBottom) {
-        scrollToLatest(messages);
+        followLatest(messages);
       } else {
         setShowJumpToLatest(true);
       }
@@ -295,6 +313,26 @@ export function MobileChatPreview({
       scrollTop: messages.scrollTop
     };
   }, [initialMessageScrollTop, messageContentKey, snapshotMessages]);
+
+  // Keep following while content grows between snapshots (adaptive reveal,
+  // images, code blocks, content-visibility size settling).
+  useEffect(() => {
+    const messages = messagesRef.current;
+    if (!messages || typeof ResizeObserver === 'undefined') return undefined;
+    let frame: number | undefined;
+    const resizeObserver = new ResizeObserver(() => {
+      if (frame !== undefined || !stickToBottomRef.current) return;
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        if (stickToBottomRef.current && !isNearBottom(messages, 1)) followLatest(messages);
+      });
+    });
+    const observeChildren = () => { for (const child of messages.children) resizeObserver.observe(child); };
+    observeChildren();
+    const mutationObserver = typeof MutationObserver === 'undefined' ? undefined : new MutationObserver(observeChildren);
+    mutationObserver?.observe(messages, { childList: true });
+    return () => { resizeObserver.disconnect(); mutationObserver?.disconnect(); if (frame !== undefined) cancelAnimationFrame(frame); };
+  }, []);
 
   const selectPreset = (preset: ChatViewportPreset) => {
     if (preset === 'responsive') { updateViewport({ ...viewport, preset }); return; }
@@ -312,10 +350,16 @@ export function MobileChatPreview({
 
   const rotateViewport = () => updateViewport({ ...viewport, preset: 'custom', width: clamp(logicalHeight, MIN_VIEWPORT_WIDTH, MAX_VIEWPORT_WIDTH), height: clamp(logicalWidth, MIN_VIEWPORT_HEIGHT, MAX_VIEWPORT_HEIGHT) });
 
+  function followLatest(messages: HTMLElement): void {
+    scrollToLatest(messages);
+    programmaticTopRef.current = messages.scrollTop;
+    stickToBottomRef.current = true;
+  }
+
   const jumpToLatest = () => {
     const messages = messagesRef.current;
     if (!messages) return;
-    scrollToLatest(messages);
+    followLatest(messages);
     const current = messageScrollRef.current;
     if (current) messageScrollRef.current = { ...current, nearBottom: true, scrollHeight: messages.scrollHeight, scrollTop: messages.scrollTop };
     setShowJumpToLatest(false);
@@ -419,13 +463,14 @@ export function MobileChatPreview({
             {snapshot?.sessionState === 'loadingOpening' && profile.opening?.mode === 'request' && <OpeningLoading headingId={`${previewId}-opening-loading-heading`} />}
             {snapshot?.sessionState === 'failed' && profile.opening?.mode === 'request' && <OpeningError profile={profile} snapshot={snapshot} post={post} trusted={trusted} headingId={`${previewId}-opening-error-heading`} />}
             {opening && componentVisible(profile, 'opening') && <OpeningCard profile={profile} opening={opening} active={active} trusted={trusted} setDraft={setDraft} send={sendAndFollow} post={post} headingId={`${previewId}-opening-heading`} />}
-      {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} snapshot={snapshot} messageTagEventIndex={messageTagEventIndex} post={post} send={sendAndFollow} setDraft={setDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage} onOpenResponse={message.role === 'assistant' ? () => setResponseDetailId(message.id) : undefined} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback} onActionFeedback={onMessageActionFeedback} />)}
+      {snapshotMessages.map((message) => <MobileMessage key={message.id} profile={profile} message={message} messageTagEventIndex={hasMessageTagRules ? messageTagEventIndex : EMPTY_MESSAGE_TAG_INDEX} post={stablePost} send={sendAndFollow} setDraft={stableSetDraft} trusted={trusted} selected={selectedMessageId === message.id} onSelectMessage={onSelectMessage ? stableSelectMessage : undefined} onOpenResponse={message.role === 'assistant' ? openResponse : undefined} acceptedForms={acceptedForms} actionFeedback={messageActionFeedback?.sourceMessageId === message.id ? messageActionFeedback : undefined} onActionFeedback={onMessageActionFeedback ? stableActionFeedback : undefined} />)}
             {responseActivityPhase && responseActivityPhase !== 'receiving' && !activeAssistant && <ResponseActivity profile={profile} phase={responseActivityPhase} elapsedMs={responseActivityElapsedMs} />}
             {!snapshot && <p className="mobile-chat-preview__empty" role="status">{t('Loading conversation…')}</p>}
             {snapshot && snapshotMessages.length === 0 && !opening && snapshot.sessionState === 'ready' && <p className="mobile-chat-preview__empty">{t('No messages yet. Send a message to begin.')}</p>}
             {continuationBlocked && <p className="mobile-chat-preview__continuation" role="status">{t('Continuation is disabled after this error. Start a new conversation to send another message.')}</p>}
-            {showJumpToLatest && <button className="mobile-chat-preview__jump-to-latest" type="button" onClick={jumpToLatest} aria-label={t('Jump to latest')}><ProductIcon name="arrow-down" />{t('Jump to latest')}</button>}
           </div>
+          {/* Outside the scroller so it stays pinned to the visible bottom edge. */}
+          {showJumpToLatest && <button className="mobile-chat-preview__jump-to-latest" type="button" onClick={jumpToLatest} aria-label={t('Jump to latest')}><ProductIcon name="arrow-down" />{t('Jump to latest')}</button>}
         </div>
 
         <MobileComposer profile={profile} active={active} sessionReady={snapshot?.sessionState === 'ready'} turnState={snapshot?.turnState} continuationBlocked={continuationBlocked} trusted={trusted} draft={draft} setDraft={setDraft} send={sendAndFollow} post={post} />
@@ -743,7 +788,11 @@ function ResponseContentOverlay({ profile, message, snapshot, post, onInspect, o
   </CaseEditorOverlay>;
 }
 
-function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post, send, setDraft, trusted, selected, onSelectMessage, onOpenResponse, acceptedForms, actionFeedback, onActionFeedback }: { profile: TurnStageProfile; message: ChatMessage; snapshot?: SessionSnapshot; messageTagEventIndex: MessageTagEventIndex; post: PostMessage; send: SendMessage; setDraft: SetDraft; trusted: boolean; selected: boolean; onSelectMessage?: (messageId: string) => void; onOpenResponse?: () => void; acceptedForms?: ReadonlySet<string>; actionFeedback?: MessageActionFeedback; onActionFeedback?: (feedback: MessageActionFeedback | undefined) => void }): React.JSX.Element {
+/**
+ * Memoized: message objects keep their identity across session deltas unless
+ * their content changed, so only the streaming tail re-renders and re-parses.
+ */
+const MobileMessage = memo(function MobileMessage({ profile, message, messageTagEventIndex, post, send, setDraft, trusted, selected, onSelectMessage, onOpenResponse, acceptedForms, actionFeedback, onActionFeedback }: { profile: TurnStageProfile; message: ChatMessage; messageTagEventIndex: MessageTagEventIndex; post: PostMessage; send: SendMessage; setDraft: SetDraft; trusted: boolean; selected: boolean; onSelectMessage?: (messageId: string) => void; onOpenResponse?: (messageId: string) => void; acceptedForms?: ReadonlySet<string>; actionFeedback?: MessageActionFeedback; onActionFeedback?: (feedback: MessageActionFeedback | undefined) => void }): React.JSX.Element {
   const [responseActionPreview, setResponseActionPreview] = useState<{ action: ResponseAction; previewOnly: boolean }>();
   const responseActionReceiptRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { if (responseActionPreview) responseActionReceiptRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [responseActionPreview]);
@@ -763,7 +812,7 @@ function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post,
   const messageLabelValues = { role: roleLabel, status: statusLabel };
   const messageActions = resolveMessageActions(profile, message.role, Boolean(onSelectMessage));
   const messageActionVisibility = resolveMessageActionVisibility(profile.ui);
-  const messageTags = useMemo(() => resolveMessageTags(profile.ui?.messageTags, message, snapshot, messageTagEventIndex), [message, messageTagEventIndex, profile.ui?.messageTags, snapshot]);
+  const messageTags = useMemo(() => resolveMessageTags(profile.ui?.messageTags, message, undefined, messageTagEventIndex), [message, messageTagEventIndex, profile.ui?.messageTags]);
   const feedback = actionFeedback?.sourceMessageId === message.id ? actionFeedback : undefined;
   const reportFeedback = (actionId: string, status: MessageActionFeedback['status'], feedbackMessage: string) => onActionFeedback?.({ actionId, sourceMessageId: message.id, status, message: feedbackMessage });
   const enabledMessageMetrics = new Set(profile.metrics?.messageEnabled?.length ? profile.metrics.messageEnabled : ['ttft', 'totalDuration']);
@@ -790,16 +839,18 @@ function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post,
   const onMessageClick = (event: React.MouseEvent<HTMLElement>) => {
     if (!onOpenResponse && !onSelectMessage) return;
     if (isMessageInteractiveTarget(event.target)) return;
-    if (onOpenResponse && text) onOpenResponse();
+    // Finishing a drag-selection also fires click; keep the selection instead of opening a dialog.
+    if (hasTextSelectionWithin(event.currentTarget)) return;
+    if (onOpenResponse && text) onOpenResponse(message.id);
     else onSelectMessage?.(message.id);
   };
   const onMessageKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if ((!onOpenResponse && !onSelectMessage) || isMessageInteractiveTarget(event.target) || (event.key !== 'Enter' && event.key !== ' ')) return;
     event.preventDefault();
-    if (onOpenResponse && text) onOpenResponse();
+    if (onOpenResponse && text) onOpenResponse(message.id);
     else onSelectMessage?.(message.id);
   };
-  return <article className={`mobile-chat-preview__message mobile-chat-preview__message--${message.role} ${selected ? 'mobile-chat-preview__message--selected' : ''}`} data-message-id={message.id} data-status={message.status} data-selected={selected ? 'true' : 'false'} aria-label={t(onOpenResponse && text ? '{role} message, {status}. Open response content.' : '{role} message, {status}', messageLabelValues)} style={streamingStyle} tabIndex={onOpenResponse || onSelectMessage ? 0 : undefined} onClick={onMessageClick} onKeyDown={onMessageKeyDown}>
+  return <article className={`mobile-chat-preview__message mobile-chat-preview__message--${message.role} ${selected ? 'mobile-chat-preview__message--selected' : ''}`} data-message-id={message.id} data-status={message.status} data-selected={selected ? 'true' : 'false'} aria-busy={streamingAssistant || undefined} aria-label={t(onOpenResponse && text ? '{role} message, {status}. Open response content.' : '{role} message, {status}', messageLabelValues)} style={streamingStyle} tabIndex={onOpenResponse || onSelectMessage ? 0 : undefined} onClick={onMessageClick} onKeyDown={onMessageKeyDown}>
     {message.role !== 'user' && <span className="mobile-chat-preview__message-avatar" aria-hidden="true">{profile.name.trim().charAt(0).toUpperCase() || 'T'}</span>}
     <span className="mobile-chat-preview__message-heading"><strong>{roleLabel}</strong><MessageStatus state={message.status} />{messageTags.length > 0 && <span className="mobile-chat-preview__message-tags" aria-label={t('Message tags')}>{messageTags.map((tag) => <span className={`mobile-chat-preview__message-tag mobile-chat-preview__message-tag--${tag.tone}`} key={tag.id}>{tag.label}</span>)}</span>}</span>
     <div className="mobile-chat-preview__message-body">
@@ -821,10 +872,17 @@ function MobileMessage({ profile, message, snapshot, messageTagEventIndex, post,
       </footer>}
     </div>
   </article>;
+});
+
+function hasTextSelectionWithin(element: HTMLElement): boolean {
+  const selection = typeof window.getSelection === 'function' ? window.getSelection() : null;
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) return false;
+  return element.contains(selection.anchorNode) || element.contains(selection.focusNode);
 }
 
 export interface ResolvedMessageTag { id: string; label: string; tone: NonNullable<MessageTagRule['tone']> }
 interface MessageTagEventIndex { raw: Map<number, unknown[]>; normalized: Map<number, unknown[]> }
+const EMPTY_MESSAGE_TAG_INDEX: MessageTagEventIndex = { raw: new Map(), normalized: new Map() };
 
 export function resolveMessageTags(rules: readonly MessageTagRule[] | undefined, message: ChatMessage, snapshot?: SessionSnapshot, index = createMessageTagEventIndex(snapshot)): ResolvedMessageTag[] {
   if (!rules?.length) return [];
@@ -996,7 +1054,8 @@ function MobileMessagePart({ profile, part, messageId, citations, post, trusted,
 
 function MobileMarkdown({ text, post, streaming, streamingActive, markdown, html, classStyles, styleRules }: { text: string; post: PostMessage; streaming?: ResolvedStreaming; streamingActive: boolean; markdown: boolean; html: boolean; classStyles?: ResponseClassStyles; styleRules?: ResponseStyleRules }): React.JSX.Element {
   const visibleText = useStreamingRevealText(text, streamingActive, streaming);
-  return <div className="mobile-chat-preview__text" data-reveal-mode={streaming?.reveal ?? 'instant'}><RichMarkdown text={visibleText} markdown={markdown} html={html} classStyles={classStyles} styleRules={styleRules} copyLabel={t('Copy code')} onOpenLink={(uri) => post({ type: 'uri.open', uri })} />{streamingActive && streaming ? <StreamingIndicator streaming={streaming} /> : null}</div>;
+  const openLink = useStableCallback((uri: string) => post({ type: 'uri.open', uri }));
+  return <div className="mobile-chat-preview__text" data-reveal-mode={streaming?.reveal ?? 'instant'}><RichMarkdown text={visibleText} streaming={streamingActive} markdown={markdown} html={html} classStyles={classStyles} styleRules={styleRules} copyLabel={t('Copy code')} onOpenLink={openLink} />{streamingActive && streaming ? <StreamingIndicator streaming={streaming} /> : null}</div>;
 }
 
 function MobileText({ text, streaming, streamingActive }: { text: string; streaming?: ResolvedStreaming; streamingActive: boolean }): React.JSX.Element {
@@ -1028,6 +1087,10 @@ function useStreamingRevealText(text: string, active: boolean, streaming?: Resol
     : text.length);
   const targetRef = useRef(text);
   const deadlineRef = useRef(nowMs() + maxVisualLagMs);
+  const revealing = adaptive && active && !presentationBypass && configured;
+  // Length already shown while the reveal was bypassed. Tracked in a ref so
+  // instant/event modes return the canonical text without a second render.
+  const settledLengthRef = useRef(revealing ? 0 : text.length);
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
@@ -1045,27 +1108,30 @@ function useStreamingRevealText(text: string, active: boolean, streaming?: Resol
     const previousTarget = targetRef.current;
     const appendOnly = text.startsWith(previousTarget);
     targetRef.current = text;
-    if (!adaptive || !active || presentationBypass || !configured) {
-      setVisibleLength(text.length);
+    if (!revealing) {
+      settledLengthRef.current = text.length;
       return;
     }
     if (!appendOnly) {
+      settledLengthRef.current = 0;
       deadlineRef.current = nowMs() + maxVisualLagMs;
       setVisibleLength(advanceGraphemeBoundary(text, 0, pacing.initialGraphemes));
       return;
     }
+    const settledLength = settledLengthRef.current;
+    settledLengthRef.current = 0;
     setVisibleLength((current) => {
-      const boundedCurrent = Math.min(current, text.length);
+      const boundedCurrent = Math.min(Math.max(current, settledLength), text.length);
       if (text.length > boundedCurrent && boundedCurrent >= previousTarget.length) {
         deadlineRef.current = nowMs() + maxVisualLagMs;
         return advanceGraphemeBoundary(text, boundedCurrent, pacing.initialGraphemes);
       }
       return boundedCurrent;
     });
-  }, [active, adaptive, configured, maxVisualLagMs, pacing.initialGraphemes, presentationBypass, text]);
+  }, [maxVisualLagMs, pacing.initialGraphemes, revealing, text]);
 
   useEffect(() => {
-    if (!adaptive || !active || presentationBypass || !configured) return undefined;
+    if (!revealing) return undefined;
     const timer = window.setInterval(() => {
       setVisibleLength((current) => {
         const target = targetRef.current;
@@ -1077,9 +1143,9 @@ function useStreamingRevealText(text: string, active: boolean, streaming?: Resol
       });
     }, pacing.intervalMs);
     return () => window.clearInterval(timer);
-  }, [active, adaptive, configured, maxVisualLagMs, pacing.intervalMs, pacing.minimumGraphemes, presentationBypass]);
+  }, [maxVisualLagMs, pacing.intervalMs, pacing.minimumGraphemes, revealing]);
 
-  return text.slice(0, Math.min(visibleLength, text.length));
+  return revealing ? text.slice(0, Math.min(visibleLength, text.length)) : text;
 }
 
 function shouldBypassStreamingReveal(): boolean {
@@ -1253,8 +1319,18 @@ function scrollToLatest(element: HTMLElement): void {
   element.scrollTop = top;
 }
 
+/**
+ * Cheap change signature for scroll anchoring. Streaming appends always change
+ * a text length, so lengths avoid concatenating every message body per delta.
+ */
 function getMessageContentKey(messages: ChatMessage[]): string {
-  return messages.map((message) => `${message.id}\u001e${message.status}\u001e${(message.parts ?? []).map((part) => `${part.type}:${String(part.text ?? '')}`).join('\u001f')}`).join('\u001d');
+  let key = '';
+  for (const message of messages) {
+    let textLength = 0;
+    for (const part of message.parts ?? []) textLength += typeof part.text === 'string' ? part.text.length : 0;
+    key += `${message.id}\u001e${message.status}\u001e${message.parts?.length ?? 0}\u001e${textLength}\u001d`;
+  }
+  return key;
 }
 
 function isFormDefinition(value: unknown): value is FormDefinition {

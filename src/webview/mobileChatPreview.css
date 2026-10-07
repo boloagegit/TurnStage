@@ -262,6 +262,7 @@
 }
 
 .mobile-chat-preview__content {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
@@ -689,7 +690,9 @@
   border: 0;
   overflow-wrap: anywhere;
   content-visibility: auto;
-  contain-intrinsic-block-size: 8rem;
+  /* `auto` remembers each message's rendered size after it scrolls away, so
+     scrollHeight and scroll anchoring stay stable in long transcripts. */
+  contain-intrinsic-block-size: auto 8rem;
 }
 
 .mobile-chat-preview__message--user {
@@ -912,12 +915,25 @@
   48% { opacity: var(--mcp-stream-intensity); transform: translateY(-.16em); }
 }
 
+.mobile-chat-preview__text .safe-markdown__code-block {
+  border-color: var(--mcp-border);
+  border-radius: .62em;
+  background: var(--mcp-code-background);
+  overflow: hidden;
+}
+
+.mobile-chat-preview__text .safe-markdown__code-block pre {
+  font-size: .846em;
+}
+
 @keyframes mcp-stream-shimmer {
   from { background-position: 115% 0; }
   to { background-position: -115% 0; }
 }
 
-.mobile-chat-preview__text pre,
+/* Markdown code blocks already draw their own frame; styling their inner <pre>
+   again produced a box inside a box. */
+.mobile-chat-preview__text pre:not(.safe-markdown__code-block pre),
 .mobile-chat-preview__json {
   max-width: 100%;
   margin: var(--mcp-space-2) 0;
@@ -1482,7 +1498,8 @@
   }
 
   .mobile-chat-preview__response-activity-content[data-animated='true'] .mobile-chat-preview__response-dots > span,
-  .mobile-chat-preview__response-activity-content--sending[data-animated='true'] > .codicon-loading {
+  .mobile-chat-preview__response-activity-content--sending[data-animated='true'] > .codicon-loading,
+  .mobile-chat-preview__session-start--loading > .codicon-loading {
     animation: none;
     transform: none;
   }
@@ -1516,7 +1533,8 @@
 }
 
 .vscode-reduce-motion .mobile-chat-preview__response-activity-content[data-animated='true'] .mobile-chat-preview__response-dots > span,
-.vscode-reduce-motion .mobile-chat-preview__response-activity-content--sending[data-animated='true'] > .codicon-loading {
+.vscode-reduce-motion .mobile-chat-preview__response-activity-content--sending[data-animated='true'] > .codicon-loading,
+.vscode-reduce-motion .mobile-chat-preview__session-start--loading > .codicon-loading {
   animation: none;
   transform: none;
 }

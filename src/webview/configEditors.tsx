@@ -251,7 +251,9 @@ function VariantCard({ index, variant, post, onDelete }: { index: number; varian
   const key: VariantKey = variant.id.toLocaleLowerCase().includes('continu') ? 'continuation' : variant.id.toLocaleLowerCase().includes('first') ? 'first-turn' : 'other';
   const base: Array<string | number> = ['conversation', 'send', 'variants', index];
   const patch = (suffix: string[], value: unknown) => post({ type: 'profile.patch', path: [...base, ...suffix], value });
-  useEffect(() => { setBodyText(JSON.stringify(variant.body ?? {}, null, 2)); setBodyError(''); }, [variant.body]);
+  // Reset only when the stored body actually changes, not on every Profile snapshot (keeps in-progress edits).
+  const storedBodyText = JSON.stringify(variant.body ?? {}, null, 2);
+  useEffect(() => { setBodyText(storedBodyText); setBodyError(''); }, [storedBodyText]);
   const applyBody = () => {
     try {
       const value = JSON.parse(bodyText) as unknown;
@@ -361,7 +363,8 @@ function MappingCard({ rule, index, count, post, onMove, onDelete }: { rule: Map
   const [emitText, setEmitText] = useState(() => JSON.stringify(rule.emit, null, 2));
   const [emitError, setEmitError] = useState('');
   const [matchValue, setMatchValue] = useState(() => formatValue(rule.match.value));
-  useEffect(() => { setEmitText(JSON.stringify(rule.emit, null, 2)); setEmitError(''); }, [rule.emit]);
+  const storedEmitText = JSON.stringify(rule.emit, null, 2);
+  useEffect(() => { setEmitText(storedEmitText); setEmitError(''); }, [storedEmitText]);
   useEffect(() => setMatchValue(formatValue(rule.match.value)), [rule.match.value]);
   const base: Array<string | number> = ['stream', 'mappings', index];
   const patch = (suffix: string[], value: unknown) => post({ type: 'profile.patch', path: [...base, ...suffix], value });
