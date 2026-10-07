@@ -1,4 +1,4 @@
-/* global localStorage, innerWidth */
+/* global localStorage, sessionStorage, innerWidth */
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -103,7 +103,7 @@ try {
 
   const vsix = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: 'en-US' });
   vsix.on('pageerror', (error) => errors.push(`vsix: ${error.message}`));
-  await vsix.goto(`${url}/test/visual/profileWorkspaceHarness.html?rightPane=debug&locale=en-US`);
+  await vsix.goto(`${url}/test/visual/profileWorkspaceHarness.html?rightPane=debug&locale=en-US&persistState=1`);
   await vsix.getByRole('tab', { name: 'Debug', exact: true }).waitFor();
   await capture(vsix, 'vsix-shell');
   await vsix.getByRole('button', { name: 'More actions', exact: true }).first().click();
@@ -136,6 +136,17 @@ try {
   assert.equal(await vsix.locator('.preview-pane').evaluate((element) => getComputedStyle(element).visibility), 'hidden');
   await chatTab.click();
   assert.equal(await vsix.locator('[data-message-id]').count(), messagesBefore, 'narrow tab switching must retain chat');
+  await vsix.getByRole('tab', { name: 'General tests', exact: true }).click();
+  await vsix.waitForFunction(() => JSON.parse(sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').narrowView === 'pane');
+  await vsix.reload();
+  await vsix.getByRole('tab', { name: 'General tests', exact: true, selected: true }).waitFor();
+  assert.equal(await vsix.locator('.preview-pane').evaluate((element) => getComputedStyle(element).visibility), 'hidden', 'reload must restore the workspace side');
+  await vsix.getByRole('tab', { name: 'Chat', exact: true }).click();
+  await vsix.getByRole('textbox', { name: 'Message', exact: true }).fill('Unfinished native draft');
+  await vsix.waitForFunction(() => JSON.parse(sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').narrowView === 'chat');
+  await vsix.reload();
+  await vsix.getByRole('tab', { name: 'Chat', exact: true, selected: true }).waitFor();
+  assert.equal(await vsix.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Unfinished native draft');
   await capture(vsix, 'vsix-narrow');
   await vsix.close();
 

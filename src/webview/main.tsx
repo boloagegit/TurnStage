@@ -1538,6 +1538,7 @@ export function normalizeWebviewState(value: unknown): WebviewState | undefined 
     ...(isWorkspaceSection(candidate.section) ? { section: candidate.section } : {}),
     ...(isSettingsSectionId(candidate.configurationSection) ? { configurationSection: candidate.configurationSection } : {}),
     ...(normalizedPane ? { rightPaneMode: normalizedPane } : {}),
+    ...(candidate.narrowView === 'chat' || candidate.narrowView === 'pane' ? { narrowView: candidate.narrowView } : {}),
     ...(savedTestsSection === 'campaigns' ? { testsSection: 'scenarios' as const } : AUTOMATION_SECTIONS.includes(savedTestsSection as AutomationSectionId) ? { testsSection: savedTestsSection as AutomationSectionId } : {}),
     testKind: normalizedPane === 'adversarial' ? 'adversarial' as const : 'contract' as const,
     ...(RED_TEAM_SECTIONS.includes(candidate.redTeamSection as RedTeamSectionId) ? { redTeamSection: candidate.redTeamSection as RedTeamSectionId } : savedCombinedRedTeam && AUTOMATION_SECTIONS.includes(savedTestsSection as AutomationSectionId) ? { redTeamSection: savedTestsSection === 'scenarios' ? 'cases' as const : 'results' as const } : {}),
