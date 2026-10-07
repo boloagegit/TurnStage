@@ -231,17 +231,25 @@ try {
   // Narrow and light layouts keep the drawer inside the viewport.
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 820, height: 900 });
-  // Web keeps its existing stacked layout; editor-only Chat navigation must not leak here.
-  assert.equal(await page.getByRole('tab', { name: 'Chat', exact: true }).count(), 0);
+  // Narrow workspaces switch between Chat and the workspace with tabs instead of stacking them, in Web as in VS Code.
+  const chatTab = page.getByRole('tab', { name: 'Chat', exact: true });
+  await chatTab.click();
+  assert.equal(await chatTab.getAttribute('aria-selected'), 'true');
   const narrowLayout = await page.evaluate(() => {
     const chat = document.querySelector('.preview-pane').getBoundingClientRect();
-    const panel = document.querySelector('.debug-pane').getBoundingClientRect();
-    return { stacked: panel.top >= chat.bottom - 1, chatVisible: getComputedStyle(document.querySelector('.preview-pane')).visibility, panelVisible: getComputedStyle(document.querySelector('.right-pane-panel')).visibility };
+    const panel = document.querySelector('.right-pane-panel').getBoundingClientRect();
+    return { sameTop: Math.abs(chat.top - panel.top) < 1, chatHeight: chat.height, panelVisibility: getComputedStyle(document.querySelector('.right-pane-panel')).visibility, host: document.documentElement.dataset.host };
   });
-  assert.equal(narrowLayout.stacked, true, 'Web must retain chat above the workspace');
-  assert.equal(narrowLayout.chatVisible, 'visible');
-  assert.equal(narrowLayout.panelVisible, 'visible');
+  assert.equal(narrowLayout.host, 'web');
+  assert.equal(narrowLayout.sameTop, true, 'chat and workspace are stacked instead of sharing one area');
+  assert.ok(narrowLayout.chatHeight > 600, 'chat does not use the full narrow height');
+  assert.equal(narrowLayout.panelVisibility, 'hidden');
   report.webNarrowLayout = narrowLayout;
+  const messagesBefore = await page.locator('[data-message-id]').count();
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
+  assert.equal(await page.locator('.preview-pane').evaluate((element) => getComputedStyle(element).visibility), 'hidden');
+  await chatTab.click();
+  assert.equal(await page.locator('[data-message-id]').count(), messagesBefore, 'chat remounted when switching narrow tabs');
   if (!await page.getByRole('region', { name: 'Conversations' }).isVisible()) await page.locator('.mobile-chat-preview__conversations').click();
   const box = await page.getByRole('region', { name: 'Conversations' }).boundingBox();
   assert.ok(box && box.x >= 0 && box.x + box.width <= 820, 'drawer overflows a narrow viewport');
