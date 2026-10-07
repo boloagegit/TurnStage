@@ -16,6 +16,7 @@ import { WebCampaignController } from './webCampaignController';
 import { WebInsightsController } from './webInsightsController';
 import { ArtifactStore } from './artifactStore';
 import { redactKnownSecrets } from '../../src/shared/redaction';
+import { SessionDeltaTracker } from '../../src/shared/sessionDelta';
 import { loadEnvironments, loadPreferences, loadProfiles, saveEnvironments, savePreferences, saveProfiles, type StoredEnvironment, type StoredProfile, type WebThemePreference } from './storage';
 import { loadOfficialCatalog, mergeCatalogEntries, type OfficialCatalogResult } from './catalog';
 import { applyWebAppearance, bindSystemAppearance } from './theme';
@@ -106,7 +107,7 @@ function createSession(item: StoredProfile): BrowserSession {
   const profile = codec.parse(item.raw).profile ?? fallbackProfile(item);
   const next = new BrowserSession(profile, activeEnvironment(), secrets, (state) => {
     if (session !== next) return;
-    post({ type: 'session.snapshot', snapshot: state.snapshot, runs: runSummaries, requestPreview: state.requestPreview, networkEntries: state.networkEntries });
+    scheduleSessionSync(state);
     void retainCompletedRun(profile, state);
   });
   void next.start();
@@ -594,7 +595,39 @@ function persistLibrary(): void {
   savePreferences(preferences);
 }
 
+// The browser session emits once per stream chunk. Like the VS Code host,
+// coalesce those emits and send bounded deltas after a full checkpoint instead
+// of deep-cloning and re-rendering the whole session for every chunk.
+const SESSION_SYNC_INTERVAL_MS = 32;
+const sessionDeltaTracker = new SessionDeltaTracker();
+let sessionSyncTimer: number | undefined;
+let lastSyncedPhase = '';
+
+function sessionPhase(state: BrowserSessionState): string {
+  return `${state.snapshot.sessionId}\u0000${state.snapshot.sessionState}\u0000${state.snapshot.turnState}`;
+}
+
+function scheduleSessionSync(state: BrowserSessionState): void {
+  // State transitions (submit, first byte, completion, stop) are flushed immediately.
+  if (sessionPhase(state) !== lastSyncedPhase) { flushSessionSync(); return; }
+  sessionSyncTimer ??= window.setTimeout(flushSessionSync, SESSION_SYNC_INTERVAL_MS);
+}
+
+function flushSessionSync(): void {
+  if (sessionSyncTimer !== undefined) window.clearTimeout(sessionSyncTimer);
+  sessionSyncTimer = undefined;
+  const current = session.current;
+  lastSyncedPhase = sessionPhase(current);
+  const payload = { snapshot: current.snapshot, runs: runSummaries, requestPreview: current.requestPreview, networkEntries: current.networkEntries };
+  const delta = sessionDeltaTracker.next(payload);
+  if (delta) post({ type: 'session.delta', delta });
+  else post({ type: 'session.snapshot', ...payload });
+}
+
 function post(payload: HostPayload, requestId: string = browserUuid()): void {
+  // Every full session checkpoint (hydrate, profile switch, run refresh, test
+  // evidence) becomes the base for the next delta.
+  if (payload.type === 'session.snapshot') sessionDeltaTracker.checkpoint({ snapshot: payload.snapshot, runs: payload.runs, requestPreview: payload.requestPreview, networkEntries: payload.networkEntries });
   // Match the structured-clone boundary used by VS Code and omit undefined fields.
   const message = JSON.parse(JSON.stringify({ ...payload, protocolVersion: PROTOCOL_VERSION, editorInstanceId: 'turnstage-web', requestId })) as HostMessage;
   window.dispatchEvent(new MessageEvent('message', { data: message }));

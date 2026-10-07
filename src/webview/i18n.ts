@@ -1625,15 +1625,29 @@ export function t(message: string, values: MessageValues = {}): string {
   return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] === undefined ? match : String(values[key]));
 }
 
+// Intl formatter construction is far more expensive than formatting. Event
+// rows, metrics, and chat timing format several values per render, so keep one
+// instance per locale and option set.
+const formatterCache = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat>();
+
+function cachedFormatter<T extends Intl.NumberFormat | Intl.DateTimeFormat>(kind: string, create: () => T): T {
+  const key = `${locale}\u0000${kind}`;
+  const cached = formatterCache.get(key);
+  if (cached) return cached as T;
+  const created = create();
+  formatterCache.set(key, created);
+  return created;
+}
+
 export function formatNumber(value: number): string {
-  return new Intl.NumberFormat(locale).format(value);
+  return cachedFormatter('number', () => new Intl.NumberFormat(locale)).format(value);
 }
 
 export function formatDateTime(value: number | string | Date): string {
   const date = toValidDate(value);
   if (!date) return t('Unknown date');
   try {
-    return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'medium' }).format(date);
+    return cachedFormatter('dateTime', () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'medium' })).format(date);
   } catch {
     return t('Unknown date');
   }
@@ -1645,7 +1659,7 @@ export function dateTimeAttribute(value: number | string | Date): string | undef
 }
 
 export function formatDuration(value: number): string {
-  return new Intl.NumberFormat(locale, { maximumFractionDigits: 0, style: 'unit', unit: 'millisecond', unitDisplay: 'short' }).format(value);
+  return cachedFormatter('duration', () => new Intl.NumberFormat(locale, { maximumFractionDigits: 0, style: 'unit', unit: 'millisecond', unitDisplay: 'short' })).format(value);
 }
 
 export function localizeHumanized(value: string): string {

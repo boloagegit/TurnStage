@@ -98,6 +98,20 @@ The current UI includes these performance-conscious choices:
   when requested so narrow toolbars retain their primary actions;
 - CSS uses VS Code theme variables and reduced-motion rules rather than a
   separate visual runtime.
+- chat messages are memoized and receive stable callbacks; `applySessionDelta`
+  preserves array identity for unchanged events and messages, so only the
+  streaming tail re-renders. While a message streams, its Markdown is split at
+  top-level blank lines and completed blocks are parsed once (raw HTML,
+  reference definitions and footnotes keep a single parse). `rehype-raw` runs
+  only when the source contains `<`;
+- TurnStage Web coalesces browser-session emits every 32 ms (state transitions
+  flush immediately) and sends `session.delta` messages after a checkpoint;
+- chat auto-follow tracks the reader's intent and a ResizeObserver keeps the
+  view pinned while revealed content grows; `contain-intrinsic-size: auto`
+  keeps off-screen message heights stable;
+- Intl number/date formatters are cached per locale; JSON viewers memoize
+  serialization, defer search, tokenize in linear time and fall back to plain
+  text above 256 KiB;
 - Chat screenshot rendering is user-triggered, capped at 8 million output
   pixels, and bounded again by a 24 MiB clipboard-side PNG limit.
 

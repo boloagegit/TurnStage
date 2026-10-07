@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { IconButton } from './Icon';
 import { JsonSyntax } from './JsonViewer';
 import { copyText } from './clipboardText';
+import { t } from './i18n';
 import './safeMarkdown.css';
 
 /**
@@ -244,6 +245,12 @@ function SafeMarkdownBlockView({ block, onCopyCode, onOpenLink, copyLabel }: { b
 
 export function SafeCodeBlock({ code, language, onCopyCode, copyLabel }: { code: string; language?: string; onCopyCode?: SafeMarkdownProps['onCopyCode']; copyLabel: string }): React.JSX.Element {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  // Return to the copy affordance so repeated copies get fresh feedback.
+  useEffect(() => {
+    if (state === 'idle') return undefined;
+    const timer = window.setTimeout(() => setState('idle'), state === 'copied' ? 2_000 : 4_000);
+    return () => window.clearTimeout(timer);
+  }, [state]);
   const copy = async (): Promise<void> => {
     try {
       if (onCopyCode) {
@@ -258,7 +265,7 @@ export function SafeCodeBlock({ code, language, onCopyCode, copyLabel }: { code:
   };
   const languageClass = language ? ` language-${language}` : '';
   const jsonLanguage = language?.toLocaleLowerCase() === 'json' || language?.toLocaleLowerCase() === 'jsonc';
-  const label = state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed. Try again.' : copyLabel;
+  const label = state === 'copied' ? t('Copied') : state === 'failed' ? t('Copy failed. Try again.') : copyLabel;
   return <div className="safe-markdown__code-block">
     <div className="safe-markdown__code-toolbar">
       {language && <span className="safe-markdown__language">{language}</span>}

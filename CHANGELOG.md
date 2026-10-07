@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Streaming responses render much more smoothly in VS Code and Web. Completed messages no longer re-render or re-parse Markdown while a later message streams, completed Markdown blocks of the streaming message are parsed once, and Web now sends the same bounded session deltas as VS Code instead of a full session copy per stream chunk. In a three-turn, 1,341-event benchmark, Webview script time dropped by about 60% and frames slower than 50 ms fell from about 75 to under 5.
+- The chat keeps following a fast stream to the end unless the reader scrolls up, and **Jump to latest** now stays pinned to the visible bottom edge instead of scrolling away with the transcript.
+- Fixed Escape in Profile fields saving the typed value instead of reverting it, and Escape in a confirmation also closing the case editor behind it. Focus now returns to the surrounding list after a confirmed delete removes the focused row.
+- JSON edits in case Advanced controls, request-variant bodies, and mapping emit fields are no longer reset by unrelated updates such as stream deltas or test-run progress.
+- Selecting a Network row or an event is no longer undone or re-focused by streaming updates; event search keeps keyboard focus while a run is active.
+- Large JSON payloads in the inspectors are searched without blocking typing, tokenized in linear time, and shown as plain text above 256 KiB. Selecting all cases in large suites updates the selection once.
+- Markdown code blocks in chat no longer draw a second frame inside the code block, copy feedback resets after a moment and is localized, the Red Team results header stays visible while scrolling, and pagination keeps keyboard focus at the first/last page.
+- Compatibility: no Profile, suite, storage, or protocol format changes.
+
 ## 0.35.1
 
 - Fixed a VS Code test-discovery race that could omit newly added or edited cases when another refresh was already running. Refresh now waits for pending source changes before a manual run starts. Web behavior and existing Profile, suite, and history formats are unchanged.

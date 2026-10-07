@@ -75,6 +75,12 @@ export class SessionDeltaTracker {
   }
 }
 
+/**
+ * Applies a bounded delta to the current Webview checkpoint. Unchanged event
+ * and message arrays keep their identity so memoized projections and
+ * per-message renderers can skip work for deltas that only change metrics or
+ * the streaming tail.
+ */
 export function applySessionDelta(snapshot: SessionSnapshot | undefined, delta: SessionDelta): SessionSnapshot | undefined {
   if (!snapshot || snapshot.sessionId !== delta.baseSessionId || delta.core.sessionId !== delta.baseSessionId) return undefined;
   return {
@@ -108,9 +114,9 @@ function eventDelta<T extends { sequence: number }>(events: readonly T[], previo
 }
 
 function applyEventDelta<T extends { sequence: number }>(current: readonly T[], delta: { retainFromSequence?: number; append: T[] }): T[] {
-  const retained = delta.retainFromSequence === undefined || (current[0]?.sequence ?? Number.POSITIVE_INFINITY) >= delta.retainFromSequence
-    ? [...current]
-    : current.slice(lowerBoundSequence(current, delta.retainFromSequence));
+  const trimmed = delta.retainFromSequence !== undefined && (current[0]?.sequence ?? Number.POSITIVE_INFINITY) < delta.retainFromSequence;
+  if (!trimmed && !delta.append.length) return current as T[];
+  const retained = trimmed ? current.slice(lowerBoundSequence(current, delta.retainFromSequence!)) : [...current];
   if (!delta.append.length) return retained;
   if ((retained.at(-1)?.sequence ?? Number.NEGATIVE_INFINITY) < delta.append[0]!.sequence) return [...retained, ...delta.append];
   const appendedSequences = new Set(delta.append.map((event) => event.sequence));
@@ -140,6 +146,7 @@ function upperBoundSequence<T extends { sequence: number }>(events: readonly T[]
 }
 
 function applyMessageDelta(current: readonly ChatMessage[], removeIds: readonly string[], upsert: readonly ChatMessage[]): ChatMessage[] {
+  if (!removeIds.length && !upsert.length) return current as ChatMessage[];
   const removed = new Set(removeIds);
   const updates = new Map(upsert.map((message) => [message.id, message]));
   const next = current.filter((message) => !removed.has(message.id)).map((message) => updates.get(message.id) ?? message);

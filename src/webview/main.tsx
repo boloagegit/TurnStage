@@ -280,6 +280,8 @@ function App(): React.JSX.Element {
   </main>;
 }
 
+const EMPTY_HISTORY_RUNS: TestRunHistoryRecord[] = [];
+
 function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, automationResults, contractCaseCatalog, linkedContractCaseEditor, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, testsSection, setTestsSection, selectedTestCases, setSelectedTestCases, testHistory, selectedAutomationResultKey, setSelectedAutomationResultKey, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, profileReadOnly, hostKind, diagnostics, scrollPositions, onScrollPositionChange, expandedContractCaseId, setExpandedContractCaseId, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector }: {
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
@@ -419,8 +421,15 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   };
   const beginResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
-    const move = (moveEvent: PointerEvent) => resizeFromPointer(moveEvent.clientX, moveEvent.clientY);
+    // At most one layout update per frame; high-rate pointers otherwise re-render the workspace per event.
+    let frame: number | undefined;
+    let latest = { x: event.clientX, y: event.clientY };
+    const move = (moveEvent: PointerEvent) => {
+      latest = { x: moveEvent.clientX, y: moveEvent.clientY };
+      frame ??= requestAnimationFrame(() => { frame = undefined; resizeFromPointer(latest.x, latest.y); });
+    };
     const stop = () => {
+      if (frame !== undefined) { cancelAnimationFrame(frame); frame = undefined; resizeFromPointer(latest.x, latest.y); }
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', stop);
       window.removeEventListener('pointercancel', stop);
@@ -445,35 +454,49 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   useEffect(() => { setSelectionNotice(undefined); }, [rightPaneMode]);
   const [selectedHistoryRunId, setSelectedHistoryRunId] = useState<string>();
   const [confirmHistoryAction, historyConfirmation] = useConfirmAction();
-  const historyRuns = testHistory?.profileId === profile.id ? testHistory.runs : [];
-  const visibleHistoryRuns = historyRuns.filter((run) => run.cases.some((item) => item.kind === testKind));
+  const historyRuns = testHistory?.profileId === profile.id ? testHistory.runs : EMPTY_HISTORY_RUNS;
+  const visibleHistoryRuns = useMemo(() => historyRuns.filter((run) => run.cases.some((item) => item.kind === testKind)), [historyRuns, testKind]);
   const completedRunForCurrentKind = testOperation?.state === 'completed' && historyRuns[0]?.cases.some((item) => item.kind === testKind);
   const selectedHistoryRun = visibleHistoryRuns.find((run) => run.id === selectedHistoryRunId) ?? visibleHistoryRuns[0];
   const baselineHistoryRun = historyRuns.find((run) => run.id === testHistory?.baselineRunId);
-  const historyDifferences = selectedHistoryRun && baselineHistoryRun && selectedHistoryRun.id !== baselineHistoryRun.id
+  // History comparison, selection keys and run availability scale with run
+  // and case counts; memoize them so streaming and progress renders skip them.
+  const historyDifferences = useMemo(() => selectedHistoryRun && baselineHistoryRun && selectedHistoryRun.id !== baselineHistoryRun.id
     ? new Map(compareTestRuns(baselineHistoryRun, selectedHistoryRun).map((item) => [item.key, item.difference]))
-    : new Map<string, ReturnType<typeof compareTestRuns>[number]['difference']>();
-  const selectedForProfile = [...selectedTestCases.values()].filter((item) => item.profileId === profile.id && item.kind === testKind);
-  const selectedCaseKeys = new Set(selectedForProfile.map(testCaseKey));
-  const toggleTestCase = (identity: TestCaseIdentity) => {
-    const key = testCaseKey(identity);
+    : new Map<string, ReturnType<typeof compareTestRuns>[number]['difference']>(), [baselineHistoryRun, selectedHistoryRun]);
+  const selectedForProfile = useMemo(() => [...selectedTestCases.values()].filter((item) => item.profileId === profile.id && item.kind === testKind), [profile.id, selectedTestCases, testKind]);
+  const selectedCaseKeys = useMemo(() => new Set(selectedForProfile.map(testCaseKey)), [selectedForProfile]);
+  const toggleTestCases = useCallback((identities: readonly TestCaseIdentity[]) => {
+    if (!identities.length) return;
     setSelectedTestCases((current) => {
       const next = new Map(current);
-      if (next.has(key)) next.delete(key);
-      else next.set(key, identity);
+      for (const identity of identities) {
+        const key = testCaseKey(identity);
+        if (next.has(key)) next.delete(key);
+        else next.set(key, identity);
+      }
       return next;
     });
     setSelectionNotice(undefined);
-  };
-  const selectedRunAvailability = selectedForProfile.reduce((counts, identity) => {
+  }, []);
+  const toggleTestCase = useCallback((identity: TestCaseIdentity) => toggleTestCases([identity]), [toggleTestCases]);
+  const linkedCaseLookup = useMemo(() => {
+    const lookup = new Map<string, AdversarialCaseCatalog['entries'][number] | ContractCaseCatalog['entries'][number]>();
+    // First match wins, matching the previous Array.find semantics for duplicate ids.
+    const add = (key: string, item: AdversarialCaseCatalog['entries'][number] | ContractCaseCatalog['entries'][number]) => { if (!lookup.has(key)) lookup.set(key, item); };
+    for (const item of adversarialCaseCatalog?.entries ?? []) add(`adversarial\u001f${item.suiteId}\u001f${item.scenarioId}`, item);
+    for (const item of contractCaseCatalog?.entries ?? []) add(`contract\u001f${item.suiteId}\u001f${item.scenarioId}`, item);
+    return lookup;
+  }, [adversarialCaseCatalog, contractCaseCatalog]);
+  const selectedRunAvailability = useMemo(() => selectedForProfile.reduce((counts, identity) => {
     const scenario = identity.suiteId
-      ? identity.kind === 'adversarial' ? adversarialCaseCatalog?.entries.find((item) => item.suiteId === identity.suiteId && item.scenarioId === identity.scenarioId) : contractCaseCatalog?.entries.find((item) => item.suiteId === identity.suiteId && item.scenarioId === identity.scenarioId)
+      ? linkedCaseLookup.get(`${identity.kind === 'adversarial' ? 'adversarial' : 'contract'}\u001f${identity.suiteId}\u001f${identity.scenarioId}`)
       : profile.tests?.scenarios?.find((item) => item.id === identity.scenarioId && Boolean(item.adversarial) === (identity.kind === 'adversarial'));
     const needsReview = Boolean(scenario?.capture?.status === 'needsReview' || scenario?.tags?.includes('needs-review'));
     const incomplete = Boolean(scenario && 'steps' in scenario && (!scenario.name?.trim() || scenario.steps.length === 0 || scenario.steps.some((step) => !step.input?.trim())));
     const unsupported = Boolean(hostKind !== 'vscode' && identity.kind === 'contract' && scenario && ('steps' in scenario ? webUnsupportedTestFeature(scenario) : 'webUnsupported' in scenario && typeof scenario.webUnsupported === 'boolean' ? scenario.webUnsupported : 'faults' in scenario && (scenario.faults || scenario.comparison || scenario.performance)));
     return { unresolved: counts.unresolved + Number(!scenario), unavailable: counts.unavailable + Number(needsReview || incomplete || unsupported) };
-  }, { unresolved: 0, unavailable: 0 });
+  }, { unresolved: 0, unavailable: 0 }), [hostKind, linkedCaseLookup, profile.tests?.scenarios, selectedForProfile]);
   useEffect(() => {
     if (activeAutomationEvidence?.result.evidenceId) setSelectedAutomationResultKey(activeAutomationEvidence.result.evidenceId);
   }, [activeAutomationEvidence?.result.evidenceId, setSelectedAutomationResultKey]);
@@ -544,8 +567,8 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
                         </div>}
                       </>}
                     </section>}
-                    {testKind === 'contract' && <AutomationWorkspace unified profile={profile} readOnly={profileReadOnly} automationResults={automationResults} campaignDashboard={campaignDashboard} testOperation={testOperation} trusted={snapshot?.trusted === true} vscodeFeatures={hostKind === 'vscode'} selectedCaseKeys={selectedCaseKeys} onToggleCase={toggleTestCase} post={post} scrollTop={scrollPositions[`tests.${testsSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`tests.${testsSection}`, value)} activeSection={testsSection} onActiveSectionChange={setTestsSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedContractCaseId} onExpandedCaseIdChange={setExpandedContractCaseId} selectedResultKey={selectedAutomationResultKey} onSelectedResultKeyChange={setSelectedAutomationResultKey} linkedCaseCatalog={contractCaseCatalog} linkedCaseEditor={linkedContractCaseEditor} />}
-                    {testKind === 'adversarial' && <AdversarialWorkspace unified profile={profile} readOnly={profileReadOnly} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} trusted={snapshot?.trusted === true} vscodeFeatures={hostKind === 'vscode'} selectedCaseKeys={selectedCaseKeys} onToggleCase={toggleTestCase} post={post} scrollTop={scrollPositions[`adversarial.${redTeamSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`adversarial.${redTeamSection}`, value)} activeSection={redTeamSection === 'timeline' && activeEvidence ? 'timeline' : activeTestSection === 'scenarios' ? 'cases' : 'results'} onActiveSectionChange={setRedTeamSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} linkedCaseCatalog={adversarialCaseCatalog} linkedCaseEditor={linkedAdversarialCaseEditor} caseCollection={adversarialCaseCollection} onCaseCollectionChange={setAdversarialCaseCollection} resultCollection={adversarialResultCollection} onResultCollectionChange={setAdversarialResultCollection} />}
+                    {testKind === 'contract' && <AutomationWorkspace unified profile={profile} readOnly={profileReadOnly} automationResults={automationResults} campaignDashboard={campaignDashboard} testOperation={testOperation} trusted={snapshot?.trusted === true} vscodeFeatures={hostKind === 'vscode'} selectedCaseKeys={selectedCaseKeys} onToggleCase={toggleTestCase} onToggleCases={toggleTestCases} post={post} scrollTop={scrollPositions[`tests.${testsSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`tests.${testsSection}`, value)} activeSection={testsSection} onActiveSectionChange={setTestsSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedContractCaseId} onExpandedCaseIdChange={setExpandedContractCaseId} selectedResultKey={selectedAutomationResultKey} onSelectedResultKeyChange={setSelectedAutomationResultKey} linkedCaseCatalog={contractCaseCatalog} linkedCaseEditor={linkedContractCaseEditor} />}
+                    {testKind === 'adversarial' && <AdversarialWorkspace unified profile={profile} readOnly={profileReadOnly} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} trusted={snapshot?.trusted === true} vscodeFeatures={hostKind === 'vscode'} selectedCaseKeys={selectedCaseKeys} onToggleCase={toggleTestCase} onToggleCases={toggleTestCases} post={post} scrollTop={scrollPositions[`adversarial.${redTeamSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`adversarial.${redTeamSection}`, value)} activeSection={redTeamSection === 'timeline' && activeEvidence ? 'timeline' : activeTestSection === 'scenarios' ? 'cases' : 'results'} onActiveSectionChange={setRedTeamSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} linkedCaseCatalog={adversarialCaseCatalog} linkedCaseEditor={linkedAdversarialCaseEditor} caseCollection={adversarialCaseCollection} onCaseCollectionChange={setAdversarialCaseCollection} resultCollection={adversarialResultCollection} onResultCollectionChange={setAdversarialResultCollection} />}
                   </div>
                   {historyConfirmation}
                 </div>
@@ -879,7 +902,7 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
       : effectiveTab === 'Metrics'
         ? <MetricGrid metrics={snapshot?.metrics} enabled={profile?.metrics?.enabled} />
         : effectiveTab === 'Errors'
-          ? <div className="error-list">{snapshot?.errors.length ? snapshot.errors.map((error, index) => <details key={`${error.type}-${index}`}><summary>{error.type}</summary><p>{error.message}</p><JsonBlock value={error} /></details>) : <p className="muted">{t('No runtime errors.')}</p>}</div>
+          ? <div className="error-list">{snapshot?.errors.length ? snapshot.errors.map((error, index) => <LazyDetails key={`${error.type}-${index}`} summary={error.type}><p>{error.message}</p><JsonBlock value={error} /></LazyDetails>) : <p className="muted">{t('No runtime errors.')}</p>}</div>
           : <Replay runs={runs} replay={snapshot?.replay} remoteSessions={snapshot?.remoteSessions} active={active} trusted={snapshot?.trusted === true} />;
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, currentTab: InspectorTab) => {
     const currentIndex = availableTabs.indexOf(currentTab);
@@ -909,7 +932,15 @@ export function NetworkInspector({ entries, legacyRequestPreview, selectedEntryI
     if (!state) setUncontrolledState(next);
     onStateChange?.(next);
   };
-  useEffect(() => { if (selectedEntryId && entries.some((entry) => entry.id === selectedEntryId)) updateState({ selectedId: selectedEntryId }); }, [entries, selectedEntryId]);
+  // Apply an external selection once it exists. Streaming updates replace
+  // `entries` every batch; re-applying would undo the user's own row choice.
+  const appliedEntryIdRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!selectedEntryId) { appliedEntryIdRef.current = undefined; return; }
+    if (appliedEntryIdRef.current === selectedEntryId || !entries.some((entry) => entry.id === selectedEntryId)) return;
+    appliedEntryIdRef.current = selectedEntryId;
+    if (currentState.selectedId !== selectedEntryId) updateState({ selectedId: selectedEntryId });
+  }, [entries, selectedEntryId]);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filtered = useMemo(() => entries.filter((entry) => !normalizedQuery || `${entry.kind} ${entry.method} ${entry.url} ${entry.status ?? ''} ${entry.state} ${entry.variantId ?? ''} ${entry.correlation?.traceId ?? ''} ${entry.correlation?.spanId ?? ''} ${entry.correlation?.requestId ?? ''}`.toLocaleLowerCase().includes(normalizedQuery)), [entries, normalizedQuery]);
   const selected = filtered.find((entry) => entry.id === selectedId) ?? filtered.at(-1);
@@ -1088,9 +1119,13 @@ export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas,
   const collapsed = useMemo(() => new Set(collapsedTurnKeys ?? uncontrolledCollapsed), [collapsedTurnKeys, uncontrolledCollapsed]);
   const groups = useMemo(() => buildEventTurnGroups(items, messages, kind, terminalRawSequences), [items, kind, messages, terminalRawSequences]);
   const rows = useMemo(() => flattenEventTree(groups, collapsed), [collapsed, groups]);
-  const selectedItem = effectiveSelectedSequence === undefined ? undefined : items.find((item) => eventSequence(item) === effectiveSelectedSequence);
-  const selectedGroup = selectedItem ? groups.find((group) => group.key === eventTurnKey(selectedItem)) : undefined;
-  const selectedRowIndex = effectiveSelectedSequence === undefined ? -1 : rows.findIndex((row) => row.kind === 'event' && eventSequence(row.item) === effectiveSelectedSequence);
+  const selectedItemIndex = useMemo(() => effectiveSelectedSequence === undefined ? -1 : items.findIndex((item) => eventSequence(item) === effectiveSelectedSequence), [effectiveSelectedSequence, items]);
+  const selectedItem = selectedItemIndex >= 0 ? items[selectedItemIndex] : undefined;
+  const selectedGroup = useMemo(() => selectedItem ? groups.find((group) => group.key === eventTurnKey(selectedItem)) : undefined, [groups, selectedItem]);
+  const selectedRowIndex = useMemo(() => effectiveSelectedSequence === undefined ? -1 : rows.findIndex((row) => row.kind === 'event' && eventSequence(row.item) === effectiveSelectedSequence), [effectiveSelectedSequence, rows]);
+  const onScrollTopChangeRef = useRef(onScrollTopChange);
+  onScrollTopChangeRef.current = onScrollTopChange;
+  const revealedSequenceRef = useRef<number | undefined>(undefined);
   const screenReader = typeof document !== 'undefined' && document.body?.classList.contains('vscode-using-screen-reader');
   const viewportStart = Math.floor(top / rowHeight);
   const viewportEnd = viewportStart + Math.ceil(height / rowHeight);
@@ -1140,10 +1175,15 @@ export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas,
     setTop(list.scrollTop);
   }, [initialScrollTop]);
 
+  // Reveal and focus a selection once. Streaming deltas and buffer trimming
+  // shift the row index; re-running then would steal focus from the composer
+  // or the search field roughly every batch interval.
   useEffect(() => {
-    if (selectedSequence === undefined || selectedRowIndex < 0) return;
+    if (selectedSequence === undefined) { revealedSequenceRef.current = undefined; return; }
+    if (selectedRowIndex < 0 || revealedSequenceRef.current === selectedSequence) return;
     const list = listRef.current;
     if (!list) return;
+    revealedSequenceRef.current = selectedSequence;
     const rowTop = selectedRowIndex * rowHeight;
     const rowBottom = rowTop + rowHeight;
     const viewportTop = list.scrollTop;
@@ -1155,17 +1195,20 @@ export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas,
     }
     focusAfterRender(() => document.getElementById(`inspector-event-${String(selectedSequence)}`)?.focus());
   }, [height, selectedRowIndex, selectedSequence]);
+  const scrollFrameRef = useRef<number | undefined>(undefined);
+  useEffect(() => () => { if (scrollFrameRef.current !== undefined) cancelAnimationFrame(scrollFrameRef.current); }, []);
 
   useEffect(() => { setActiveIndex((current) => selectedRowIndex >= 0 ? selectedRowIndex : rows.length ? Math.min(Math.max(current, 0), rows.length - 1) : 0); }, [rows, selectedRowIndex]);
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
-    const maximum = Math.max(0, rows.length * rowHeight - (list.clientHeight || height));
+    // Use the observed height instead of reading clientHeight, which would force layout on every delta.
+    const maximum = Math.max(0, rows.length * rowHeight - height);
     if (top <= maximum) return;
     list.scrollTop = maximum;
     setTop(maximum);
-    onScrollTopChange?.(maximum);
-  }, [height, onScrollTopChange, rows.length, top]);
+    onScrollTopChangeRef.current?.(maximum);
+  }, [height, rows.length, top]);
 
   const focusRow = (index: number) => {
     const row = rows[index];
@@ -1201,13 +1244,22 @@ export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas,
 
   const accessibleEnd = Math.min(rows.length, visibleStart + ACCESSIBLE_EVENT_WINDOW_SIZE);
   const accessibleWindow = screenReader && rows.length > ACCESSIBLE_EVENT_WINDOW_SIZE;
-  const selectedItemIndex = selectedItem ? items.indexOf(selectedItem) : -1;
   const selectedDetailId = selectedItem ? eventDetailId(kind, selectedItem, selectedItemIndex) : undefined;
   const selectedDelta = selectedItem ? eventDeltas?.get(eventSequence(selectedItem) ?? -1) : undefined;
   return <div className={`event-browser ${selectedItem ? 'event-browser--detail' : ''} ${accessibleWindow ? 'event-browser--accessible-window' : ''}`.trim()}>
     {screenReader && rows.length > ACCESSIBLE_EVENT_WINDOW_SIZE && <p className="event-accessibility-notice" role="status" aria-live="polite">{t('Showing event rows {start}–{end} of {total} for screen reader performance.', { start: formatNumber(visibleStart + 1), end: formatNumber(accessibleEnd), total: formatNumber(rows.length) })}</p>}
     <span className="sr-only" aria-live="polite" aria-atomic="true">{selectedItem ? t('Event payload opened for {event} #{sequence}.', { event: eventLabel(selectedItem), sequence: formatNumber(selectedItem.sequence) }) : t('Event payload closed.')}</span>
-    <div ref={listRef} className="virtual-list event-tree" role="tree" aria-label={label} onScroll={(event) => { const next = event.currentTarget.scrollTop; setTop(next); onScrollTopChange?.(next); }}>
+    <div ref={listRef} className="virtual-list event-tree" role="tree" aria-label={label} onScroll={(event) => {
+      // Coalesce to one render per frame, and only when the first visible row changes.
+      const element = event.currentTarget;
+      onScrollTopChangeRef.current?.(element.scrollTop);
+      if (scrollFrameRef.current !== undefined) return;
+      scrollFrameRef.current = requestAnimationFrame(() => {
+        scrollFrameRef.current = undefined;
+        const next = element.scrollTop;
+        setTop((current) => Math.floor(current / rowHeight) === Math.floor(next / rowHeight) ? current : next);
+      });
+    }}>
       {!items.length ? <div className="empty-state compact"><strong>{t('No matching events')}</strong></div> : <div className="virtual-space" style={{ height: rows.length * rowHeight }}><div style={{ transform: `translateY(${visibleStart * rowHeight}px)` }}>{visible.map((row, visibleIndex) => {
         const rowIndex = visibleStart + visibleIndex;
         if (row.kind === 'turn') {
@@ -1231,6 +1283,12 @@ export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas,
       <JsonBlock value={selectedItem} />
     </section>}
   </div>;
+}
+
+/** A disclosure whose body mounts only after the first open, so closed rows cost nothing per update. */
+function LazyDetails({ summary, children }: { summary: React.ReactNode; children: React.ReactNode }): React.JSX.Element {
+  const [opened, setOpened] = useState(false);
+  return <details onToggle={(event) => { if (event.currentTarget.open) setOpened(true); }}><summary>{summary}</summary>{opened ? children : null}</details>;
 }
 
 function eventTreeRowId(row: EventTreeRow, fallbackIndex: number): string {
