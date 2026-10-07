@@ -120,6 +120,22 @@ try {
   await capture(vsix, 'vsix-visual-error');
   await visitPanels(vsix, 'vsix');
   await vsix.setViewportSize({ width: 760, height: 720 });
+  const chatTab = vsix.getByRole('tab', { name: 'Chat', exact: true });
+  await chatTab.click();
+  assert.equal(await chatTab.getAttribute('aria-selected'), 'true');
+  const narrowLayout = await vsix.evaluate(() => {
+    const chat = document.querySelector('.preview-pane').getBoundingClientRect();
+    const panel = document.querySelector('.right-pane-panel').getBoundingClientRect();
+    return { sameTop: Math.abs(chat.top - panel.top) < 1, chatHeight: chat.height, panelVisibility: getComputedStyle(document.querySelector('.right-pane-panel')).visibility };
+  });
+  assert.equal(narrowLayout.sameTop, true, 'VS Code chat and workspace must share one grid area');
+  assert.ok(narrowLayout.chatHeight > 600, 'chat must use the full narrow editor height');
+  assert.equal(narrowLayout.panelVisibility, 'hidden');
+  const messagesBefore = await vsix.locator('[data-message-id]').count();
+  await vsix.getByRole('tab', { name: 'General tests', exact: true }).click();
+  assert.equal(await vsix.locator('.preview-pane').evaluate((element) => getComputedStyle(element).visibility), 'hidden');
+  await chatTab.click();
+  assert.equal(await vsix.locator('[data-message-id]').count(), messagesBefore, 'narrow tab switching must retain chat');
   await capture(vsix, 'vsix-narrow');
   await vsix.close();
 

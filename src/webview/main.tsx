@@ -468,7 +468,8 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   const workspaceClassName = ['test-workspace', `test-workspace--${layout.preset}`, `test-workspace--inspector-${rightPanePosition}`, rightPaneMode !== 'debug' ? 'test-workspace--configuration-open' : '', layout.compact ? 'test-workspace--compact' : ''].filter(Boolean).join(' ');
   const decrementKey = rightPanePosition === 'right' ? 'ArrowLeft' : 'ArrowUp';
   const incrementKey = rightPanePosition === 'right' ? 'ArrowRight' : 'ArrowDown';
-  const narrow = useMediaQuery(NARROW_WORKSPACE_QUERY);
+  const narrowViewport = useMediaQuery(NARROW_WORKSPACE_QUERY);
+  const narrow = hostKind === 'vscode' && narrowViewport;
   const chatTabSelected = narrow && narrowView === 'chat';
   const paneTabSelected = (mode: RightPaneMode) => !chatTabSelected && rightPaneMode === mode;
   // The half the user last worked in is the one a narrow editor shows, so resizing never swaps the view away.
@@ -617,7 +618,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
             if (next === 'chat') { setNarrowView('chat'); focusAfterRender(() => document.getElementById('right-pane-chat-tab')?.focus()); }
             else selectRightPaneMode(next, true);
           }}>
-            <button id="right-pane-chat-tab" className="right-pane-tab--chat" type="button" role="tab" aria-label={t('Chat')} tabIndex={chatTabSelected ? 0 : -1} aria-selected={chatTabSelected} aria-controls="narrow-chat-panel" onClick={() => setNarrowView('chat')}><ProductIcon name="comment-discussion" className="right-pane-tab__icon" /><span className="right-pane-tab__label">{t('Chat')}</span></button>
+            {narrow && <button id="right-pane-chat-tab" className="right-pane-tab--chat" type="button" role="tab" aria-label={t('Chat')} tabIndex={chatTabSelected ? 0 : -1} aria-selected={chatTabSelected} aria-controls="narrow-chat-panel" onClick={() => setNarrowView('chat')}><ProductIcon name="comment-discussion" className="right-pane-tab__icon" /><span className="right-pane-tab__label">{t('Chat')}</span></button>}
             <button id="right-pane-debug-tab" type="button" role="tab" tabIndex={paneTabSelected('debug') ? 0 : -1} aria-selected={paneTabSelected('debug')} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('debug')}>{t('Debug')}</button>
             <button id="right-pane-tests-tab" type="button" role="tab" tabIndex={paneTabSelected('tests') ? 0 : -1} aria-selected={paneTabSelected('tests')} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('tests')}>{t('General tests')}<span className="right-pane-tab-count" aria-hidden="true">{formatNumber(generalCaseCount)}</span></button>
             <button id="right-pane-adversarial-tab" type="button" role="tab" tabIndex={paneTabSelected('adversarial') ? 0 : -1} aria-selected={paneTabSelected('adversarial')} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('adversarial')}>{t('Red Team')}<span className="right-pane-tab-count" aria-hidden="true">{formatNumber(redTeamCaseCount)}</span></button>

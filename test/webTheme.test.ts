@@ -38,6 +38,13 @@ describe('TurnStage Web theme compatibility', () => {
     expect(readFileSync(resolve(repository, 'src/extension/editors/turnstageEditorProvider.ts'), 'utf8')).toContain('data-host="vscode"');
   });
 
+  it('keeps narrow editor layout rules out of shared Web styles', () => {
+    const sharedCss = readFileSync(resolve(repository, 'src/webview/refresh.css'), 'utf8');
+    const nativeCss = readFileSync(resolve(repository, 'src/webview/vscodeNative.css'), 'utf8');
+    expect(sharedCss).not.toContain("data-narrow-view");
+    expect(nativeCss).toContain("html[data-host='vscode'] .test-workspace[data-narrow-view='chat']");
+  });
+
   it('defines every VS Code token consumed by the shared Webview CSS', () => {
     const sharedCss = readdirSync(resolve(repository, 'src/webview'))
       // vscodeNative.css only applies under <html data-host="vscode">, where VS Code supplies every token.
