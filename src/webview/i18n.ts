@@ -1669,6 +1669,7 @@ const zhTw: Record<string, string> = {
   "Filter cases by last result": "依上次結果篩選案例",
   "Last result: {outcome}, {date}": "上次結果：{outcome}，{date}",
   "No cases match this result filter.": "沒有符合此結果篩選的案例。",
+  'Chat': '聊天',
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {

@@ -9,6 +9,7 @@
  * Colors stay theme tokens, so light, dark and high-contrast themes all apply.
  */
 html[data-host='vscode'] {
+  --ts-pane-heading: 35px;
   --ts-radius-sm: 2px;
   --ts-radius: 3px;
   --ts-radius-lg: 4px;
@@ -57,7 +58,8 @@ html[data-host='vscode'] :is(.right-pane-tabs, .unified-test-workspace__sections
 html[data-host='vscode'] body:is(.vscode-high-contrast, .vscode-high-contrast-light) :is(.right-pane-tabs, .unified-test-workspace__sections, .mini-tabs[role='tablist'], .conversation-drawer__views) button[aria-selected='true'] { outline: 1px solid var(--vscode-contrastActiveBorder, var(--vscode-focusBorder)); outline-offset: -1px; }
 
 /* Workspace tabs = panel title: 35px, small caps, like Problems / Output / Terminal. */
-html[data-host='vscode'] .right-pane-heading { min-height: 35px; padding: 0 var(--ts-space-2); }
+/* First tab label lines up with the panel content's inset. */
+html[data-host='vscode'] .right-pane-heading { min-height: 35px; padding: 0 var(--ts-space-2) 0 calc(var(--ts-pane-inline, 16px) - 10px); }
 html[data-host='vscode'] .right-pane-tabs button { font-size: 11px; letter-spacing: .02em; text-transform: uppercase; }
 /* Section and view tabs = settings-editor style: sentence case, slightly shorter. */
 html[data-host='vscode'] .unified-test-workspace__sections { height: 30px; margin: 0 var(--ts-pane-inline, var(--ts-space-3)); }
@@ -122,3 +124,7 @@ html[data-host='vscode'] .history-check-row__actions button:hover { background: 
 /* Focus = the workbench's 1px focus border. */
 html[data-host='vscode'] :is(button, input, select, textarea, summary, a):focus-visible { outline-width: 1px; outline-offset: -1px; }
 html[data-host='vscode'] .right-pane-view { animation-duration: 100ms; }
+@container (max-width: 460px) {
+  html[data-host='vscode'] .right-pane-tabs button { padding-inline: 6px; }
+  html[data-host='vscode'] .right-pane-tabs button[aria-selected='true']::after { inset-inline: 6px; }
+}
