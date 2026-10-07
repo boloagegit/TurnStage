@@ -12,6 +12,7 @@ import { testCaseKey, type TestCaseIdentity } from '../shared/testSelection';
 import { webUnsupportedTestFeature } from '../shared/webTestCapabilities';
 import { isTestRunActive } from '../shared/protocol';
 import './settingsWorkspace.css';
+import { LiveCaseStatusBadge } from './liveCaseStatus';
 
 /**
  * Keep this callback local to the workspace so it can also be used by hosts
@@ -156,8 +157,19 @@ export interface SettingsWorkspaceProps {
 
 type PatchPath = Array<string | number>;
 
-function ReadOnlyNotice({ post }: { post: SettingsWorkspacePost }): React.JSX.Element {
-  return <div className="settings-readonly-notice" role="note"><ProductIcon name="lock" /><strong>{t('Server-managed Profile')}</strong><button type="button" className="primary" onClick={() => post({ type: 'profile.duplicate' })}>{t('Duplicate to edit')}</button></div>;
+/**
+ * Whether embedded sections render their own read-only notice. The Profile
+ * workspace shows one shared notice for the whole right pane instead of
+ * repeating it in every section.
+ */
+export const ReadOnlyNoticeContext = React.createContext(true);
+
+export function ReadOnlyBanner({ post }: { post: SettingsWorkspacePost }): React.JSX.Element {
+  return <div className="settings-readonly-notice" role="note"><ProductIcon name="lock" /><strong>{t('Server-managed Profile')}</strong><button type="button" onClick={() => post({ type: 'profile.duplicate' })}>{t('Duplicate to edit')}</button></div>;
+}
+
+function ReadOnlyNotice({ post }: { post: SettingsWorkspacePost }): React.JSX.Element | null {
+  return React.useContext(ReadOnlyNoticeContext) ? <ReadOnlyBanner post={post} /> : null;
 }
 
 function useRestoredScrollPosition(ref: React.RefObject<HTMLDivElement | null>, key: string, scrollTop: number | undefined): void {
@@ -977,12 +989,28 @@ function TestOperationStatus({ operation, post }: { operation?: TestOperationSna
     : t('Concurrency limit: {limit} / 8', { limit: formatNumber(progress.maxConcurrency) })
     : undefined;
   const percentage = progress?.totalCases ? Math.round((progress.completedCases / progress.totalCases) * 100) : undefined;
+  // Pass/fail/running/queued breakdown when the host reports outcome tallies.
+  const breakdown = progress && progress.totalCases > 0 && progress.passedCases !== undefined && progress.failedCases !== undefined ? {
+    passed: progress.passedCases,
+    failed: progress.failedCases,
+    running: active ? progress.activeCases?.length ?? progress.activeCaseNames?.length ?? 0 : 0,
+    queued: active ? Math.max(0, progress.totalCases - progress.completedCases - (progress.activeCases?.length ?? progress.activeCaseNames?.length ?? 0)) : Math.max(0, progress.totalCases - progress.completedCases),
+  } : undefined;
   return <div className={`test-operation-status test-operation-status--${operation.state}`} role="status" aria-live="polite" aria-atomic="true">
     <ProductIcon name={icon} className={operation.state === 'running' ? 'test-operation-status__active-icon' : ''} />
     <div><strong>{t(title)}</strong><span>{t(detail)}</span>{concurrencyDetail && <small>{concurrencyDetail}</small>}{activeCaseDetail && <small>{activeCaseDetail}</small>}{operation.detail && <small>{operation.detail}</small>}</div>
     {active && (percentage === undefined
       ? <progress aria-label={t('Test run progress')} />
-      : <progress value={progress!.completedCases} max={progress!.totalCases} aria-label={t('Test run progress')} aria-valuetext={progressDetail}>{percentage}%</progress>)}
+      : <progress className={breakdown ? 'sr-only' : undefined} value={progress!.completedCases} max={progress!.totalCases} aria-label={t('Test run progress')} aria-valuetext={progressDetail}>{percentage}%</progress>)}
+    {breakdown && <div className="test-run-breakdown">
+      <div className="test-run-meter" aria-hidden="true">
+        {breakdown.passed > 0 && <span className="test-run-meter__passed" style={{ flexGrow: breakdown.passed }} />}
+        {breakdown.failed > 0 && <span className="test-run-meter__failed" style={{ flexGrow: breakdown.failed }} />}
+        {breakdown.running > 0 && <span className="test-run-meter__running" style={{ flexGrow: breakdown.running }} />}
+        {breakdown.queued > 0 && <span className="test-run-meter__queued" style={{ flexGrow: breakdown.queued }} />}
+      </div>
+      <small className="test-run-tally">{t(active ? '{passed} passed · {failed} failed · {running} running · {queued} queued' : '{passed} passed · {failed} failed · {queued} not run', { passed: formatNumber(breakdown.passed), failed: formatNumber(breakdown.failed), running: formatNumber(breakdown.running), queued: formatNumber(breakdown.queued) })}</small>
+    </div>}
     {active && <div className="test-operation-status__controls">
       <IconButton type="button" icon={paused ? 'debug-start' : 'debug-pause'} label={t(paused ? 'Resume test run' : 'Pause test run')} disabled={operation.state === 'cancelling'} onClick={() => post({ type: paused ? 'test.resume' : 'test.pause' })} />
       <IconButton type="button" className="danger-subtle" icon="stop" label={t(operation.state === 'cancelling' ? 'Stopping test run…' : 'Stop test run')} disabled={operation.state === 'cancelling'} onClick={() => post({ type: 'test.cancel' })} />
@@ -1238,7 +1266,7 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEdito
       return <div className="adversarial-case-item" role="listitem" key={row.key}>
       {profileId && onToggleCase && <label className="test-case-select"><input type="checkbox" aria-label={blockReason ? `${t('Select case {name}', { name: row.scenarioName })}. ${blockReason}` : t('Select case {name}', { name: row.scenarioName })} checked={selectedCaseKeys?.has(testCaseKey({ profileId, suiteId: row.suiteId, scenarioId: row.scenarioId, kind: 'adversarial' })) ?? false} disabled={testRunActive || Boolean(blockReason)} onChange={() => onToggleCase({ profileId, suiteId: row.suiteId, scenarioId: row.scenarioId, kind: 'adversarial' })} /></label>}
       <button type="button" className="adversarial-case-item__main" aria-label={blockReason ? `${row.scenarioName}. ${blockReason}` : row.scenarioName} onClick={() => row.source === 'linked' ? requestLinkedCase(row) : onToggle(row.key)}><strong>{row.scenarioName}</strong><code>{row.scenarioId}</code><span className="case-row-meta">{row.sourceLabel} · {t(row.mode === 'multiTurn' ? 'Multi-turn' : 'Single turn')} · {t('Repetitions')} {formatNumber(row.repetitions)}{row.tags.length ? ` · ${row.tags.join(', ')}` : ''}</span>{blockReason && <small className="test-case-block-reason">{blockReason}</small>}</button>
-      <div className="adversarial-case-item__actions"><IconButton type="button" icon="debug-start" label={blockReason ? `${row.scenarioName}: ${blockReason}` : t('Run case {name}', { name: row.scenarioName })} disabled={testRunActive || Boolean(blockReason)} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}) })} />{row.sourcePath && <IconButton type="button" icon={vscodeFeatures ? 'go-to-file' : 'export'} label={vscodeFeatures ? t('Open linked source {name}', { name: row.sourceLabel }) : t('Export imported copy')} onClick={() => onOpenSource(row.sourcePath!)} />}<IconButton type="button" icon="trash" label={row.sourcePath ? t(vscodeFeatures ? 'Delete case {name} from source file' : 'Delete case {name} from browser copy', { name: row.scenarioName }) : t('Delete scenario {name}', { name: row.scenarioName })} disabled={readOnly || Boolean(row.sourcePath && (!row.revision || !trusted))} onClick={() => row.scenario && row.index !== undefined ? onDelete(row.index, row.scenario) : row.sourcePath && row.revision ? requestConfirm({ title: t(vscodeFeatures ? 'Delete case {name} from source file?' : 'Delete case {name} from browser copy?', { name: row.scenarioName }), actionLabel: t('Delete case'), detail: t(vscodeFeatures ? 'This changes {source}. You can undo the file edit in VS Code.' : 'This changes only the copy stored in this browser. The original file is unchanged.', { source: linkedSuiteLabel(row.sourcePath) }), onConfirm: () => post({ type: 'adversarial.case.delete', sourcePath: row.sourcePath!, scenarioId: row.scenarioId, expectedRevision: row.revision! }) }) : undefined} /></div>
+      <div className="adversarial-case-item__actions"><LiveCaseStatusBadge suiteId={row.suiteId} scenarioId={row.scenarioId} /><IconButton type="button" icon="debug-start" label={blockReason ? `${row.scenarioName}: ${blockReason}` : t('Run case {name}', { name: row.scenarioName })} disabled={testRunActive || Boolean(blockReason)} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}) })} />{row.sourcePath && <IconButton type="button" icon={vscodeFeatures ? 'go-to-file' : 'export'} label={vscodeFeatures ? t('Open linked source {name}', { name: row.sourceLabel }) : t('Export imported copy')} onClick={() => onOpenSource(row.sourcePath!)} />}<IconButton type="button" icon="trash" label={row.sourcePath ? t(vscodeFeatures ? 'Delete case {name} from source file' : 'Delete case {name} from browser copy', { name: row.scenarioName }) : t('Delete scenario {name}', { name: row.scenarioName })} disabled={readOnly || Boolean(row.sourcePath && (!row.revision || !trusted))} onClick={() => row.scenario && row.index !== undefined ? onDelete(row.index, row.scenario) : row.sourcePath && row.revision ? requestConfirm({ title: t(vscodeFeatures ? 'Delete case {name} from source file?' : 'Delete case {name} from browser copy?', { name: row.scenarioName }), actionLabel: t('Delete case'), detail: t(vscodeFeatures ? 'This changes {source}. You can undo the file edit in VS Code.' : 'This changes only the copy stored in this browser. The original file is unchanged.', { source: linkedSuiteLabel(row.sourcePath) }), onConfirm: () => post({ type: 'adversarial.case.delete', sourcePath: row.sourcePath!, scenarioId: row.scenarioId, expectedRevision: row.revision! }) }) : undefined} /></div>
     </div>; })}</div>
     {activeRow && <CaseEditorOverlay title={activeRow.scenarioName} context={`${activeRow.scenarioId} · ${activeRow.sourceLabel}`} onRequestClose={requestClose} footer={<>
       {closeWarning && <span className="case-editor-dialog__warning" role="alert">{t('Unsaved changes')}</span>}
@@ -1381,7 +1409,7 @@ function ContractCaseList({ rows, editorRows = rows, profileId, selectedCaseKeys
     return <div className={`automation-scenario-row ${expanded ? 'is-expanded' : ''}`} role="listitem" key={row.key}>
       {profileId && onToggleCase && <label className="test-case-select"><input type="checkbox" aria-label={blockReason ? `${t('Select case {name}', { name: row.scenarioName })}. ${blockReason}` : t('Select case {name}', { name: row.scenarioName })} checked={selectedCaseKeys?.has(testCaseKey({ profileId, suiteId: row.suiteId, scenarioId: row.scenarioId, kind: 'contract' })) ?? false} disabled={testRunActive || Boolean(blockReason)} onChange={() => onToggleCase({ profileId, suiteId: row.suiteId, scenarioId: row.scenarioId, kind: 'contract' })} /></label>}
       <button type="button" className="automation-scenario-row__main" aria-label={blockReason ? `${row.scenarioName}. ${blockReason}` : row.scenarioName} aria-expanded={expanded} onClick={() => toggle(row)}><strong>{row.scenarioName}</strong><code>{row.scenarioId}</code><span className="case-row-meta">{row.sourceLabel} · {t('{steps} steps · {assertions} assertions', { steps: formatNumber(row.turns), assertions: formatNumber(row.assertions) })}{flags.length ? ` · ${flags.join(' · ')}` : ''}</span>{blockReason && <small className="test-case-block-reason">{blockReason}</small>}</button>
-      <div className="automation-scenario-row__actions"><IconButton type="button" icon="debug-start" label={blockReason ? `${row.scenarioName}: ${blockReason}` : t('Run case {name}', { name: row.scenarioName })} disabled={testRunActive || Boolean(blockReason)} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}), kind: 'contract' })} />
+      <div className="automation-scenario-row__actions"><LiveCaseStatusBadge suiteId={row.suiteId} scenarioId={row.scenarioId} /><IconButton type="button" icon="debug-start" label={blockReason ? `${row.scenarioName}: ${blockReason}` : t('Run case {name}', { name: row.scenarioName })} disabled={testRunActive || Boolean(blockReason)} onClick={() => post({ type: 'test.runCase', scenarioId: row.scenarioId, ...(row.suiteId ? { suiteId: row.suiteId } : {}), kind: 'contract' })} />
       {row.sourcePath && <IconButton type="button" icon={vscodeFeatures ? 'go-to-file' : 'export'} label={vscodeFeatures ? t('Open linked source {name}', { name: row.sourceLabel }) : t('Export imported copy')} onClick={() => post({ type: 'contract.openLinkedSuite', path: row.sourcePath! })} />}
       <IconButton type="button" icon="trash" label={row.sourcePath ? t(vscodeFeatures ? 'Delete case {name} from source file' : 'Delete case {name} from browser copy', { name: row.scenarioName }) : t('Delete scenario {name}', { name: row.scenarioName })} disabled={readOnly || Boolean(row.sourcePath && (!row.revision || !trusted))} onClick={() => row.scenario && row.index !== undefined ? onInlineDelete(row.index, row.scenario, () => onExpandedCaseIdChange(undefined)) : row.sourcePath && row.revision ? requestConfirm({ title: t(vscodeFeatures ? 'Delete case {name} from source file?' : 'Delete case {name} from browser copy?', { name: row.scenarioName }), actionLabel: t('Delete case'), detail: t(vscodeFeatures ? 'This changes {source}. You can undo the file edit in VS Code.' : 'This changes only the copy stored in this browser. The original file is unchanged.', { source: linkedSuiteLabel(row.sourcePath) }), onConfirm: () => post({ type: 'contract.case.delete', sourcePath: row.sourcePath!, scenarioId: row.scenarioId, expectedRevision: row.revision! }) }) : undefined} /></div>
     </div>;

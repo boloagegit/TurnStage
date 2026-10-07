@@ -43,7 +43,7 @@ import { attachCampaignBaseline, createCampaignPlan, createCampaignRunRecord, ty
 import { CampaignRepository } from './campaignRepository';
 import { digestValue } from './provenance';
 import { logAt, startLogOperation } from '../logging';
-import type { TestOperationProgress } from '../../shared/protocol';
+import { MAX_PROGRESS_COMPLETED_OUTCOMES, type TestOperationCaseOutcome, type TestOperationCaseRef, type TestOperationProgress } from '../../shared/protocol';
 import { TestRunControl } from '../../shared/testRunControl';
 import { ExternalAdversarialSuiteRepository } from './externalAdversarialSuite';
 import { isScenarioReady } from './scenarioCapture';
@@ -926,6 +926,12 @@ export class ScenarioTestController implements vscode.Disposable {
       let completedAttempts = 0;
       const completedAttemptsByJob = new Map<string, number>();
       const activeCases = new Map<string, string>();
+      // Live case-list status: identities of running cases, pass/fail tallies,
+      // and outcomes completed since the last progress message (bounded).
+      const activeCaseRefs = new Map<string, TestOperationCaseRef>();
+      let passedCases = 0;
+      let failedCases = 0;
+      let pendingOutcomes: TestOperationCaseOutcome[] = [];
       const control = scope.control ?? new TestRunControl();
       const cancellationListener = effectiveToken.onCancellationRequested(() => control.cancel());
       let lastProgressAt = 0;
@@ -945,7 +951,12 @@ export class ScenarioTestController implements vscode.Disposable {
             maxConcurrency: concurrency,
             activeCaseNames: [...activeCases.values()].slice(0, 8),
             runState: control.state,
+            activeCases: [...activeCaseRefs.values()].slice(0, 8),
+            passedCases: Math.min(jobs.length, passedCases),
+            failedCases: Math.min(jobs.length, failedCases),
+            ...(pendingOutcomes.length ? { completedOutcomes: pendingOutcomes.slice(-MAX_PROGRESS_COMPLETED_OUTCOMES) } : {}),
           });
+          pendingOutcomes = [];
         };
         if (force || now - lastProgressAt >= 100) {
           if (progressTimer) clearTimeout(progressTimer);
@@ -991,11 +1002,20 @@ export class ScenarioTestController implements vscode.Disposable {
             const preparedJob = prepared[index];
             if (!preparedJob || effectiveToken.isCancellationRequested) { control.release(); return; }
             activeCases.set(preparedJob.job.item.id, String(preparedJob.job.item.label));
+            activeCaseRefs.set(preparedJob.job.item.id, { scenarioId: preparedJob.job.scenarioId, ...(preparedJob.job.suiteId ? { suiteId: preparedJob.job.suiteId } : {}) });
             publishProgress(true);
             let result: CompletedScenario | undefined;
             try { result = await this.runJob(preparedJob.job, run, effectiveToken, selection, preparedJob.loaded, runEvidenceIds, persistedGroups, Boolean(scope.runId), scope.campaign, () => markAttemptComplete(preparedJob.job)); }
-            finally { activeCases.delete(preparedJob.job.item.id); control.release(); }
-            if (result) { completed.push(result); completedCases += 1; }
+            finally { activeCases.delete(preparedJob.job.item.id); activeCaseRefs.delete(preparedJob.job.item.id); control.release(); }
+            if (result) {
+              completed.push(result);
+              completedCases += 1;
+              const adversarialOutcome = result.record.result?.adversarial?.outcome;
+              const passed = adversarialOutcome ? adversarialOutcome === 'resisted' : result.record.status === 'passed';
+              if (passed) passedCases += 1; else failedCases += 1;
+              pendingOutcomes.push({ scenarioId: result.record.scenarioId, ...(result.suiteId ? { suiteId: result.suiteId } : {}), outcome: passed ? 'passed' : 'failed' });
+              if (pendingOutcomes.length > MAX_PROGRESS_COMPLETED_OUTCOMES) pendingOutcomes = pendingOutcomes.slice(-MAX_PROGRESS_COMPLETED_OUTCOMES);
+            }
             publishProgress(true);
           }
         }));

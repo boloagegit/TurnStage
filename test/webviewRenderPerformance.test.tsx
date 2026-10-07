@@ -11,9 +11,11 @@ import { MobileChatPreview } from '../src/webview/MobileChatPreview';
 import { NetworkInspector, VirtualEvents } from '../src/webview/main';
 import { RichMarkdown, splitStreamingMarkdown } from '../src/webview/RichMarkdown';
 import { tokenizeJson } from '../src/webview/JsonViewer';
-import { SettingsWorkspace } from '../src/webview/SettingsWorkspace';
+import { AutomationWorkspace, SettingsWorkspace } from '../src/webview/SettingsWorkspace';
 import { useConfirmAction } from '../src/webview/ConfirmAction';
 import { formatDuration, formatNumber, setLocale } from '../src/webview/i18n';
+import { LiveCaseStatusBadge, LiveCaseStatusContext, useLiveCaseStatuses } from '../src/webview/liveCaseStatus';
+import { isHostMessage, PROTOCOL_VERSION, type TestOperationSnapshot } from '../src/shared/protocol';
 
 beforeAll(() => {
   class TestResizeObserver implements ResizeObserver {
@@ -166,5 +168,44 @@ describe('editing safeguards', () => {
     fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' });
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(outer).not.toHaveBeenCalled();
+  });
+});
+
+describe('live test-run status', () => {
+  function Harness({ operation }: { operation?: TestOperationSnapshot }): React.JSX.Element {
+    const statuses = useLiveCaseStatuses(operation);
+    return <LiveCaseStatusContext.Provider value={statuses}>
+      <LiveCaseStatusBadge scenarioId="a" />
+      <LiveCaseStatusBadge suiteId="suite" scenarioId="b" />
+      <LiveCaseStatusBadge scenarioId="c" />
+    </LiveCaseStatusContext.Provider>;
+  }
+  const progress = (patch: Partial<NonNullable<TestOperationSnapshot['progress']>>): TestOperationSnapshot => ({ action: 'runSelection', state: 'running', progress: { totalCases: 3, completedCases: 0, totalAttempts: 3, completedAttempts: 0, maxConcurrency: 2, passedCases: 0, failedCases: 0, ...patch } });
+
+  it('accumulates bounded per-message outcomes and marks running cases', () => {
+    const { container, rerender } = render(<Harness operation={progress({ activeCases: [{ scenarioId: 'a' }, { suiteId: 'suite', scenarioId: 'b' }] })} />);
+    expect([...container.querySelectorAll('.live-case-status')].map((node) => node.textContent)).toEqual(['Running', 'Running']);
+    rerender(<Harness operation={progress({ completedCases: 1, passedCases: 1, activeCases: [{ suiteId: 'suite', scenarioId: 'b' }], completedOutcomes: [{ scenarioId: 'a', outcome: 'passed' }] })} />);
+    rerender(<Harness operation={progress({ completedCases: 2, passedCases: 1, failedCases: 1, activeCases: [{ scenarioId: 'c' }], completedOutcomes: [{ suiteId: 'suite', scenarioId: 'b', outcome: 'failed' }] })} />);
+    expect([...container.querySelectorAll('.live-case-status')].map((node) => node.className.split('--')[1])).toEqual(['passed', 'failed', 'running']);
+    rerender(<Harness operation={{ action: 'runSelection', state: 'running', progress: { totalCases: 3, completedCases: 0, totalAttempts: 3, completedAttempts: 0, maxConcurrency: 2 } }} />);
+    expect(container.querySelectorAll('.live-case-status')).toHaveLength(0);
+  });
+
+  it('validates the optional live-progress fields at the host boundary', () => {
+    const envelope = { protocolVersion: PROTOCOL_VERSION, editorInstanceId: 'editor-1', requestId: 'r-1', type: 'test.operation' };
+    const valid = progress({ activeCases: [{ scenarioId: 'a' }], completedOutcomes: [{ scenarioId: 'b', outcome: 'failed' }], failedCases: 1, completedCases: 1 });
+    expect(isHostMessage({ ...envelope, operation: valid }, 'editor-1')).toBe(true);
+    expect(isHostMessage({ ...envelope, operation: progress({ completedOutcomes: [{ scenarioId: 'b', outcome: 'unknown' as 'failed' }] }) }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, operation: progress({ activeCases: Array.from({ length: 9 }, (_, index) => ({ scenarioId: `c${index}` })) }) }, 'editor-1')).toBe(false);
+    expect(isHostMessage({ ...envelope, operation: progress({ passedCases: 4 }) }, 'editor-1')).toBe(false);
+  });
+
+  it('shows a pass/fail/running/queued breakdown while keeping the native progress value', () => {
+    const operation = progress({ totalCases: 10, completedCases: 4, passedCases: 3, failedCases: 1, activeCases: [{ scenarioId: 'a' }, { scenarioId: 'b' }] });
+    const { container } = render(<AutomationWorkspace profile={profile} post={vi.fn()} activeSection="scenarios" testOperation={operation} />);
+    expect(container.querySelector('.test-run-tally')?.textContent).toBe('3 passed · 1 failed · 2 running · 4 queued');
+    expect((screen.getByRole('progressbar', { name: 'Test run progress' }) as HTMLProgressElement).value).toBe(4);
+    expect(container.querySelectorAll('.test-run-meter > span')).toHaveLength(4);
   });
 });

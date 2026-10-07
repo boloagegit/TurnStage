@@ -434,4 +434,10 @@ export const ja: Record<string, string> = {
   'View related events': '関連イベントを表示',
   'Content was truncated at the safety limit.': '安全上限に達したため内容を切り詰めました。',
   '{role} message, {status}. Open response content.': '{role} メッセージ、{status}。応答内容を開きます。',
+  'Selected cases': '選択したケース',
+  '{count} cases selected': '{count} 件のケースを選択',
+  '{passed} passed · {failed} failed · {running} running · {queued} queued': '合格 {passed} · 失敗 {failed} · 実行中 {running} · 待機 {queued}',
+  '{passed} passed · {failed} failed · {queued} not run': '合格 {passed} · 失敗 {failed} · 未実行 {queued}',
+  'Copied': 'コピーしました',
+  'Copy failed. Try again.': 'コピーに失敗しました。もう一度お試しください。',
 };

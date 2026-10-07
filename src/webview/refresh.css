@@ -1,0 +1,156 @@
+/*
+ * TurnStage visual refresh.
+ *
+ * Loaded after the base styles. Colors still come from the host theme
+ * (VS Code injects its theme variables; TurnStage Web defines them in
+ * vscode-token-compat.css), so light, dark and high-contrast themes keep
+ * working. This layer only changes shape, hierarchy and typography:
+ * segmented tabs, fill-based selection (no single-color accent edges),
+ * monospaced numeric readouts, state marks that differ by shape, and
+ * sentence-case labels.
+ */
+:root {
+  --ts-radius-sm: 6px;
+  --ts-radius: 8px;
+  --ts-radius-lg: 12px;
+  --ts-mono: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  --ts-state-pass: var(--vscode-testing-iconPassed, #3ee08f);
+  --ts-state-fail: var(--vscode-testing-iconFailed, #ff6b6b);
+  --ts-state-run: var(--vscode-progressBar-background, #3dd6f5);
+  --ts-state-idle: var(--vscode-editorWidget-border, #2b3644);
+  --ts-segment-background: var(--vscode-input-background, var(--vscode-editor-background));
+  --ts-segment-border: var(--vscode-editorWidget-border, var(--vscode-widget-border, transparent));
+  --ts-segment-selected: var(--vscode-list-inactiveSelectionBackground, var(--vscode-toolbar-activeBackground));
+}
+
+/* Sentence-case labels read faster than tracked all-caps, especially in CJK locales. */
+.debug-heading > span,
+.debug-heading strong,
+.opening h2,
+.adversarial-result-field-label { text-transform: none; letter-spacing: normal; }
+
+/* Numbers align and stay readable while they update. */
+.inspector-tab-count,
+.right-pane-tab-count,
+.test-run-tally,
+.case-row-meta,
+.event-turn,
+.event-time-total,
+.event-time-gap,
+.metrics dd,
+.connection-doctor__metrics dd,
+.adversarial-result-pagination,
+.test-operation-status small { font-variant-numeric: tabular-nums; }
+
+/* Buttons: one rounded shape for every level; disabled loses emphasis, not only opacity. */
+button { border-radius: var(--ts-radius-sm); }
+button.primary { font-weight: 600; }
+button.primary:disabled { background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); }
+
+/* Segmented tabs: workspace tabs, test sections and inspector views share one pattern. */
+.right-pane-heading { justify-content: flex-start; padding: var(--ts-space-1) var(--ts-space-2); }
+.right-pane-tabs,
+.unified-test-workspace__sections,
+.mini-tabs[role='tablist'] {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-self: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid var(--ts-segment-border);
+  border-radius: 10px;
+  background: var(--ts-segment-background);
+  overflow-x: auto;
+}
+.right-pane-tabs button,
+.unified-test-workspace__sections button,
+.mini-tabs[role='tablist'] button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px var(--ts-space-3);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.right-pane-tabs button:hover:not(:disabled),
+.unified-test-workspace__sections button:hover:not(:disabled),
+.mini-tabs[role='tablist'] button:hover:not(:disabled) { background: var(--vscode-list-hoverBackground); color: var(--vscode-foreground); }
+.right-pane-tabs button[aria-selected='true'],
+.right-pane-tabs button[aria-selected='true']:hover:not(:disabled),
+.unified-test-workspace__sections button[aria-selected='true'],
+.unified-test-workspace__sections button[aria-selected='true']:hover:not(:disabled),
+.mini-tabs[role='tablist'] button[aria-selected='true'],
+.mini-tabs[role='tablist'] button[aria-selected='true']:hover:not(:disabled) { background: var(--ts-segment-selected); color: var(--vscode-foreground); }
+body.vscode-high-contrast .right-pane-tabs button[aria-selected='true'],
+body.vscode-high-contrast-light .right-pane-tabs button[aria-selected='true'],
+body.vscode-high-contrast .unified-test-workspace__sections button[aria-selected='true'],
+body.vscode-high-contrast-light .unified-test-workspace__sections button[aria-selected='true'],
+body.vscode-high-contrast .mini-tabs[role='tablist'] button[aria-selected='true'],
+body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected='true'] { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.unified-test-workspace__sections { justify-self: start; margin: var(--ts-space-2) var(--ts-pane-inline, var(--ts-space-3)); }
+.mini-tabs[role='tablist'] { margin: var(--ts-space-2); }
+.right-pane-tab-count { font-family: var(--ts-mono); font-size: var(--ts-type-caption); font-weight: 600; color: var(--vscode-descriptionForeground); }
+.right-pane-tabs button[aria-selected='true'] .right-pane-tab-count { color: var(--vscode-foreground); }
+
+/* One read-only notice for the whole right pane. */
+.debug-pane:has(> .settings-readonly-notice) { grid-template-rows: auto auto minmax(0, 1fr); }
+.debug-pane > .settings-readonly-notice { grid-template-columns: auto minmax(0, 1fr) auto; margin: 0; padding: var(--ts-space-2) var(--ts-space-3); border-bottom: 1px solid var(--vscode-editorGroup-border); background: var(--vscode-editorWidget-background); }
+.debug-pane > .settings-readonly-notice > .product-icon { color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground)); }
+.debug-pane > .settings-readonly-notice button { grid-column: auto; justify-self: end; }
+
+/* Selection actions appear at the bottom, next to the list, only when something is selected. */
+.unified-test-workspace { grid-template-rows: auto minmax(0, 1fr) auto; }
+.unified-test-workspace__run-actions {
+  margin: var(--ts-space-2) var(--ts-pane-inline, var(--ts-space-3));
+  padding: var(--ts-space-2) var(--ts-space-2) var(--ts-space-2) var(--ts-space-3);
+  border-radius: var(--ts-radius-lg);
+  background: var(--vscode-editorWidget-background);
+  box-shadow: 0 6px 18px var(--vscode-widget-shadow, transparent);
+}
+.unified-test-workspace__selection-count { flex: 1 1 8em; min-width: 0; font-weight: 600; }
+
+/* Live case status: shape plus text, never color alone. */
+.live-case-status { display: inline-flex; align-items: center; gap: 6px; margin-inline-end: var(--ts-space-1); font-size: var(--ts-type-caption); font-weight: 600; white-space: nowrap; }
+.live-case-status__mark { width: 8px; height: 8px; border-radius: 50%; }
+.live-case-status--running { color: var(--vscode-foreground); }
+.live-case-status--running .live-case-status__mark { background: var(--ts-state-run); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ts-state-run) 28%, transparent); }
+.live-case-status--passed { color: var(--ts-state-pass); }
+.live-case-status--passed .live-case-status__mark { background: var(--ts-state-pass); }
+.live-case-status--failed { color: var(--ts-state-fail); }
+.live-case-status--failed .live-case-status__mark { width: 9px; height: 8px; border-radius: 0; background: var(--ts-state-fail); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+
+/* Run breakdown meter: passed, failed, running, queued. */
+.test-operation-status { border-radius: var(--ts-radius); }
+/* The native progress stays for assistive technology when the meter is shown. */
+.test-operation-status progress.sr-only { width: 1px; height: 1px; }
+.test-run-breakdown { display: grid; grid-column: 2 / -1; gap: 4px; min-width: 0; }
+.test-run-meter { display: flex; gap: 2px; height: 6px; overflow: hidden; border-radius: 3px; }
+.test-run-meter > span { min-width: 3px; border-radius: 2px; }
+.test-run-meter__passed { background: var(--ts-state-pass); }
+.test-run-meter__failed { background: var(--ts-state-fail); }
+.test-run-meter__running { background: var(--ts-state-run); }
+.test-run-meter__queued { background: var(--ts-state-idle); }
+.test-run-tally { color: var(--vscode-descriptionForeground); }
+
+@media (forced-colors: active) {
+  .test-run-meter > span, .live-case-status__mark { forced-color-adjust: none; border: 1px solid CanvasText; }
+}
+
+/* Narrow panes: keep every workspace tab visible; counts give way first. */
+@container (max-width: 460px) {
+  .right-pane-heading { padding-inline: var(--ts-space-1); }
+  .right-pane-tabs { min-width: 0; padding: 2px; }
+  .right-pane-tabs button { padding-inline: 6px; }
+  .right-pane-tab-count { display: none; }
+}
+
+/* Card heading actions keep their label on one line; the card text wraps instead. */
+.settings-card-heading--actions { flex-wrap: wrap; row-gap: var(--ts-space-2); }
+.settings-card-heading--actions > div:first-child { flex: 1 1 16em; min-width: 0; }
+.settings-card-heading--actions > button { flex: 0 0 auto; white-space: nowrap; }
