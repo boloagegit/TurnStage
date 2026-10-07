@@ -7,7 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ConversationDirectory, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 import { MobileChatPreview } from '../src/webview/MobileChatPreview';
 import { ConversationDrawer, groupConversations, historyCheckSummary } from '../src/webview/ConversationDrawer';
-import { AppSkeleton, KeepAlivePane } from '../src/webview/main';
+import { AppSkeleton, isNarrowWorkspaceWidth, KeepAlivePane, NARROW_WORKSPACE_WIDTH } from '../src/webview/main';
 import { setLocale } from '../src/webview/i18n';
 
 beforeAll(() => {
@@ -240,5 +240,13 @@ describe('visual continuity', () => {
     expect(skeleton.getAttribute('aria-busy')).toBe('true');
     expect(skeleton.style.getPropertyValue('--app-skeleton-split')).toBe('70fr');
     expect(skeleton.querySelectorAll('.app-skeleton__tabs .ts-skeleton')).toHaveLength(4);
+  });
+
+  it('switches to tabs by the workspace width, not the window, and ignores a hidden (zero-width) workspace', () => {
+    expect(NARROW_WORKSPACE_WIDTH).toBe(1024);
+    // A 1100px Web window minus the library sidebar leaves a ~796px workspace: tabs, not a cramped split.
+    expect(isNarrowWorkspaceWidth(796)).toBe(true);
+    expect(isNarrowWorkspaceWidth(1100)).toBe(false);
+    expect(isNarrowWorkspaceWidth(0)).toBe(false);
   });
 });

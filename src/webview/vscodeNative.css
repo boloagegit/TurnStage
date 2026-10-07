@@ -118,32 +118,15 @@ html[data-host='vscode'] .conversation-drawer__search { border: 1px solid var(--
 html[data-host='vscode'] .history-check__summary { padding-inline: 0; border-radius: 0; background: transparent; }
 html[data-host='vscode'] .history-check__results { gap: 0; border-radius: 0; }
 html[data-host='vscode'] .history-check-row { padding-inline: 0; background: transparent; border-top: 1px solid var(--vscode-widget-border, var(--vscode-editorGroup-border, transparent)); }
-html[data-host='vscode'] .history-check-row__actions button { padding-inline: 0; background: transparent; }
-html[data-host='vscode'] .history-check-row__actions button:hover { background: transparent; text-decoration: underline; }
+html[data-host='vscode'] .history-check-row__actions button { padding-inline: 0; background: transparent; color: var(--vscode-textLink-foreground); }
+html[data-host='vscode'] .history-check-row__actions button:hover { background: transparent; color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); text-decoration: underline; }
 
 /* Focus = the workbench's 1px focus border. */
 html[data-host='vscode'] :is(button, input, select, textarea, summary, a):focus-visible { outline-width: 1px; outline-offset: -1px; }
 html[data-host='vscode'] .right-pane-view { animation-duration: 100ms; }
 
-/*
- * Narrow editors: chat and workspace become tabs in one header instead of a
- * vertical split. The workspace pane spans the whole area (its tab row on top);
- * the chat sits under that tab row in the same area. Both stay mounted and the
- * hidden one keeps its rendering state (content-visibility), so switching never
- * reflows or reloads either side.
- */
-html[data-host='vscode'] .right-pane-tab--chat { display: none !important; }
-@media (max-width: 64em) {
-  html[data-host='vscode'] .test-workspace:has(> .debug-pane) { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--ts-pane-heading) minmax(0, 1fr); overflow: hidden; }
-  html[data-host='vscode'] .test-workspace > .debug-pane { grid-row: 1 / -1; grid-column: 1; min-height: 0; }
-  html[data-host='vscode'] .test-workspace > .debug-pane > .right-pane-heading { box-sizing: border-box; height: var(--ts-pane-heading); min-height: 0; }
-  html[data-host='vscode'] .test-workspace:has(> .debug-pane) > .preview-pane { position: relative; z-index: 1; grid-row: 2; grid-column: 1; min-height: 0; }
-  html[data-host='vscode'] .test-workspace:has(> .debug-pane) .right-pane-tab--chat { display: inline-flex !important; }
-  html[data-host='vscode'] .test-workspace[data-narrow-view='chat'] > .debug-pane > :not(.right-pane-heading),
-  html[data-host='vscode'] .test-workspace[data-narrow-view='pane'] > .preview-pane { visibility: hidden; content-visibility: hidden; pointer-events: none; }
-  html[data-host='vscode'] .test-workspace[data-narrow-view='pane'] > .preview-pane .conversation-drawer { display: none; }
-  html[data-host='vscode'] .test-workspace > .splitter { display: none; }
-}
+/* Narrow workspaces (layout rules shared with Web live in refresh.css): compact native tabs keep the
+ * workbench specificity so the first label stays on the content inset and Configure is never clipped. */
 html[data-host='vscode'] .right-pane-tabs .right-pane-tab__icon { display: none; }
 @container (max-width: 460px) {
   html[data-host='vscode'] .right-pane-heading { padding-inline: calc(var(--ts-pane-inline, 16px) - 4px) 4px; }

@@ -183,6 +183,7 @@ export function MobileChatPreview({
     messagesRef.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   });
   const historyCheck = historyCheckSummary(conversations);
+  const historyCheckLabel = !historyCheck ? '' : historyCheck.status === 'checking' ? t('Checking server copy…') : historyCheck.status === 'match' ? t('Matches server copy') : historyCheck.status === 'failed' ? t('History check failed') : historyCheck.differences === 1 ? t('1 differs from server') : t('{count} differ from server', { count: formatNumber(historyCheck.differences) });
   const conversationsAvailable = Boolean(conversations && (conversations.enabled || conversations.remote.configured));
   const allSnapshotMessages = snapshot?.messages ?? EMPTY_MESSAGES;
   const [visibleMessageLimit, setVisibleMessageLimit] = useState(DEFAULT_VISIBLE_CHAT_MESSAGES);
@@ -462,9 +463,9 @@ export function MobileChatPreview({
           <ProductIcon name="circle-filled" />
           <span>{humanize(sessionState)}</span>
         </span>
-        {historyCheck && <button type="button" className={`mobile-chat-preview__history-check mobile-chat-preview__history-check--${historyCheck.status}`} aria-controls={conversationDrawer ? conversationDrawerId : undefined} onClick={() => setConversationDrawer((current) => current === 'check' ? undefined : 'check')}>
+        {historyCheck && <button type="button" className={`mobile-chat-preview__history-check mobile-chat-preview__history-check--${historyCheck.status}`} title={historyCheckLabel} aria-controls={conversationDrawer ? conversationDrawerId : undefined} onClick={() => setConversationDrawer((current) => current === 'check' ? undefined : 'check')}>
           {historyCheck.status === 'checking' ? <ProductIcon name="loading" className="codicon-modifier-spin" /> : <span className="mobile-chat-preview__history-check-mark" aria-hidden="true" />}
-          <span>{historyCheck.status === 'checking' ? t('Checking server copy…') : historyCheck.status === 'match' ? t('Matches server copy') : historyCheck.status === 'failed' ? t('History check failed') : t('{count} differ from server', { count: formatNumber(historyCheck.differences) })}</span>
+          <span>{historyCheckLabel}</span>
         </button>}
         {conversationsAvailable && <IconButton ref={conversationToggleRef} className="mobile-chat-preview__conversations" icon="comment-discussion" label={t('Conversations')} type="button" aria-expanded={Boolean(conversationDrawer)} aria-controls={conversationDrawer ? conversationDrawerId : undefined} onClick={() => setConversationDrawer((current) => current ? undefined : 'conversations')} />}
         {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon={conversations?.enabled ? 'add' : 'debug-restart'} label={t(conversations?.enabled ? 'New conversation' : 'Restart session')} type="button" disabled={!trusted || active || snapshot.sessionState === 'loadingOpening'} onClick={() => post({ type: 'conversation.new' })} />}

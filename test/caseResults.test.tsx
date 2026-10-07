@@ -123,8 +123,36 @@ describe('one list for cases and results', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Failed (1)' }));
     expect(onFilterChange).toHaveBeenCalledWith('failed');
     fireEvent.click(screen.getByRole('button', { name: 'Rerun failed (1)' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Run history' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View results' }));
     expect(onRerun).toHaveBeenCalledOnce();
     expect(onViewHistory).toHaveBeenCalledOnce();
+    expect(container.querySelector('.case-run-summary strong')?.textContent).toMatch(/^Latest results/u);
+  });
+
+  it('speaks Red Team outcomes in the same words as the case badges', () => {
+    const keys = ['red-pass', 'red-fail'].map((id) => liveCaseKey(undefined, id));
+    const { container } = render(<CaseRunSummary kind="adversarial" caseKeys={keys} outcomes={latestCaseOutcomes(runs, 'adversarial')} lastRunAt={1_000} filter="all" onFilterChange={vi.fn()} rerunCount={1} rerunDisabled={false} onRerun={vi.fn()} onViewHistory={vi.fn()} />);
+    expect(container.querySelector('.case-run-summary__tally')?.textContent).toBe('1 resisted · 1 not resisted · 0 not run');
+    expect(screen.getByRole('button', { name: 'Not resisted (1)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Rerun not resisted (1)' })).toBeTruthy();
+  });
+
+  it('never strands a result filter: the empty list and Red Team clear actions return to All', () => {
+    const onFilterChange = vi.fn();
+    const outcomes = latestCaseOutcomes(runs, 'contract');
+    const { unmount } = render(<CaseResultContext.Provider value={{ outcomes, filter: 'failed', hasHistory: true, onFilterChange }}><AutomationWorkspace profile={{ ...profile, tests: { scenarios: profile.tests!.scenarios!.filter((item) => item.id === 'pass') } }} post={vi.fn()} activeSection="scenarios" unified /></CaseResultContext.Provider>);
+    expect(screen.getByText('No cases match this result filter.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all cases' }));
+    expect(onFilterChange).toHaveBeenLastCalledWith('all');
+    unmount();
+    const onCollectionChange = vi.fn();
+    render(<CaseResultContext.Provider value={{ outcomes: latestCaseOutcomes(runs, 'adversarial'), filter: 'notRun', hasHistory: true, onFilterChange }}><AdversarialWorkspace profile={profile} post={vi.fn()} activeSection="cases" unified onCaseCollectionChange={onCollectionChange} /></CaseResultContext.Provider>);
+    const clear = screen.getByRole('button', { name: 'Clear (1)' });
+    expect(clear.hasAttribute('disabled')).toBe(false);
+    onFilterChange.mockClear();
+    fireEvent.click(clear);
+    expect(onFilterChange).toHaveBeenCalledWith('all');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(onFilterChange).toHaveBeenCalledTimes(2);
   });
 });

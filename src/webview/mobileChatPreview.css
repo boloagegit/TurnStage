@@ -1565,6 +1565,11 @@
   .mobile-chat-preview__environment,
   .mobile-chat-preview__session-tools > span[aria-hidden='true'] { display: none; }
   .mobile-chat-preview__session-tools { margin-inline-start: auto; padding-inline-start: 0; }
+  /* Every toolbar action stays reachable: labels collapse to their icons but keep their accessible names. */
+  .mobile-chat-preview__viewport-settings > summary > span:not(.product-icon),
+  .mobile-chat-preview__session-state > span:not(.product-icon),
+  .mobile-chat-preview__history-check > span:not(.product-icon, .mobile-chat-preview__history-check-mark) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .mobile-chat-preview__viewport-toolbar { gap: 2px; }
 
   .mobile-chat-preview__starter-list,
   .mobile-chat-preview__followups {
@@ -1585,7 +1590,7 @@
   .mobile-chat-preview__session-start { grid-template-columns: var(--ts-icon-size, 16px) minmax(0, 1fr); }
   .mobile-chat-preview__session-start > .mobile-chat-preview__button { grid-column: 2; justify-self: start; }
 }
-@container (max-width: 320px) { .mobile-chat-preview__viewport-settings > summary > span { display: none; } }
+@container (max-width: 320px) { .mobile-chat-preview__viewport-settings > summary > span:not(.product-icon) { display: none; } }
 
 .response-content-dialog { width: min(100%, 78em); height: min(90dvh, 58em); max-height: 90dvh; }
 .response-content-dialog .case-editor-dialog__body { display: grid; min-height: 0; overflow: hidden; }

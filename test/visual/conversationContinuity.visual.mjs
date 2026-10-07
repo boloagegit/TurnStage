@@ -136,7 +136,7 @@ try {
   await modeSelect.selectOption({ label: 'Server rewrites saved answer' });
   await composer.fill('And the second step?');
   await composer.press('Enter');
-  const differs = page.getByRole('button', { name: '1 differ from server' });
+  const differs = page.getByRole('button', { name: '1 differs from server' });
   await differs.waitFor();
   await differs.click();
   await page.getByRole('tab', { name: /History check/u, selected: true }).waitFor();

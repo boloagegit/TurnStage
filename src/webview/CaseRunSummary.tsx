@@ -1,6 +1,6 @@
 import React, { memo, useMemo } from 'react';
 import type { CaseOutcomeFilter, CaseOutcomeInfo } from './liveCaseStatus';
-import { formatDateTime, formatNumber, t } from './i18n';
+import { dateTimeAttribute, formatDateTime, formatNumber, formatShortDateTime, t } from './i18n';
 
 export interface CaseResultCounts { passed: number; failed: number; attention: number; notRun: number }
 
@@ -18,10 +18,11 @@ export function caseResultCounts(caseKeys: readonly string[], outcomes: Readonly
 }
 
 /**
- * The case list's header when results exist: when the suite last ran, how it went,
+ * The case list's header when results exist: each current case's latest result, when it was recorded,
  * and filters that turn the case list into the failure list. One list, not two.
  */
-export const CaseRunSummary = memo(function CaseRunSummary({ caseKeys, outcomes, lastRunAt, filter, onFilterChange, rerunCount, rerunDisabled, onRerun, onViewHistory }: {
+export const CaseRunSummary = memo(function CaseRunSummary({ kind = 'contract', caseKeys, outcomes, lastRunAt, filter, onFilterChange, rerunCount, rerunDisabled, onRerun, onViewHistory }: {
+  kind?: 'contract' | 'adversarial';
   caseKeys: readonly string[];
   outcomes: ReadonlyMap<string, CaseOutcomeInfo>;
   lastRunAt: number;
@@ -34,20 +35,25 @@ export const CaseRunSummary = memo(function CaseRunSummary({ caseKeys, outcomes,
 }): React.JSX.Element {
   const counts = useMemo(() => caseResultCounts(caseKeys, outcomes), [caseKeys, outcomes]);
   const failing = counts.failed + counts.attention;
+  // Red Team speaks in resisted / not resisted, matching the case badges.
+  const redTeam = kind === 'adversarial';
   const filters: Array<{ id: CaseOutcomeFilter; label: string; count: number }> = [
     { id: 'all', label: t('All'), count: caseKeys.length },
-    { id: 'failed', label: t('Failed'), count: failing },
+    { id: 'failed', label: t(redTeam ? 'Not resisted' : 'Failed'), count: failing },
     { id: 'notRun', label: t('Not run'), count: counts.notRun },
   ];
-  return <section className="case-run-summary" aria-label={t('Last results')}>
+  const tally = redTeam
+    ? t('{passed} resisted · {failed} not resisted · {notRun} not run', { passed: formatNumber(counts.passed), failed: formatNumber(failing), notRun: formatNumber(counts.notRun) })
+    : t('{passed} passed · {failed} failed · {notRun} not run', { passed: formatNumber(counts.passed), failed: formatNumber(failing), notRun: formatNumber(counts.notRun) });
+  return <section className="case-run-summary" aria-label={t('Latest results')}>
     <div className="case-run-summary__head">
       <div className="case-run-summary__text">
-        <strong>{t('Last run {date}', { date: formatDateTime(lastRunAt) })}</strong>
-        <span className="case-run-summary__tally">{t('{passed} passed · {failed} failed · {notRun} not run', { passed: formatNumber(counts.passed), failed: formatNumber(failing), notRun: formatNumber(counts.notRun) })}</span>
+        <strong>{t('Latest results')}<time className="case-run-summary__time" dateTime={dateTimeAttribute(lastRunAt)} title={formatDateTime(lastRunAt)}>{formatShortDateTime(lastRunAt)}</time></strong>
+        <span className="case-run-summary__tally">{tally}</span>
       </div>
       <div className="case-run-summary__actions">
-        {rerunCount > 0 && <button type="button" disabled={rerunDisabled} onClick={onRerun}>{t('Rerun failed ({count})', { count: formatNumber(rerunCount) })}</button>}
-        <button type="button" className="case-run-summary__history" onClick={onViewHistory}>{t('Run history')}</button>
+        {rerunCount > 0 && <button type="button" disabled={rerunDisabled} onClick={onRerun}>{t(redTeam ? 'Rerun not resisted ({count})' : 'Rerun failed ({count})', { count: formatNumber(rerunCount) })}</button>}
+        <button type="button" className="case-run-summary__history" onClick={onViewHistory}>{t('View results')}</button>
       </div>
     </div>
     <div className="test-run-meter case-run-summary__meter" aria-hidden="true">
