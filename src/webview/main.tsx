@@ -273,8 +273,8 @@ function App(): React.JSX.Element {
     <a className="skip" href="#main-panel">{t('Skip to content')}</a>
     {snapshot?.trusted === false && <div className="trust-banner" role="status"><strong>{t('Restricted mode.')}</strong> {t('This workspace is not trusted. Network requests are disabled; fixture replay remains available.')}</div>}
     {diagnostics.length > 0 && <div className="validation-banner" role="alert"><strong>{t(diagnostics.length === 1 ? '{count} configuration issue.' : '{count} configuration issues.', { count: formatNumber(diagnostics.length) })}</strong> {t('Requests are blocked until errors are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></div>}
-    {notice && <div className="operation-status" role="status" aria-live="polite" aria-atomic="true"><ProductIcon name="info" /><span>{typeof notice === 'string' ? notice : notice.message}</span>{typeof notice !== 'string' && <div className="operation-status__actions"><button type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'open' })}>{t('Open')}</button><IconButton icon="folder-opened" label={t('Reveal in file explorer')} type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'reveal' })} /><IconButton icon="copy" label={t('Copy path')} type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'copyPath' })} /></div>}<IconButton icon="close" label={t('Dismiss notification')} type="button" onClick={() => setNotice('')} /></div>}
     <section id="main-panel" tabIndex={-1} className="panel" aria-label={t('Test')}>
+      {notice && <div className="operation-status" role="status" aria-live="polite" aria-atomic="true"><ProductIcon name="info" /><span>{typeof notice === 'string' ? notice : notice.message}</span>{typeof notice !== 'string' && <div className="operation-status__actions"><button type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'open' })}>{t('Open')}</button><IconButton icon="folder-opened" label={t('Reveal in file explorer')} type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'reveal' })} /><IconButton icon="copy" label={t('Copy path')} type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'copyPath' })} /></div>}<IconButton icon="close" label={t('Dismiss notification')} type="button" onClick={() => setNotice('')} /></div>}
       <TestWorkspace
         profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries}
         testResults={testResults} automationResults={automationResults}
@@ -670,7 +670,10 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
 
 /** First frame while the host loads the Profile: the same shell geometry as the workspace, with placeholders. */
 export function AppSkeleton({ splitPercent, paneHidden = false }: { splitPercent: number; paneHidden?: boolean }): React.JSX.Element {
-  return <main className="app-skeleton" data-pane={paneHidden ? 'hidden' : 'visible'} aria-busy="true" aria-label={t('Loading profile…')} style={{ '--app-skeleton-split': `${splitPercent}fr`, '--app-skeleton-rest': `${100 - splitPercent}fr` } as React.CSSProperties}>
+  // Measured like the live workspace, so a Web window whose sidebar leaves a narrow workspace boots tabbed too.
+  const skeletonRef = useRef<HTMLElement>(null);
+  const narrow = useNarrowWorkspace(skeletonRef);
+  return <main ref={skeletonRef} className="app-skeleton" data-layout={narrow ? 'narrow' : 'wide'} data-pane={paneHidden ? 'hidden' : 'visible'} aria-busy="true" aria-label={t('Loading profile…')} style={{ '--app-skeleton-split': `${splitPercent}fr`, '--app-skeleton-rest': `${100 - splitPercent}fr` } as React.CSSProperties}>
     <div className="app-skeleton__chat">
       <span className="ts-skeleton ts-skeleton--text" style={{ width: '40%' }} />
       <div className="app-skeleton__messages"><span className="ts-skeleton ts-skeleton--bubble" /><span className="ts-skeleton ts-skeleton--bubble" /><span className="ts-skeleton ts-skeleton--bubble" /></div>
