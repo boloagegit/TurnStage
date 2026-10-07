@@ -12,7 +12,7 @@ html[data-host='vscode'] {
   --ts-pane-heading: 35px;
   --ts-radius-sm: 2px;
   --ts-radius: 3px;
-  --ts-radius-lg: 4px;
+  --ts-radius-lg: 3px;
   --ts-segment-background: transparent;
   --ts-segment-selected: var(--vscode-list-inactiveSelectionBackground);
 }
@@ -124,10 +124,6 @@ html[data-host='vscode'] .history-check-row__actions button:hover { background: 
 /* Focus = the workbench's 1px focus border. */
 html[data-host='vscode'] :is(button, input, select, textarea, summary, a):focus-visible { outline-width: 1px; outline-offset: -1px; }
 html[data-host='vscode'] .right-pane-view { animation-duration: 100ms; }
-@container (max-width: 460px) {
-  html[data-host='vscode'] .right-pane-tabs button { padding-inline: 6px; }
-  html[data-host='vscode'] .right-pane-tabs button[aria-selected='true']::after { inset-inline: 6px; }
-}
 
 /*
  * Narrow editors: chat and workspace become tabs in one header instead of a
@@ -150,8 +146,11 @@ html[data-host='vscode'] .right-pane-tab--chat { display: none !important; }
 }
 html[data-host='vscode'] .right-pane-tabs .right-pane-tab__icon { display: none; }
 @container (max-width: 460px) {
+  html[data-host='vscode'] .right-pane-heading { padding-inline: calc(var(--ts-pane-inline, 16px) - 4px) 4px; }
   html[data-host='vscode'] .right-pane-tabs { gap: 0; }
-  html[data-host='vscode'] .right-pane-tabs button { padding-inline: 4px; }
+  /* Match the specificity of the shared native tab rule above. */
+  html[data-host='vscode'] .right-pane-tabs[role='tablist'] button { padding-inline: 4px; }
+  html[data-host='vscode'] .right-pane-tabs[role='tablist'] button[aria-selected='true']::after { inset-inline: 4px; }
   html[data-host='vscode'] .right-pane-tabs .right-pane-tab__icon { display: inline-block; }
   html[data-host='vscode'] .right-pane-tab--chat .right-pane-tab__label { display: none; }
 }
