@@ -199,29 +199,31 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
 .app-skeleton__messages > :nth-child(even) { width: 72%; }
 .app-skeleton[data-pane='hidden'] { grid-template-columns: minmax(0, 1fr); }
 .app-skeleton[data-pane='hidden'] .app-skeleton__pane { display: none; }
-/* A narrow editor boots straight into the tabbed layout it will render, not a split it then collapses. */
+/* A narrow workspace boots straight into the tabbed layout it will render, not a split it then collapses. The
+ * React skeleton measures itself (data-layout); the static boot markup has only the window to go by. */
+.app-skeleton[data-layout='narrow']:not([data-pane='hidden']) { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--ts-pane-heading) minmax(0, 1fr); }
+.app-skeleton[data-layout='narrow']:not([data-pane='hidden']) .app-skeleton__pane { grid-row: 1; grid-template-rows: var(--ts-pane-heading); }
+.app-skeleton[data-layout='narrow']:not([data-pane='hidden']) .app-skeleton__rows { display: none; }
+.app-skeleton[data-layout='narrow']:not([data-pane='hidden']) .app-skeleton__chat { grid-row: 2; border-inline-end: 0; }
 @media (max-width: 64em) {
-  .app-skeleton:not([data-pane='hidden']) { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--ts-pane-heading) minmax(0, 1fr); }
-  .app-skeleton:not([data-pane='hidden']) .app-skeleton__pane { grid-row: 1; grid-template-rows: var(--ts-pane-heading); }
-  .app-skeleton:not([data-pane='hidden']) .app-skeleton__rows { display: none; }
-  .app-skeleton:not([data-pane='hidden']) .app-skeleton__chat { grid-row: 2; border-inline-end: 0; }
+  .app-skeleton:not([data-layout]):not([data-pane='hidden']) { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--ts-pane-heading) minmax(0, 1fr); }
+  .app-skeleton:not([data-layout]):not([data-pane='hidden']) .app-skeleton__pane { grid-row: 1; grid-template-rows: var(--ts-pane-heading); }
+  .app-skeleton:not([data-layout]):not([data-pane='hidden']) .app-skeleton__rows { display: none; }
+  .app-skeleton:not([data-layout]):not([data-pane='hidden']) .app-skeleton__chat { grid-row: 2; border-inline-end: 0; }
 }
 
-/* Operation notices float like workbench toasts instead of pushing both panes down and back. */
-.app { position: relative; }
-.app > .operation-status { position: absolute; z-index: 40; inset-block-end: var(--ts-space-3); inset-inline-end: var(--ts-space-3); box-sizing: border-box; width: auto; max-width: min(32em, calc(100% - 2 * var(--ts-space-3))); border: 1px solid var(--vscode-notifications-border, var(--vscode-widget-border, transparent)); border-radius: var(--ts-radius); box-shadow: 0 0 8px 2px var(--vscode-widget-shadow, rgba(0, 0, 0, .36)); animation: ts-view-in 150ms ease-out both; }
-/* Narrow layouts keep the composer's send button clear: the toast drops in under the tab row instead. */
-.app:has(> .panel .test-surface[data-layout='narrow']) > .operation-status { inset-block: calc(var(--ts-pane-heading) + var(--ts-space-2)) auto; }
-.mobile-chat-preview__loading { display: grid; gap: var(--ts-space-3); padding-block: var(--ts-space-2); }
-.mobile-chat-preview__loading > :nth-child(odd) { justify-self: end; width: 52%; }
-.mobile-chat-preview__loading > :nth-child(even) { width: 76%; }
-.unified-test-history__loading { display: grid; gap: var(--ts-space-2); padding-block: var(--ts-space-2); }
+/* Operation notices float like workbench toasts instead of pushing both panes down and back. They drop in at the
+ * top end, under the tab rows, where neither the composer's send button nor the run-selection bar sits. */
+.panel { position: relative; }
+.panel > .operation-status { position: absolute; z-index: 40; inset-block-start: calc(var(--ts-pane-heading) + var(--ts-space-2)); inset-inline-end: var(--ts-space-3); box-sizing: border-box; width: auto; max-width: min(32em, calc(100% - 2 * var(--ts-space-3))); border: 1px solid var(--vscode-notifications-border, var(--vscode-widget-border, transparent)); border-radius: var(--ts-radius); box-shadow: 0 0 8px 2px var(--vscode-widget-shadow, rgba(0, 0, 0, .36)); animation: ts-view-in 150ms ease-out both; }
+/* Narrow: below both the tab row and the chat toolbar, over the transcript rather than its actions. */
+.panel:has(.test-surface[data-layout='narrow']) > .operation-status { inset-block-start: calc(2 * var(--ts-pane-heading) + var(--ts-space-2)); }
 
 @media (prefers-reduced-motion: reduce) {
-  .right-pane-view, .conversation-drawer, .live-case-status--running .live-case-status__mark, .app > .operation-status { animation: none; }
+  .right-pane-view, .conversation-drawer, .live-case-status--running .live-case-status__mark, .panel > .operation-status { animation: none; }
 }
 .vscode-reduce-motion .right-pane-view,
-.vscode-reduce-motion .app > .operation-status,
+.vscode-reduce-motion .panel > .operation-status,
 .vscode-reduce-motion .conversation-drawer,
 .vscode-reduce-motion .ts-skeleton,
 .vscode-reduce-motion .live-case-status--running .live-case-status__mark { animation: none; }
@@ -332,6 +334,9 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
 .case-run-summary__text { display: grid; flex: 1 1 14em; gap: 1px; min-width: 0; }
 .case-run-summary__text strong { font-variant-numeric: tabular-nums; }
 .case-run-summary__time { margin-inline-start: var(--ts-space-2); white-space: nowrap; color: var(--vscode-descriptionForeground); font-weight: 400; }
+/* Run actions: the baseline status reads as a caption line, then the actions sit in one row. */
+.unified-test-history__actions { justify-content: flex-start; }
+.unified-test-history__actions > span { flex: 1 0 100%; }
 .case-run-summary__tally { color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); font-variant-numeric: tabular-nums; }
 .case-run-summary__actions { display: flex; flex-wrap: wrap; gap: var(--ts-space-1); }
 .case-run-summary__meter { height: 4px; }

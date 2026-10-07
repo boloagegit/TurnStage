@@ -58,6 +58,7 @@
   background: var(--mcp-background);
 }
 .mobile-chat-preview__toolbar-overflow-trigger { display: inline-flex; flex: 0 0 auto; }
+.mobile-chat-preview__history-check-count { display: none; }
 .mobile-chat-preview__viewport-icon {
   display: grid;
   place-items: center;
@@ -1570,6 +1571,7 @@
   .mobile-chat-preview__session-state > span:not(.product-icon),
   .mobile-chat-preview__history-check > span:not(.product-icon, .mobile-chat-preview__history-check-mark) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .mobile-chat-preview__viewport-toolbar { gap: 2px; }
+  .mobile-chat-preview__history-check .mobile-chat-preview__history-check-count { display: inline; font-variant-numeric: tabular-nums; }
 
   .mobile-chat-preview__starter-list,
   .mobile-chat-preview__followups {
