@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TurnStageProfile } from '../src/shared/types';
 import type { TestRunHistoryRecord } from '../src/shared/testRunHistory';
 import { AdversarialWorkspace, AutomationWorkspace } from '../src/webview/SettingsWorkspace';
-import { CaseResultContext, LiveCaseStatusContext, LiveCaseStatusBadge, latestCaseOutcomes, liveCaseKey, matchesOutcomeFilter, type CaseResultState } from '../src/webview/liveCaseStatus';
+import { CaseResultContext, LiveCaseStatusContext, LiveCaseStatusBadge, latestCaseOutcomes, liveCaseKey, matchesOutcomeFilter, useLiveCaseStatuses, type CaseResultState } from '../src/webview/liveCaseStatus';
 import { CaseRunSummary, caseResultCounts } from '../src/webview/CaseRunSummary';
 import { setLocale } from '../src/webview/i18n';
 
@@ -41,6 +41,18 @@ describe('last result per case', () => {
     expect(matchesOutcomeFilter(outcomes.get(liveCaseKey(undefined, 'a')), 'failed')).toBe(false);
     expect(matchesOutcomeFilter(undefined, 'notRun')).toBe(true);
     expect(caseResultCounts([liveCaseKey(undefined, 'a'), liveCaseKey('suite', 'd'), liveCaseKey(undefined, 'new-case')], outcomes)).toEqual({ passed: 1, failed: 0, attention: 1, notRun: 1 });
+  });
+
+  it('hands completed progress to the recorded outcome and duration', () => {
+    function Harness({ state }: { state: 'running' | 'completed' }) {
+      const statuses = useLiveCaseStatuses({ action: 'runSelection', state, progress: { totalCases: 1, completedCases: 1, totalAttempts: 1, completedAttempts: 1, maxConcurrency: 1, passedCases: 0, failedCases: 1, completedOutcomes: [{ scenarioId: 'red', outcome: 'failed' }] } });
+      return <LiveCaseStatusContext.Provider value={statuses}><CaseResultContext.Provider value={{ outcomes: latestCaseOutcomes([run('r', 1000, [['red', 'adversarial', 'infrastructureError', 212]])], 'adversarial'), filter: 'all', hasHistory: true }}><LiveCaseStatusBadge scenarioId="red" /></CaseResultContext.Provider></LiveCaseStatusContext.Provider>;
+    }
+    const { container, rerender } = render(<Harness state="running" />);
+    expect(container.querySelector('.live-case-status')?.textContent).toBe('Failed');
+    rerender(<Harness state="completed" />);
+    expect(container.querySelector('.live-case-status--last')?.textContent).toBe('Infrastructure error212 ms');
+    expect(container.querySelector('.live-case-status')?.getAttribute('title')).toMatch(/^Last result: Infrastructure error, /u);
   });
 
   it('shows the live state while running, otherwise the last result with its duration', () => {
