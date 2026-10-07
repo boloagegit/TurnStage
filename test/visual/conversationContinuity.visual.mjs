@@ -1,4 +1,4 @@
-/* global localStorage, sessionStorage, window, requestAnimationFrame, performance */
+/* global localStorage, sessionStorage, window, requestAnimationFrame, performance, Event */
 // Conversation drawer, server history check, and visual continuity in TurnStage Web.
 // Run after `npm run web:build`: node test/visual/conversationContinuity.visual.mjs
 import assert from 'node:assert/strict';
@@ -173,10 +173,10 @@ try {
   await page.getByRole('button', { name: 'Close conversations' }).click();
   await page.getByRole('tab', { name: 'General tests', exact: true }).click();
   await page.getByRole('tab', { name: 'Cases', exact: true }).click();
-  const search = page.getByRole('searchbox').first();
+  const search = page.getByRole('searchbox', { name: 'Search cases', exact: true });
   await search.fill('refund');
   await page.evaluate(() => { window.__frames.splice(0); });
-  for (const tab of ['Debug', 'Configure', 'General tests', 'Debug', 'General tests']) {
+  for (const tab of ['Debug', 'Configure', 'General tests', 'Red Team', 'General tests', 'Debug', 'General tests']) {
     await page.getByRole('tab', { name: tab, exact: true }).click();
     await page.waitForTimeout(60);
   }
@@ -186,6 +186,32 @@ try {
   assert.equal(switchFrames.filter((frame) => frame.panes > 1).length, 0, 'two right-pane views were visible at once');
   report.tabSwitch = { frames: switchFrames.length };
   await shot('04-tests-after-switches');
+
+  // General tests and Red Team retain separate mounted content and keyboard targets.
+  await page.getByRole('tab', { name: 'Red Team', exact: true }).click();
+  const redCases = page.getByRole('tab', { name: 'Cases', exact: true });
+  await redCases.focus();
+  await redCases.press('ArrowRight');
+  await page.getByRole('tab', { name: 'Results', exact: true, selected: true }).waitFor();
+  assert.equal(await page.getByRole('tab', { name: 'Results', exact: true }).evaluate((element) => element === document.activeElement), true, 'Red Team keyboard navigation focused the hidden General tests pane');
+  const duplicateIds = await page.evaluate(() => {
+    const ids = [...document.querySelectorAll('.right-pane-panel [id]')].map((element) => element.id);
+    return ids.filter((id, index) => ids.indexOf(id) !== index);
+  });
+  assert.deepEqual(duplicateIds, [], 'retained test panes must not duplicate accessibility IDs');
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
+  assert.equal(await page.getByRole('tab', { name: 'Cases', exact: true }).getAttribute('aria-selected'), 'true', 'Red Team changed the General tests section');
+  assert.equal(await search.inputValue(), 'refund');
+
+  // A nonzero Configure scroll position survives visits to all three other panes.
+  await page.getByRole('tab', { name: 'Configure', exact: true }).click();
+  const settings = page.locator('#settings-content');
+  const scrollTop = await settings.evaluate((element) => { element.scrollTop = element.scrollHeight; element.dispatchEvent(new Event('scroll', { bubbles: true })); return element.scrollTop; });
+  assert.ok(scrollTop > 0, 'the scroll regression needs overflowing settings content');
+  for (const tab of ['Debug', 'General tests', 'Red Team', 'Configure']) await page.getByRole('tab', { name: tab, exact: true }).click();
+  assert.equal(await settings.evaluate((element) => element.scrollTop), scrollTop, 'Configure lost its scroll position');
+  report.configureScrollTop = scrollTop;
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
 
   // Reload: the archive (IndexedDB) and the open tab (sessionStorage) come back.
   await page.reload();
