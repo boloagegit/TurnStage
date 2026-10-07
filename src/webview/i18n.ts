@@ -1608,6 +1608,11 @@ const zhTw: Record<string, string> = {
   'View related events': '查看相關事件',
   'Content was truncated at the safety limit.': '內容已達安全上限並被截斷。',
   '{role} message, {status}. Open response content.': '{role}訊息，{status}。開啟回應內容。',
+  'Selected cases': '已選取的案例',
+  '{count} cases selected': '已選 {count} 個案例',
+  '{passed} passed · {failed} failed · {running} running · {queued} queued': '{passed} 通過 · {failed} 失敗 · {running} 執行中 · {queued} 排隊',
+  '{passed} passed · {failed} failed · {queued} not run': '{passed} 通過 · {failed} 失敗 · {queued} 未執行',
+  'Running': '執行中',
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {

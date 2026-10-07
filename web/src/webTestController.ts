@@ -1,4 +1,4 @@
-import type { AdversarialCaseCatalog, ContractCaseCatalog, HostPayload, LinkedAdversarialCaseDetail, LinkedContractCaseDetail, TestOperationAction } from '../../src/shared/protocol';
+import { MAX_PROGRESS_COMPLETED_OUTCOMES, type AdversarialCaseCatalog, type ContractCaseCatalog, type HostPayload, type LinkedAdversarialCaseDetail, type LinkedContractCaseDetail, type TestOperationAction, type TestOperationCaseOutcome, type TestOperationCaseRef } from '../../src/shared/protocol';
 import type { AdversarialResultSummary, AutomationResultSummary, ScenarioDefinition, ScenarioRunResult, TurnStageEnvironment, TurnStageProfile } from '../../src/shared/types';
 import { adversarialCsvTemplate, serializeAdversarialCsv } from '../../src/extension/testing/adversarialCsv';
 import { contractCsvTemplate, serializeContractCsv } from '../../src/extension/testing/contractCsv';
@@ -140,6 +140,10 @@ export class WebTestController {
     let workerFailure: unknown;
     let nextCaseIndex = 0;
     const activeCases = new Map<number, string>();
+    const activeCaseRefs = new Map<number, TestOperationCaseRef>();
+    let passedCases = 0;
+    let failedCases = 0;
+    let pendingOutcomes: TestOperationCaseOutcome[] = [];
     let lastResultsPostAt = 0;
     let lastProgressPostAt = 0;
     writeRunLease(profile.id, runId, leaseOwner);
@@ -164,7 +168,9 @@ export class WebTestController {
       const now = Date.now();
       if (!force && now - lastProgressPostAt < 250) return;
       lastProgressPostAt = now;
-      this.post({ type: 'test.operation', operation: { action, state: state === 'running' ? control.state : state, progress: { totalCases: selected.length, completedCases: completed, totalAttempts: attempts, completedAttempts, maxConcurrency, activeCaseNames: [...activeCases.values()], runState: control.state } } });
+      const completedOutcomes = pendingOutcomes.slice(-MAX_PROGRESS_COMPLETED_OUTCOMES);
+      pendingOutcomes = [];
+      this.post({ type: 'test.operation', operation: { action, state: state === 'running' ? control.state : state, progress: { totalCases: selected.length, completedCases: completed, totalAttempts: attempts, completedAttempts, maxConcurrency, activeCaseNames: [...activeCases.values()], runState: control.state, activeCases: [...activeCaseRefs.values()].slice(0, 8), passedCases, failedCases, ...(completedOutcomes.length ? { completedOutcomes } : {}) } } });
     };
     const unsubscribeControl = control.subscribe(() => postProgress('running', true));
     try {
@@ -177,6 +183,7 @@ export class WebTestController {
           if (index >= cases.length || this.cancelled || workerFailure !== undefined) { control.release(); return; }
           const item = cases[index]!;
           activeCases.set(index, item.scenario.name);
+          activeCaseRefs.set(index, { scenarioId: item.scenario.id, ...(item.suiteId ? { suiteId: item.suiteId } : {}) });
           postProgress('running', completed === 0);
           try {
             if (this.profile().id !== profile.id) throw new Error('The active profile changed during this test run. The remaining cases were not sent.');
@@ -189,6 +196,10 @@ export class WebTestController {
             checkpointIds.push(checkpointId);
             completed += 1;
             completedAttempts += execution.result.repetitions?.completedAttempts ?? 1;
+            const passed = outcome === 'passed' || outcome === 'resisted';
+            if (passed) passedCases += 1; else failedCases += 1;
+            pendingOutcomes.push({ scenarioId: item.scenario.id, ...(item.suiteId ? { suiteId: item.suiteId } : {}), outcome: passed ? 'passed' : 'failed' });
+            if (pendingOutcomes.length > MAX_PROGRESS_COMPLETED_OUTCOMES) pendingOutcomes = pendingOutcomes.slice(-MAX_PROGRESS_COMPLETED_OUTCOMES);
             postResults();
             postProgress('running');
           } catch (error) {
@@ -196,6 +207,7 @@ export class WebTestController {
             control.cancel();
           } finally {
             activeCases.delete(index);
+            activeCaseRefs.delete(index);
             control.release();
           }
         }

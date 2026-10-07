@@ -56,7 +56,18 @@ export interface TestOperationProgress {
   maxConcurrency: number;
   activeCaseNames?: string[];
   runState?: 'running' | 'pausing' | 'paused' | 'cancelling';
+  /** Identities of the cases currently running (at most 8), for live case-list status. */
+  activeCases?: TestOperationCaseRef[];
+  /** Completed cases in this run that passed (contract passed or adversarial resisted). */
+  passedCases?: number;
+  /** Completed cases in this run that did not pass. */
+  failedCases?: number;
+  /** Cases completed since the previous progress message (at most 64). The Webview accumulates them per run. */
+  completedOutcomes?: TestOperationCaseOutcome[];
 }
+export interface TestOperationCaseRef { suiteId?: string; scenarioId: string }
+export interface TestOperationCaseOutcome extends TestOperationCaseRef { outcome: 'passed' | 'failed' }
+export const MAX_PROGRESS_COMPLETED_OUTCOMES = 64;
 export interface TestOperationSnapshot { action: TestOperationAction; state: TestOperationState; detail?: string; progress?: TestOperationProgress }
 
 export function isTestRunActive(operation?: TestOperationSnapshot): boolean {
@@ -567,7 +578,14 @@ function isTestOperationProgress(value: unknown): boolean {
   if (Number(value.completedCases) > Number(value.totalCases) || Number(value.completedAttempts) > Number(value.totalAttempts)) return false;
   if (!Number.isSafeInteger(value.maxConcurrency) || Number(value.maxConcurrency) < 1 || Number(value.maxConcurrency) > 8) return false;
   if (value.runState !== undefined && !['running', 'pausing', 'paused', 'cancelling'].includes(String(value.runState))) return false;
+  for (const count of [value.passedCases, value.failedCases]) if (count !== undefined && (!Number.isSafeInteger(count) || Number(count) < 0 || Number(count) > Number(value.totalCases))) return false;
+  if (value.activeCases !== undefined && !(Array.isArray(value.activeCases) && value.activeCases.length <= 8 && value.activeCases.every(isTestOperationCaseRef))) return false;
+  if (value.completedOutcomes !== undefined && !(Array.isArray(value.completedOutcomes) && value.completedOutcomes.length <= MAX_PROGRESS_COMPLETED_OUTCOMES && value.completedOutcomes.every((entry: unknown) => isRecord(entry) && ['passed', 'failed'].includes(String(entry.outcome)) && isTestOperationCaseRef(entry)))) return false;
   return value.activeCaseNames === undefined || (Array.isArray(value.activeCaseNames) && value.activeCaseNames.length <= 8 && value.activeCaseNames.every((entry) => isBoundedString(entry, 256)));
+}
+
+function isTestOperationCaseRef(value: unknown): value is TestOperationCaseRef {
+  return isRecord(value) && isBoundedString(value.scenarioId, 256) && (value.suiteId === undefined || isBoundedString(value.suiteId, 256));
 }
 
 function isAdversarialResults(value: unknown): boolean {

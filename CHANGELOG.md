@@ -9,7 +9,10 @@
 - Selecting a Network row or an event is no longer undone or re-focused by streaming updates; event search keeps keyboard focus while a run is active.
 - Large JSON payloads in the inspectors are searched without blocking typing, tokenized in linear time, and shown as plain text above 256 KiB. Selecting all cases in large suites updates the selection once.
 - Markdown code blocks in chat no longer draw a second frame inside the code block, copy feedback resets after a moment and is localized, the Red Team results header stays visible while scrolling, and pagination keeps keyboard focus at the first/last page.
-- Compatibility: no Profile, suite, storage, or protocol format changes.
+- Refreshed the Profile workspace look in VS Code and Web: segmented workspace, test-section, and inspector tabs with case counts, sentence-case labels, aligned numeric readouts, one shared read-only notice instead of one per section, and selection actions that appear next to the case list only when cases are selected. VS Code keeps following the active color theme, including high contrast.
+- TurnStage Web's dark theme uses a darker, higher-contrast palette with a cyan accent; the light theme accent changes from orange to teal. Web no longer requests the Inter font and uses the system UI font.
+- While tests run, each visible case shows Running, Passed, or Failed as it finishes, and the run status adds a passed/failed/running/queued breakdown in both VS Code and Web.
+- Compatibility: no Profile, suite, or storage format changes. `test.operation` progress messages gain optional fields (`activeCases`, `passedCases`, `failedCases`, `completedOutcomes`); older Webviews ignore them.
 
 ## 0.35.1
 

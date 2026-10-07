@@ -434,4 +434,10 @@ export const ko: Record<string, string> = {
   'View related events': '관련 이벤트 보기',
   'Content was truncated at the safety limit.': '안전 제한에 도달하여 내용이 잘렸습니다.',
   '{role} message, {status}. Open response content.': '{role} 메시지, {status}. 응답 내용을 엽니다.',
+  'Selected cases': '선택한 케이스',
+  '{count} cases selected': '케이스 {count}개 선택됨',
+  '{passed} passed · {failed} failed · {running} running · {queued} queued': '통과 {passed} · 실패 {failed} · 실행 중 {running} · 대기 {queued}',
+  '{passed} passed · {failed} failed · {queued} not run': '통과 {passed} · 실패 {failed} · 미실행 {queued}',
+  'Copied': '복사됨',
+  'Copy failed. Try again.': '복사하지 못했습니다. 다시 시도하세요.',
 };
