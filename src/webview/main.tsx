@@ -1,4 +1,4 @@
-import React, { Activity, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { Activity, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AdversarialCaseCatalog, ContractCaseCatalog, HostMessage, MappingTestResult, TestOperationSnapshot, WebviewPayload, WorkspaceSection } from '../shared/protocol';
 import { isHostMessage, isWorkspaceSection, isTestRunActive, PROTOCOL_VERSION } from '../shared/protocol';
@@ -48,7 +48,18 @@ export const DEFAULT_SPLIT_PERCENT = 64;
 export const ACCESSIBLE_EVENT_WINDOW_SIZE = 200;
 export const DEFAULT_EVENT_FILTERS: EventFilterState = { query: '', turn: 'all', eventType: 'all', mapping: 'all', issue: 'all', terminal: 'all' };
 export interface NetworkInspectorState { query: string; selectedId?: string; detailTab: NetworkDetailTab }
-export interface WebviewState { version?: number; sessionId?: string; section?: WorkspaceSection; configurationSection?: SettingsSectionId; rightPaneMode?: RightPaneMode; testsSection?: AutomationSectionId; testKind?: TestKindFilter; redTeamSection?: RedTeamSectionId; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number; selectedNetworkId?: string; activeEvidenceId?: string; selectedAutomationResultKey?: string; selectedCampaignId?: string; chatViewport?: ChatViewportState; eventFilters?: Partial<InspectorEventFilters>; collapsedEventTurns?: Partial<CollapsedEventTurns>; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; expandedContractCaseId?: string; expandedAdversarialCaseId?: string; adversarialCaseCollection?: Partial<AdversarialCaseCollectionState>; adversarialResultCollection?: Partial<AdversarialResultCollectionState>; networkInspector?: Partial<NetworkInspectorState>; acceptedForms?: string[] }
+/** Which half a narrow editor shows; wide editors show both side by side. */
+export type NarrowView = 'chat' | 'pane';
+/** Matches the CSS breakpoint where chat and workspace become tabs instead of a split. */
+export const NARROW_WORKSPACE_QUERY = '(max-width: 64em)';
+export function useMediaQuery(query: string): boolean {
+  return useSyncExternalStore(
+    (notify) => { if (typeof matchMedia !== 'function') return () => undefined; const list = matchMedia(query); list.addEventListener('change', notify); return () => list.removeEventListener('change', notify); },
+    () => typeof matchMedia === 'function' && matchMedia(query).matches,
+    () => false,
+  );
+}
+export interface WebviewState { version?: number; sessionId?: string; section?: WorkspaceSection; configurationSection?: SettingsSectionId; rightPaneMode?: RightPaneMode; testsSection?: AutomationSectionId; testKind?: TestKindFilter; redTeamSection?: RedTeamSectionId; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number; selectedNetworkId?: string; activeEvidenceId?: string; selectedAutomationResultKey?: string; selectedCampaignId?: string; chatViewport?: ChatViewportState; eventFilters?: Partial<InspectorEventFilters>; collapsedEventTurns?: Partial<CollapsedEventTurns>; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; expandedContractCaseId?: string; expandedAdversarialCaseId?: string; adversarialCaseCollection?: Partial<AdversarialCaseCollectionState>; adversarialResultCollection?: Partial<AdversarialResultCollectionState>; networkInspector?: Partial<NetworkInspectorState>; acceptedForms?: string[]; narrowView?: NarrowView }
 type VsCodeApi = { postMessage(message: unknown): void; getState(): WebviewState | undefined; setState(state: WebviewState): void };
 type OperationNotice = string | { message: string; artifactId: string };
 const rootElement = typeof document === 'undefined' ? undefined : document.getElementById('root');
@@ -81,6 +92,7 @@ function App(): React.JSX.Element {
   const [adversarialResultCollection, setAdversarialResultCollection] = useState<AdversarialResultCollectionState>(() => normalizeAdversarialResultCollectionState(savedState?.adversarialResultCollection));
   const [selectedCampaignId, setSelectedCampaignId] = useState(savedState?.selectedCampaignId);
   const [networkInspector, setNetworkInspector] = useState<NetworkInspectorState>(() => normalizeNetworkInspectorState(savedState?.networkInspector));
+  const [narrowView, setNarrowView] = useState<NarrowView>(savedState?.narrowView === 'pane' ? 'pane' : 'chat');
   const scrollPositionsRef = useRef<Partial<Record<ScrollPositionKey, number>>>({ ...savedState?.scrollPositions });
   const stateRef = useRef<WebviewState | undefined>(undefined);
   const persistTimerRef = useRef<number | undefined>(undefined);
@@ -191,9 +203,9 @@ function App(): React.JSX.Element {
     scheduleStatePersist();
   }, [scheduleStatePersist]);
   useEffect(() => {
-    stateRef.current = { version: WEBVIEW_STATE_VERSION, sessionId: snapshot?.sessionId, section: rightPaneMode === 'configure' ? configurationSection : 'test', configurationSection, rightPaneMode, testsSection, testKind: rightPaneMode === 'adversarial' ? 'adversarial' : 'contract', redTeamSection, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, selectedAutomationResultKey, selectedCampaignId, chatViewport, eventFilters, collapsedEventTurns, expandedContractCaseId, expandedAdversarialCaseId, adversarialCaseCollection, adversarialResultCollection, networkInspector, acceptedForms: [...acceptedForms] };
+    stateRef.current = { version: WEBVIEW_STATE_VERSION, sessionId: snapshot?.sessionId, section: rightPaneMode === 'configure' ? configurationSection : 'test', configurationSection, rightPaneMode, testsSection, testKind: rightPaneMode === 'adversarial' ? 'adversarial' : 'contract', redTeamSection, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, selectedAutomationResultKey, selectedCampaignId, chatViewport, eventFilters, collapsedEventTurns, expandedContractCaseId, expandedAdversarialCaseId, adversarialCaseCollection, adversarialResultCollection, networkInspector, acceptedForms: [...acceptedForms], narrowView };
     scheduleStatePersist();
-  }, [snapshot?.sessionId, configurationSection, rightPaneMode, testsSection, redTeamSection, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, selectedAutomationResultKey, selectedCampaignId, chatViewport, eventFilters, collapsedEventTurns, expandedContractCaseId, expandedAdversarialCaseId, adversarialCaseCollection, adversarialResultCollection, networkInspector, acceptedForms, scheduleStatePersist]);
+  }, [snapshot?.sessionId, configurationSection, rightPaneMode, testsSection, redTeamSection, draft, inspectorTab, splitPercent, splitCustomized, selectedMessageId, selectedRawSequence, selectedNetworkId, activeEvidenceId, selectedAutomationResultKey, selectedCampaignId, chatViewport, eventFilters, collapsedEventTurns, expandedContractCaseId, expandedAdversarialCaseId, adversarialCaseCollection, adversarialResultCollection, networkInspector, acceptedForms, narrowView, scheduleStatePersist]);
   useEffect(() => {
     const flushIfHidden = () => { if (document.visibilityState === 'hidden') persistState(); };
     window.addEventListener('pagehide', persistState);
@@ -282,6 +294,7 @@ function App(): React.JSX.Element {
         expandedAdversarialCaseId={expandedAdversarialCaseId} setExpandedAdversarialCaseId={setExpandedAdversarialCaseId}
         networkInspector={networkInspector} setNetworkInspector={setNetworkInspector}
         conversations={conversations}
+        narrowView={narrowView} setNarrowView={setNarrowView}
       />
     </section>
     <div className="sr-status" role="status" aria-live="polite">{terminalAnnouncement(snapshot?.turnState)}</div>
@@ -290,7 +303,7 @@ function App(): React.JSX.Element {
 
 const EMPTY_HISTORY_RUNS: TestRunHistoryRecord[] = [];
 
-function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, automationResults, contractCaseCatalog, linkedContractCaseEditor, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, testsSection, setTestsSection, selectedTestCases, setSelectedTestCases, testHistory, selectedAutomationResultKey, setSelectedAutomationResultKey, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, profileReadOnly, hostKind, diagnostics, scrollPositions, onScrollPositionChange, expandedContractCaseId, setExpandedContractCaseId, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector, conversations }: {
+function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, automationResults, contractCaseCatalog, linkedContractCaseEditor, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, testsSection, setTestsSection, selectedTestCases, setSelectedTestCases, testHistory, selectedAutomationResultKey, setSelectedAutomationResultKey, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, profileReadOnly, hostKind, diagnostics, scrollPositions, onScrollPositionChange, expandedContractCaseId, setExpandedContractCaseId, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector, conversations, narrowView, setNarrowView }: {
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
   runs: LocalRunSummary[];
@@ -368,6 +381,8 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   networkInspector: NetworkInspectorState;
   setNetworkInspector: (state: NetworkInspectorState) => void;
   conversations?: ConversationDirectory;
+  narrowView: NarrowView;
+  setNarrowView: (view: NarrowView) => void;
 }): React.JSX.Element {
   const [testOperation, setTestOperation] = useState<TestOperationSnapshot>();
   const testKind: TestKindFilter = rightPaneMode === 'adversarial' ? 'adversarial' : 'contract';
@@ -453,8 +468,22 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   const workspaceClassName = ['test-workspace', `test-workspace--${layout.preset}`, `test-workspace--inspector-${rightPanePosition}`, rightPaneMode !== 'debug' ? 'test-workspace--configuration-open' : '', layout.compact ? 'test-workspace--compact' : ''].filter(Boolean).join(' ');
   const decrementKey = rightPanePosition === 'right' ? 'ArrowLeft' : 'ArrowUp';
   const incrementKey = rightPanePosition === 'right' ? 'ArrowRight' : 'ArrowDown';
+  const narrow = useMediaQuery(NARROW_WORKSPACE_QUERY);
+  const chatTabSelected = narrow && narrowView === 'chat';
+  const paneTabSelected = (mode: RightPaneMode) => !chatTabSelected && rightPaneMode === mode;
+  // The half the user last worked in is the one a narrow editor shows, so resizing never swaps the view away.
+  const showChatHalf = useCallback(() => setNarrowView('chat'), [setNarrowView]);
+  const showPaneHalf = useCallback(() => setNarrowView('pane'), [setNarrowView]);
+  // Navigation that opens a panel (Configure from the chat toolbar, evidence, host commands) also brings it forward when narrow.
+  const previousRightPaneMode = useRef(rightPaneMode);
+  useEffect(() => {
+    if (previousRightPaneMode.current === rightPaneMode) return;
+    previousRightPaneMode.current = rightPaneMode;
+    setNarrowView('pane');
+  }, [rightPaneMode, setNarrowView]);
   const selectRightPaneMode = (mode: RightPaneMode, focus = false) => {
     setRightPaneMode(mode);
+    setNarrowView('pane');
     if (focus) focusAfterRender(() => document.getElementById(`right-pane-${mode}-tab`)?.focus());
   };
   const activeEvidence = resolveActiveEvidence(testResults, activeEvidenceId);
@@ -565,8 +594,8 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
           ? <AutomationEvidenceReviewBar results={automationResults} selection={activeAutomationEvidence} testRunActive={isTestRunActive(testOperation)} trusted={snapshot?.trusted === true} onSelect={(result) => { if (result.evidenceId) { setSelectedAutomationResultKey(result.evidenceId); post({ type: 'test.evidence.open', evidenceId: result.evidenceId, location: result.primaryLocation }); } }} onClose={onCloseEvidence} />
           : null}
     </div>
-    <div ref={workspaceRef} className={workspaceClassName} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
-    <section ref={previewRef} className="preview-pane">
+    <div ref={workspaceRef} className={workspaceClassName} data-narrow-view={showRightPane ? narrowView : 'chat'} style={{ '--preview-size': trackSizes.preview, '--inspector-size': trackSizes.inspector } as React.CSSProperties}>
+    <section ref={previewRef} className="preview-pane" onPointerDownCapture={showChatHalf} onFocusCapture={showChatHalf} {...(narrow && showRightPane ? { id: 'narrow-chat-panel', role: 'tabpanel', 'aria-labelledby': 'right-pane-chat-tab' } : {})}>
       <MobileChatPreview profile={profile} showEnvironment={hostKind === 'vscode'} snapshot={snapshot} active={active} continuationBlocked={continuationBlocked} draft={draft} setDraft={setDraft} send={send} post={post} viewport={chatViewport} onViewportChange={setChatViewport} onConfigure={() => setRightPaneMode('configure')} selectedMessageId={rightPaneMode === 'debug' ? selectedMessageId : undefined} onSelectMessage={onSelectMessage} acceptedForms={acceptedForms} messageActionFeedback={messageActionFeedback} visualFeedback={visualFeedback} onMessageActionFeedback={onMessageActionFeedback} initialMessageScrollTop={scrollPositions.chat} onMessageScrollTopChange={(value) => onScrollPositionChange('chat', value)} screenshotMode={hostKind === 'web' && !window.isSecureContext ? 'download' : 'copy'} conversations={conversations} />
     </section>
     {showRightPane && <>
@@ -580,19 +609,24 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
           <div className="right-pane-tabs" role="tablist" aria-label={t('Right panel')} onKeyDown={(event) => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
             event.preventDefault();
-            const currentIndex = rightPaneModes.indexOf(rightPaneMode);
-            const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? rightPaneModes.length - 1 : (currentIndex + (event.key === 'ArrowLeft' ? -1 : 1) + rightPaneModes.length) % rightPaneModes.length;
-            selectRightPaneMode(rightPaneModes[nextIndex]!, true);
+            // Narrow editors add Chat as the first tab; wide editors show chat beside the panel.
+            const order: Array<RightPaneMode | 'chat'> = narrow ? ['chat', ...rightPaneModes] : [...rightPaneModes];
+            const currentIndex = order.indexOf(chatTabSelected ? 'chat' : rightPaneMode);
+            const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? order.length - 1 : (currentIndex + (event.key === 'ArrowLeft' ? -1 : 1) + order.length) % order.length;
+            const next = order[nextIndex]!;
+            if (next === 'chat') { setNarrowView('chat'); focusAfterRender(() => document.getElementById('right-pane-chat-tab')?.focus()); }
+            else selectRightPaneMode(next, true);
           }}>
-            <button id="right-pane-debug-tab" type="button" role="tab" tabIndex={rightPaneMode === 'debug' ? 0 : -1} aria-selected={rightPaneMode === 'debug'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('debug')}>{t('Debug')}</button>
-            <button id="right-pane-tests-tab" type="button" role="tab" tabIndex={rightPaneMode === 'tests' ? 0 : -1} aria-selected={rightPaneMode === 'tests'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('tests')}>{t('General tests')}<span className="right-pane-tab-count" aria-hidden="true">{formatNumber(generalCaseCount)}</span></button>
-            <button id="right-pane-adversarial-tab" type="button" role="tab" tabIndex={rightPaneMode === 'adversarial' ? 0 : -1} aria-selected={rightPaneMode === 'adversarial'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('adversarial')}>{t('Red Team')}<span className="right-pane-tab-count" aria-hidden="true">{formatNumber(redTeamCaseCount)}</span></button>
-            <button id="right-pane-configure-tab" type="button" role="tab" tabIndex={rightPaneMode === 'configure' ? 0 : -1} aria-selected={rightPaneMode === 'configure'} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('configure')}>{t('Configure')}</button>
+            <button id="right-pane-chat-tab" className="right-pane-tab--chat" type="button" role="tab" aria-label={t('Chat')} tabIndex={chatTabSelected ? 0 : -1} aria-selected={chatTabSelected} aria-controls="narrow-chat-panel" onClick={() => setNarrowView('chat')}><ProductIcon name="comment-discussion" className="right-pane-tab__icon" /><span className="right-pane-tab__label">{t('Chat')}</span></button>
+            <button id="right-pane-debug-tab" type="button" role="tab" tabIndex={paneTabSelected('debug') ? 0 : -1} aria-selected={paneTabSelected('debug')} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('debug')}>{t('Debug')}</button>
+            <button id="right-pane-tests-tab" type="button" role="tab" tabIndex={paneTabSelected('tests') ? 0 : -1} aria-selected={paneTabSelected('tests')} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('tests')}>{t('General tests')}<span className="right-pane-tab-count" aria-hidden="true">{formatNumber(generalCaseCount)}</span></button>
+            <button id="right-pane-adversarial-tab" type="button" role="tab" tabIndex={paneTabSelected('adversarial') ? 0 : -1} aria-selected={paneTabSelected('adversarial')} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('adversarial')}>{t('Red Team')}<span className="right-pane-tab-count" aria-hidden="true">{formatNumber(redTeamCaseCount)}</span></button>
+            <button id="right-pane-configure-tab" type="button" role="tab" tabIndex={paneTabSelected('configure') ? 0 : -1} aria-selected={paneTabSelected('configure')} aria-controls="right-pane-panel" onClick={() => selectRightPaneMode('configure')}>{t('Configure')}</button>
           </div>
         </header>
         {profileReadOnly && rightPaneMode !== 'debug' && <ReadOnlyBanner post={post} />}
         <ReadOnlyNoticeContext.Provider value={false}>
-        <div id="right-pane-panel" className="right-pane-panel" role="tabpanel" aria-labelledby={`right-pane-${rightPaneMode}-tab`} tabIndex={-1}>
+        <div id="right-pane-panel" className="right-pane-panel" role="tabpanel" aria-labelledby={`right-pane-${rightPaneMode}-tab`} tabIndex={-1} onPointerDownCapture={showPaneHalf} onFocusCapture={showPaneHalf}>
           <KeepAlivePane active={rightPaneMode === 'debug'} render={() => <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} collapsedEventTurns={collapsedEventTurns} onCollapsedEventTurnsChange={setCollapsedEventTurns} onCreateMapping={profileReadOnly ? undefined : onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} scrollPositions={scrollPositions} onScrollPositionChange={onScrollPositionChange} networkInspector={networkInspector} onNetworkInspectorChange={setNetworkInspector} />} />
           <KeepAlivePane active={rightPaneMode === 'tests'} render={renderTestPane} />
           <KeepAlivePane active={rightPaneMode === 'adversarial'} render={renderTestPane} />
