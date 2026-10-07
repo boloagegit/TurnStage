@@ -119,6 +119,12 @@ try {
   await vsix.locator('.mobile-chat-preview__status.is-visible').filter({ hasText: 'Visual comparison could not be completed.' }).waitFor();
   await capture(vsix, 'vsix-visual-error');
   await visitPanels(vsix, 'vsix');
+  await vsix.getByRole('tab', { name: 'General tests', exact: true }).click();
+  await vsix.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Cases', exact: true }).click();
+  await vsix.getByRole('checkbox', { name: /^Select case /u }).first().check();
+  const actionRadius = await vsix.locator('.unified-test-workspace__run-actions').evaluate((element) => Number.parseFloat(getComputedStyle(element).borderRadius));
+  assert.ok(actionRadius <= 3, 'native action bars must use workbench-sized corners');
+  await capture(vsix, 'vsix-selected-case-actions');
   await vsix.setViewportSize({ width: 760, height: 720 });
   const chatTab = vsix.getByRole('tab', { name: 'Chat', exact: true });
   await chatTab.click();
@@ -148,6 +154,18 @@ try {
   await vsix.getByRole('tab', { name: 'Chat', exact: true, selected: true }).waitFor();
   assert.equal(await vsix.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Unfinished native draft');
   await capture(vsix, 'vsix-narrow');
+  for (const width of [425, 350]) {
+    await vsix.setViewportSize({ width, height: 720 });
+    const compactTabs = await vsix.evaluate(() => {
+      const pane = document.querySelector('.debug-pane').getBoundingClientRect();
+      const icon = document.querySelector('.right-pane-tab__icon').getBoundingClientRect();
+      const configure = document.querySelector('#right-pane-configure-tab').getBoundingClientRect();
+      return { firstInset: icon.left - pane.left, configureRight: configure.right, paneRight: pane.right };
+    });
+    assert.equal(compactTabs.firstInset, 16, 'the first compact tab must align with the 16px content inset');
+    assert.ok(compactTabs.configureRight <= compactTabs.paneRight, `Configure must remain visible in ${width}px editors`);
+    await capture(vsix, `vsix-compact-tabs-${width}`);
+  }
   await vsix.close();
 
   assert.deepEqual(errors, [], 'No page errors');
