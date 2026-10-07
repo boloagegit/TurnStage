@@ -1670,6 +1670,18 @@ const zhTw: Record<string, string> = {
   "Last result: {outcome}, {date}": "上次結果：{outcome}，{date}",
   "No cases match this result filter.": "沒有符合此結果篩選的案例。",
   'Chat': '聊天',
+  "Show all cases": "顯示所有案例",
+  "Not resisted": "未抵擋",
+  "{passed} resisted · {failed} not resisted · {notRun} not run": "{passed} 抵擋 · {failed} 未抵擋 · {notRun} 未執行",
+  "Latest results": "最新結果",
+  "Rerun not resisted ({count})": "重跑未抵擋 {count}",
+  "View results": "查看結果",
+  "1 case selected": "已選 1 個案例",
+  "Run selected ({count})": "執行已選 {count} 筆",
+  "Evidence from this session": "本次工作階段的證據",
+  "1 case": "1 個案例",
+  "Raw": "原始",
+  "1 differs from server": "與伺服器不同 1 處",
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {

@@ -79,11 +79,11 @@ try {
     await (await chooser).setFiles({ name: `large-${kind}.csv`, mimeType: 'text/csv', buffer: Buffer.from(`${csvRow(columns)}\r\n${rows.join('\r\n')}\r\n`) });
     await page.getByRole('button', { name: `Run case Case ${kind}-0001`, exact: true }).waitFor();
     await page.getByRole('button', { name: /Select all selectable cases/u }).click();
-    await page.getByRole('button', { name: 'Run selected 5,000', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Run selected (5,000)', exact: true }).waitFor();
     probe.hold = true;
     probe.requests.length = 0;
     const started = Date.now();
-    await page.getByRole('button', { name: 'Run selected 5,000', exact: true }).click();
+    await page.getByRole('button', { name: 'Run selected (5,000)', exact: true }).click();
     await waitUntil(() => probe.requests.length === 4);
     const pause = page.getByRole('button', { name: 'Pause test run', exact: true });
     await pause.focus();
@@ -134,11 +134,12 @@ try {
     }, 15000);
     try {
       await Promise.race([
-        page.getByText('Test run completed', { exact: true }).waitFor({ timeout: 1200000 }),
+        // The unified case list folds a finished run into its Latest results row, so wait for the run to end instead of a card.
+        page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === 'Run selected (5,000)' && !button.disabled) && !document.querySelector('.test-operation-status--running, .test-operation-status--paused, .test-operation-status--pausing'), null, { timeout: 1200000 }),
         stalled,
       ]);
     } catch (error) {
-      const diagnostic = { kind, requests: probe.requests.length, pending: probe.pending.size, status: await page.locator('.test-operation-status').innerText(), pageErrors, body: (await page.locator('body').innerText()).slice(-8000) };
+      const diagnostic = { kind, requests: probe.requests.length, pending: probe.pending.size, status: await page.locator('.test-operation-status').innerText({ timeout: 1000 }).catch(() => ''), pageErrors, body: (await page.locator('body').innerText()).slice(-8000) };
       await writeFile(resolve(output, `${kind}-completion-failed.json`), JSON.stringify(diagnostic, null, 2));
       await page.screenshot({ path: resolve(output, `${kind}-completion-failed.png`) });
       console.error(JSON.stringify(diagnostic));
@@ -172,7 +173,7 @@ try {
     await page.getByRole('tab', { name: 'Cases', exact: true }).click();
     probe.hold = true;
     probe.requests.length = 0;
-    await page.getByRole('button', { name: 'Run selected 5,000', exact: true }).click();
+    await page.getByRole('button', { name: 'Run selected (5,000)', exact: true }).click();
     await waitUntil(() => probe.requests.length === 4);
     await page.getByRole('button', { name: 'Pause test run', exact: true }).click();
     for (const finish of [...probe.pending]) finish();
@@ -187,7 +188,7 @@ try {
     assert.equal(probe.requests.length, 4);
     await page.screenshot({ path: resolve(output, `${kind}-cancelled.png`) });
     probe.requests.length = 0;
-    await page.getByRole('button', { name: 'Run selected 5,000', exact: true }).click();
+    await page.getByRole('button', { name: 'Run selected (5,000)', exact: true }).click();
     await waitUntil(() => probe.requests.length === 4);
     await page.getByRole('button', { name: 'Stop test run', exact: true }).click();
     await page.getByText('Test run cancelled', { exact: true }).waitFor();

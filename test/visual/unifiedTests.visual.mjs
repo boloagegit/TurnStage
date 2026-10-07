@@ -49,7 +49,7 @@ try {
   assert.equal(await page.getByText('Slow stream contract', { exact: true }).filter({ visible: true }).count(), 0, 'Red-team list excludes general cases');
   await page.getByRole('searchbox', { name: 'Search cases' }).fill('Linked case 1');
   await page.getByRole('button', { name: /Select matching cases \(11\/11\)/ }).click();
-  assert.match(await page.getByRole('button', { name: /Run selected/ }).innerText(), /Run selected 11/);
+  assert.match(await page.getByRole('button', { name: /Run selected/ }).innerText(), /Run selected \(11\)/);
   await page.getByRole('button', { name: 'Clear selection' }).click();
   await page.getByRole('searchbox', { name: 'Search cases' }).fill('');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-red-team-cases.png') });
@@ -63,7 +63,7 @@ try {
   await page.getByRole('tab', { name: 'General tests' }).click();
   const select = page.getByRole('checkbox', { name: /Select case/ }).first();
   await select.check();
-  await page.getByRole('button', { name: /Run selected 1/ }).click();
+  await page.getByRole('button', { name: 'Run selected (1)' }).click();
   assert.equal(await page.getByRole('group', { name: 'Review selected run' }).count(), 0, 'Selected cases start without a second confirmation');
   assert.equal(await page.evaluate(() => globalThis.__turnstageMessages.some((message) => message.type === 'test.runSelection' && message.cases.length === 1)), true);
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-run-selected.png') });
@@ -76,9 +76,15 @@ try {
   await page.evaluate(() => globalThis.__turnstageHarness.dispatch({ type: 'test.operation', operation: { action: 'runSelection', state: 'completed', progress: { totalCases: 1, completedCases: 1, totalAttempts: 1, completedAttempts: 1, maxConcurrency: 1, failedCases: 1, passedCases: 0, completedOutcomes: [{ scenarioId: 'slow-stream-contract', outcome: 'failed' }] } } }));
   await page.locator('.live-case-status--last').filter({ hasText: 'Failed' }).waitFor();
   assert.equal(await page.locator('.live-case-status--last .live-case-status__metric').first().textContent(), '20 ms', 'Completed progress must yield to the recorded result and duration');
-  await page.getByRole('button', { name: 'View test results' }).waitFor();
+  // A finished run is told once, by the Latest results row above the case list.
+  await page.getByRole('region', { name: 'Latest results' }).waitFor();
+  assert.equal(await page.getByText('Test run completed', { exact: true }).filter({ visible: true }).count(), 0, 'No second completion card under the summary');
+  assert.equal(await page.getByRole('button', { name: 'View test results' }).count(), 0, 'One results link, in the summary');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-run-completed.png') });
-  await page.getByRole('button', { name: 'View test results' }).click();
+  await page.evaluate(() => { globalThis.__turnstageMessages.length = 0; });
+  await page.getByRole('button', { name: 'Rerun failed (1)' }).click();
+  assert.equal(await page.evaluate(() => globalThis.__turnstageMessages.some((message) => message.type === 'test.runSelection' && message.cases.length === 1 && message.cases[0].scenarioId === 'slow-stream-contract')), true, 'Rerun failed reruns exactly what the summary counts');
+  await page.getByRole('button', { name: 'View results' }).click();
   assert.equal(await page.getByRole('tab', { name: 'Results' }).getAttribute('aria-selected'), 'true', 'Completed runs link directly to results');
   assert.equal(await page.getByRole('text', { name: 'New failure' }).count(), 0); // plain text lives in a list row, not a role-specific control
   assert.match(await page.getByRole('region', { name: 'Run history' }).innerText(), /New failure/);

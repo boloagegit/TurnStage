@@ -86,7 +86,7 @@ describe('Inspector keyboard helpers', () => {
     expect(mainSource).toContain('aria-valuenow={Math.round(splitPercent)}');
     expect(mainSource).toContain("'--preview-size': trackSizes.preview");
     expect(mainSource).toContain("'--inspector-size': trackSizes.inspector");
-    expect(baseStyles).toContain('@media (max-width: 64em)');
+    expect(baseStyles).toContain(".test-surface[data-layout='narrow'] > .test-workspace {");
     expect(baseStyles).toContain('var(--preview-size, 64fr)');
     expect(baseStyles).toContain('var(--inspector-size, 36fr)');
     expect(mobileSource).toContain('mobile-chat-preview__viewport-toolbar');

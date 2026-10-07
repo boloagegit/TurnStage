@@ -46,7 +46,7 @@ export function useLiveCaseStatuses(operation: TestOperationSnapshot | undefined
 export type CaseOutcomeTone = 'passed' | 'failed' | 'attention';
 export type CaseOutcomeFilter = 'all' | 'failed' | 'notRun';
 export interface CaseOutcomeInfo { outcome: TestRunOutcome; tone: CaseOutcomeTone; durationMs?: number; at: number }
-export interface CaseResultState { outcomes: ReadonlyMap<string, CaseOutcomeInfo>; filter: CaseOutcomeFilter; hasHistory: boolean }
+export interface CaseResultState { outcomes: ReadonlyMap<string, CaseOutcomeInfo>; filter: CaseOutcomeFilter; hasHistory: boolean; onFilterChange?: (filter: CaseOutcomeFilter) => void }
 
 const EMPTY_OUTCOMES: ReadonlyMap<string, CaseOutcomeInfo> = new Map();
 /** Each case's most recent recorded result plus the list filter, so case rows double as the result list. */
@@ -83,9 +83,9 @@ export function matchesOutcomeFilter(info: CaseOutcomeInfo | undefined, filter: 
 }
 
 /** Row predicate for the active result filter; stable while the filter and results are unchanged. */
-export function useCaseOutcomeFilter(): { filter: CaseOutcomeFilter; matches: (row: { suiteId?: string; scenarioId: string }) => boolean } {
-  const { outcomes, filter } = useContext(CaseResultContext);
-  return useMemo(() => ({ filter, matches: (row) => matchesOutcomeFilter(outcomes.get(liveCaseKey(row.suiteId, row.scenarioId)), filter) }), [filter, outcomes]);
+export function useCaseOutcomeFilter(): { filter: CaseOutcomeFilter; matches: (row: { suiteId?: string; scenarioId: string }) => boolean; reset: () => void } {
+  const { outcomes, filter, onFilterChange } = useContext(CaseResultContext);
+  return useMemo(() => ({ filter, matches: (row) => matchesOutcomeFilter(outcomes.get(liveCaseKey(row.suiteId, row.scenarioId)), filter), reset: () => onFilterChange?.('all') }), [filter, onFilterChange, outcomes]);
 }
 
 /**
