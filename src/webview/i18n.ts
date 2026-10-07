@@ -1661,6 +1661,14 @@ const zhTw: Record<string, string> = {
   "Yesterday": "昨天",
   "{count} differ from server": "與伺服器不同 {count} 處",
   "{count} of {total} messages differ": "{total} 則中有 {count} 則不同",
+  "All": "全部",
+  "Last results": "最近結果",
+  "Last run {date}": "上次執行 {date}",
+  "{passed} passed · {failed} failed · {notRun} not run": "{passed} 通過 · {failed} 失敗 · {notRun} 未執行",
+  "Rerun failed ({count})": "重跑失敗 {count}",
+  "Filter cases by last result": "依上次結果篩選案例",
+  "Last result: {outcome}, {date}": "上次結果：{outcome}，{date}",
+  "No cases match this result filter.": "沒有符合此結果篩選的案例。",
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {

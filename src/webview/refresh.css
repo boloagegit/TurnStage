@@ -248,9 +248,11 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
 .conversation-row__meta { display: flex; align-items: center; gap: 8px; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); font-variant-numeric: tabular-nums; }
 .conversation-row__time { margin-inline-start: auto; font-family: var(--ts-mono); }
 .conversation-row__source { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 4px; background: var(--ts-segment-background); }
-.conversation-row__delete { align-self: center; opacity: 0; }
+/* Row actions overlay the row's end so every row keeps the same text edges (no reserved gutter). */
+.conversation-row__delete, .conversation-row__confirm { position: absolute; inset-inline-end: 4px; top: 50%; transform: translateY(-50%); }
+.conversation-row__delete { opacity: 0; background: var(--vscode-list-hoverBackground); }
 .conversation-row:hover .conversation-row__delete, .conversation-row__delete:focus-visible { opacity: 1; }
-.conversation-row__confirm { display: inline-flex; align-items: center; gap: 4px; padding-inline-end: 6px; }
+.conversation-row__confirm { display: inline-flex; align-items: center; gap: 4px; padding: 2px; border-radius: var(--ts-radius-sm); background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background)); box-shadow: 0 0 6px var(--vscode-widget-shadow, transparent); }
 .mobile-chat-preview__history-divider { display: flex; align-items: center; gap: var(--ts-space-2); margin: var(--ts-space-1) 0; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); }
 .mobile-chat-preview__history-divider::before, .mobile-chat-preview__history-divider::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--vscode-editorGroup-border, currentColor); opacity: .6; }
 .mobile-chat-preview__history-divider > span { flex: 0 1 auto; text-align: center; }
@@ -289,3 +291,30 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
 }
 
 .mobile-chat-preview__conversations[aria-expanded='true'] { background: var(--ts-segment-selected); color: var(--vscode-foreground); }
+
+/* Case rows double as the result list: last result in a quieter tone than live status. */
+.live-case-status--last { font-weight: 500; }
+.live-case-status--last.live-case-status--passed { color: var(--ts-state-pass); }
+.live-case-status--last.live-case-status--failed { color: var(--ts-state-fail); }
+.live-case-status--attention { color: var(--vscode-charts-blue, #7fb8ee); }
+.live-case-status--attention .live-case-status__mark { width: 7px; height: 7px; border-radius: 1px; background: currentColor; transform: rotate(45deg); }
+.live-case-status--not-run { color: var(--vscode-descriptionForeground); }
+.live-case-status--not-run .live-case-status__mark { box-sizing: border-box; border: 1.5px solid currentColor; background: transparent; }
+.live-case-status__metric { margin-inline-start: 2px; color: var(--vscode-descriptionForeground); font-family: var(--ts-mono); font-size: 0.92em; font-weight: 400; }
+.test-run-meter__attention { background: var(--vscode-charts-blue, #7fb8ee); }
+
+.case-run-summary { display: grid; gap: 8px; padding: var(--ts-space-2) var(--ts-pane-inline, var(--ts-space-3)); border-top: 1px solid var(--vscode-editorGroup-border); }
+.case-run-summary__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ts-space-2); }
+.case-run-summary__text { display: grid; flex: 1 1 14em; gap: 1px; min-width: 0; }
+.case-run-summary__text strong { font-variant-numeric: tabular-nums; }
+.case-run-summary__tally { color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); font-variant-numeric: tabular-nums; }
+.case-run-summary__actions { display: flex; flex-wrap: wrap; gap: var(--ts-space-1); }
+.case-run-summary__meter { height: 4px; }
+.case-run-summary__filters { display: flex; flex-wrap: wrap; gap: 4px; margin-inline-start: -10px; } /* first label aligns with the text above */
+.case-run-summary__filters button { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border: 0; background: transparent; color: var(--vscode-descriptionForeground); }
+.case-run-summary__filters button:hover { background: var(--vscode-list-hoverBackground); color: var(--vscode-foreground); }
+.case-run-summary__filters button[aria-pressed='true'] { background: var(--ts-segment-selected); color: var(--vscode-foreground); font-weight: 600; }
+.case-run-summary__count { font-family: var(--ts-mono); font-size: var(--ts-type-caption); font-variant-numeric: tabular-nums; opacity: .8; }
+@media (forced-colors: active) {
+  .case-run-summary__filters button[aria-pressed='true'] { outline: 1px solid Highlight; }
+}

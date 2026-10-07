@@ -66,7 +66,7 @@ try {
   await page.getByRole('button', { name: 'Run case Load case 0001' }).click();
   await page.getByRole('tab', { name: 'Results' }).click();
   await page.getByRole('button', { name: 'Select test result Load case 0001' }).waitFor();
-  await page.locator('.unified-test-history__selector select').waitFor();
+  await page.locator('.unified-test-history__selector select').filter({ visible: true }).waitFor();
   assert.match(await page.locator('.automation-result-table').innerText(), /Passed/u);
   await page.screenshot({ path: resolve(output, 'general-result.png') });
   await page.getByRole('tab', { name: 'Red Team' }).click();
@@ -75,7 +75,7 @@ try {
   await page.getByRole('button', { name: 'Run case Red browser check' }).click();
   await page.getByRole('tab', { name: 'Results' }).click();
   await page.getByText('Red browser check').first().waitFor();
-  await page.locator('.unified-test-history__selector select').waitFor();
+  await page.locator('.unified-test-history__selector select').filter({ visible: true }).waitFor();
   assert.match(await page.locator('.adversarial-result-table').last().innerText(), /Resisted/u);
   await page.screenshot({ path: resolve(output, 'red-result.png') });
   await page.getByRole('button', { name: 'Profile actions: Product gap QA' }).click();
@@ -129,7 +129,7 @@ try {
 }
 
 async function importSuite(page, suite, fileName) {
-  const menu = page.locator('.adversarial-case-file-menu');
+  const menu = page.locator('.adversarial-case-file-menu').filter({ visible: true });
   if (!await menu.getAttribute('open')) await menu.locator(':scope > summary').click();
   const formats = menu.locator('.case-format-submenu').first();
   if (!await formats.getAttribute('open')) await formats.locator('summary').click();

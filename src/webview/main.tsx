@@ -19,7 +19,9 @@ import { useConfirmAction } from './ConfirmAction';
 import { UnifiedTestHistoryCases } from './UnifiedTestHistoryCases';
 import './styles.css';
 import './refresh.css';
-import { LiveCaseStatusContext, useLiveCaseStatuses } from './liveCaseStatus';
+import './vscodeNative.css';
+import { LiveCaseStatusContext, useLiveCaseStatuses, CaseResultContext, latestCaseOutcomes, liveCaseKey, type CaseOutcomeFilter } from './liveCaseStatus';
+import { CaseRunSummary } from './CaseRunSummary';
 
 declare function acquireVsCodeApi<T = unknown>(): { postMessage(message: unknown): void; getState(): T | undefined; setState(state: T): void };
 export type EventMappingFilter = 'all' | 'matched' | 'unmatched';
@@ -507,11 +509,21 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   const generalCaseCount = useMemo(() => (profile.tests?.scenarios?.filter((item) => !item.adversarial).length ?? 0) + (contractCaseCatalog?.total ?? 0), [contractCaseCatalog?.total, profile.tests?.scenarios]);
   const redTeamCaseCount = useMemo(() => adversarialCaseCount(profile, adversarialCaseCatalog), [adversarialCaseCatalog, profile]);
   const liveCaseStatuses = useLiveCaseStatuses(testOperation);
+  // The case list doubles as the result list: each row shows its last recorded result.
+  const [caseOutcomeFilters, setCaseOutcomeFilters] = useState<Record<TestKindFilter, CaseOutcomeFilter>>({ contract: 'all', adversarial: 'all' });
+  const caseOutcomes = useMemo(() => latestCaseOutcomes(visibleHistoryRuns, testKind), [testKind, visibleHistoryRuns]);
+  const caseResultState = useMemo(() => ({ outcomes: caseOutcomes, filter: caseOutcomeFilters[testKind], hasHistory: visibleHistoryRuns.length > 0 }), [caseOutcomeFilters, caseOutcomes, testKind, visibleHistoryRuns.length]);
+  const currentCaseKeys = useMemo(() => [
+    ...(profile.tests?.scenarios ?? []).filter((item) => Boolean(item.adversarial) === (testKind === 'adversarial')).map((item) => liveCaseKey(undefined, item.id)),
+    ...((testKind === 'adversarial' ? adversarialCaseCatalog : contractCaseCatalog)?.entries ?? []).map((item) => liveCaseKey(item.suiteId, item.scenarioId)),
+  ], [adversarialCaseCatalog, contractCaseCatalog, profile.tests?.scenarios, testKind]);
+  const latestRunForKind = visibleHistoryRuns.reduce<TestRunHistoryRecord | undefined>((latest, run) => !latest || run.startedAt > latest.startedAt ? run : latest, undefined);
+  const latestRunRerunCount = useMemo(() => latestRunForKind ? nonPassingCases(latestRunForKind).filter((item) => item.kind === testKind).length : 0, [latestRunForKind, testKind]);
   useEffect(() => {
     if (activeAutomationEvidence?.result.evidenceId) setSelectedAutomationResultKey(activeAutomationEvidence.result.evidenceId);
   }, [activeAutomationEvidence?.result.evidenceId, setSelectedAutomationResultKey]);
   const replayActive = snapshot?.replay && (snapshot.replay.status === 'playing' || snapshot.replay.status === 'paused') ? snapshot.replay : undefined;
-  const renderTestPane = () => <LiveCaseStatusContext.Provider value={liveCaseStatuses}><div className="unified-test-workspace">
+  const renderTestPane = () => <LiveCaseStatusContext.Provider value={liveCaseStatuses}><CaseResultContext.Provider value={caseResultState}><div className="unified-test-workspace">
     <div className="unified-test-workspace__toolbar">
       <div className="unified-test-workspace__sections" role="tablist" aria-label={t('Test sections')} onKeyDown={(event) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -523,6 +535,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
         <button id={`unified-test-${testKind}-cases-tab`} type="button" role="tab" aria-selected={activeTestSection === 'scenarios'} tabIndex={activeTestSection === 'scenarios' ? 0 : -1} onClick={() => selectTestSection('scenarios')}>{t('Cases')}</button>
         <button id={`unified-test-${testKind}-results-tab`} type="button" role="tab" aria-selected={activeTestSection === 'results'} tabIndex={activeTestSection === 'results' ? 0 : -1} onClick={() => selectTestSection('results')}>{t('Results')}</button>
       </div>
+      {activeTestSection === 'scenarios' && latestRunForKind && <CaseRunSummary caseKeys={currentCaseKeys} outcomes={caseOutcomes} lastRunAt={latestRunForKind.startedAt} filter={caseOutcomeFilters[testKind]} onFilterChange={(filter) => setCaseOutcomeFilters((current) => ({ ...current, [testKind]: filter }))} rerunCount={latestRunRerunCount} rerunDisabled={isTestRunActive(testOperation)} onRerun={() => post({ type: 'test.history.rerun', runId: latestRunForKind.id, kind: testKind })} onViewHistory={() => { setSelectedHistoryRunId(latestRunForKind.id); selectTestSection('results'); }} />}
     </div>
     <div className="unified-test-workspace__body" role="tabpanel" aria-labelledby={`unified-test-${testKind}-${activeTestSection === 'scenarios' ? 'cases' : 'results'}-tab`}>
       {activeTestSection === 'results' && <section className="unified-test-history" aria-label={t('Run history')}>
@@ -542,7 +555,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
     </div>
     {activeTestSection === 'scenarios' && (selectedForProfile.length > 0 || selectionNotice || completedRunForCurrentKind) && <div className="unified-test-workspace__run-actions" role="region" aria-label={t('Selected cases')}>{selectedForProfile.length > 0 && <span className="unified-test-workspace__selection-count">{t('{count} cases selected', { count: formatNumber(selectedForProfile.length) })}</span>}{selectedForProfile.length > 0 && <button type="button" onClick={() => { setSelectedTestCases((current) => new Map([...current].filter(([, item]) => item.profileId !== profile.id || item.kind !== testKind))); setSelectionNotice(undefined); }}>{t('Clear selection')}</button>}{completedRunForCurrentKind && <button type="button" onClick={() => selectTestSection('results')}>{t('View test results')}</button>}{selectionNotice && <span role="alert">{selectionNotice}</span>}{selectedForProfile.length > 0 && <button type="button" className="primary" disabled={!selectedForProfile.length || isTestRunActive(testOperation)} onClick={() => { if (selectedRunAvailability.unresolved) { setSelectionNotice(t('Some selected cases are no longer available. Refresh the list before running.')); return; } if (selectedRunAvailability.unavailable) { setSelectionNotice(t('Some selected cases need review or are not supported in this app. Open or remove them before running.')); return; } setSelectionNotice(undefined); post({ type: 'test.runSelection', cases: selectedForProfile }); }}>{t('Run selected {count}', { count: formatNumber(selectedForProfile.length) })}</button>}</div>}
     {historyConfirmation}
-  </div></LiveCaseStatusContext.Provider>;
+  </div></CaseResultContext.Provider></LiveCaseStatusContext.Provider>;
   return <div className="test-surface">
     <div className="test-surface__header">
       {replayActive && <ReplayOperationStatus replay={replayActive} onOpenControls={() => { setRightPaneMode('debug'); setInspectorTab('Runs'); }} />}

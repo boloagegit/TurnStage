@@ -187,7 +187,7 @@ async function importCsv(page, data, name) {
   await (await chooser).setFiles({ name, mimeType: 'text/csv', buffer: data });
 }
 async function openImportMenu(page) {
-  const menu = page.locator('.adversarial-case-file-menu');
+  const menu = page.locator('.adversarial-case-file-menu').filter({ visible: true });
   if (!await menu.getAttribute('open')) await menu.locator(':scope > summary').click();
   const formats = menu.locator('.case-format-submenu').first();
   if (!await formats.getAttribute('open')) await formats.locator('summary').click();

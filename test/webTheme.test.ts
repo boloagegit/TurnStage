@@ -28,9 +28,20 @@ afterEach(() => {
 });
 
 describe('TurnStage Web theme compatibility', () => {
+  it('scopes every VS Code-only rule to the VS Code host so Web keeps its own look', () => {
+    const nativeCss = readFileSync(resolve(repository, 'src/webview/vscodeNative.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//gu, '');
+    const selectors = [...nativeCss.matchAll(/(^|\})\s*([^{}@]+)\{/gu)].map((match) => match[2]!.trim()).filter(Boolean);
+    expect(selectors.length).toBeGreaterThan(10);
+    const topLevelParts = (selector: string) => { const parts: string[] = []; let depth = 0; let current = ''; for (const character of selector) { if (character === '(') depth += 1; if (character === ')') depth -= 1; if (character === ',' && depth === 0) { parts.push(current.trim()); current = ''; } else current += character; } parts.push(current.trim()); return parts; };
+    expect(selectors.flatMap(topLevelParts).filter((part) => !part.startsWith("html[data-host='vscode']"))).toEqual([]);
+    expect(readFileSync(resolve(repository, 'web/index.html'), 'utf8')).toContain('data-host="web"');
+    expect(readFileSync(resolve(repository, 'src/extension/editors/turnstageEditorProvider.ts'), 'utf8')).toContain('data-host="vscode"');
+  });
+
   it('defines every VS Code token consumed by the shared Webview CSS', () => {
     const sharedCss = readdirSync(resolve(repository, 'src/webview'))
-      .filter((name) => name.endsWith('.css'))
+      // vscodeNative.css only applies under <html data-host="vscode">, where VS Code supplies every token.
+      .filter((name) => name.endsWith('.css') && name !== 'vscodeNative.css')
       .map((name) => readFileSync(resolve(repository, 'src/webview', name), 'utf8'))
       .join('\n');
     const compatibilityCss = readFileSync(resolve(repository, 'web/src/vscode-token-compat.css'), 'utf8');

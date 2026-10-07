@@ -40,13 +40,13 @@ try {
   assert.equal(await page.getByRole('tab', { name: 'Cases' }).getAttribute('aria-selected'), 'true');
   await page.getByRole('searchbox', { name: 'Search cases' }).waitFor();
   assert.equal(await page.getByRole('tab', { name: 'General tests' }).getAttribute('aria-selected'), 'true');
-  assert.equal(await page.getByText('Linked case 1', { exact: true }).count(), 0, 'General list excludes red-team cases');
+  assert.equal(await page.getByText('Linked case 1', { exact: true }).filter({ visible: true }).count(), 0, 'General list excludes red-team cases');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-general-cases.png') });
   await page.getByRole('tab', { name: 'General tests' }).focus();
   await page.keyboard.press('ArrowRight');
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true');
   await page.waitForFunction(() => document.querySelectorAll('.adversarial-case-list .test-case-select input[type="checkbox"]').length === 25);
-  assert.equal(await page.getByText('Slow stream contract', { exact: true }).count(), 0, 'Red-team list excludes general cases');
+  assert.equal(await page.getByText('Slow stream contract', { exact: true }).filter({ visible: true }).count(), 0, 'Red-team list excludes general cases');
   await page.getByRole('searchbox', { name: 'Search cases' }).fill('Linked case 1');
   await page.getByRole('button', { name: /Select matching cases \(11\/11\)/ }).click();
   assert.match(await page.getByRole('button', { name: /Run selected/ }).innerText(), /Run selected 11/);

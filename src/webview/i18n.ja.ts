@@ -487,4 +487,12 @@ export const ja: Record<string, string> = {
   "Yesterday": "昨日",
   "{count} differ from server": "サーバーと {count} 件不一致",
   "{count} of {total} messages differ": "{total} 件中 {count} 件が異なります",
+  "All": "すべて",
+  "Last results": "最新の結果",
+  "Last run {date}": "前回の実行 {date}",
+  "{passed} passed · {failed} failed · {notRun} not run": "合格 {passed} · 失敗 {failed} · 未実行 {notRun}",
+  "Rerun failed ({count})": "失敗を再実行 ({count})",
+  "Filter cases by last result": "前回の結果でケースを絞り込む",
+  "Last result: {outcome}, {date}": "前回の結果: {outcome}、{date}",
+  "No cases match this result filter.": "この結果フィルターに一致するケースはありません。",
 };
