@@ -1613,6 +1613,54 @@ const zhTw: Record<string, string> = {
   '{passed} passed · {failed} failed · {running} running · {queued} queued': '{passed} 通過 · {failed} 失敗 · {running} 執行中 · {queued} 排隊',
   '{passed} passed · {failed} failed · {queued} not run': '{passed} 通過 · {failed} 失敗 · {queued} 未執行',
   'Running': '執行中',
+  "After a reply, TurnStage reads conversations.history and compares it with what was streamed. The next turn uses the server copy as context.": "每次回覆後，TurnStage 會讀取 conversations.history，與串流收到的內容比對。下一輪會以伺服器保存的版本作為上下文。",
+  "All {total} checked messages match": "已檢查的 {total} 則訊息全部一致",
+  "Check again": "重新比對",
+  "Check failed: {error}": "比對失敗：{error}",
+  "Check now": "立即比對",
+  "Checking server copy…": "正在比對伺服器紀錄…",
+  "Close conversations": "關閉對話列表",
+  "Configure conversations.list to show server conversations.": "設定 conversations.list 即可顯示伺服器上的對話。",
+  "Conversation history": "對話歷史",
+  "Conversation panel views": "對話面板檢視",
+  "Conversations": "對話",
+  "Conversations appear here after the first reply.": "收到第一則回覆後，對話會出現在這裡。",
+  "Could not load the conversation: {error}": "無法載入對話：{error}",
+  "Current": "目前",
+  "Delete {title}": "刪除「{title}」",
+  "Delete {title}?": "刪除「{title}」？",
+  "Earlier": "更早",
+  "Earlier messages loaded from the server · new messages below": "以上為伺服器載入的舊訊息 · 以下為本次工作階段",
+  "Hide differences": "隱藏差異",
+  "History check": "歷史一致性",
+  "History check failed": "歷史比對失敗",
+  "Includes conversations from the server list.": "包含伺服器清單中的對話。",
+  "Loading run history…": "正在載入執行紀錄…",
+  "Loading server conversations…": "正在載入伺服器對話…",
+  "Loading…": "載入中…",
+  "Matches": "一致",
+  "Matches server copy": "與伺服器紀錄一致",
+  "No conversations match this search.": "沒有符合搜尋的對話。",
+  "Not checked yet.": "尚未比對。",
+  "Not in server history": "伺服器紀錄中沒有",
+  "Reading server history…": "正在讀取伺服器紀錄…",
+  "Refresh server conversations": "重新整理伺服器對話",
+  "Saved on server": "伺服器保存",
+  "Saved on this device. Configure conversations.list to include server conversations.": "儲存在這台裝置。設定 conversations.list 可一併顯示伺服器上的對話。",
+  "Search conversations": "搜尋對話",
+  "Server": "伺服器",
+  "Server list unavailable: {error}": "無法取得伺服器清單：{error}",
+  "Show differences": "顯示差異",
+  "Show in conversation": "在對話中顯示",
+  "Streamed": "串流收到",
+  "Streamed vs. saved on the server": "串流收到的 vs 伺服器保存的",
+  "Text differs": "文字不同",
+  "The conversation archive is turned off for this Profile.": "這個設定檔已關閉對話保存。",
+  "Today": "今天",
+  "Untitled conversation": "未命名對話",
+  "Yesterday": "昨天",
+  "{count} differ from server": "與伺服器不同 {count} 處",
+  "{count} of {total} messages differ": "{total} 則中有 {count} 則不同",
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {
@@ -1661,6 +1709,21 @@ export function formatDateTime(value: number | string | Date): string {
 /** Return a safe ISO value for a time element, omitting corrupt persisted dates. */
 export function dateTimeAttribute(value: number | string | Date): string | undefined {
   return toValidDate(value)?.toISOString();
+}
+
+/** Short time for today, otherwise a short date with time. */
+export function formatShortDateTime(value: number): string {
+  const date = toValidDate(value);
+  if (!date) return t('Unknown date');
+  const today = new Date();
+  const sameDay = date.toDateString() === today.toDateString();
+  try {
+    return sameDay
+      ? cachedFormatter('shortTime', () => new Intl.DateTimeFormat(locale, { timeStyle: 'short' })).format(date)
+      : cachedFormatter('shortDateTime', () => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })).format(date);
+  } catch {
+    return t('Unknown date');
+  }
 }
 
 export function formatDuration(value: number): string {

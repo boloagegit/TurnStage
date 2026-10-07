@@ -6,7 +6,7 @@ import { localize } from '../l10n';
 const STORAGE_KEY = 'turnstage.requestAuthorizations.v1';
 const MAX_GRANTS = 200;
 
-export type RequestAuthorizationPurpose = 'opening' | 'conversation' | 'stop';
+export type RequestAuthorizationPurpose = 'opening' | 'conversation' | 'stop' | 'conversationList' | 'conversationHistory';
 
 export interface RequestAuthorizationAssessment {
   required: boolean;
@@ -139,6 +139,8 @@ function authorizationDetail(profile: TurnStageProfile, request: PreparedRequest
 function requestDefinition(profile: TurnStageProfile, purpose: RequestAuthorizationPurpose): RequestDefinition | undefined {
   if (purpose === 'opening') return profile.opening?.request;
   if (purpose === 'stop') return profile.conversation.stop?.request;
+  if (purpose === 'conversationList') return profile.conversations?.list?.request;
+  if (purpose === 'conversationHistory') return profile.conversations?.history?.request;
   return profile.conversation.send;
 }
 

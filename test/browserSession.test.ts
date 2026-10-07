@@ -50,6 +50,30 @@ describe('BrowserSession', () => {
     expect(states.length).toBeGreaterThan(3);
   });
 
+  it('loads conversation history through the Profile request and restores it in place', async () => {
+    const historyProfile: TurnStageProfile = { ...profile, conversations: { history: { request: { method: 'GET', url: '${env.baseUrl}/conversations/${conversation.id}/messages', headers: { authorization: 'Bearer ${secret.token}' } } } } };
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ messages: [{ id: 'm1', role: 'user', content: 'Hi' }, { id: 'm2', role: 'assistant', content: 'token-123 never leaks' }] }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    const session = new BrowserSession(historyProfile, environment, new Map([['token', 'token-123']]), () => undefined);
+    await session.start();
+
+    const data = await session.fetchConversationJson('history', 'conv 1');
+    const calls = fetch.mock.calls as unknown as Array<[string | URL | Request]>;
+    expect(String(calls[0]?.[0])).toBe('https://example.test/conversations/conv%201/messages');
+    expect(JSON.stringify(data)).not.toContain('token-123');
+    expect(session.current.networkEntries.at(-1)).toMatchObject({ kind: 'history', state: 'completed', status: 200 });
+
+    session.restoreConversation({ conversationId: 'conv 1', title: 'Saved', messages: [{ id: 'm1', role: 'user', status: 'completed', createdAt: 1, parts: [{ type: 'text', text: 'Hi' }], citations: [], actions: [], followups: [] }] });
+    expect(session.current.snapshot).toMatchObject({ conversationId: 'conv 1', title: 'Saved', sessionState: 'ready', turnState: 'idle' });
+    expect(session.current.snapshot.messages).toHaveLength(1);
+    expect(session.current.networkEntries).toEqual([]);
+    expect(session.busy).toBe(false);
+
+    fetch.mockImplementationOnce(async () => new Response('not json', { status: 200 }));
+    await expect(session.fetchConversationJson('history', 'conv 1')).rejects.toThrow('not valid JSON');
+    await expect(new BrowserSession(profile, environment, new Map(), () => undefined).fetchConversationJson('list')).rejects.toThrow('does not configure');
+  });
+
   it('uses Profile-mapped backend TTFT and total duration in Web', async () => {
     const timedProfile: TurnStageProfile = { ...profile, stream: { ...profile.stream, mappings: [
       ...profile.stream.mappings,

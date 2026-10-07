@@ -17,6 +17,7 @@ import { WebInsightsController } from './webInsightsController';
 import { ArtifactStore } from './artifactStore';
 import { redactKnownSecrets } from '../../src/shared/redaction';
 import { SessionDeltaTracker } from '../../src/shared/sessionDelta';
+import { ConversationManager, type ConversationStorage, type StoredConversation } from '../../src/shared/conversationHistory';
 import { loadEnvironments, loadPreferences, loadProfiles, saveEnvironments, savePreferences, saveProfiles, type StoredEnvironment, type StoredProfile, type WebThemePreference } from './storage';
 import { loadOfficialCatalog, mergeCatalogEntries, type OfficialCatalogResult } from './catalog';
 import { applyWebAppearance, bindSystemAppearance } from './theme';
@@ -58,6 +59,8 @@ let runSummaries: LocalRunSummary[] = [];
 const recordedTurns = new Set<string>();
 let webviewState: VsCodeApiState | undefined;
 let session: BrowserSession;
+let conversations: ConversationManager | undefined;
+const archivedTurns = new Set<string>();
 let tests: WebTestController;
 let campaigns: WebCampaignController;
 let insights: WebInsightsController;
@@ -69,11 +72,23 @@ const disposeAppearance = bindSystemAppearance(() => preferences.theme ?? 'syste
 window.addEventListener('beforeunload', () => { secrets.clear(); disposeAppearance(); });
 (window as typeof window & { acquireVsCodeApi?: () => BridgeApi }).acquireVsCodeApi = () => ({
   postMessage: (message) => void handleWebviewMessage(message),
-  getState: () => webviewState,
-  setState: (value) => { webviewState = value; },
+  getState: () => webviewState ?? (webviewState = readSessionWebviewState()),
+  setState: (value) => { webviewState = value; writeSessionWebviewState(value); },
 });
 
 void bootstrap();
+
+// Per-tab UI state (open panel, filters, scroll positions, draft) so a reload
+// resumes exactly where the reader was. sessionStorage never leaves this tab.
+const WEBVIEW_STATE_KEY = 'turnstage.web.webviewState.v1';
+function readSessionWebviewState(): VsCodeApiState | undefined {
+  try { const raw = sessionStorage.getItem(WEBVIEW_STATE_KEY); return raw ? JSON.parse(raw) as VsCodeApiState : undefined; }
+  catch { return undefined; }
+}
+function writeSessionWebviewState(value: VsCodeApiState): void {
+  try { sessionStorage.setItem(WEBVIEW_STATE_KEY, JSON.stringify(value)); }
+  catch { /* Storage can be full or disabled; state then lives for this page only. */ }
+}
 
 async function bootstrap(): Promise<void> {
   catalog = await loadOfficialCatalog({
@@ -105,11 +120,22 @@ async function bootstrap(): Promise<void> {
 
 function createSession(item: StoredProfile): BrowserSession {
   const profile = codec.parse(item.raw).profile ?? fallbackProfile(item);
+  const environmentId = activeEnvironment().id;
+  const archive: { manager?: ConversationManager } = {};
   const next = new BrowserSession(profile, activeEnvironment(), secrets, (state) => {
     if (session !== next) return;
     scheduleSessionSync(state);
     void retainCompletedRun(profile, state);
+    if (archive.manager) void archiveConversationTurn(archive.manager, state);
   });
+  const manager = new ConversationManager(profile, {
+    storage: webConversationStorage(profile.id, environmentId),
+    fetchJson: (kind, conversationId) => next.fetchConversationJson(kind, conversationId),
+    createId: browserUuid,
+  }, (state) => { if (session === next) post({ type: 'conversations.state', state }); });
+  archive.manager = manager;
+  conversations = manager;
+  void manager.load();
   void next.start();
   return next;
 }
@@ -140,8 +166,18 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       }
       case 'form.cancel': break;
       case 'request.abort': await session.abort(); break;
-      case 'conversation.clear': if (confirmSessionChange('clear')) session.clear(); break;
-      case 'conversation.new': if (confirmSessionChange('restart')) await session.newConversation(); break;
+      case 'conversation.clear': if (conversations?.preservesConversations || confirmSessionChange('clear')) { conversations?.beginNew(); session.clear(); } break;
+      case 'conversation.new': if (conversations?.preservesConversations || confirmSessionChange('restart')) { conversations?.beginNew(); await session.newConversation(); } break;
+      case 'conversation.open': {
+        const manager = conversations;
+        if (!manager || session.busy || message.key === manager.currentKey) break;
+        const restored = await manager.open(message.key);
+        if (restored && conversations === manager && !session.busy) session.restoreConversation(restored);
+        break;
+      }
+      case 'conversation.delete': await conversations?.remove(message.key); break;
+      case 'conversation.list.refresh': await conversations?.refreshRemote(); break;
+      case 'conversation.history.verify': if (!session.busy) await conversations?.verify(session.current.snapshot); break;
       case 'run.import': await importRun(message.requestId); break;
       case 'run.export': await exportRun(message.runId, message.requestId); break;
       case 'run.delete': if (window.confirm('Delete this browser-local run? This cannot be undone.')) await deleteRun(message.runId); break;
@@ -239,6 +275,7 @@ function hydrate(requestId?: string): void {
   postProfile();
   const current = session.current;
   post({ type: 'session.snapshot', snapshot: current.snapshot, runs: runSummaries, requestPreview: current.requestPreview, networkEntries: current.networkEntries });
+  if (conversations) post({ type: 'conversations.state', state: conversations.directory });
   tests.postResults();
   void refreshRuns();
   void campaigns.postDashboard();
@@ -306,8 +343,28 @@ function selectProfile(id: string): void {
   void tests.postHistory();
   const current = session.current;
   post({ type: 'session.snapshot', snapshot: current.snapshot, runs: runSummaries, networkEntries: [] });
+  if (conversations) post({ type: 'conversations.state', state: conversations.directory });
   void refreshRuns();
   onLibraryChanged?.();
+}
+
+async function archiveConversationTurn(manager: ConversationManager, state: BrowserSessionState): Promise<void> {
+  const snapshot = state.snapshot;
+  if (snapshot.replay || !['completed', 'failed', 'aborted'].includes(snapshot.turnState)) return;
+  const user = [...snapshot.messages].reverse().find((item) => item.role === 'user');
+  const turnId = typeof user?.metadata?.clientRequestId === 'string' ? user.metadata.clientRequestId : undefined;
+  if (!turnId || archivedTurns.has(turnId)) return;
+  archivedTurns.add(turnId);
+  await manager.record(snapshot);
+  if (snapshot.turnState === 'completed' && manager.shouldVerifyAfterTurn()) await manager.verify(snapshot);
+}
+
+function webConversationStorage(profileId: string, environmentId: string): ConversationStorage {
+  const id = `conversation-archive:${profileId}:${environmentId}`;
+  return {
+    load: async () => (await artifacts.get<StoredConversation[]>('runs', id))?.value ?? [],
+    save: (items) => artifacts.put<StoredConversation[]>('runs', { id, profileId, kind: 'conversation-archive', name: 'Conversation archive', updatedAt: Date.now(), value: redactKnownSecrets(items, [...secrets.values()]) as StoredConversation[] }),
+  };
 }
 
 async function retainCompletedRun(profile: TurnStageProfile, state: BrowserSessionState): Promise<void> {

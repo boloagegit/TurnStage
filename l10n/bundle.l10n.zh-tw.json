@@ -773,5 +773,12 @@
   "Certificate verification is disabled for this request.": "此請求已停用憑證驗證。",
   "TurnStage will ask again if the destination, secret references, or TLS settings change.": "若目的地、密鑰引用或 TLS 設定變更，TurnStage 會再次詢問。",
   "Local stream stopped. The remote stop request was not sent because connection access was not allowed.": "本機串流已停止；由於未允許連線存取，因此未送出遠端停止請求。",
-  "Importing a browser-local suite copy is available only in TurnStage Web.": "只有 TurnStage Web 支援匯入瀏覽器本機套件副本。"
+  "Importing a browser-local suite copy is available only in TurnStage Web.": "只有 TurnStage Web 支援匯入瀏覽器本機套件副本。",
+  "This Profile does not configure a conversation {kind} request.": "這個設定檔沒有設定對話 {kind} 請求。",
+  "Connection access was not allowed.": "未允許連線存取。",
+  "The conversation history request timed out.": "對話歷史請求逾時。",
+  "The conversation history response exceeded the maximum allowed size.": "對話歷史回應超過允許的大小上限。",
+  "The conversation history response is not valid JSON.": "對話歷史回應不是有效的 JSON。",
+  "Conversation archive size must be an integer from 1 to 100.": "對話保存數量必須是 1 到 100 之間的整數。",
+  "The conversation history request should reference conversation.id so TurnStage can load a specific conversation.": "對話歷史請求應引用 conversation.id，TurnStage 才能載入指定的對話。"
 }

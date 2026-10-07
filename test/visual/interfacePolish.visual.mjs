@@ -12,7 +12,7 @@ await mkdir(output, { recursive: true });
 const server = createServer(async (request, response) => {
   try {
     const path = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
-    const file = path === '/' ? resolve(root, 'web-dist/index.html') : path === '/turnstage-catalog.json' || path.startsWith('/assets/')
+    const file = path === '/' ? resolve(root, 'web-dist/index.html') : path === '/turnstage-catalog.json' || path === '/theme-boot.js' || path.startsWith('/assets/')
       ? resolve(root, 'web-dist', `.${path}`) : resolve(root, `.${path}`);
     if (file !== root && !file.startsWith(`${root}${sep}`)) throw new Error('outside workspace');
     response.setHeader('content-type', { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.ttf': 'font/ttf' }[extname(file)] ?? 'application/octet-stream');

@@ -272,7 +272,7 @@ export class ProfileValidator {
     if (!profile.conversation?.send?.variants?.length) out.push(issue(tree, ['conversation', 'send'], localize('At least one request variant is required.')));
     if (!profile.stream?.mappings?.length) out.push(issue(tree, ['stream'], localize('At least one stream mapping is required.')));
     if (!['sse', 'ndjson', 'json', 'text-stream', 'fixture'].includes(profile.stream.transport)) out.push(issue(tree, ['stream', 'transport'], localize('Unsupported stream transport: {transport}.', { transport: String(profile.stream.transport) })));
-    for (const [path, request] of [['conversation.send', profile.conversation.send], ['opening.request', profile.opening?.request], ['conversation.stop.request', profile.conversation.stop?.request]] as const) {
+    for (const [path, request] of [['conversation.send', profile.conversation.send], ['opening.request', profile.opening?.request], ['conversation.stop.request', profile.conversation.stop?.request], ['conversations.list.request', profile.conversations?.list?.request], ['conversations.history.request', profile.conversations?.history?.request]] as const) {
       if (!request) continue;
       if (!['POST', 'GET', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) out.push(issue(tree, path.split('.'), localize('Unsupported HTTP method: {method}.', { method: String(request.method) })));
       if (typeof request.url !== 'string' || !request.url.trim()) out.push(issue(tree, path.split('.'), localize('Request URL is required.')));
@@ -287,6 +287,10 @@ export class ProfileValidator {
     }
     const maxRuns = profile.history?.localRuns?.maxRuns;
     if (maxRuns !== undefined && (!Number.isInteger(maxRuns) || maxRuns < 1 || maxRuns > 100)) out.push(issue(tree, ['history', 'localRuns', 'maxRuns'], localize('Local run retention must be an integer from 1 to 100.')));
+    const maxConversations = profile.history?.conversations?.maxConversations;
+    if (maxConversations !== undefined && (!Number.isInteger(maxConversations) || maxConversations < 1 || maxConversations > 100)) out.push(issue(tree, ['history', 'conversations', 'maxConversations'], localize('Conversation archive size must be an integer from 1 to 100.')));
+    const historyUrl = profile.conversations?.history?.request?.url;
+    if (typeof historyUrl === 'string' && historyUrl.trim() && !historyUrl.includes('conversation.id') && !JSON.stringify(profile.conversations?.history?.request?.body ?? '').includes('conversation.id')) out.push(issue(tree, ['conversations', 'history', 'request'], localize('The conversation history request should reference conversation.id so TurnStage can load a specific conversation.'), 'warning'));
     if (profile.environment && environments.length && !environments.some((env) => env.id === profile.environment)) out.push(issue(tree, ['environment'], localize('Environment "{environment}" was not found.', { environment: profile.environment })));
     for (const duplicate of duplicates((profile.controls ?? []).map((control) => control.id))) out.push(issue(tree, ['controls'], localize('Duplicate control id: {id}.', { id: duplicate })));
     for (const [index, control] of (profile.controls ?? []).entries()) {

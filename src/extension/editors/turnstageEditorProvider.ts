@@ -7,6 +7,7 @@ import { EnvironmentRepository, MAX_PROFILE_BYTES } from '../config/profileRepos
 import { ProfileCodec } from '../config/profileCodec';
 import { ProfileValidator, validateAdversarialScenariosAgainstProfile, validateContractScenariosAgainstProfile } from '../config/profileValidator';
 import { LocalRunRepository, type LocalRunImportResult } from '../history/localRunRepository';
+import { ConversationRepository } from '../history/conversationRepository';
 import { SecretService, UriPolicy } from '../security/security';
 import { RequestAuthorizationService } from '../security/requestAuthorization';
 import { isActive, SessionController } from '../runtime/sessionController';
@@ -233,6 +234,10 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         await disposeController(); const environment = envEntries.find((item) => item.environment.id === parsed.profile!.environment)?.environment ?? builtInEnvironment();
         const nextController = new SessionController(parsed.profile, document.uri, environment, this.context, this.secrets, this.runs, sendSession, this.output, {
           authorizeRequest: (request, purpose, hasSecrets) => this.requestAuthorization.authorize(document.uri, parsed.profile!, environment, request, purpose, hasSecrets),
+          conversations: {
+            storage: new ConversationRepository(this.context, { workspace: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString() ?? document.uri.toString(), profileId: parsed.profile.id, environmentId: environment.id }),
+            changed: (state) => { if (!disposed) observeBackground(post({ type: 'conversations.state', state }), 'conversations-state'); },
+          },
         }); await nextController.loadRuns();
         if (disposed || document.version !== version) { nextController.dispose(); return; }
         controller = nextController;
@@ -262,6 +267,8 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       await post(validationSnapshot);
       await post({ type: 'profile.editState', dirty: document.isDirty });
       await postFullSession();
+      const conversations = controller?.getConversationDirectory();
+      if (conversations) await post({ type: 'conversations.state', state: conversations });
     };
     const scheduleLoad = () => { if (loadTimer) clearTimeout(loadTimer); loadTimer = setTimeout(() => { loadTimer = undefined; void load().catch((error) => logAt(this.output, 'error', `[editor] ${error instanceof Error ? error.stack ?? error.message : String(error)}`)); }, DOCUMENT_CHANGE_DEBOUNCE_MS); };
     const documentListener = vscode.workspace.onDidChangeTextDocument((event) => { if (event.document.uri.toString() === document.uri.toString()) { observeBackground(post({ type: 'profile.editState', dirty: true }), 'document-change'); scheduleLoad(); } });
@@ -759,9 +766,13 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           case 'opening.useFallback': controller.useConfiguredOpeningFallback(); break;
           case 'request.send': await controller.send(message.text, message.interaction); break;
           case 'request.abort': await controller.abort(); break;
-          case 'conversation.new': if (await confirmRestartSession()) await controller.newConversation(); break;
-          case 'conversation.clear': if (await confirmClearConversation()) controller.clearConversation(); break;
-          case 'history.remote.apply': controller.applyRemoteSession(message.conversationId); break;
+          case 'conversation.new': if (controller.preservesConversations() || await confirmRestartSession()) await controller.newConversation(); break;
+          case 'conversation.clear': if (controller.preservesConversations() || await confirmClearConversation()) controller.clearConversation(); break;
+          case 'history.remote.apply': await controller.applyRemoteSession(message.conversationId); break;
+          case 'conversation.open': await controller.openConversation(message.key); break;
+          case 'conversation.delete': await controller.deleteConversation(message.key); break;
+          case 'conversation.list.refresh': await controller.refreshConversationList(); break;
+          case 'conversation.history.verify': await controller.verifyConversationHistory(); break;
           case 'citation.open': { const citation = controller.snapshot.messages.flatMap((item) => item.citations).find((item) => item.id === message.citationId); if (citation) await this.uriPolicy.open(citation, controller.profile, controller.profileUri); break; }
           case 'uri.open': await this.uriPolicy.open({ id: `markdown-link-${message.requestId}`, kind: 'url', uri: message.uri }, controller.profile, controller.profileUri); break;
           case 'action.invoke': {
@@ -1256,8 +1267,15 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     if (['input.fill', 'event.inspect', 'form.open', 'form.submit', 'form.cancel'].includes(action.actionId)) return;
     throw new Error(localize('This response action is not supported: {action}.', { action: action.actionId }));
   }
-  private html(webview: vscode.Webview, instanceId: string): string { const nonce = crypto.randomUUID().replace(/-/g, ''); const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js')); const style = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css')); const locale = configuredLocale(); const direction = textDirection(locale); return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ${webview.cspSource}; img-src ${webview.cspSource} data: blob: http: https:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource} data:; script-src 'nonce-${nonce}'"><link rel="stylesheet" href="${style}"><title>TurnStage</title></head><body><div id="root" data-instance-id="${instanceId}"></div><script nonce="${nonce}" src="${script}"></script></body></html>`; }
+  private html(webview: vscode.Webview, instanceId: string): string { const nonce = crypto.randomUUID().replace(/-/g, ''); const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js')); const style = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css')); const locale = configuredLocale(); const direction = textDirection(locale); return `<!doctype html><html lang="${locale}" dir="${direction}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ${webview.cspSource}; img-src ${webview.cspSource} data: blob: http: https:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource} data:; script-src 'nonce-${nonce}'"><link rel="stylesheet" href="${style}"><style>html,body{background:var(--vscode-editor-background)}</style><title>TurnStage</title></head><body><div id="root" data-instance-id="${instanceId}">${WEBVIEW_BOOT_SKELETON}</div><script nonce="${nonce}" src="${script}"></script></body></html>`; }
 }
+
+/**
+ * Static first frame shown until React mounts. It reuses the Webview stylesheet's
+ * skeleton classes, so a reopened or reloaded editor paints its layout instantly
+ * instead of a blank panel.
+ */
+const WEBVIEW_BOOT_SKELETON = '<main class="app-skeleton" aria-busy="true"><div class="app-skeleton__chat"><span class="ts-skeleton ts-skeleton--text" style="width:40%"></span><div class="app-skeleton__messages"><span class="ts-skeleton ts-skeleton--bubble"></span><span class="ts-skeleton ts-skeleton--bubble"></span><span class="ts-skeleton ts-skeleton--bubble"></span></div><span class="ts-skeleton" style="height:2.6em"></span></div><div class="app-skeleton__pane"><div class="app-skeleton__tabs"><span class="ts-skeleton"></span><span class="ts-skeleton"></span><span class="ts-skeleton"></span><span class="ts-skeleton"></span></div><div class="app-skeleton__rows"><span class="ts-skeleton ts-skeleton--text" style="width:72%"></span><span class="ts-skeleton ts-skeleton--text" style="width:88%"></span><span class="ts-skeleton ts-skeleton--text" style="width:64%"></span></div></div></main>';
 
 function headerValue(headers: Record<string, string> | undefined, name: string): string | undefined {
   if (!headers) return undefined;

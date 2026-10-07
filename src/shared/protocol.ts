@@ -1,4 +1,4 @@
-import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioCaptureDefinition, ScenarioDefinition, ScenarioEvidenceLocation, SessionDelta, SessionSnapshot, TurnStageProfile } from './types';
+import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, ConversationDirectory, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioCaptureDefinition, ScenarioDefinition, ScenarioEvidenceLocation, SessionDelta, SessionSnapshot, TurnStageProfile } from './types';
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -154,6 +154,10 @@ export type WebviewMessage = Envelope & (
   | { type: 'conversation.new' }
   | { type: 'conversation.clear' }
   | { type: 'history.remote.apply'; conversationId: string }
+  | { type: 'conversation.open'; key: string }
+  | { type: 'conversation.delete'; key: string }
+  | { type: 'conversation.list.refresh' }
+  | { type: 'conversation.history.verify' }
   | { type: 'citation.open'; citationId: string }
   | { type: 'uri.open'; uri: string }
   | { type: 'action.invoke'; actionId: string; sourceMessageId?: string }
@@ -228,6 +232,7 @@ export type HostMessage = Envelope & (
   | { type: 'profile.validated'; valid: boolean }
   | { type: 'session.snapshot'; snapshot: SessionSnapshot; runs: LocalRunSummary[]; requestPreview?: unknown; networkEntries?: NetworkExchange[] }
   | { type: 'session.delta'; delta: SessionDelta }
+  | { type: 'conversations.state'; state: ConversationDirectory }
   | { type: 'mapping.test.result'; result: MappingTestResult }
   | { type: 'request.error'; error: { type: string; message: string } }
   | { type: 'action.feedback'; actionId: string; sourceMessageId: string; status: 'success' | 'error'; message: string }
@@ -352,7 +357,7 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
   const message = value;
   switch (message.type) {
     case 'test.pause': case 'test.resume': return true;
-    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'profile.duplicate': case 'profile.save': case 'profile.openFirstIssue': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'testExplorer.open': case 'test.runAll': case 'test.runContracts': case 'test.cancel': case 'test.evidenceBundle.export': case 'test.history.request': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
+    case 'webview.ready': case 'profile.validate': case 'profile.openAsText': case 'profile.duplicate': case 'profile.save': case 'profile.openFirstIssue': case 'session.start': case 'opening.retry': case 'opening.useFallback': case 'output.open': case 'request.abort': case 'conversation.new': case 'conversation.clear': case 'conversation.list.refresh': case 'conversation.history.verify': case 'run.replay.pause': case 'run.replay.resume': case 'run.replay.stop': case 'run.replay.step': case 'run.import': case 'run.clear': case 'testExplorer.open': case 'test.runAll': case 'test.runContracts': case 'test.cancel': case 'test.evidenceBundle.export': case 'test.history.request': case 'adversarial.capture': case 'copilot.profileDoctor': case 'connection.analyze': return true;
     case 'adversarial.catalog.request': return message.force === undefined || typeof message.force === 'boolean';
     case 'adversarial.file': return ['importCsv', 'importJsonc', 'importJsonl', 'linkSuite', 'linkJsonc', 'exportCsv', 'exportJsonc', 'exportJsonl', 'csvTemplate'].includes(String(message.action));
     case 'adversarial.openLinkedSuite': return isBoundedString(message.path, 4096) && Boolean(message.path.trim());
@@ -385,6 +390,7 @@ export function isWebviewMessage(value: unknown, instanceId: string): value is W
     case 'mapping.test': return isRecord(message.event) && typeof message.event.protocol === 'string' && streamProtocols.has(message.event.protocol as RawStreamEvent['protocol']) && isBoundedString(message.event.raw, 262_144) && optionalBoundedString(message.event.eventName) && isStructuredValue(message.event.data);
     case 'request.send': return isBoundedString(message.text, MAX_TEXT_LENGTH) && isInteractionContext(message.interaction);
     case 'history.remote.apply': return isBoundedString(message.conversationId);
+    case 'conversation.open': case 'conversation.delete': return isBoundedString(message.key, 2048);
     case 'citation.open': return isBoundedString(message.citationId);
     case 'uri.open': return isBoundedString(message.uri, MAX_TEXT_LENGTH);
     case 'action.invoke': return isBoundedString(message.actionId) && optionalBoundedString(message.sourceMessageId);
@@ -413,6 +419,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
     case 'profile.validation': return Array.isArray(message.diagnostics) && message.diagnostics.length <= 10_000 && message.diagnostics.every((item) => isRecord(item) && (item.severity === 'error' || item.severity === 'warning') && isBoundedString(item.message, MAX_TEXT_LENGTH) && Number.isInteger(item.offset) && Number(item.offset) >= 0 && Number.isInteger(item.length) && Number(item.length) >= 0);
     case 'profile.editState': return typeof message.dirty === 'boolean';
     case 'profile.validated': return typeof message.valid === 'boolean';
+    case 'conversations.state': return isRecord(message.state) && typeof message.state.enabled === 'boolean' && isBoundedString(message.state.currentKey, 2048) && Array.isArray(message.state.items) && message.state.items.length <= 500 && isRecord(message.state.remote) && isRecord(message.state.history) && isStructuredValue(message.state, MAX_HOST_VALUE_NODES);
     case 'session.snapshot': return isRecord(message.snapshot) && Array.isArray(message.runs) && isStructuredValue(message.snapshot, MAX_HOST_VALUE_NODES) && isStructuredValue(message.runs, MAX_HOST_VALUE_NODES) && (message.requestPreview === undefined || isStructuredValue(message.requestPreview, MAX_HOST_VALUE_NODES)) && (message.networkEntries === undefined || (Array.isArray(message.networkEntries) && isStructuredValue(message.networkEntries, MAX_HOST_VALUE_NODES)));
     case 'session.delta': return isSessionDelta(message.delta);
     case 'mapping.test.result': return isRecord(message.result) && isStructuredValue(message.result, MAX_HOST_VALUE_NODES);

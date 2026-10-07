@@ -18,6 +18,19 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const contractSessions = new Map();
 const intermittentAttempts = new Map();
 const openingProbe = { requests: 0 };
+// Persisted conversations for conversations.list / conversations.history examples.
+const storedConversations = new Map();
+let conversationCounter = 0;
+const nextConversationId = () => `conversation-${Date.now()}-${++conversationCounter}`;
+function persistTurn(conversationId, userText, assistantText) {
+  const now = Date.now();
+  const existing = storedConversations.get(conversationId) ?? { id: conversationId, title: 'Sample conversation', createdAt: now, messages: [] };
+  existing.messages.push({ id: `m-${existing.messages.length + 1}`, role: 'user', content: userText, created_at: now }, { id: `m-${existing.messages.length + 2}`, role: 'assistant', content: assistantText, created_at: now });
+  existing.updatedAt = now;
+  storedConversations.delete(conversationId);
+  storedConversations.set(conversationId, existing);
+  while (storedConversations.size > 100) storedConversations.delete(storedConversations.keys().next().value);
+}
 const concurrencyProbe = {
   active: 0,
   maxActive: 0,
@@ -144,6 +157,12 @@ const server = http.createServer(async (request, response) => {
   response.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
   if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return; }
   if (request.method === 'GET' && request.url === '/rich-content/image.svg') { response.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' }); response.end(proofImage); return; }
+  if (request.method === 'GET' && request.url === '/conversations') return json(response, 200, { data: [...storedConversations.values()].reverse().map((item) => ({ id: item.id, title: item.title, updated_at: new Date(item.updatedAt).toISOString() })) });
+  const historyMatch = request.method === 'GET' ? /^\/conversations\/([^/]+)\/messages$/.exec(request.url ?? '') : null;
+  if (historyMatch) {
+    const stored = storedConversations.get(decodeURIComponent(historyMatch[1]));
+    return stored ? json(response, 200, { messages: stored.messages }) : json(response, 404, { code: 'CONVERSATION_NOT_FOUND' });
+  }
   if (request.method !== 'POST') return json(response, 405, { code: 'METHOD_NOT_ALLOWED' });
   if (request.url === '/__turnstage_test/concurrency/reset') { resetConcurrencyProbe(); return json(response, 200, concurrencyProbeSnapshot()); }
   if (request.url === '/__turnstage_test/concurrency/metrics') return json(response, 200, concurrencyProbeSnapshot());
@@ -203,7 +222,8 @@ const server = http.createServer(async (request, response) => {
     ].join(''));
     return;
   }
-  await write('start', { conversationId: body.conversationId ?? `conversation-${Date.now()}`, assistantMessageId: `assistant-${Date.now()}` });
+  const conversationId = typeof body.conversationId === 'string' && body.conversationId ? body.conversationId : nextConversationId();
+  await write('start', { conversationId, assistantMessageId: `assistant-${Date.now()}` });
   await write('status', { text: request.url.startsWith('/agent/') ? 'Searching sample sources…' : 'Preparing a sample response…' });
   if (mode === 'delayed-first-event') await delay(450);
   if (request.url.startsWith('/agent/') || mode === 'adversarial-tool') {
@@ -246,6 +266,8 @@ const server = http.createServer(async (request, response) => {
   if (mode === 'disconnect') { response.destroy(); return; }
   if (mode === 'missing-terminal') { response.end(); return; }
   await write('done', { ok: true }); response.end();
+  // `history-rewrite` stores a post-processed answer, so the history check reports a difference.
+  if (typeof body.message === 'string') persistTurn(conversationId, body.message, mode === 'history-rewrite' ? `${prefix}rewritten result.` : `${prefix}sample result.`);
 });
 
 server.listen(requestedPort, '127.0.0.1', () => {
