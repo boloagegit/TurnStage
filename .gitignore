@@ -26,3 +26,7 @@ test-results/
 *.log
 *.tsbuildinfo
 .DS_Store
+
+# Python helper and unittest bytecode
+__pycache__/
+*.py[cod]

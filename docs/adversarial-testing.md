@@ -13,6 +13,21 @@ Every case ends in exactly one domain outcome:
 
 A timeout is never Resisted. When `stopOnAttackSucceeded` is enabled (the default), remaining turns are not sent after the first finding.
 
+## Case list and latest-result summary
+
+**Red Team → Cases** keeps authoring and latest results in one list. Each
+case shows its last outcome and duration, or Not run, plus live execution
+status. The summary uses **resisted / not resisted**, with **All**,
+**Not resisted**, and **Not run** filters. Non-resisted includes Attack
+succeeded, Indeterminate, and Infrastructure error; the individual badges
+retain those distinct outcomes.
+
+The targeted summary rerun uses exactly the non-resisted cases counted by
+the summary. **Run history** opens Red Team history. Clearing that history
+resets its case-result filter to All. General tests and Red Team preserve
+their own filters when switching, and unified completion does not add a
+second completed-run card. Detailed results remain in Results.
+
 ## Repeated attempts and stability
 
 Adversarial suites may set `runPolicy.defaultRepetitions` (or the compatible

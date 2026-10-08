@@ -1,6 +1,11 @@
 # VS Code UI audit — 2026-08-27
 
-This audit applies `docs/vscode-extension-ui-guidelines.md` to the current
+This is a historical audit of the implementation on 2026-08-27. Source line
+numbers, layout decisions, test counts, and artifact paths below belong to
+that snapshot. For today's workflow, see the [VS Code user guide](../vscode-user-guide.md)
+and the [current UI review standard](../vscode-extension-ui-guidelines.md).
+
+This audit applied `docs/vscode-extension-ui-guidelines.md` to the then-current
 manifest, extension source, Webview source, and the rebuilt standalone Webview
 renders in `artifacts/turnstage-vscode-guidelines-desktop.png`,
 `artifacts/turnstage-profile-configuration.png`, and
@@ -9,8 +14,8 @@ artifacts are not Extension Development Host screenshots, so native workbench
 placement is verified from `package.json`, extension source, and trusted plus
 Restricted Mode Extension Host tests rather than inferred from the images.
 
-**Current status:** all findings from the initial audit and the final hardening
-re-audit are resolved in the current working tree. The final gate reports 31
+**Status at the time:** all findings from the initial audit and the final hardening
+re-audit were resolved in that working tree. The final gate reported 31
 test files and 186 tests passed, including React DOM keyboard behavior, axe,
 real local SSE transport, and session-flow tests. Typecheck, lint, package,
 trusted Extension Host, and Restricted Mode Extension Host checks also pass.

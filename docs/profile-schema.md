@@ -522,6 +522,8 @@ be HTTP 4xx/5xx codes. Reconnect occurs only before the first stream event.
 credential headers or header values containing a secret resolved for the
 current request.
 
+### Assistant response content
+
 Assistant response content mapped to `content.markdown.delta` supports Markdown and static HTML in the same message, including `<br>`, images, and tables. Content mapped to `content.text.delta` remains literal text. Scripts, event handlers, forms, embedded documents, inline CSS, and unsafe URLs are not rendered. External response images load automatically without a referrer; a browser may still block an image with an untrusted TLS certificate or mixed-content policy. The Web browser's API requests still require valid TLS and CORS or a same-origin proxy.
 
 For Markdown-mapped messages, a Profile can configure the two renderers independently:
