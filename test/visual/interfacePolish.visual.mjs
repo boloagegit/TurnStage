@@ -110,6 +110,21 @@ try {
   const configureBounds = await web.getByRole('tab', { name: 'Configure', exact: true }).boundingBox();
   assert.ok(configureBounds && configureBounds.x + configureBounds.width <= 390, 'Mobile: Configure tab is fully visible');
   await capture(web, 'web-mobile');
+  // System UI font metrics differ across hosts. A wider installed font must
+  // not stretch the grid header or hide the final tab behind a scroll clip.
+  await web.evaluate(() => document.documentElement.style.setProperty('--vscode-font-family', 'Verdana, system-ui, sans-serif'));
+  const mobileTabs = await web.locator('.right-pane-tabs').evaluate((element) => {
+    const pane = element.closest('.debug-pane').getBoundingClientRect();
+    const list = element.getBoundingClientRect();
+    return [...element.querySelectorAll('[role="tab"]')].map((tab) => {
+      const bounds = tab.getBoundingClientRect();
+      return { label: tab.getAttribute('aria-label') ?? tab.textContent, left: bounds.left, right: bounds.right, paneLeft: pane.left, paneRight: pane.right, listLeft: list.left, listRight: list.right };
+    });
+  });
+  await web.screenshot({ path: resolve(output, 'web-mobile-wide-font.png'), fullPage: false });
+  assert.deepEqual(mobileTabs.filter((tab) => tab.left < Math.max(tab.paneLeft, tab.listLeft) || tab.right > Math.min(tab.paneRight, tab.listRight)), [], 'Mobile: every tab fits the workspace with wider system font metrics');
+  await capture(web, 'web-mobile-wide-font');
+  await web.evaluate(() => document.documentElement.style.removeProperty('--vscode-font-family'));
   await web.getByRole('button', { name: 'Search profiles' }).click();
   await capture(web, 'web-mobile-library');
   await web.close();
