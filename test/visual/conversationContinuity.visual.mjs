@@ -207,6 +207,8 @@ try {
   await redCases.focus();
   await redCases.press('ArrowRight');
   await page.getByRole('tab', { name: 'Results', exact: true, selected: true }).waitFor();
+  // Selection commits before the next animation frame moves keyboard focus.
+  await page.waitForFunction(() => document.activeElement?.id === 'unified-test-adversarial-results-tab');
   assert.equal(await page.getByRole('tab', { name: 'Results', exact: true }).evaluate((element) => element === document.activeElement), true, 'Red Team keyboard navigation focused the hidden General tests pane');
   const duplicateIds = await page.evaluate(() => {
     const ids = [...document.querySelectorAll('.right-pane-panel [id]')].map((element) => element.id);
