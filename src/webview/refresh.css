@@ -49,7 +49,7 @@ button.primary { font-weight: 600; }
 button.primary:disabled { background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); }
 
 /* Segmented tabs: workspace tabs, test sections and inspector views share one pattern. */
-.right-pane-heading { justify-content: flex-start; padding: var(--ts-space-1) var(--ts-space-2); }
+.right-pane-heading { min-width: 0; justify-content: flex-start; padding: var(--ts-space-1) var(--ts-space-2); }
 .right-pane-tabs,
 .unified-test-workspace__sections,
 .mini-tabs[role='tablist'] {
@@ -372,7 +372,8 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
 .right-pane-tabs .right-pane-tab__icon { display: none; }
 @container (max-width: 460px) {
   .right-pane-tabs { gap: 0; }
-  .right-pane-tabs button { padding-inline: 4px; }
+  /* Leave room for wider system fonts after Web's compact library sidebar. */
+  .right-pane-tabs button { padding-inline: 3px; font-size: var(--ts-type-label); }
   .right-pane-tabs .right-pane-tab__icon { display: inline-block; }
   .right-pane-tab--chat .right-pane-tab__label { display: none; }
 }
