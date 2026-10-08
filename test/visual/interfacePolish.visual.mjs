@@ -178,6 +178,15 @@ try {
     assert.equal(compactTabs.firstInset, 16, 'the first compact tab must align with the 16px content inset');
     assert.ok(compactTabs.configureRight <= compactTabs.paneRight, `Configure must remain visible in ${width}px editors`);
     await capture(vsix, `vsix-compact-tabs-${width}`);
+    await vsix.getByRole('tab', { name: 'Debug', exact: true }).click();
+    const evidenceTabs = await vsix.getByRole('tablist', { name: 'Evidence views' }).evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return [...element.querySelectorAll('[role="tab"]')].map((tab) => ({ label: tab.getAttribute('aria-label'), left: tab.getBoundingClientRect().left, right: tab.getBoundingClientRect().right, listLeft: bounds.left, listRight: bounds.right }));
+    });
+    assert.equal(evidenceTabs.length, 6);
+    assert.deepEqual(evidenceTabs.filter((tab) => tab.left < tab.listLeft || tab.right > tab.listRight + 1), [], `all Debug tabs must fit in ${width}px editors`);
+    await capture(vsix, `vsix-compact-debug-${width}`);
+    await chatTab.click();
   }
   await vsix.close();
 
