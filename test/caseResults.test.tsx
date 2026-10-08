@@ -83,6 +83,31 @@ describe('one list for cases and results', () => {
 
   function names(): string[] { return within(screen.getByRole('list')).getAllByRole('button', { name: /case|Red/u }).map((button) => button.getAttribute('aria-label') ?? '').filter((name) => !name.startsWith('Run') && !name.startsWith('Delete')); }
 
+  it.each([
+    ['General Cases', 'contract', 'scenarios'],
+    ['General Results', 'contract', 'results'],
+    ['Red Team Cases', 'adversarial', 'cases'],
+    ['Red Team Results', 'adversarial', 'results'],
+  ] as const)('does not repeat a completed operation in %s, including after history is cleared', (_label, kind, section) => {
+    for (const hasHistory of [true, false]) {
+      const operation = { action: 'runSelection', state: 'completed' } as const;
+      const { unmount } = render(<CaseResultContext.Provider value={{ outcomes: latestCaseOutcomes(hasHistory ? runs : [], kind), filter: 'all', hasHistory }}>
+        {kind === 'contract'
+          ? <AutomationWorkspace profile={profile} post={vi.fn()} activeSection={section === 'scenarios' ? 'scenarios' : 'results'} testOperation={operation} unified />
+          : <AdversarialWorkspace profile={profile} post={vi.fn()} activeSection={section === 'cases' ? 'cases' : 'results'} testOperation={operation} unified />}
+      </CaseResultContext.Provider>);
+      expect(screen.queryByText('Test run completed')).toBeNull();
+      unmount();
+    }
+  });
+
+  it('keeps live run feedback in unified Results and completion feedback in the standalone workspace', () => {
+    const { rerender } = render(<AutomationWorkspace profile={profile} post={vi.fn()} activeSection="results" testOperation={{ action: 'runSelection', state: 'running' }} unified />);
+    expect(screen.getByText('Running selected cases…')).toBeTruthy();
+    rerender(<AutomationWorkspace profile={profile} post={vi.fn()} activeSection="results" testOperation={{ action: 'runSelection', state: 'completed' }} />);
+    expect(screen.getByText('Test run completed')).toBeTruthy();
+  });
+
   it('narrows General test cases to failures or cases that never ran', () => {
     const outcomes = latestCaseOutcomes(runs, 'contract');
     const { rerender } = render(<CaseResultContext.Provider value={{ outcomes, filter: 'failed', hasHistory: true }}><AutomationWorkspace profile={profile} post={vi.fn()} activeSection="scenarios" unified /></CaseResultContext.Provider>);

@@ -39,6 +39,7 @@ try {
   await page.getByRole('tab', { name: 'Results' }).press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Cases' }).getAttribute('aria-selected'), 'true');
   await page.getByRole('searchbox', { name: 'Search cases' }).waitFor();
+  const allGeneralCases = await page.getByRole('checkbox', { name: /^Select case /u }).evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label')).sort());
   assert.equal(await page.getByRole('tab', { name: 'General tests' }).getAttribute('aria-selected'), 'true');
   assert.equal(await page.getByText('Linked case 1', { exact: true }).filter({ visible: true }).count(), 0, 'General list excludes red-team cases');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-general-cases.png') });
@@ -86,6 +87,7 @@ try {
   assert.equal(await page.evaluate(() => globalThis.__turnstageMessages.some((message) => message.type === 'test.runSelection' && message.cases.length === 1 && message.cases[0].scenarioId === 'slow-stream-contract')), true, 'Rerun failed reruns exactly what the summary counts');
   await page.getByRole('button', { name: 'View results' }).click();
   assert.equal(await page.getByRole('tab', { name: 'Results' }).getAttribute('aria-selected'), 'true', 'Completed runs link directly to results');
+  assert.equal(await page.getByText('Test run completed', { exact: true }).filter({ visible: true }).count(), 0, 'Run history does not repeat the completed operation card');
   assert.equal(await page.getByRole('text', { name: 'New failure' }).count(), 0); // plain text lives in a list row, not a role-specific control
   assert.match(await page.getByRole('region', { name: 'Run history' }).innerText(), /New failure/);
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-run-history.png') });
@@ -132,6 +134,9 @@ try {
   assert.equal(await page.evaluate(() => globalThis.__turnstageMessages.some((message) => message.type === 'test.history.clear' && message.kind === 'contract')), true);
   await page.evaluate(() => globalThis.__turnstageHarness.dispatch({ type: 'test.history', profileId: 'slow-sse-proof', runs: [] }));
   await page.getByText('No recorded runs yet.').waitFor();
+  await page.getByRole('tab', { name: 'Cases', exact: true }).click();
+  assert.deepEqual(await page.getByRole('checkbox', { name: /^Select case /u }).evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label')).sort()), allGeneralCases, 'Clearing history restores every original General case, including linked cases');
+  assert.equal(await page.getByText('Test run completed', { exact: true }).filter({ visible: true }).count(), 0, 'Clearing history must not resurrect a stale completed card');
   assert.deepEqual(errors, [], 'No browser runtime errors');
   console.log(JSON.stringify({ passed: true, screenshots: ['unified-general-cases.png', 'unified-red-team-cases.png', 'unified-run-selected.png', 'unified-run-completed.png', 'unified-run-history.png', 'unified-run-history-narrow.png', 'unified-run-history-light.png', 'unified-run-history-high-contrast.png', 'unified-run-history-200-percent.png', 'unified-red-team-zh-TW.png', 'unified-red-team-ja-JP.png', 'unified-red-team-ko-KR.png'], artifacts }, null, 2));
 } finally {
