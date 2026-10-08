@@ -93,7 +93,20 @@ try {
   await web.getByRole('dialog').waitFor();
   await capture(web, 'web-jsonc');
   await web.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await web.setViewportSize({ width: 1100, height: 844 });
+  await web.waitForFunction(() => document.querySelector('.test-surface')?.dataset.layout === 'narrow');
+  const sidebarBreakpoint = await web.locator('.test-workspace').evaluate((element) => ({ windowWidth: innerWidth, workspaceWidth: element.getBoundingClientRect().width }));
+  assert.ok(sidebarBreakpoint.windowWidth > 1024 && sidebarBreakpoint.workspaceWidth <= 1024, 'Web tabs use the workspace width after subtracting the library sidebar');
+  assert.equal(await web.getByRole('tab', { name: 'Chat', exact: true }).isVisible(), true);
+  await capture(web, 'web-sidebar-narrow');
+  await web.reload();
+  await web.waitForFunction(() => document.querySelector('.test-surface')?.dataset.layout === 'narrow');
+  await web.getByRole('tab', { name: 'Chat', exact: true }).waitFor();
+  await capture(web, 'web-sidebar-narrow-reload');
   await web.setViewportSize({ width: 390, height: 844 });
+  // ResizeObserver commits the measured layout asynchronously; do not inspect
+  // tab bounds from the previous width before the new layout has rendered.
+  await web.waitForFunction(() => innerWidth === 390 && document.querySelector('.test-surface')?.dataset.layout === 'narrow' && document.querySelector('.test-workspace')?.getBoundingClientRect().width <= 390);
   const configureBounds = await web.getByRole('tab', { name: 'Configure', exact: true }).boundingBox();
   assert.ok(configureBounds && configureBounds.x + configureBounds.width <= 390, 'Mobile: Configure tab is fully visible');
   await capture(web, 'web-mobile');
