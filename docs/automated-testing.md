@@ -9,6 +9,22 @@ effects and repeated samples. Comparison, performance regression against a
 VS Code baseline, and Fault Lab checks require the extension. Web can evaluate
 absolute performance thresholds and disables unsupported cases before sending traffic.
 
+## Case results and history
+
+In **General tests → Cases**, each case shows its latest recorded outcome
+and duration, or **Not run**, plus live status during execution. The
+**Last run** summary counts each current case's latest result across retained
+history. Deleted cases do not contribute to the summary.
+
+Use **All**, **Failed**, or **Not run** to filter that same list. Failed
+includes errors; **Rerun failed (n)** resolves the cases counted by the
+summary rather than an unrelated detailed-results collection. **Run history**
+opens General tests history in Results. Clearing this test kind's history
+resets its result filter to All; switching to Red Team and back keeps it.
+
+Unified Cases/Results do not show a second **Test run completed** card after
+the summary updates. Detailed results and evidence remain in Results.
+
 ## Inline and linked cases
 
 Keep a few cases in `tests.scenarios`. For a larger collection, use **General tests →
@@ -127,7 +143,7 @@ restart, choose **Run remaining cases** explicitly.
 Drafts marked **Needs review** and Web-unsupported cases cannot be selected or
 run. If a previously selected case becomes unavailable, the selection is
 rejected before any request is sent instead of running a partial batch. A
-completed run offers **View test results**. Results lists the latest
+completed run updates the case-list summary. Results lists the latest
 session evidence and a separate, metadata-only run history. A completed run
 can be accepted as a comparison baseline; future runs classify new failures,
 recoveries, changed case definitions or settings, execution errors, and
@@ -156,7 +172,17 @@ run status, case identity, and completed attempt counts.
 VS Code Test Explorer and the CLI remain available. The CLI loads
 workspace-relative linked suites directly and supports stable Profile, Suite,
 Case, tag, and changed-file selectors. Reports and evidence retain Suite and
-Case identity.
+Case identity. Build the CLI with `npm run compile`, then run it from the
+checkout:
+
+```sh
+./dist/cli.js run --workspace . --changed-file src/chat/client.ts --format junit
+./dist/cli.js verify path/to/evidence/provenance.json
+```
+
+The first command executes cases against their configured endpoints; the
+paths are examples to replace with your workspace's source/evidence paths.
+CLI secrets come only from process environment variables, not `.env` files.
 
 GitHub Copilot's TurnStage tools discover linked cases using prompt-free
 metadata, validate their current digest, preview bounded request cost, and run

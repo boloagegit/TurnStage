@@ -6,7 +6,13 @@ concept in the original product brief is implemented.
 
 ## Boundaries
 
-TurnStage is a desktop/remote VS Code extension with two bundles:
+TurnStage has three execution hosts that share Profile contracts, mapping,
+domain types, and test logic. The React workspace is shared by the VS Code
+Webview and standalone Web; storage and network ownership belong to each host.
+
+### VS Code extension
+
+The desktop/remote extension uses two product bundles:
 
 ```text
 Extension Host (dist/extension.js)
@@ -22,6 +28,27 @@ The Webview does not open sockets, call backend URLs, read workspace files, or
 execute VS Code commands. Its Content Security Policy permits connections only
 to the Webview resource origin for embedding bundled fonts during Chat PNG
 capture; direct HTTP and HTTPS connections from the panel remain blocked.
+
+### Standalone Web
+
+`web/src/main.tsx` supplies the browser host and controllers to the shared
+React workspace. Vite builds it into `web-dist`; the static Web ZIP does not
+load `dist/extension.js`, use VS Code APIs, or execute the VSIX.
+
+The browser owns fetch, CORS/TLS enforcement, localStorage preferences and
+Profiles, and IndexedDB suites/history/evidence. Session secrets live in page
+memory. Deployment presets are read-only until duplicated locally. An
+explicitly configured `serve.py` proxy can forward same-origin `/api` requests
+to one fixed upstream; it is not a general URL proxy. See
+[Web deployment](web-deployment.md) and [security](security.md).
+
+### Headless CLI
+
+`src/cli` builds to `dist/cli.js`. It reads workspace Profiles and linked
+suites, uses the Node runtime for requests, emits machine-readable results,
+and verifies exported provenance. Secrets come from the process environment;
+the CLI does not load `.env` files or use VS Code SecretStorage. See
+[automated testing](automated-testing.md#running-and-copilot).
 
 ## Runtime data flow
 
@@ -452,17 +479,22 @@ objects: the host emits a serializable diagnostic summary for Opening, each
 Stream attempt, and Stop, while the Webview renders the list plus Headers,
 Payload, Response, and Timing panels. Request bodies, response data, and
 non-Authorization sensitive headers use the normal redaction boundary; the
-exact outgoing Authorization header is intentionally included only for this
-Trusted-Workspace live inspector. The list is cleared on session restart and is
-not part of `LocalRun` persistence or Output logging.
+outgoing Authorization header is masked before display. The list is cleared
+on session restart and is not part of `LocalRun` persistence or Output logging.
 
-Each settings child renders only its selected General, Opening & Flow, Request,
-Stream & Mapping, Chat UI, Test settings, History & Errors, or Security section. Raw and
-normalized event lists use a fixed-height virtual list. Except for the custom
-phone preview, the visual UI follows VS Code editor/pane/list/settings patterns
-and theme variables, semantic form elements, keyboard tab navigation, a
-keyboard-operable split separator, focus-visible outlines, reduced-motion and
-forced-color styles, and polite live regions.
+Configure displays the selected Profile configuration section. Raw and
+normalized event lists use fixed-height virtualization. In wide workspaces,
+Chat and the right pane are side by side; at workspace width ≤ 1024px, Chat
+joins the tab list and shares the same grid cell with the right pane. Hidden
+views remain mounted, and the chosen side is persisted in host UI state.
+
+VS Code native CSS is scoped to `html[data-host='vscode']`; Web retains its
+amber styling. Both hosts use semantic controls, keyboard tab navigation,
+focus-visible outlines, reduced-motion handling, and live regions. The
+conversations drawer uses a local/server history projection; opening or
+finalizing a turn can request configured server history only when the host's
+authorization allows it. General tests and Red Team show per-case latest
+outcomes and a summary rather than a duplicate completion card.
 
 ## Known runtime limitations
 

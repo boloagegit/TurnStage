@@ -17,7 +17,7 @@ test exists; it is not a claim of manual verification in every VS Code build.
 | SSE framing | Accept CR, LF, CRLF, leading BOM, split frames, and final partial frames | Automated |
 | Reconnect | Retry only before the first event, with bounded attempts/backoff and `Retry-After` | Automated |
 | Redirects | Bound hops, default to same-origin, and strip secrets on explicit cross-origin follow | Automated |
-| Split layout | Prefer the chat pane, adapt minimum tracks, stack when narrow, and recover corrupt state | Automated |
+| Workspace layout | Show panes side by side when wide; at workspace width ≤ 1024px, switch through tabs while preserving mounted views and recovering corrupt state in VS Code and Web | Automated |
 | International text | Support RTL plus long CJK, emoji, URLs, and labels with logical, breakable layout | Automated |
 | Assistive technology | Render a bounded event window while retaining full-list ARIA positions | Automated |
 | Conversation scrolling | Follow only near the tail; preserve reading position and expose Jump to latest | Automated |

@@ -24,8 +24,10 @@ CONTRIBUTING.md
 CODE_OF_CONDUCT.md
 media/icon.svg
 media/marketplace/**
-docs/vscode-ui-audit-2026-08-27.md
+docs/archive/**
 docs/performance-results.json
 artifacts/**
+**/__pycache__/**
+**/*.py[cod]
 *.vsix
 turnstage-web-*.zip
