@@ -1569,7 +1569,7 @@
   /* Every toolbar action stays reachable: labels collapse to their icons but keep their accessible names. */
   .mobile-chat-preview__viewport-settings > summary > span:not(.product-icon),
   .mobile-chat-preview__session-state > span:not(.product-icon),
-  .mobile-chat-preview__history-check > span:not(.product-icon, .mobile-chat-preview__history-check-mark) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .mobile-chat-preview__history-check > span:not(.product-icon, .mobile-chat-preview__history-check-mark, .mobile-chat-preview__history-check-count) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .mobile-chat-preview__viewport-toolbar { gap: 2px; }
   .mobile-chat-preview__history-check .mobile-chat-preview__history-check-count { display: inline; font-variant-numeric: tabular-nums; }
 

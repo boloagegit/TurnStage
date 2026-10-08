@@ -138,6 +138,20 @@ try {
   await composer.press('Enter');
   const differs = page.getByRole('button', { name: '1 differs from server' });
   await differs.waitFor();
+  await page.setViewportSize({ width: 420, height: 900 });
+  await page.getByRole('tab', { name: 'Chat', exact: true }).click();
+  const differenceCount = await page.locator('.mobile-chat-preview__history-check-count').evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const button = element.closest('button').getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return { text: element.textContent, width: bounds.width, height: bounds.height, clipPath: style.clipPath, insideButton: bounds.left >= button.left && bounds.right <= button.right };
+  });
+  assert.equal(differenceCount.text, '1');
+  assert.ok(differenceCount.width > 1 && differenceCount.height > 1, 'compact toolbar must paint the difference count at readable dimensions');
+  assert.equal(differenceCount.clipPath, 'none', 'compact difference count must not inherit hidden-label clipping');
+  assert.equal(differenceCount.insideButton, true);
+  await shot('02-compact-difference-count');
+  await page.setViewportSize({ width: 1440, height: 900 });
   await differs.click();
   await page.getByRole('tab', { name: /History check/u, selected: true }).waitFor();
   assert.equal(await page.locator('.history-check-row__diff del').first().textContent(), 'sample');
