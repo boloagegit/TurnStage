@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.36.0
 
 - Streaming responses render much more smoothly in VS Code and Web. Completed messages no longer re-render or re-parse Markdown while a later message streams, completed Markdown blocks of the streaming message are parsed once, and Web now sends the same bounded session deltas as VS Code instead of a full session copy per stream chunk. In a three-turn, 1,341-event benchmark, Webview script time dropped by about 60% and frames slower than 50 ms fell from about 75 to under 5.
 - The chat keeps following a fast stream to the end unless the reader scrolls up, and **Jump to latest** now stays pinned to the visible bottom edge instead of scrolling away with the transcript.
@@ -21,7 +21,7 @@
 - Narrow workspaces (about 1,024px or less) no longer stack the chat above the workspace with a page scroll. Chat becomes the first tab next to Debug, General tests, Red Team, and Configure, each using the full height; both sides stay loaded, so switching keeps scroll positions and streaming output. The width is measured on the workspace itself, so the Web library sidebar counts, and opening Debug, evidence, Configure, or a **Go to** destination brings that side forward. The editor shows whichever side you last worked in when it is resized, and a narrow editor boots straight into the tabbed layout.
 - Operation notices (for example "Profile is valid.") float like workbench notifications instead of pushing both panes down and back. The chat toolbar is as tall as the workspace tab row, so their edges line up. At phone widths the chat toolbar collapses labels to icons so every action stays reachable, the conversation drawer takes the whole chat area, Debug uses shorter evidence-tab labels, and stacked card headings no longer leave a large gap.
 - Fixed nested tab panels and a dangling label in the unified test workspace for screen readers; workspace tab counts are announced, and history-check actions in VS Code use the theme's link color.
-- Compatibility: Profiles gain the optional root `conversations` object and `history.conversations`; existing Profiles are unchanged and still valid. Because these are new Profile fields, the next release must be a minor version. `test.operation` progress messages gain optional fields (`activeCases`, `passedCases`, `failedCases`, `completedOutcomes`), and hosts send a new `conversations.state` message; older Webviews ignore both.
+- Compatibility: Profiles gain the optional root `conversations` object and `history.conversations`; existing Profiles are unchanged and still valid. `test.operation` progress messages gain optional fields (`activeCases`, `passedCases`, `failedCases`, `completedOutcomes`), and hosts send a new `conversations.state` message; older Webviews ignore both.
 
 ## 0.35.1
 
