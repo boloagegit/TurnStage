@@ -65,7 +65,7 @@ html[data-host='vscode'] .right-pane-tabs button { font-size: 11px; letter-spaci
 html[data-host='vscode'] .unified-test-workspace__sections { height: 30px; margin: 0 var(--ts-pane-inline, var(--ts-space-3)); }
 html[data-host='vscode'] .unified-test-workspace__sections button:first-child { padding-inline-start: 0; }
 html[data-host='vscode'] .unified-test-workspace__sections button:first-child[aria-selected='true']::after { inset-inline-start: 0; }
-html[data-host='vscode'] .mini-tabs[role='tablist'] { height: 30px; margin: 0 var(--ts-space-2); }
+html[data-host='vscode'] .mini-tabs[role='tablist'] { height: 30px; margin: 0 var(--ts-pane-inline); }
 html[data-host='vscode'] .mini-tabs[role='tablist'] button:first-child { padding-inline-start: 0; }
 html[data-host='vscode'] .mini-tabs[role='tablist'] button:first-child[aria-selected='true']::after { inset-inline-start: 0; }
 /* Phone-width panes: a narrower inset so all six view tabs stay on one row (see refresh.css). */

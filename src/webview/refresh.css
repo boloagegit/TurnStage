@@ -49,7 +49,7 @@ button.primary { font-weight: 600; }
 button.primary:disabled { background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); }
 
 /* Segmented tabs: workspace tabs, test sections and inspector views share one pattern. */
-.right-pane-heading { min-width: 0; justify-content: flex-start; padding: var(--ts-space-1) var(--ts-space-2); }
+.right-pane-heading { min-width: 0; justify-content: flex-start; padding: var(--ts-space-1) var(--ts-space-2) var(--ts-space-1) var(--ts-pane-inline); }
 .right-pane-tabs,
 .unified-test-workspace__sections,
 .mini-tabs[role='tablist'] {
@@ -95,7 +95,8 @@ body.vscode-high-contrast-light .unified-test-workspace__sections button[aria-se
 body.vscode-high-contrast .mini-tabs[role='tablist'] button[aria-selected='true'],
 body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected='true'] { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .unified-test-workspace__sections { justify-self: start; margin: var(--ts-space-2) var(--ts-pane-inline, var(--ts-space-3)); }
-.mini-tabs[role='tablist'] { margin: var(--ts-space-2); }
+/* View tabs start on the content inset like every other control, rather than floating centered. */
+.mini-tabs[role='tablist'] { align-self: flex-start; margin: var(--ts-space-2) var(--ts-pane-inline); }
 .mini-tab__short { display: none; }
 @container (max-width: 600px) {
   .mini-tabs .mini-tab__short { display: inline; }
@@ -105,10 +106,13 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
   .mini-tabs[role='tablist'] button { gap: 4px; padding-inline: 7px; }
   .mini-tabs .inspector-tab-count { margin-inline-start: 0; }
 }
+/* Phone-width panes give the inset back so every workspace tab still fits. */
+@container (max-width: 340px) { .right-pane-heading { padding-inline: var(--ts-space-1); } }
+@container (max-width: 360px) { .mini-tabs[role='tablist'] { margin-inline: var(--ts-space-1); } }
 @container (max-width: 420px) {
   /* Tighter tabs keep all six on one row at phone widths; narrower panes scroll the row rather than
      wrap it, because a wrapped row in this column layout is sized as one line and overlaps the filters. */
-  .mini-tabs[role='tablist'] { flex-shrink: 0; margin-inline: var(--ts-space-1); overflow-x: auto; scrollbar-width: thin; }
+  .mini-tabs[role='tablist'] { flex-shrink: 0; overflow-x: auto; scrollbar-width: thin; }
   .mini-tabs[role='tablist'] button { padding-inline: 3px; font-size: var(--ts-type-label); }
   .mini-tabs .inspector-tab-count { min-width: 14px; padding-inline: 3px; }
 }
@@ -163,7 +167,7 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
 
 /* Narrow panes: keep every workspace tab visible; counts give way first. */
 @container (max-width: 460px) {
-  .right-pane-heading { padding-inline: var(--ts-space-1); }
+  .right-pane-heading { padding-inline: var(--ts-pane-inline) var(--ts-space-1); }
   .right-pane-tabs { min-width: 0; padding: 2px; }
   .right-pane-tabs button { padding-inline: 6px; }
   .right-pane-tab-count { display: none; }

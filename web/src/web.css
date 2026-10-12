@@ -12,7 +12,7 @@ body { background: var(--vscode-editor-background); }
 .sidebar-icon.icon-button { width: var(--profile-control-height); min-width: var(--profile-control-height); height: var(--profile-control-height); min-height: var(--profile-control-height); padding: 0; border: 1px solid transparent; border-radius: 2px; color: var(--vscode-icon-foreground); background: transparent; }
 .sidebar-icon.icon-button:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-toolbar-hoverForeground); }
 .compact-library-toggle { display: none !important; }
-.library-filters { display: grid; grid-template-columns: minmax(0, 1fr) 84px; gap: var(--ts-space-1); padding: var(--ts-space-2); border-block-end: 1px solid var(--vscode-sideBarSectionHeader-border); }
+.library-filters { display: grid; grid-template-columns: minmax(0, 1fr) 84px; gap: var(--ts-space-1); padding: var(--ts-space-2) var(--ts-space-3); border-block-end: 1px solid var(--vscode-sideBarSectionHeader-border); }
 .library-search { min-width: 0; }.library-search input { box-sizing: border-box; width: 100%; height: var(--profile-control-height); min-width: 0; border: 1px solid var(--vscode-input-border); border-radius: 2px; padding-inline: var(--ts-space-2); color: var(--vscode-input-foreground); background: var(--vscode-input-background); font: inherit; font-size: 11px; }
 .library-search input::placeholder { color: var(--vscode-input-placeholderForeground); }
 .library-filters select { width: 100%; min-width: 0; padding-inline: var(--ts-space-1); font-size: 11px; }
@@ -129,3 +129,6 @@ body { background: var(--vscode-editor-background); }
 .curl-import__field textarea[aria-invalid='true'] { border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); }
 .curl-import__error { margin: 0; color: var(--vscode-errorForeground); overflow-wrap: anywhere; }
 .curl-import__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ts-space-2); }
+
+/* Footer links share the sidebar's 12px edge: their icons line up with the brand mark, headings, and search. */
+.profile-library footer .profile-guide-link, .profile-library footer .sidebar-preferences summary { width: calc(100% + 2 * var(--ts-space-2)); margin-inline: calc(-1 * var(--ts-space-2)); padding-inline: var(--ts-space-2); }
