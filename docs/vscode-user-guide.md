@@ -222,7 +222,7 @@ The following tables collect common commands and settings; see
 | Setting | Default | Effect |
 | --- | ---: | --- |
 | `turnstage.displayLanguage` | `auto` | Application-wide language for TurnStage profile editors: follow VS Code, Traditional Chinese, Japanese, Korean, or English |
-| `turnstage.profileGlob` | `.vscode/turnstage/profiles/*.turnstage.jsonc` | Workspace-relative discovery glob |
+| `turnstage.profileGlob` | `.vscode/turnstage/profiles/*.turnstage.jsonc` | Workspace-relative discovery glob. New and imported workspace Profiles are written to its folder (the path before the first wildcard), and the sidebar follows changes without a reload |
 | `turnstage.maxBufferedEvents` | `5000` | Maximum raw and normalized events kept in the live session |
 | `turnstage.maxConversationMessages` | `500` | Maximum conversation messages kept in memory (50–1000) |
 | `turnstage.maxBufferedBytes` | `10485760` | Maximum raw-buffer JSON bytes (10 MiB) |

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parse } from 'jsonc-parser';
-import { copyFileName, copyProfileId, duplicateProfileGroups, duplicateProfileText, importedProfileFileName } from '../src/extension/config/profileManagement';
+import { copyFileName, copyProfileId, duplicateProfileGroups, duplicateProfileText, importedProfileFileName, profileGlobDirectory } from '../src/extension/config/profileManagement';
 
 describe('profile management', () => {
   it('groups every entry that shares an exact non-empty profile id', () => {
@@ -42,5 +42,16 @@ describe('profile management', () => {
 
     expect(parse(result)).toMatchObject({ id: 'agent-copy', name: 'Agent Copy' });
     expect(result).toContain('// keep comments');
+  });
+
+  it('writes new Profiles into the static folder of the discovery glob', () => {
+    expect(profileGlobDirectory('.vscode/turnstage/profiles/*.turnstage.jsonc')).toEqual(['.vscode', 'turnstage', 'profiles']);
+    expect(profileGlobDirectory('./config/turnstage/**/*.turnstage.jsonc')).toEqual(['config', 'turnstage']);
+    expect(profileGlobDirectory('profiles\\*.jsonc')).toEqual(['profiles']);
+    expect(profileGlobDirectory('*.turnstage.jsonc')).toEqual([]);
+    expect(profileGlobDirectory('{a,b}/*.turnstage.jsonc')).toEqual([]);
+    expect(profileGlobDirectory('../shared/*.turnstage.jsonc')).toEqual(['.vscode', 'turnstage', 'profiles']);
+    expect(profileGlobDirectory('/etc/*.turnstage.jsonc')).toEqual(['.vscode', 'turnstage', 'profiles']);
+    expect(profileGlobDirectory('C:/profiles/*.jsonc')).toEqual(['.vscode', 'turnstage', 'profiles']);
   });
 });

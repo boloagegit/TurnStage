@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { findNodeAtLocation } from 'jsonc-parser';
 import { ProfileCodec } from './profileCodec';
-import { copyFileName, copyProfileId, duplicateProfileGroups, duplicateProfileText, importedProfileFileName } from './profileManagement';
+import { copyFileName, copyProfileId, DEFAULT_PROFILE_GLOB, duplicateProfileGroups, duplicateProfileText, importedProfileFileName, profileGlobDirectory } from './profileManagement';
 import type { TurnStageEnvironment, TurnStageProfile } from '../../shared/types';
 import { localize } from '../l10n';
 
@@ -37,8 +37,7 @@ export class ProfileRepository {
     const entries: ProfileEntry[] = [];
     if (scope !== 'user' && vscode.workspace.workspaceFolders?.length) {
       const perFolder = await Promise.all(vscode.workspace.workspaceFolders.map(async (folder) => {
-        const glob = vscode.workspace.getConfiguration('turnstage', folder.uri).get('profileGlob', '.vscode/turnstage/profiles/*.turnstage.jsonc');
-        return vscode.workspace.findFiles(new vscode.RelativePattern(folder, glob), '**/{node_modules,.git}/**', 500);
+        return vscode.workspace.findFiles(new vscode.RelativePattern(folder, profileGlob(folder.uri)), '**/{node_modules,.git}/**', 500);
       }));
       const uris = [...new Map(perFolder.flat().map((uri) => [uri.toString(), uri])).values()].slice(0, MAX_DISCOVERED_FILES);
       entries.push(...await mapWithConcurrency(uris, READ_CONCURRENCY, (uri) => this.read(uri, 'workspace')));
@@ -115,7 +114,7 @@ export class ProfileRepository {
   }
 
   profileDirectory(destination: ProfileDestination): vscode.Uri {
-    if (destination !== 'user') return vscode.Uri.joinPath(destination.uri, '.vscode', 'turnstage', 'profiles');
+    if (destination !== 'user') return vscode.Uri.joinPath(destination.uri, ...profileGlobDirectory(profileGlob(destination.uri)));
     const directory = this.userProfileDirectory();
     if (!directory) throw new Error(localize('User profile storage is unavailable.'));
     return directory;
@@ -221,3 +220,8 @@ async function mapWithConcurrency<T, R>(items: readonly T[], concurrency: number
   }));
   return output;
 }
+
+export function profileGlob(folder: vscode.Uri): string {
+  return vscode.workspace.getConfiguration('turnstage', folder).get('profileGlob', DEFAULT_PROFILE_GLOB);
+}
+
