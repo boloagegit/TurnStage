@@ -82,27 +82,26 @@ describe('VS Code contribution UX', () => {
     const icon = readFileSync(resolve(import.meta.dirname, '..', 'media', 'activity.svg'), 'utf8');
     expect(icon).toContain('viewBox="0 0 24 24"');
     expect(icon).toContain('stroke="currentColor"');
-    expect(icon).toContain('fill="currentColor"');
-    expect(icon).toContain('<rect x="2.5" y="2.5" width="19" height="19"');
+    expect(icon).toContain('fill="none"');
+    expect(icon).toContain('d="M7 3.5h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H10.5L6 21v-3.6A4 4 0 0 1 3 13.5v-6a4 4 0 0 1 4-4z"');
     expect(icon).not.toMatch(/#[0-9a-f]{3,8}/iu);
   });
 
-  it('keeps the Marketplace icon on the exact Activity Bar mark geometry', () => {
+  it('keeps the Marketplace icon and Web favicon on the exact Activity Bar mark paths', () => {
     const activityIcon = readFileSync(resolve(import.meta.dirname, '..', 'media', 'activity.svg'), 'utf8');
     const marketplaceIcon = readFileSync(resolve(import.meta.dirname, '..', 'media', 'icon.svg'), 'utf8');
-    const sharedGeometry = [
-      'x="2.5" y="2.5" width="19" height="19" rx="3.25"',
-      'd="M12 6.4v4.9m0 0-4.25 4.5m4.25-4.5 4.25 4.5"',
-      'cx="12" cy="6.4" r="1.3"',
-      'cx="7.75" cy="15.8" r="1.3"',
-      'x="14.95" y="14.5" width="2.6" height="2.6" rx="0.58"',
+    const webPage = readFileSync(resolve(import.meta.dirname, '..', 'web', 'index.html'), 'utf8');
+    const markPaths = [
+      'M7 3.5h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H10.5L6 21v-3.6A4 4 0 0 1 3 13.5v-6a4 4 0 0 1 4-4z',
+      'M6.5 10.5h3l1.6-3.2 2.4 6.2 1.6-3h2.4',
     ];
 
-    for (const geometry of sharedGeometry) {
-      expect(activityIcon).toContain(geometry);
-      expect(marketplaceIcon).toContain(geometry);
+    for (const markPath of markPaths) {
+      expect(activityIcon).toContain(`d="${markPath}"`);
+      expect(marketplaceIcon).toContain(`d="${markPath}"`);
+      expect(webPage).toContain(`d='${markPath}'`);
     }
-    expect(marketplaceIcon).toContain('transform="scale(10.6666666667)"');
+    expect(marketplaceIcon).toContain('transform="translate(26 26) scale(8.5)"');
     expect(manifest).toMatchObject({ icon: 'media/icon.png' });
   });
 
