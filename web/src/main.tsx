@@ -37,6 +37,7 @@ import enterpriseRaw from '../../resources/templates/enterprise-chat.turnstage.j
 import environmentRaw from '../../resources/templates/local.environment.jsonc?raw';
 import './vscode-token-compat.css';
 import './web.css';
+import { promptBeforeReply } from '../../src/shared/retryPrompt';
 
 type VsCodeApiState = Record<string, unknown>;
 type BridgeApi = { postMessage(message: unknown): void; getState(): VsCodeApiState | undefined; setState(state: VsCodeApiState): void };
@@ -726,7 +727,7 @@ async function invokeAction(actionId: string, sourceMessageId: string | undefine
     if (sourceMessageId) post({ type: 'action.feedback', actionId, sourceMessageId, status: 'success', message: t('Message copied.') }, requestId);
     return;
   }
-  if (actionId === 'message.retry') { const text = [...session.current.snapshot.messages].reverse().find((item) => item.role === 'user')?.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text).join(''); if (text) await session.send(text, { kind: 'retry', sourceMessageId }); return; }
+  if (actionId === 'message.retry') { const text = promptBeforeReply(session.current.snapshot.messages, sourceMessageId); if (text) await session.send(text, { kind: 'retry', sourceMessageId }); return; }
   if (actionId === 'request.abort') { await session.abort(); return; }
   if (actionId === 'conversation.new') { if (confirmSessionChange('restart')) await session.newConversation(); return; }
   if (actionId === 'conversation.clear') { if (confirmSessionChange('clear')) session.clear(); return; }
