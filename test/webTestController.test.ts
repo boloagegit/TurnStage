@@ -94,6 +94,28 @@ describe('WebTestController', () => {
     expect(history.cases.every((item) => item.completedAttempts === 0 && item.outcome === undefined)).toBe(true);
   });
 
+  it('keeps the General baseline when a Red Team run is accepted', async () => {
+    const scenarios = [
+      { id: 'general', name: 'General', steps: [{ id: 'turn', input: 'Hello' }] },
+      { id: 'red', name: 'Red', steps: [{ id: 'turn', input: 'Attack' }], adversarial: { mode: 'singleTurn' as const, maxTurns: 1, forbid: { content: ['forbidden'] } } },
+    ];
+    const profile: TurnStageProfile = { version: 1, id: `baselines-${crypto.randomUUID()}`, name: 'Baselines', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios } };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('event: done\ndata: {}\n\n', { status: 200 })));
+    const messages: HostPayload[] = [];
+    const controller = new WebTestController(() => profile, () => environment, new Map(), (payload) => messages.push(payload));
+    const latestHistory = () => messages.filter((item): item is Extract<HostPayload, { type: 'test.history' }> => item.type === 'test.history').at(-1)!;
+    await controller.run('runContracts');
+    const generalRun = latestHistory().runs[0]!.id;
+    await controller.acceptBaseline(generalRun);
+    await controller.run('runAll');
+    const redRun = latestHistory().runs.find((run) => run.id !== generalRun && run.cases.some((item) => item.kind === 'adversarial'))!.id;
+    await controller.acceptBaseline(redRun);
+    expect(latestHistory().baselines).toEqual({ contract: generalRun, adversarial: redRun });
+    await controller.clearHistory('adversarial');
+    expect(latestHistory().baselines).toEqual({ contract: generalRun });
+  });
+
   it('keeps latest results and exports isolated when profiles reuse a case ID', async () => {
     const scenario = { id: 'shared-id', name: 'Same case ID', steps: [{ id: 'turn', input: 'Hello' }] };
     const base: TurnStageProfile = { version: 1, id: `isolation-a-${crypto.randomUUID()}`, name: 'A', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios: [scenario] } };

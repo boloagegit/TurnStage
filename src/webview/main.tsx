@@ -13,7 +13,7 @@ import { dateTimeAttribute, formatDateTime, formatDuration, formatNumber, locali
 import { resolveUiLayout } from './uiConfig';
 import { applySessionDelta } from '../shared/sessionDelta';
 import { testCaseKey, type TestCaseIdentity } from '../shared/testSelection';
-import { compareTestRuns, nonPassingCases, unfinishedCases, type TestRunHistoryRecord } from '../shared/testRunHistory';
+import { compareTestRuns, nonPassingCases, unfinishedCases, type TestBaselineIds, type TestRunComparison, type TestRunHistoryRecord } from '../shared/testRunHistory';
 import { webUnsupportedTestFeature } from '../shared/webTestCapabilities';
 import { useConfirmAction } from './ConfirmAction';
 import { UnifiedTestHistoryCases } from './UnifiedTestHistoryCases';
@@ -122,7 +122,7 @@ function App(): React.JSX.Element {
   const [contractCaseCatalog, setContractCaseCatalog] = useState<ContractCaseCatalog>();
   const [linkedContractCaseEditor, setLinkedContractCaseEditor] = useState<LinkedContractCaseEditorState>();
   const [campaignDashboard, setCampaignDashboard] = useState<CampaignDashboardV1>();
-  const [testHistory, setTestHistory] = useState<{ profileId: string; runs: TestRunHistoryRecord[]; baselineRunId?: string }>();
+  const [testHistory, setTestHistory] = useState<{ profileId: string; runs: TestRunHistoryRecord[]; baselines?: TestBaselineIds }>();
   const [activeTimeline, setActiveTimeline] = useState<{ evidenceId: string; timeline: EvidenceTimelineSummary }>();
   const [connectionResult, setConnectionResult] = useState<ConnectionDoctorSummary>();
   const [conversations, setConversations] = useState<ConversationDirectory>();
@@ -172,7 +172,7 @@ function App(): React.JSX.Element {
       else if (message.type === 'contract.case.deleted') { setLinkedContractCaseEditor(undefined); setNotice(t('Deleted case {name}.', { name: message.scenarioId })); }
       else if (message.type === 'contract.case.error') { setLinkedContractCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict }); setNotice(errorNotice(message.message)); }
       else if (message.type === 'test.results') { setTestResults(message.results); setAutomationResults(message.automationResults ?? []); }
-      else if (message.type === 'test.history') setTestHistory({ profileId: message.profileId, runs: message.runs, baselineRunId: message.baselineRunId });
+      else if (message.type === 'test.history') setTestHistory({ profileId: message.profileId, runs: message.runs, baselines: message.baselines });
       else if (message.type === 'test.exported') { const text = t(message.kind === 'evidenceBundle' ? 'Evidence Bundle exported to {path}' : 'Test report exported to {path}', { path: message.path }); setNotice(message.artifactId ? { message: text, artifactId: message.artifactId } : text); }
       else if (message.type === 'campaign.dashboard') setCampaignDashboard(message.dashboard);
       else if (message.type === 'campaign.preview') { const summary = t('{cases} cases · {attempts} attempts · up to {requests} requests', { cases: formatNumber(message.selectedCases), attempts: formatNumber(message.plannedAttempts), requests: formatNumber(message.plannedRequests) }); setNotice(message.warnings.length ? `${summary} · ${message.warnings.join(' ')}` : summary); }
@@ -374,7 +374,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   setTestsSection: (section: AutomationSectionId) => void;
   selectedTestCases: ReadonlyMap<string, TestCaseIdentity>;
   setSelectedTestCases: React.Dispatch<React.SetStateAction<ReadonlyMap<string, TestCaseIdentity>>>;
-  testHistory?: { profileId: string; runs: TestRunHistoryRecord[]; baselineRunId?: string };
+  testHistory?: { profileId: string; runs: TestRunHistoryRecord[]; baselines?: TestBaselineIds };
   selectedAutomationResultKey?: string;
   setSelectedAutomationResultKey: (key: string | undefined) => void;
   redTeamSection: RedTeamSectionId;
@@ -513,12 +513,12 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   const visibleHistoryRuns = useMemo(() => historyRuns.filter((run) => run.cases.some((item) => item.kind === testKind)), [historyRuns, testKind]);
   const completedRunForCurrentKind = testOperation?.state === 'completed' && historyRuns[0]?.cases.some((item) => item.kind === testKind);
   const selectedHistoryRun = visibleHistoryRuns.find((run) => run.id === selectedHistoryRunId) ?? visibleHistoryRuns[0];
-  const baselineHistoryRun = historyRuns.find((run) => run.id === testHistory?.baselineRunId);
+  const baselineHistoryRun = historyRuns.find((run) => run.id === testHistory?.baselines?.[testKind]);
   // History comparison, selection keys and run availability scale with run
   // and case counts; memoize them so streaming and progress renders skip them.
   const historyDifferences = useMemo(() => selectedHistoryRun && baselineHistoryRun && selectedHistoryRun.id !== baselineHistoryRun.id
-    ? new Map(compareTestRuns(baselineHistoryRun, selectedHistoryRun).map((item) => [item.key, item.difference]))
-    : new Map<string, ReturnType<typeof compareTestRuns>[number]['difference']>(), [baselineHistoryRun, selectedHistoryRun]);
+    ? new Map(compareTestRuns(baselineHistoryRun, selectedHistoryRun).map((item) => [item.key, item]))
+    : new Map<string, TestRunComparison>(), [baselineHistoryRun, selectedHistoryRun]);
   const selectedForProfile = useMemo(() => [...selectedTestCases.values()].filter((item) => item.profileId === profile.id && item.kind === testKind), [profile.id, selectedTestCases, testKind]);
   const selectedCaseKeys = useMemo(() => new Set(selectedForProfile.map(testCaseKey)), [selectedForProfile]);
   const toggleTestCases = useCallback((identities: readonly TestCaseIdentity[]) => {
@@ -717,7 +717,7 @@ function testRunOutcomeLabel(outcome: TestRunHistoryRecord['cases'][number]['out
 }
 
 function testRunDifferenceLabel(difference: ReturnType<typeof compareTestRuns>[number]['difference']): string {
-  const labels = { 'new-failure': 'New failure', recovered: 'Recovered', 'still-failing': 'Still failing', 'new-case': 'New case', 'removed-case': 'Removed case', 'definition-changed': 'Case changed', 'configuration-changed': 'Settings changed', 'infrastructure-error': 'Execution error', indeterminate: 'Cannot determine', incomplete: 'Incomplete run', unchanged: 'Unchanged' } as const;
+  const labels = { 'new-failure': 'New failure', recovered: 'Recovered', 'still-failing': 'Still failing', 'new-case': 'New case', 'removed-case': 'Not in this run', 'definition-changed': 'Case changed', 'configuration-changed': 'Settings changed', 'infrastructure-error': 'Execution error', indeterminate: 'Cannot determine', incomplete: 'Incomplete run', unchanged: 'Unchanged' } as const;
   return t(labels[difference]);
 }
 

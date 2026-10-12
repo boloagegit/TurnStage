@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import type { TestRunHistoryRecord } from '../../shared/testRunHistory';
-import { clearTestRunHistoryKind, TEST_RUN_HISTORY_FORMAT, TEST_RUN_HISTORY_VERSION } from '../../shared/testRunHistory';
+import type { TestBaselineIds, TestRunHistoryRecord } from '../../shared/testRunHistory';
+import { acceptTestBaseline, baselineRunIdList, clearTestRunHistoryKind, normalizeTestBaselines, TEST_RUN_HISTORY_FORMAT, TEST_RUN_HISTORY_VERSION } from '../../shared/testRunHistory';
 import { testCaseKey } from '../../shared/testSelection';
 import { sha256Hex } from '../../shared/sha256';
 
@@ -11,7 +11,8 @@ interface StoredHistory {
   format: 'turnstage-test-history-store';
   version: 1;
   runs: TestRunHistoryRecord[];
-  baselineRunId?: string;
+  /** Accepted baseline per test type. Earlier versions stored one `baselineRunId` for both types. */
+  baselines: TestBaselineIds;
 }
 
 /** Workspace-local, bounded, metadata-only manual test history. */
@@ -26,16 +27,15 @@ export class TestRunHistoryRepository {
     return (await this.read(profileId)).runs.sort((left, right) => right.startedAt - left.startedAt);
   }
 
-  async baseline(profileId: string): Promise<TestRunHistoryRecord | undefined> {
-    const history = await this.read(profileId);
-    return history.runs.find((run) => run.id === history.baselineRunId);
+  async baselines(profileId: string): Promise<TestBaselineIds> {
+    return (await this.read(profileId)).baselines;
   }
 
   async acceptBaseline(profileId: string, runId: string): Promise<void> {
     await this.update(profileId, (history) => {
       const run = history.runs.find((item) => item.id === runId);
       if (!run || run.status !== 'completed') throw new Error('Only a completed run from this profile can be used as a baseline.');
-      return { ...history, baselineRunId: runId };
+      return { ...history, baselines: acceptTestBaseline(history.baselines, run) };
     });
   }
 
@@ -44,14 +44,16 @@ export class TestRunHistoryRepository {
     await this.update(record.profileId, (history) => {
       const ordered = [record, ...history.runs.filter((item) => item.id !== record.id)].sort((left, right) => right.startedAt - left.startedAt);
       const retained = ordered.slice(0, RETAIN_RUNS);
-      const baseline = ordered.find((item) => item.id === history.baselineRunId);
-      if (baseline && !retained.some((item) => item.id === baseline.id)) retained.push(baseline);
+      for (const baselineId of baselineRunIdList(history.baselines)) {
+        const baseline = ordered.find((item) => item.id === baselineId);
+        if (baseline && !retained.some((item) => item.id === baseline.id)) retained.push(baseline);
+      }
       return { ...history, runs: retained };
     });
   }
 
   async clear(profileId: string, kind: 'contract' | 'adversarial'): Promise<void> {
-    await this.update(profileId, (history) => ({ format: history.format, version: history.version, ...clearTestRunHistoryKind(history.runs, kind, history.baselineRunId) }));
+    await this.update(profileId, (history) => ({ format: history.format, version: history.version, ...clearTestRunHistoryKind(history.runs, kind, history.baselines) }));
   }
 
   private async read(profileId: string): Promise<StoredHistory> {
@@ -61,8 +63,8 @@ export class TestRunHistoryRepository {
       const bytes = await vscode.workspace.fs.readFile(uri);
       const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
       if (!isRecord(parsed) || parsed.format !== 'turnstage-test-history-store' || parsed.version !== 1 || !Array.isArray(parsed.runs)) throw new Error('Test history has an unsupported format.');
-      const runs = parsed.runs.filter((value): value is TestRunHistoryRecord => validRun(value) && value.profileId === profileId).slice(0, RETAIN_RUNS + 1);
-      return { format: 'turnstage-test-history-store', version: 1, runs, ...(typeof parsed.baselineRunId === 'string' && runs.some((item) => item.id === parsed.baselineRunId) ? { baselineRunId: parsed.baselineRunId } : {}) };
+      const runs = parsed.runs.filter((value): value is TestRunHistoryRecord => validRun(value) && value.profileId === profileId).slice(0, RETAIN_RUNS + 2);
+      return { format: 'turnstage-test-history-store', version: 1, runs, baselines: normalizeTestBaselines(parsed.baselines ?? parsed.baselineRunId, runs) };
     } catch (error) {
       if (isMissing(error)) return emptyHistory();
       throw error;
@@ -88,7 +90,7 @@ export class TestRunHistoryRepository {
   private uri(profileId: string): vscode.Uri { return vscode.Uri.joinPath(this.root, 'test-history', `${safeFilePart(profileId)}.json`); }
 }
 
-function emptyHistory(): StoredHistory { return { format: 'turnstage-test-history-store', version: 1, runs: [] }; }
+function emptyHistory(): StoredHistory { return { format: 'turnstage-test-history-store', version: 1, runs: [], baselines: {} }; }
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === 'object' && !Array.isArray(value)); }
 function safeId(value: unknown): value is string { return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(value); }
 function safeFilePart(value: string): string { return `${value.replace(/[^A-Za-z0-9_.-]/gu, '-').slice(0, 60)}-${sha256Hex(value).slice(0, 16)}`; }

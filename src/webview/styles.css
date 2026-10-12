@@ -357,3 +357,6 @@ body.vscode-high-contrast .json-token, body.vscode-high-contrast-light .json-tok
 @media (forced-colors: active) {
   :root select:not([multiple]) { appearance: auto; background-image: none; }
 }
+.unified-history-cases__filters { margin-inline-start: 0; }
+.unified-history-cases__difference--new-failure { font-weight: 600; color: var(--vscode-errorForeground); }
+.unified-history-cases__changed { color: var(--vscode-descriptionForeground); }

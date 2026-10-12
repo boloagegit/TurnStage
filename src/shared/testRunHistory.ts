@@ -116,45 +116,87 @@ export function unfinishedCases(run: TestRunHistoryRecord): TestCaseIdentity[] {
     .map(({ profileId, suiteId, scenarioId, kind }) => ({ profileId, suiteId, scenarioId, kind }));
 }
 
+/** Accepted baseline run per test type. General tests and Red Team are compared with their own baseline. */
+export type TestBaselineIds = Partial<Record<TestCaseIdentity['kind'], string>>;
+
+/** Accepting a run replaces the baseline only for the test types it contains. */
+export function acceptTestBaseline(current: TestBaselineIds, run: TestRunHistoryRecord): TestBaselineIds {
+  const next = { ...current };
+  for (const item of run.cases) next[item.kind] = run.id;
+  return next;
+}
+
+/**
+ * Reads stored baselines, including the single run ID earlier versions kept for both test types, and keeps only
+ * baselines whose run is still retained and still contains cases of that type.
+ */
+export function normalizeTestBaselines(value: unknown, runs: readonly TestRunHistoryRecord[]): TestBaselineIds {
+  const result: TestBaselineIds = {};
+  for (const kind of ['contract', 'adversarial'] as const) {
+    const runId = typeof value === 'string' ? value : value && typeof value === 'object' ? (value as Record<string, unknown>)[kind] : undefined;
+    if (typeof runId === 'string' && runs.some((run) => run.id === runId && run.cases.some((item) => item.kind === kind))) result[kind] = runId;
+  }
+  return result;
+}
+
+export function baselineRunIdList(baselines: TestBaselineIds): string[] { return [...new Set(Object.values(baselines).filter((value): value is string => Boolean(value)))]; }
+
 /** Clear one test type without removing the other type from mixed history records. */
-export function clearTestRunHistoryKind(runs: readonly TestRunHistoryRecord[], kind: TestCaseIdentity['kind'], baselineRunId?: string): { runs: TestRunHistoryRecord[]; baselineRunId?: string } {
+export function clearTestRunHistoryKind(runs: readonly TestRunHistoryRecord[], kind: TestCaseIdentity['kind'], baselines: TestBaselineIds = {}): { runs: TestRunHistoryRecord[]; baselines: TestBaselineIds } {
   const retained = runs.flatMap((run) => {
     const cases = run.cases.filter((item) => item.kind !== kind);
     return cases.length ? [{ ...run, cases }] : [];
   });
-  return { runs: retained, ...(baselineRunId && retained.some((run) => run.id === baselineRunId) ? { baselineRunId } : {}) };
+  return { runs: retained, baselines: normalizeTestBaselines({ ...baselines, [kind]: undefined }, retained) };
 }
+
+/** Profile fields that do not change how a case executes; editing them must not mark every result as settings-changed. */
+const PRESENTATION_ONLY_PROFILE_FIELDS = new Set(['name', 'description', 'ui', 'history']);
 
 function comparisonConfiguration(profile: unknown): unknown {
   if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return profile;
-  const value = profile as Record<string, unknown>;
+  const value = Object.fromEntries(Object.entries(profile as Record<string, unknown>).filter(([key]) => !PRESENTATION_ONLY_PROFILE_FIELDS.has(key)));
   const tests = value.tests;
-  if (!tests || typeof tests !== 'object' || Array.isArray(tests)) return profile;
+  if (!tests || typeof tests !== 'object' || Array.isArray(tests)) return value;
   const settings = Object.fromEntries(Object.entries(tests as Record<string, unknown>).filter(([key]) => !['scenarios', 'contractSuites', 'adversarialSuites', 'campaigns'].includes(key)));
   return { ...value, tests: settings };
 }
 
 export type TestRunDifference = 'new-failure' | 'recovered' | 'still-failing' | 'new-case' | 'removed-case' | 'definition-changed' | 'configuration-changed' | 'infrastructure-error' | 'indeterminate' | 'incomplete' | 'unchanged';
 
-export function compareTestRuns(baseline: TestRunHistoryRecord, current: TestRunHistoryRecord): Array<{ key: string; difference: TestRunDifference }> {
+export interface TestRunComparison {
+  key: string;
+  difference: TestRunDifference;
+  /** Set when the case definition or its settings changed; shown beside an outcome difference instead of hiding it. */
+  changed?: 'definition' | 'configuration';
+}
+
+export function compareTestRuns(baseline: TestRunHistoryRecord, current: TestRunHistoryRecord): TestRunComparison[] {
   const before = new Map(baseline.cases.map((item) => [item.key, item]));
   const after = new Map(current.cases.map((item) => [item.key, item]));
   const keys = [...new Set([...before.keys(), ...after.keys()])].sort();
-  return keys.map((key) => {
+  return keys.map((key): TestRunComparison => {
     const oldCase = before.get(key);
     const newCase = after.get(key);
     if (!oldCase) return { key, difference: 'new-case' };
     if (!newCase) return { key, difference: 'removed-case' };
-    if (oldCase.definitionDigest !== newCase.definitionDigest || baseline.evaluatorVersion !== current.evaluatorVersion) return { key, difference: 'definition-changed' };
-    if (baseline.profileDigest !== current.profileDigest || (oldCase.environmentDigest ?? baseline.environmentDigest) !== (newCase.environmentDigest ?? current.environmentDigest)) return { key, difference: 'configuration-changed' };
-    if (!oldCase.outcome || !newCase.outcome || oldCase.completedAttempts !== oldCase.requestedAttempts || newCase.completedAttempts !== newCase.requestedAttempts) return { key, difference: 'incomplete' };
-    if (oldCase.outcome === 'error' || newCase.outcome === 'error' || oldCase.outcome === 'infrastructureError' || newCase.outcome === 'infrastructureError') return { key, difference: 'infrastructure-error' };
-    if (oldCase.outcome === 'indeterminate' || newCase.outcome === 'indeterminate') return { key, difference: 'indeterminate' };
-    const oldPass = oldCase.outcome === 'passed' || oldCase.outcome === 'resisted';
-    const newPass = newCase.outcome === 'passed' || newCase.outcome === 'resisted';
-    if (oldPass && !newPass) return { key, difference: 'new-failure' };
-    if (!oldPass && newPass) return { key, difference: 'recovered' };
-    if (!oldPass && !newPass) return { key, difference: 'still-failing' };
-    return { key, difference: 'unchanged' };
+    const changed = oldCase.definitionDigest !== newCase.definitionDigest || baseline.evaluatorVersion !== current.evaluatorVersion
+      ? 'definition'
+      : baseline.profileDigest !== current.profileDigest || (oldCase.environmentDigest ?? baseline.environmentDigest) !== (newCase.environmentDigest ?? current.environmentDigest) ? 'configuration' : undefined;
+    const difference = outcomeDifference(oldCase, newCase);
+    if (difference === 'unchanged' && changed) return { key, difference: changed === 'definition' ? 'definition-changed' : 'configuration-changed' };
+    return changed ? { key, difference, changed } : { key, difference };
   });
+}
+
+function outcomeDifference(oldCase: TestRunCaseRecord, newCase: TestRunCaseRecord): TestRunDifference {
+  if (!oldCase.outcome || !newCase.outcome || oldCase.completedAttempts !== oldCase.requestedAttempts || newCase.completedAttempts !== newCase.requestedAttempts) return 'incomplete';
+  if (oldCase.outcome === 'error' || newCase.outcome === 'error' || oldCase.outcome === 'infrastructureError' || newCase.outcome === 'infrastructureError') return 'infrastructure-error';
+  if (oldCase.outcome === 'indeterminate' || newCase.outcome === 'indeterminate') return 'indeterminate';
+  const oldPass = oldCase.outcome === 'passed' || oldCase.outcome === 'resisted';
+  const newPass = newCase.outcome === 'passed' || newCase.outcome === 'resisted';
+  if (oldPass && !newPass) return 'new-failure';
+  if (!oldPass && newPass) return 'recovered';
+  if (!oldPass && !newPass) return 'still-failing';
+  return 'unchanged';
 }

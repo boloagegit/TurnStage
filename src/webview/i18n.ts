@@ -1684,6 +1684,13 @@ const zhTw: Record<string, string> = {
   "1 differs from server": "與伺服器不同 1 處",
   "Finish or stop the current request before opening test evidence.": "請先完成或停止目前的請求，再開啟測試證據。",
   "Opened test evidence.": "已開啟測試證據。",
+  "New failures": "新失敗",
+  "Changed": "已變更",
+  "Not in this run": "未包含在此次執行",
+  "Filter cases by difference from baseline": "依與基準的差異篩選案例",
+  "No cases have this difference.": "沒有案例符合此差異。",
+  "Case changed since baseline": "案例自基準後已變更",
+  "Settings changed since baseline": "設定自基準後已變更",
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {

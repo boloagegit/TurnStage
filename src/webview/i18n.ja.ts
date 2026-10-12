@@ -1553,4 +1553,11 @@ export const ja: Record<string, string> = {
   "Percent": "パーセント",
   "Finish or stop the current request before opening test evidence.": "テストの証拠を開く前に、現在のリクエストを完了するか停止してください。",
   "Opened test evidence.": "テストの証拠を開きました。",
+  "New failures": "新しい失敗",
+  "Changed": "変更あり",
+  "Not in this run": "この実行に含まれない",
+  "Filter cases by difference from baseline": "比較元との差分でケースを絞り込む",
+  "No cases have this difference.": "この差分に該当するケースはありません。",
+  "Case changed since baseline": "比較元以降にケースが変更されました",
+  "Settings changed since baseline": "比較元以降に設定が変更されました",
 };
