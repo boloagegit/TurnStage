@@ -231,6 +231,20 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'profile.duplicate' });
   });
 
+  it('switches the Profile environment from the environments the host can resolve', async () => {
+    const post = vi.fn();
+    const { rerender } = render(<SettingsWorkspace embedded section="general" onSectionChange={vi.fn()} profile={{ ...profile, environment: 'staging' }} post={post} environmentIds={['local', 'staging']} />);
+    const picker = screen.getByRole('combobox', { name: 'Environment ID' });
+    expect([...picker.querySelectorAll('option')].map((option) => option.textContent)).toEqual(['local', 'staging']);
+    await userEvent.setup().selectOptions(picker, 'local');
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['environment'], value: 'local' });
+
+    rerender(<SettingsWorkspace embedded section="general" onSectionChange={vi.fn()} profile={{ ...profile, environment: 'gone' }} post={post} environmentIds={['local']} />);
+    expect(screen.getByRole('option', { name: 'gone (not found)' })).toBeTruthy();
+    rerender(<SettingsWorkspace embedded section="general" onSectionChange={vi.fn()} profile={profile} post={post} environmentIds={[]} />);
+    expect(screen.getByRole('textbox', { name: 'Environment ID' })).toBeTruthy();
+  });
+
   it('disables Extension Host-only controls in Web', () => {
     render(<SettingsWorkspace embedded section="request" onSectionChange={vi.fn()} profile={profile} post={vi.fn()} vscodeFeatures={false} connectionResult={{
       protocol: 'sse', confidence: 'high', status: 200,

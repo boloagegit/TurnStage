@@ -1,5 +1,7 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Default environment': '기본 환경',
+  '{id} (not found)': '{id} (찾을 수 없음)',
   'Test case saved: {name}': '테스트 사례 저장됨: {name}',
   'No visual baseline for this viewport. Save one first.': '이 미리보기 크기의 시각 기준이 없습니다. 먼저 저장하세요.',
   'Replace visual baseline for this viewport?': '이 미리보기 크기의 시각 기준을 교체할까요?',
