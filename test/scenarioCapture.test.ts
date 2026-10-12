@@ -37,6 +37,23 @@ describe('captured test scenarios', () => {
     expect(markCapturedScenarioReady(scenario).tags).not.toContain('needs-review');
   });
 
+  it('records the non-secret controls the conversation ran with so the case reproduces', () => {
+    const withControls: TurnStageProfile = { ...profile, controls: [
+      { id: 'mode', type: 'select', label: 'Mode', default: 'normal', persist: 'workspace', options: [{ label: 'Normal', value: 'normal' }, { label: 'Partial error', value: 'partial-error' }] },
+      { id: 'verbose', type: 'boolean', label: 'Verbose', default: false, persist: 'none' },
+      { id: 'token', type: 'text', label: 'Token', persist: 'secret' },
+    ] };
+    const scenario = buildCapturedScenario({
+      kind: 'contract',
+      name: 'Partial error',
+      snapshot: { ...snapshot([message('user-1', 'user', 'Hello')]), controls: { mode: 'partial-error', verbose: false, token: '[REDACTED]' } },
+      profile: withControls,
+      source: { kind: 'conversation' },
+    });
+    expect(scenario.controls).toEqual({ mode: 'partial-error', verbose: false });
+    expect(buildCapturedScenario({ kind: 'contract', name: 'Plain', snapshot: snapshot([message('user-1', 'user', 'Hello')]), profile, source: { kind: 'conversation' } }).controls).toBeUndefined();
+  });
+
   it('builds a bounded multi-turn adversarial draft and unique id', () => {
     const scenario = buildCapturedScenario({
       kind: 'adversarial',
