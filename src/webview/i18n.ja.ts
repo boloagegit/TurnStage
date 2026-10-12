@@ -1,5 +1,10 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Each turn you send is recorded here when it completes, fails, or is stopped.': '送信した各ターンは、完了・失敗・停止した時点でここに記録されます。',
+  'No baseline yet. Pick a run you trust; later runs are compared with it.': '比較元はまだありません。信頼できる実行を選ぶと、以降の実行はそれと比較されます。',
+  'Check-by-check detail for runs since this window opened. Run history above lists every recorded run.': 'このウィンドウを開いてからの実行の、チェックごとの詳細です。上の実行履歴にはすべての記録済み実行が表示されます。',
+  'Hide checks': 'チェックを隠す',
+  'Show checks ({count})': 'チェックを表示（{count}）',
   'Review it and mark it ready to run it with other cases.': 'レビューして実行可能にすると、他のケースと一緒に実行できます。',
   'Review now': '今すぐレビュー',
   'Try draft {name} once': '下書き {name} を 1 回試す',

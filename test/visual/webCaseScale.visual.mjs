@@ -65,6 +65,8 @@ try {
   await page.screenshot({ path: resolve(output, 'general-1000-cases.png') });
   await page.getByRole('button', { name: 'Run case Load case 0001' }).click();
   await page.getByRole('tab', { name: 'Results' }).click();
+  // Session evidence is collapsed under Run history; open it to inspect check-level results.
+  await page.getByRole('button', { name: /^Show checks/u }).click();
   await page.getByRole('button', { name: 'Select test result Load case 0001' }).waitFor();
   await page.locator('.unified-test-history__selector select').filter({ visible: true }).waitFor();
   assert.match(await page.locator('.automation-result-table').innerText(), /Passed/u);

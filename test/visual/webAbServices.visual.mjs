@@ -115,6 +115,8 @@ try {
   await importCase(page, contract, 'browser-contract.tests.jsonc');
   await page.getByRole('button', { name: 'Run case Browser contract case' }).click();
   await page.getByRole('tab', { name: 'Results' }).click();
+  // Session evidence is collapsed under Run history; open it to inspect check-level results.
+  await page.getByRole('button', { name: /^Show checks/u }).click();
   await page.getByRole('button', { name: 'Select test result Browser contract case' }).waitFor();
   assert.ok((await page.locator('.automation-result-table').innerText()).includes('Passed'));
   assert.equal(await page.locator('.automation-result-table').evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'General results must fit the inspector');

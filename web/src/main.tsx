@@ -622,8 +622,17 @@ async function forkProfile(source: StoredProfile): Promise<StoredProfile> {
   profiles = [...profiles, item];
   persistLibrary();
   await tests.copySuites(source.id, item.id);
+  // The conversation continues in the copy, so its recorded turns go with it.
+  await copyRecordedRuns(source.id, item.id).catch(() => undefined);
   selectProfile(item.id);
   return item;
+}
+
+async function copyRecordedRuns(fromId: string, toId: string): Promise<void> {
+  for (const record of await artifacts.listByKind<LocalRun>('runs', fromId, 'conversation')) {
+    const suffix = record.id.startsWith(`${fromId}:`) ? record.id.slice(fromId.length + 1) : record.value.id;
+    await artifacts.put<LocalRun>('runs', { ...record, id: `${toId}:${suffix}`, profileId: toId });
+  }
 }
 function duplicateActive(): void { duplicateProfile(active); }
 

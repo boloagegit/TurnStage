@@ -7,6 +7,11 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Each turn you send is recorded here when it completes, fails, or is stopped.': '你送出的每一輪在完成、失敗或停止時都會記錄在這裡。',
+  'No baseline yet. Pick a run you trust; later runs are compared with it.': '還沒有基準。請選一次你信任的執行，之後的執行都會與它比較。',
+  'Check-by-check detail for runs since this window opened. Run history above lists every recorded run.': '此視窗開啟後各次執行的逐項檢查明細。上方的執行紀錄列出所有已記錄的執行。',
+  'Hide checks': '隱藏檢查明細',
+  'Show checks ({count})': '顯示檢查明細（{count}）',
   'Review it and mark it ready to run it with other cases.': '請審核後標記為可執行，才能與其他案例一起執行。',
   'Review now': '立即審核',
   'Try draft {name} once': '試跑草稿 {name} 一次',
