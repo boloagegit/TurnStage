@@ -17,7 +17,7 @@ describe('results recorded before a case was edited', () => {
     expect(marked.get('edited')?.stale).toBe(true);
     expect(marked.get('same')?.stale).toBeUndefined();
     expect(marked.get('unknown')?.stale).toBeUndefined();
-    expect(caseResultCounts(['edited', 'same', 'unknown'], marked)).toEqual({ passed: 2, failed: 0, attention: 0, notRun: 1 });
+    expect(caseResultCounts(['edited', 'same', 'unknown'], marked)).toEqual({ passed: 2, failed: 0, attention: 0, notRun: 1, flaky: 0 });
     expect(matchesOutcomeFilter(marked.get('edited'), 'notRun')).toBe(true);
     expect(matchesOutcomeFilter({ ...passed, tone: 'failed', outcome: 'failed', stale: true }, 'failed')).toBe(false);
     expect(markStaleOutcomes(outcomes, new Map())).toBe(outcomes);

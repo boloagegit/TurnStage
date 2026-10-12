@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useMemo, useRef } from 'react';
 import type { TestOperationSnapshot } from '../shared/protocol';
 import type { TestRunHistoryRecord, TestRunOutcome } from '../shared/testRunHistory';
-import { formatDateTime, formatDuration, t } from './i18n';
+import { formatDateTime, formatDuration, formatNumber, t } from './i18n';
 
 export type LiveCaseState = 'running' | 'passed' | 'failed';
 
@@ -44,7 +44,7 @@ export function useLiveCaseStatuses(operation: TestOperationSnapshot | undefined
 }
 
 export type CaseOutcomeTone = 'passed' | 'failed' | 'attention';
-export type CaseOutcomeFilter = 'all' | 'failed' | 'notRun';
+export type CaseOutcomeFilter = 'all' | 'failed' | 'notRun' | 'flaky';
 export interface CaseOutcomeInfo {
   outcome: TestRunOutcome;
   tone: CaseOutcomeTone;
@@ -53,6 +53,32 @@ export interface CaseOutcomeInfo {
   definitionDigest?: string;
   /** The case was edited after this result, so the result no longer describes the current definition. */
   stale?: boolean;
+  /** Recent runs of this exact definition and settings both passed and failed, flipping more than once. */
+  flaky?: CaseStability;
+}
+export interface CaseStability { passes: number; failures: number; runs: number }
+
+/** How many recent same-definition runs are weighed when deciding whether a case is flaky. */
+export const FLAKY_WINDOW = 10;
+
+interface CaseHistoryPoint { at: number; tone: CaseOutcomeTone; definitionDigest?: string; environmentDigest?: string }
+
+/**
+ * A case is flaky when, among its most recent runs with the same definition and settings as the
+ * latest one, it both passed and failed and the result changed at least twice (pass→fail→pass or
+ * the reverse). A single change is a regression or a fix, not flakiness. Errors and indeterminate
+ * results say nothing about the case itself and are skipped.
+ */
+export function caseStability(points: readonly CaseHistoryPoint[]): CaseStability | undefined {
+  const ordered = [...points].sort((left, right) => right.at - left.at);
+  const latest = ordered[0];
+  if (!latest) return undefined;
+  const comparable = ordered.filter((point) => point.tone !== 'attention' && point.definitionDigest === latest.definitionDigest && point.environmentDigest === latest.environmentDigest).slice(0, FLAKY_WINDOW);
+  let flips = 0;
+  for (let index = 1; index < comparable.length; index += 1) if (comparable[index]!.tone !== comparable[index - 1]!.tone) flips += 1;
+  const passes = comparable.filter((point) => point.tone === 'passed').length;
+  const failures = comparable.length - passes;
+  return flips >= 2 && passes > 0 && failures > 0 ? { passes, failures, runs: comparable.length } : undefined;
 }
 export interface CaseResultState { outcomes: ReadonlyMap<string, CaseOutcomeInfo>; filter: CaseOutcomeFilter; hasHistory: boolean; onFilterChange?: (filter: CaseOutcomeFilter) => void }
 
@@ -72,14 +98,24 @@ export function outcomeLabel(outcome: TestRunOutcome): string { return t(OUTCOME
 /** Latest finished outcome per case across recorded runs of one test kind. */
 export function latestCaseOutcomes(runs: readonly TestRunHistoryRecord[], kind: 'contract' | 'adversarial'): ReadonlyMap<string, CaseOutcomeInfo> {
   const latest = new Map<string, CaseOutcomeInfo>();
+  const history = new Map<string, CaseHistoryPoint[]>();
   for (const run of runs) {
     for (const item of run.cases) {
       if (item.kind !== kind || !item.outcome) continue;
       const key = liveCaseKey(item.suiteId, item.scenarioId);
+      const tone = outcomeTone(item.outcome);
+      const points = history.get(key) ?? [];
+      points.push({ at: run.startedAt, tone, definitionDigest: item.definitionDigest, environmentDigest: item.environmentDigest });
+      history.set(key, points);
       const previous = latest.get(key);
       if (previous && previous.at >= run.startedAt) continue;
-      latest.set(key, { outcome: item.outcome, tone: outcomeTone(item.outcome), ...(item.durationMs === undefined ? {} : { durationMs: item.durationMs }), at: run.startedAt, definitionDigest: item.definitionDigest });
+      latest.set(key, { outcome: item.outcome, tone, ...(item.durationMs === undefined ? {} : { durationMs: item.durationMs }), at: run.startedAt, definitionDigest: item.definitionDigest });
     }
+  }
+  for (const [key, points] of history) {
+    const flaky = points.length > 2 ? caseStability(points) : undefined;
+    const info = latest.get(key);
+    if (flaky && info) latest.set(key, { ...info, flaky });
   }
   return latest.size ? latest : EMPTY_OUTCOMES;
 }
@@ -101,6 +137,7 @@ export function markStaleOutcomes(outcomes: ReadonlyMap<string, CaseOutcomeInfo>
 export function matchesOutcomeFilter(info: CaseOutcomeInfo | undefined, filter: CaseOutcomeFilter): boolean {
   if (filter === 'failed') return info !== undefined && !info.stale && info.tone !== 'passed';
   if (filter === 'notRun') return info === undefined || info.stale === true;
+  if (filter === 'flaky') return info !== undefined && !info.stale && info.flaky !== undefined;
   return true;
 }
 
@@ -130,5 +167,6 @@ export function LiveCaseStatusBadge({ suiteId, scenarioId }: { suiteId?: string;
   </span>;
   return <span className={`live-case-status live-case-status--last live-case-status--${last.tone}`} title={t('Last result: {outcome}, {date}', { outcome: label, date: formatDateTime(last.at) })}>
     <span className="live-case-status__mark" aria-hidden="true" />{label}{last.durationMs !== undefined && <small className="live-case-status__metric">{formatDuration(last.durationMs)}</small>}
+    {last.flaky && <small className="live-case-status__flaky" title={t('Passed {passes} and failed {failures} of the last {runs} runs of this definition', { passes: formatNumber(last.flaky.passes), failures: formatNumber(last.flaky.failures), runs: formatNumber(last.flaky.runs) })}><span className="sr-only">, </span>{t('Flaky')}</small>}
   </span>;
 }

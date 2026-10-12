@@ -2,11 +2,11 @@ import React, { memo, useMemo } from 'react';
 import type { CaseOutcomeFilter, CaseOutcomeInfo } from './liveCaseStatus';
 import { dateTimeAttribute, formatDateTime, formatNumber, formatShortDateTime, t } from './i18n';
 
-export interface CaseResultCounts { passed: number; failed: number; attention: number; notRun: number }
+export interface CaseResultCounts { passed: number; failed: number; attention: number; notRun: number; flaky: number }
 
 /** Counts the last recorded result of every case currently in the suite; deleted cases are ignored. */
 export function caseResultCounts(caseKeys: readonly string[], outcomes: ReadonlyMap<string, CaseOutcomeInfo>): CaseResultCounts {
-  const counts: CaseResultCounts = { passed: 0, failed: 0, attention: 0, notRun: 0 };
+  const counts: CaseResultCounts = { passed: 0, failed: 0, attention: 0, notRun: 0, flaky: 0 };
   for (const key of caseKeys) {
     const info = outcomes.get(key);
     const tone = info?.stale ? undefined : info?.tone;
@@ -14,6 +14,7 @@ export function caseResultCounts(caseKeys: readonly string[], outcomes: Readonly
     else if (tone === 'failed') counts.failed += 1;
     else if (tone === 'attention') counts.attention += 1;
     else counts.notRun += 1;
+    if (tone && info?.flaky) counts.flaky += 1;
   }
   return counts;
 }
@@ -42,6 +43,8 @@ export const CaseRunSummary = memo(function CaseRunSummary({ kind = 'contract', 
     { id: 'all', label: t('All'), count: caseKeys.length },
     { id: 'failed', label: t(redTeam ? 'Not resisted' : 'Failed'), count: failing },
     { id: 'notRun', label: t('Not run'), count: counts.notRun },
+    // Only offered once some case has flipped between results; most suites never need it.
+    ...(counts.flaky > 0 || filter === 'flaky' ? [{ id: 'flaky' as const, label: t('Flaky'), count: counts.flaky }] : []),
   ];
   const tally = redTeam
     ? t('{passed} resisted · {failed} not resisted · {notRun} not run', { passed: formatNumber(counts.passed), failed: formatNumber(failing), notRun: formatNumber(counts.notRun) })

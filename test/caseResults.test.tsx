@@ -40,7 +40,7 @@ describe('last result per case', () => {
     expect(matchesOutcomeFilter(outcomes.get(liveCaseKey('suite', 'd')), 'failed')).toBe(true);
     expect(matchesOutcomeFilter(outcomes.get(liveCaseKey(undefined, 'a')), 'failed')).toBe(false);
     expect(matchesOutcomeFilter(undefined, 'notRun')).toBe(true);
-    expect(caseResultCounts([liveCaseKey(undefined, 'a'), liveCaseKey('suite', 'd'), liveCaseKey(undefined, 'new-case')], outcomes)).toEqual({ passed: 1, failed: 0, attention: 1, notRun: 1 });
+    expect(caseResultCounts([liveCaseKey(undefined, 'a'), liveCaseKey('suite', 'd'), liveCaseKey(undefined, 'new-case')], outcomes)).toEqual({ passed: 1, failed: 0, attention: 1, notRun: 1, flaky: 0 });
   });
 
   it('hands completed progress to the recorded outcome and duration', () => {

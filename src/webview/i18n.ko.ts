@@ -1,5 +1,7 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Flaky': '불안정',
+  'Passed {passes} and failed {failures} of the last {runs} runs of this definition': '이 정의의 최근 {runs}회 실행 중 {passes}회 통과, {failures}회 실패',
   'Copy as cURL': 'cURL로 복사',
   'Where the time went': '시간 사용 내역',
   'Waiting for response headers': '응답 헤더 대기',
