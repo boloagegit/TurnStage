@@ -1,4 +1,4 @@
-import type { AdversarialForbidDefinition, ScenarioCaptureDefinition, ScenarioDefinition, SessionSnapshot, TurnStageProfile } from '../../shared/types';
+import type { AdversarialForbidDefinition, ScenarioAssertionDefinition, ScenarioCaptureDefinition, ScenarioDefinition, SessionSnapshot, TurnStageProfile } from '../../shared/types';
 import { digestValue } from './provenance';
 
 export const MAX_CAPTURED_TURNS = 10;
@@ -57,7 +57,7 @@ export function buildCapturedScenario(input: CaptureScenarioInput): ScenarioDefi
   };
   if (input.kind === 'contract') return {
     ...common,
-    assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }],
+    assertions: suggestedCaptureAssertions(input.snapshot),
   };
   const forbid = normalizeForbid(input.forbid);
   if (!hasForbid(forbid)) throw new Error('Choose at least one prohibited effect before saving the adversarial draft.');
@@ -92,7 +92,46 @@ export function snapshotThrough(snapshot: SessionSnapshot, throughMessageId?: st
   if (!throughMessageId) return snapshot;
   const index = snapshot.messages.findIndex((message) => message.id === throughMessageId);
   if (index < 0) throw new Error('The selected message is no longer in this conversation.');
-  return { ...snapshot, messages: snapshot.messages.slice(0, index + 1) };
+  const through = snapshot.messages[index]!;
+  // Events from later turns are not part of the saved case, so checks derived from them would never hold.
+  const next = snapshot.messages[index + 1];
+  const until = through.completedAt ?? (next ? next.createdAt - 1 : Number.POSITIVE_INFINITY);
+  return {
+    ...snapshot,
+    messages: snapshot.messages.slice(0, index + 1),
+    ...(index < snapshot.messages.length - 1 ? {
+      normalizedEvents: snapshot.normalizedEvents.filter((event) => event.receivedAt <= until),
+      rawEvents: snapshot.rawEvents.filter((event) => event.receivedAt <= until),
+    } : {}),
+  };
+}
+
+/** The most event types a suggested sequence check lists; longer streams keep their first distinct types. */
+export const MAX_SUGGESTED_EVENT_TYPES = 12;
+const MAX_SUGGESTED_TOOLS = 3;
+
+/**
+ * Checks proposed for a captured case from what the conversation actually did. They describe the
+ * protocol and structure of the reply (event order, tools, no parse or mapping errors, a non-empty
+ * reply) rather than its wording, so a model that phrases the answer differently still passes.
+ * The case stays a draft until someone reviews them.
+ */
+export function suggestedCaptureAssertions(snapshot: SessionSnapshot): ScenarioAssertionDefinition[] {
+  const assertions: ScenarioAssertionDefinition[] = [{ path: 'turn.state', operator: 'equals', value: 'completed' }];
+  const types: string[] = [];
+  for (const event of snapshot.normalizedEvents) {
+    const type = typeof event.type === 'string' ? event.type : '';
+    if (type && !types.includes(type)) types.push(type);
+    if (types.length >= MAX_SUGGESTED_EVENT_TYPES) break;
+  }
+  if (types.length >= 2) assertions.push({ path: 'events.normalized[*].type', operator: 'sequenceContains', value: types });
+  const tools = [...new Set(snapshot.normalizedEvents.filter((event) => event.type === 'tool.started' && typeof event.name === 'string' && event.name.trim()).map((event) => String(event.name).trim()))].slice(0, MAX_SUGGESTED_TOOLS);
+  for (const tool of tools) assertions.push({ path: 'events.normalized[*].name', operator: 'contains', value: tool });
+  const reply = [...snapshot.messages].reverse().find((message) => message.role === 'assistant');
+  if (reply?.parts.some((part) => (part.type === 'text' || part.type === 'markdown') && part.text?.trim())) assertions.push({ path: 'assistant.text', operator: 'regex', value: '\\S', message: 'The reply is not empty.' });
+  if (snapshot.metrics.parseErrorCount === 0) assertions.push({ path: 'metrics.parseErrorCount', operator: 'equals', value: 0 });
+  if (snapshot.metrics.mappingErrorCount === 0) assertions.push({ path: 'metrics.mappingErrorCount', operator: 'equals', value: 0 });
+  return assertions;
 }
 
 export function capturedUserSteps(snapshot: SessionSnapshot): ScenarioDefinition['steps'] {

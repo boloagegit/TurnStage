@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCapturedScenario, captureEffectOptions, capturedUserSteps, isScenarioReady, markCapturedScenarioReady, MAX_CAPTURED_TURN_CHARACTERS, snapshotThrough } from '../src/extension/testing/scenarioCapture';
+import { buildCapturedScenario, captureEffectOptions, capturedUserSteps, isScenarioReady, markCapturedScenarioReady, MAX_CAPTURED_TURN_CHARACTERS, MAX_SUGGESTED_EVENT_TYPES, snapshotThrough, suggestedCaptureAssertions } from '../src/extension/testing/scenarioCapture';
 import type { ChatMessage, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 
 const profile: TurnStageProfile = {
@@ -59,6 +59,35 @@ describe('captured test scenarios', () => {
     expect(capturedUserSteps(snapshotThrough(full, 'a1')).map((step) => step.input)).toEqual(['First']);
     expect(capturedUserSteps(snapshotThrough(full)).map((step) => step.input)).toEqual(['First', 'Second']);
     expect(() => snapshotThrough(full, 'gone')).toThrow(/no longer in this conversation/u);
+  });
+
+  it('suggests checks on the structure of the reply, not its wording', () => {
+    const source = snapshot([message('u1', 'user', 'Find it'), message('a1', 'assistant', 'Here it is')]);
+    source.normalizedEvents = ['conversation.started', 'tool.started', 'content.text.delta', 'content.text.delta', 'tool.started', 'stream.completed']
+      .map((type, index) => ({ version: 1 as const, type, sequence: index + 1, receivedAt: index + 1, ...(type === 'tool.started' ? { name: index === 1 ? 'search' : 'fetch' } : {}) }));
+    const checks = suggestedCaptureAssertions(source);
+    expect(checks).toEqual([
+      { path: 'turn.state', operator: 'equals', value: 'completed' },
+      { path: 'events.normalized[*].type', operator: 'sequenceContains', value: ['conversation.started', 'tool.started', 'content.text.delta', 'stream.completed'] },
+      { path: 'events.normalized[*].name', operator: 'contains', value: 'search' },
+      { path: 'events.normalized[*].name', operator: 'contains', value: 'fetch' },
+      { path: 'assistant.text', operator: 'regex', value: '\\S', message: 'The reply is not empty.' },
+      { path: 'metrics.parseErrorCount', operator: 'equals', value: 0 },
+      { path: 'metrics.mappingErrorCount', operator: 'equals', value: 0 },
+    ]);
+    expect(JSON.stringify(checks)).not.toContain('Here it is');
+    expect(buildCapturedScenario({ kind: 'contract', name: 'Find it', snapshot: source, profile, source: { kind: 'conversation' } }).assertions).toEqual(checks);
+    // A run that already had mapping errors is not turned into a check that demands none.
+    expect(suggestedCaptureAssertions({ ...source, metrics: { ...source.metrics, mappingErrorCount: 2 } }).some((check) => check.path === 'metrics.mappingErrorCount')).toBe(false);
+    source.normalizedEvents = Array.from({ length: 20 }, (_, index) => ({ version: 1 as const, type: `event.${index}`, sequence: index, receivedAt: index }));
+    expect((suggestedCaptureAssertions(source)[1]!.value as string[]).length).toBe(MAX_SUGGESTED_EVENT_TYPES);
+  });
+
+  it('leaves later turns out of the events of a case saved from an earlier reply', () => {
+    const full = snapshot([{ ...message('u1', 'user', 'First'), createdAt: 1 }, { ...message('a1', 'assistant', 'One'), createdAt: 2, completedAt: 5 }, { ...message('u2', 'user', 'Second'), createdAt: 6 }, { ...message('a2', 'assistant', 'Two'), createdAt: 7, completedAt: 9 }]);
+    full.normalizedEvents = [3, 4, 7, 8].map((receivedAt, index) => ({ version: 1 as const, type: index < 2 ? 'first.turn' : 'second.turn', sequence: index, receivedAt }));
+    expect(snapshotThrough(full, 'a1').normalizedEvents.map((event) => event.type)).toEqual(['first.turn', 'first.turn']);
+    expect(snapshotThrough(full, 'a2').normalizedEvents).toHaveLength(4);
   });
 
   it('builds a bounded multi-turn adversarial draft and unique id', () => {

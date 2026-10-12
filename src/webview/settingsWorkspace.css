@@ -385,3 +385,10 @@
 .add-check-dialog__empty, .add-check-dialog__hint { margin: 0; color: var(--vscode-descriptionForeground); }
 .add-check-dialog .case-editor-dialog__footer > .clipboard-action { margin-inline-end: auto; }
 @media (max-width: 46em) { .case-editor-overlay:has(> .add-check-dialog) { padding: var(--ts-space-3); }.case-editor-dialog.add-check-dialog { height: auto; max-height: calc(100dvh - 2 * var(--ts-space-3)); } }
+
+/* Review editor: each check reads as a sentence above its raw fields; IDs stay one click away. */
+.assertion-row__summary { grid-column: 1 / -1; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.scenario-step__identity > summary, .scenario-controls-disclosure > summary { width: fit-content; color: var(--vscode-descriptionForeground); }
+.scenario-step__identity > summary { cursor: pointer; font-size: var(--ts-type-small); }
+.scenario-step__identity > .settings-form-grid { margin-top: var(--ts-space-2); }
+.scenario-controls-disclosure > div { display: grid; gap: var(--ts-space-3); }

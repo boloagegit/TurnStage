@@ -403,3 +403,5 @@ body.vscode-high-contrast .json-token, body.vscode-high-contrast-light .json-tok
 .selection-tag-form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ts-space-1); min-width: 0; }
 .selection-tag-form label { flex: 1 1 10em; min-width: 0; }
 .selection-tag-form input { width: 100%; min-width: 0; }
+/* Long notices wrap: keep the icon its own size and beside the first line instead of under the text. */
+.operation-status > .product-icon { flex: none; align-self: flex-start; margin-block-start: 0.2em; }

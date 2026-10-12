@@ -14,7 +14,7 @@ import { mappingDraftFromRawEvent } from './configEditors';
 import { JsonViewer, safeJson } from './JsonViewer';
 import { IconButton, ProductIcon } from './Icon';
 import { CHAT_VIEWPORT_PRESETS, DEFAULT_CHAT_VIEWPORT, MobileChatPreview, type ChatViewportState, type MessageActionFeedback, type VisualFeedback } from './MobileChatPreview';
-import { AdversarialWorkspace, AUTOMATION_SECTIONS, ReadOnlyBanner, ReadOnlyNoticeContext, AutomationWorkspace, DEFAULT_ADVERSARIAL_CASE_COLLECTION, DEFAULT_ADVERSARIAL_RESULT_COLLECTION, normalizeAdversarialCaseCollectionState, normalizeAdversarialResultCollectionState, RED_TEAM_SECTIONS, SETTINGS_SECTIONS, SettingsWorkspace, type AdversarialCaseCollectionState, type AdversarialResultCollectionState, type AutomationSectionId, type LinkedAdversarialCaseEditorState, type LinkedContractCaseEditorState, type RedTeamSectionId, type SettingsSectionId } from './SettingsWorkspace';
+import { AdversarialWorkspace, AUTOMATION_SECTIONS, linkedContractCaseRowKey, ReadOnlyBanner, ReadOnlyNoticeContext, AutomationWorkspace, DEFAULT_ADVERSARIAL_CASE_COLLECTION, DEFAULT_ADVERSARIAL_RESULT_COLLECTION, normalizeAdversarialCaseCollectionState, normalizeAdversarialResultCollectionState, RED_TEAM_SECTIONS, SETTINGS_SECTIONS, SettingsWorkspace, type AdversarialCaseCollectionState, type AdversarialResultCollectionState, type AutomationSectionId, type LinkedAdversarialCaseEditorState, type LinkedContractCaseEditorState, type RedTeamSectionId, type SettingsSectionId } from './SettingsWorkspace';
 import { dateTimeAttribute, formatDateTime, formatDuration, formatNumber, localizeHumanized, setLocale, t } from './i18n';
 import { resolveUiLayout } from './uiConfig';
 import { applySessionDelta } from '../shared/sessionDelta';
@@ -141,6 +141,9 @@ function App(): React.JSX.Element {
   const [linkedAdversarialCaseEditor, setLinkedAdversarialCaseEditor] = useState<LinkedAdversarialCaseEditorState>();
   const [contractCaseCatalog, setContractCaseCatalog] = useState<ContractCaseCatalog>();
   const [addCheckEvent, setAddCheckEvent] = useState<Record<string, unknown>>();
+  // Notice actions run later than the message that created them, so they read the latest catalog.
+  const contractCatalogRef = useRef(contractCaseCatalog);
+  contractCatalogRef.current = contractCaseCatalog;
   // Edits to linked cases run one at a time: load the case, apply the edit, save or delete against the loaded revision.
   const caseEditQueue = useRef<CaseEditQueue>(undefined);
   const [linkedContractCaseEditor, setLinkedContractCaseEditor] = useState<LinkedContractCaseEditorState>();
@@ -229,7 +232,22 @@ function App(): React.JSX.Element {
       else if (message.type === 'run.exported') setNotice(message.artifactId ? { message: t('Run exported to {path}', { path: message.path }), artifactId: message.artifactId } : t('Run exported to {path}', { path: message.path }));
       else if (message.type === 'run.history.changed') setNotice(t(message.deletedCount === 1 ? 'Deleted {count} recorded run.' : 'Deleted {count} recorded runs.', { count: formatNumber(message.deletedCount) }));
       else if (message.type === 'adversarial.operation') setNotice(message.artifactId ? { message: message.detail, artifactId: message.artifactId } : message.detail);
-      else if (message.type === 'test.captured' || message.type === 'adversarial.captured') setNotice(message.detail);
+      else if (message.type === 'test.captured') {
+        // A captured case is a draft until reviewed, so say so and offer the review right here.
+        const { kind, scenarioId, sourcePath } = message;
+        const caseKey = (): string => {
+          if (!sourcePath) return scenarioId;
+          if (kind === 'adversarial') return `linked:${sourcePath}:${scenarioId}`;
+          const entry = contractCatalogRef.current?.entries.find((item) => item.sourcePath === sourcePath && item.scenarioId === scenarioId);
+          return entry ? linkedContractCaseRowKey(entry) : scenarioId;
+        };
+        setNotice({ message: `${message.detail} ${t('Review it and mark it ready to run it with other cases.')}`, action: { label: t('Review now'), run: () => {
+          setNarrowView('pane');
+          if (kind === 'adversarial') { setRightPaneMode('adversarial'); setRedTeamSection('cases'); setExpandedAdversarialCaseId(caseKey()); }
+          else { setRightPaneMode('tests'); setTestsSection('scenarios'); setExpandedContractCaseId(caseKey()); }
+        } } });
+      }
+      else if (message.type === 'adversarial.captured') setNotice(message.detail);
       else if (message.type === 'adversarial.catalog') setAdversarialCaseCatalog(message.catalog);
       else if ((message.type === 'contract.case.loaded' || message.type === 'adversarial.case.loaded') && queuedCaseJob(message.type.startsWith('adversarial') ? 'adversarial' : 'contract', message.detail.sourcePath, message.detail.scenario.id, 'loading')) applyQueuedCaseEdit(message.detail.scenario, message.detail.revision);
       else if ((message.type === 'contract.case.saved' || message.type === 'adversarial.case.saved') && queuedCaseJob(message.type.startsWith('adversarial') ? 'adversarial' : 'contract', message.detail.sourcePath, message.detail.scenario.id, 'saving')) advanceCaseEditQueue('changed');
