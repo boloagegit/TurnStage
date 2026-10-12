@@ -1257,7 +1257,11 @@ describe('Webview DOM behavior', () => {
     render(<AutomationWorkspace activeSection="scenarios" profile={configured} post={post} />);
 
     expect(screen.queryByRole('button', { name: 'Run all' })).toBeNull();
-    expect((screen.getByRole('button', { name: 'Captured contract: Review this case before selecting it.' }) as HTMLButtonElement).disabled).toBe(true);
+    // A draft can be tried on its own, but stays out of selections until reviewed.
+    const tryDraft = screen.getByRole('button', { name: 'Try draft Captured contract once' }) as HTMLButtonElement;
+    expect(tryDraft.disabled).toBe(false);
+    await user.click(tryDraft);
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'test.runCase', scenarioId: 'captured-contract', kind: 'contract' }));
     expect(screen.getByText('Review this case before selecting it.')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Captured contract. Review this case before selecting it.' }));
     await user.click(screen.getByRole('button', { name: 'Mark ready' }));
