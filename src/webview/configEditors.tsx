@@ -1,9 +1,10 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import type { MappingTestInput, MappingTestResult, WebviewPayload } from '../shared/protocol';
 import { responseActionIcons, type MappingRule, type MessageTagRule, type OpeningResponseBlockDefinition, type OpeningResponseBlockKind, type OpeningResponseFieldDefinition, type RawStreamEvent, type RequestVariant, type TurnStageProfile } from '../shared/types';
 import { formatNumber, localizeHumanized, t } from './i18n';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
+import { consumeRevert, revertField } from './fieldRevert';
 import { JsonSyntax } from './JsonViewer';
 import { useConfirmAction } from './ConfirmAction';
 import { DEFAULT_MESSAGE_ACTIONS, resolveMessageActionVisibility, resolveStreaming, type MessageActionId } from './uiConfig';
@@ -521,20 +522,23 @@ function Field({ label, hint, error, wide, children }: { label: string; hint?: s
 function Checkbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }): React.JSX.Element { return <label className="checkbox-control"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>; }
 function PatchText({ value, onCommit, multiline = false, ...props }: { value: string; onCommit: (value: string) => void; multiline?: boolean } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'onBlur'> & Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, 'value' | 'onChange' | 'onBlur'>): React.JSX.Element {
   const [draft, setDraft] = useState(value); useEffect(() => setDraft(value), [value]);
-  const commit = () => { if (draft !== value) onCommit(draft); };
-  const keyboard = (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => { if (event.key === 'Escape') { setDraft(value); event.currentTarget.blur(); } else if (event.key === 'Enter' && (!multiline || event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.blur(); } };
+  const reverting = useRef(false);
+  const commit = () => { if (consumeRevert(reverting)) return; if (draft !== value) onCommit(draft); };
+  const keyboard = (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => { if (event.key === 'Escape') { revertField(event, reverting); setDraft(value); event.currentTarget.blur(); } else if (event.key === 'Enter' && (!multiline || event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.blur(); } };
   return multiline ? <textarea {...props} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={keyboard} /> : <input {...props} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={keyboard} />;
 }
 
 function PatchNumber({ value, onCommit, min, max, ...props }: { value?: number; onCommit: (value: number | undefined) => void; min: number; max: number } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'type' | 'min' | 'max' | 'onChange' | 'onBlur'>): React.JSX.Element {
   const [draft, setDraft] = useState(value === undefined ? '' : String(value));
   useEffect(() => setDraft(value === undefined ? '' : String(value)), [value]);
+  const reverting = useRef(false);
   const commit = () => {
+    if (consumeRevert(reverting)) return;
     if (!draft.trim()) { onCommit(undefined); return; }
     const parsed = Number(draft);
     if (Number.isFinite(parsed)) onCommit(Math.min(max, Math.max(min, Math.round(parsed))));
   };
-  return <input {...props} type="number" min={min} max={max} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Escape') { setDraft(value === undefined ? '' : String(value)); event.currentTarget.blur(); } else if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} />;
+  return <input {...props} type="number" min={min} max={max} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Escape') { revertField(event, reverting); setDraft(value === undefined ? '' : String(value)); event.currentTarget.blur(); } else if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} />;
 }
 
 function JsonPatchEditor({ ariaLabel, value, onCommit, disabled = false }: { ariaLabel: string; value: unknown; onCommit: (value: unknown) => void; disabled?: boolean }): React.JSX.Element {
@@ -542,8 +546,10 @@ function JsonPatchEditor({ ariaLabel, value, onCommit, disabled = false }: { ari
   const [draft, setDraft] = useState(source);
   const [error, setError] = useState('');
   const errorId = useId();
+  const reverting = useRef(false);
   useEffect(() => { setDraft(source); setError(''); }, [source]);
   const commit = () => {
+    if (consumeRevert(reverting)) return;
     if (disabled || draft === source) return;
     try {
       const parsed = JSON.parse(draft) as unknown;
@@ -555,7 +561,7 @@ function JsonPatchEditor({ ariaLabel, value, onCommit, disabled = false }: { ari
   };
   return <div className="json-patch-editor">
     <textarea className="code-input" rows={7} aria-label={ariaLabel} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} value={draft} disabled={disabled} spellCheck={false} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => {
-      if (event.key === 'Escape') { setDraft(source); setError(''); event.currentTarget.blur(); }
+      if (event.key === 'Escape') { revertField(event, reverting); setDraft(source); setError(''); event.currentTarget.blur(); }
       else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); commit(); event.currentTarget.blur(); }
     }} />
     <button className="apply-inline" type="button" disabled={disabled || draft === source} onClick={commit}>{t('Apply JSON')}</button>

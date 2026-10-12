@@ -180,8 +180,8 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       case 'conversation.history.verify': if (!session.busy) await conversations?.verify(session.current.snapshot); break;
       case 'run.import': await importRun(message.requestId); break;
       case 'run.export': await exportRun(message.runId, message.requestId); break;
-      case 'run.delete': if (window.confirm('Delete this browser-local run? This cannot be undone.')) await deleteRun(message.runId); break;
-      case 'run.clear': if (window.confirm('Delete every browser-local conversation run? This cannot be undone.')) await clearRuns(); break;
+      case 'run.delete': if (confirmRunDeletion('one')) await deleteRun(message.runId); break;
+      case 'run.clear': if (confirmRunDeletion('all')) await clearRuns(); break;
       case 'run.replay.play': await replayRun(message.runId, message.speed); break;
       case 'run.replay.pause': session.pauseReplay(); break;
       case 'run.replay.resume': session.resumeReplay(); break;
@@ -646,6 +646,17 @@ function confirmSessionChange(action: 'clear' | 'restart'): boolean {
   return window.confirm(messages[locale as keyof typeof messages] ?? messages.en);
 }
 
+function confirmRunDeletion(scope: 'one' | 'all'): boolean {
+  const locale = normalizeLocale(preferences.locale ?? navigator.language);
+  const messages = {
+    'zh-TW': scope === 'one' ? '刪除這筆瀏覽器本機執行記錄？此動作無法復原。' : '刪除所有瀏覽器本機對話執行記錄？此動作無法復原。',
+    ja: scope === 'one' ? 'このブラウザーに保存された実行記録を削除しますか？この操作は元に戻せません。' : 'このブラウザーに保存されたすべての会話の実行記録を削除しますか？この操作は元に戻せません。',
+    ko: scope === 'one' ? '이 브라우저에 저장된 실행 기록을 삭제할까요? 이 작업은 되돌릴 수 없습니다.' : '이 브라우저에 저장된 모든 대화 실행 기록을 삭제할까요? 이 작업은 되돌릴 수 없습니다.',
+    en: scope === 'one' ? 'Delete this browser-local run? This cannot be undone.' : 'Delete every browser-local conversation run? This cannot be undone.',
+  };
+  return window.confirm(messages[locale as keyof typeof messages] ?? messages.en);
+}
+
 function persistLibrary(): void {
   saveProfiles(profiles.filter((item) => !item.builtIn));
   preferences.activeProfileId = active.id;
@@ -704,7 +715,7 @@ async function invokeAction(actionId: string, sourceMessageId: string | undefine
   const source = sourceMessageId ? session.current.snapshot.messages.find((item) => item.id === sourceMessageId) : undefined;
   if (actionId === 'message.copy') {
     await copyText(source?.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text).join('') ?? '');
-    if (sourceMessageId) post({ type: 'action.feedback', actionId, sourceMessageId, status: 'success', message: 'Message copied.' }, requestId);
+    if (sourceMessageId) post({ type: 'action.feedback', actionId, sourceMessageId, status: 'success', message: t('Message copied.') }, requestId);
     return;
   }
   if (actionId === 'message.retry') { const text = [...session.current.snapshot.messages].reverse().find((item) => item.role === 'user')?.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text).join(''); if (text) await session.send(text, { kind: 'retry', sourceMessageId }); return; }
