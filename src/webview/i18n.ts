@@ -7,6 +7,21 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Add as check': '加為檢查',
+  'Add check from event': '從事件新增檢查',
+  'Copy check as JSON': '將檢查複製為 JSON',
+  'Add check': '新增檢查',
+  'What to check': '要檢查什麼',
+  'The case produces a {value} event': '案例會產生 {value} 事件',
+  'The final reply contains “{value}”': '最後的回覆包含「{value}」',
+  'The tool {value} is called': '會呼叫工具 {value}',
+  'Add to case': '加入案例',
+  'No General cases yet. Save this conversation as a test first, or copy the check as JSON.': '還沒有一般測試案例。請先把這段對話存成測試，或將檢查複製為 JSON。',
+  'This Profile is read-only. Copy the check as JSON, or duplicate the Profile to edit its cases.': '此設定檔為唯讀。請將檢查複製為 JSON，或複製設定檔後再編輯案例。',
+  'The check runs after the case’s last turn, so it holds whichever turn produced the event.': '檢查會在案例最後一輪結束後執行，因此不論事件出現在哪一輪都適用。',
+  '{name} already has this check.': '{name} 已有這項檢查。',
+  'Check added to {name}.': '已將檢查加入 {name}。',
+  'Could not add the check: {error}': '無法新增檢查：{error}',
   'Compare with baseline': '與基準比較',
   'This run': '本次執行',
   'Result': '結果',

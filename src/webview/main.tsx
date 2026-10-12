@@ -5,6 +5,9 @@ import { isHostMessage, isWorkspaceSection, isTestRunActive, PROTOCOL_VERSION } 
 import { browserUuid } from '../shared/uuid';
 import { isSensitiveHeaderName, networkCurlCommand } from '../shared/curlCommand';
 import { ClipboardButton } from './ClipboardButton';
+import { AddCheckDialog } from './AddCheckDialog';
+import { checkTargets, eventCheckOptions, hasAssertion, type CheckTarget, type EventCheckOption } from './eventCheck';
+import type { ScenarioAssertionDefinition } from '../shared/types';
 import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ChatMessage, ConversationDirectory, ConnectionDoctorSummary, EvidenceTimelineEntry, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { mappingDraftFromRawEvent } from './configEditors';
 import { JsonViewer, safeJson } from './JsonViewer';
@@ -123,6 +126,9 @@ function App(): React.JSX.Element {
   const [adversarialCaseCatalog, setAdversarialCaseCatalog] = useState<AdversarialCaseCatalog>();
   const [linkedAdversarialCaseEditor, setLinkedAdversarialCaseEditor] = useState<LinkedAdversarialCaseEditorState>();
   const [contractCaseCatalog, setContractCaseCatalog] = useState<ContractCaseCatalog>();
+  const [addCheckEvent, setAddCheckEvent] = useState<Record<string, unknown>>();
+  // A check headed for a linked case: load the case, append the check, save against the loaded revision.
+  const pendingCheck = useRef<{ sourcePath: string; scenarioId: string; name: string; assertion: ScenarioAssertionDefinition; stage: 'loading' | 'saving' }>(undefined);
   const [linkedContractCaseEditor, setLinkedContractCaseEditor] = useState<LinkedContractCaseEditorState>();
   const [campaignDashboard, setCampaignDashboard] = useState<CampaignDashboardV1>();
   const [testHistory, setTestHistory] = useState<{ profileId: string; runs: TestRunHistoryRecord[]; baselines?: TestBaselineIds }>();
@@ -170,9 +176,21 @@ function App(): React.JSX.Element {
       else if (message.type === 'adversarial.case.error') { setLinkedAdversarialCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict }); setNotice(errorNotice(message.message)); }
       else if (message.type === 'contract.operation') setNotice(message.artifactId ? { message: message.detail, artifactId: message.artifactId } : message.detail);
       else if (message.type === 'contract.catalog') setContractCaseCatalog(message.catalog);
-      else if (message.type === 'contract.case.loaded') setLinkedContractCaseEditor({ status: 'loaded', detail: message.detail });
-      else if (message.type === 'contract.case.saved') { setLinkedContractCaseEditor({ status: 'saved', detail: message.detail }); setNotice(t('Linked test case saved and verified from disk.')); }
+      else if (message.type === 'contract.case.loaded') {
+        const pending = pendingCheck.current;
+        if (pending?.stage === 'loading' && pending.sourcePath === message.detail.sourcePath && pending.scenarioId === message.detail.scenario.id) {
+          const { scenario } = message.detail;
+          if (hasAssertion(scenario.assertions, pending.assertion)) { pendingCheck.current = undefined; setNotice(t('{name} already has this check.', { name: pending.name })); }
+          else { pending.stage = 'saving'; post({ type: 'contract.case.save', sourcePath: pending.sourcePath, scenarioId: pending.scenarioId, expectedRevision: message.detail.revision, scenario: { ...scenario, assertions: [...(scenario.assertions ?? []), pending.assertion] } }); }
+        } else setLinkedContractCaseEditor({ status: 'loaded', detail: message.detail });
+      }
+      else if (message.type === 'contract.case.saved') {
+        const pending = pendingCheck.current;
+        if (pending?.stage === 'saving' && pending.sourcePath === message.detail.sourcePath && pending.scenarioId === message.detail.scenario.id) { pendingCheck.current = undefined; setNotice(t('Check added to {name}.', { name: pending.name })); }
+        else { setLinkedContractCaseEditor({ status: 'saved', detail: message.detail }); setNotice(t('Linked test case saved and verified from disk.')); }
+      }
       else if (message.type === 'contract.case.deleted') { setLinkedContractCaseEditor(undefined); setNotice(t('Deleted case {name}.', { name: message.scenarioId })); }
+      else if (message.type === 'contract.case.error' && pendingCheck.current?.sourcePath === message.sourcePath && pendingCheck.current.scenarioId === message.scenarioId) { pendingCheck.current = undefined; setNotice(errorNotice(t('Could not add the check: {error}', { error: message.message }))); }
       else if (message.type === 'contract.case.error') { setLinkedContractCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict }); setNotice(errorNotice(message.message)); }
       else if (message.type === 'test.results') { setTestResults(message.results); setAutomationResults(message.automationResults ?? []); }
       else if (message.type === 'test.history') setTestHistory({ profileId: message.profileId, runs: message.runs, baselines: message.baselines });
@@ -276,6 +294,19 @@ function App(): React.JSX.Element {
   const testIssues = diagnostics.filter((issue) => issue.severity === 'error' && issue.scope === 'tests');
   if (!profile && diagnostics[0]) return <main className="empty"><h1>TurnStage</h1><p>{diagnostics[0].message}</p><button onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></main>;
   if (!profile) return <AppSkeleton splitPercent={splitPercent} />;
+  const addCheck = (option: EventCheckOption, target: CheckTarget) => {
+    setAddCheckEvent(undefined);
+    if (target.kind === 'inline') {
+      const scenario = profile.tests?.scenarios?.[target.index];
+      if (!scenario) return;
+      if (hasAssertion(scenario.assertions, option.assertion)) { setNotice(t('{name} already has this check.', { name: target.name })); return; }
+      post({ type: 'profile.patch', path: ['tests', 'scenarios', target.index, 'assertions'], value: [...(scenario.assertions ?? []), option.assertion] });
+      setNotice(t('Check added to {name}.', { name: target.name }));
+      return;
+    }
+    pendingCheck.current = { sourcePath: target.sourcePath, scenarioId: target.scenarioId, name: target.name, assertion: option.assertion, stage: 'loading' };
+    post({ type: 'contract.case.request', sourcePath: target.sourcePath, scenarioId: target.scenarioId });
+  };
   return <main className="app">
     <a className="skip" href="#main-panel">{t('Skip to content')}</a>
     {snapshot?.trusted === false && <div className="trust-banner" role="status"><strong>{t('Restricted mode.')}</strong> {t('This workspace is not trusted. Network requests are disabled; fixture replay remains available.')}</div>}
@@ -318,15 +349,17 @@ function App(): React.JSX.Element {
         networkInspector={networkInspector} setNetworkInspector={setNetworkInspector}
         conversations={conversations}
         narrowView={narrowView} setNarrowView={setNarrowView}
+        onAddCheck={(event) => { setAddCheckEvent(event); if (!contractCaseCatalog) post({ type: 'contract.catalog.request' }); }}
       />
     </section>
+    {addCheckEvent && <AddCheckDialog options={eventCheckOptions(addCheckEvent)} targets={checkTargets(profile, contractCaseCatalog)} readOnly={profileReadOnly} onClose={() => setAddCheckEvent(undefined)} onAdd={addCheck} />}
     <div className="sr-status" role="status" aria-live="polite">{terminalAnnouncement(snapshot?.turnState)}</div>
   </main>;
 }
 
 const EMPTY_HISTORY_RUNS: TestRunHistoryRecord[] = [];
 
-function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, automationResults, contractCaseCatalog, linkedContractCaseEditor, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, testsSection, setTestsSection, selectedTestCases, setSelectedTestCases, testHistory, selectedAutomationResultKey, setSelectedAutomationResultKey, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, profileReadOnly, hostKind, environmentIds, diagnostics, scrollPositions, onScrollPositionChange, expandedContractCaseId, setExpandedContractCaseId, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector, conversations, narrowView, setNarrowView }: {
+function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, automationResults, contractCaseCatalog, linkedContractCaseEditor, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, testsSection, setTestsSection, selectedTestCases, setSelectedTestCases, testHistory, selectedAutomationResultKey, setSelectedAutomationResultKey, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, profileReadOnly, hostKind, environmentIds, diagnostics, scrollPositions, onScrollPositionChange, expandedContractCaseId, setExpandedContractCaseId, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector, conversations, narrowView, setNarrowView, onAddCheck }: {
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
   runs: LocalRunSummary[];
@@ -374,6 +407,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   onSelectMessage: (messageId: string) => void;
   onSelectEvent: (event?: Record<string, unknown>) => void;
   onCreateMapping: (event: RawStreamEvent) => void;
+  onAddCheck?: (event: Record<string, unknown>) => void;
   rightPaneMode: RightPaneMode;
   setRightPaneMode: (mode: RightPaneMode) => void;
   testsSection: AutomationSectionId;
@@ -670,7 +704,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
         {profileReadOnly && rightPaneMode !== 'debug' && <ReadOnlyBanner post={post} />}
         <ReadOnlyNoticeContext.Provider value={false}>
         <div id="right-pane-panel" className="right-pane-panel" role="tabpanel" aria-labelledby={`right-pane-${rightPaneMode}-tab`} tabIndex={-1} onPointerDownCapture={showPaneHalf} onFocusCapture={showPaneHalf}>
-          <KeepAlivePane active={rightPaneMode === 'debug'} render={() => <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} collapsedEventTurns={collapsedEventTurns} onCollapsedEventTurnsChange={setCollapsedEventTurns} onCreateMapping={profileReadOnly ? undefined : onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} scrollPositions={scrollPositions} onScrollPositionChange={onScrollPositionChange} networkInspector={networkInspector} onNetworkInspectorChange={setNetworkInspector} />} />
+          <KeepAlivePane active={rightPaneMode === 'debug'} render={() => <Inspector profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries} active={active} tab={inspectorTab} setTab={setInspectorTab} requestPreview={requestPreview} interactive={!isInteractionLocked(profile, 'inspector.open', active)} eventFilters={eventFilters} onEventFiltersChange={setEventFilters} collapsedEventTurns={collapsedEventTurns} onCollapsedEventTurnsChange={setCollapsedEventTurns} onCreateMapping={profileReadOnly ? undefined : onCreateMapping} selectedSequence={selectedRawSequence} selectedNetworkId={selectedNetworkId} onSelectEvent={onSelectEvent} scrollPositions={scrollPositions} onScrollPositionChange={onScrollPositionChange} networkInspector={networkInspector} onNetworkInspectorChange={setNetworkInspector} onAddCheck={onAddCheck} />} />
           <KeepAlivePane active={rightPaneMode === 'tests'} render={renderTestPane} />
           <KeepAlivePane active={rightPaneMode === 'adversarial'} render={renderTestPane} />
           <KeepAlivePane active={rightPaneMode === 'configure'} render={() => <SettingsWorkspace embedded section={configurationSection} onSectionChange={setConfigurationSection} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} mappingTestResult={mappingTestResult} connectionResult={connectionResult} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} profileDirty={profileDirty} diagnostics={diagnostics} readOnly={profileReadOnly} vscodeFeatures={hostKind === 'vscode'} environmentIds={environmentIds} post={post} scrollStateKey={configurationSection} scrollTop={scrollPositions[`configure.${configurationSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`configure.${configurationSection}`, value)} />} />
@@ -993,7 +1027,7 @@ export function inspectorTabCounts(snapshot: SessionSnapshot | undefined, networ
   };
 }
 
-export function Inspector({ profile, snapshot, runs = [], networkEntries = [], active = false, tab, setTab, requestPreview, full = false, interactive = true, eventFilters = normalizeInspectorEventFilters(), onEventFiltersChange = () => undefined, collapsedEventTurns = normalizeCollapsedEventTurns(), onCollapsedEventTurnsChange = () => undefined, onCreateMapping, selectedSequence, selectedNetworkId, onSelectEvent, scrollPositions = {}, onScrollPositionChange = () => undefined, networkInspector, onNetworkInspectorChange }: { profile?: TurnStageProfile; snapshot?: SessionSnapshot; runs?: LocalRunSummary[]; networkEntries?: NetworkExchange[]; active?: boolean; tab: InspectorTab; setTab: (tab: InspectorTab) => void; requestPreview: unknown; full?: boolean; interactive?: boolean; eventFilters?: InspectorEventFilters; onEventFiltersChange?: (filters: InspectorEventFilters) => void; collapsedEventTurns?: CollapsedEventTurns; onCollapsedEventTurnsChange?: (turns: CollapsedEventTurns) => void; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; selectedNetworkId?: string; onSelectEvent?: (event?: Record<string, unknown>) => void; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; onScrollPositionChange?: (key: ScrollPositionKey, value: number) => void; networkInspector?: NetworkInspectorState; onNetworkInspectorChange?: (state: NetworkInspectorState) => void }): React.JSX.Element {
+export function Inspector({ profile, snapshot, runs = [], networkEntries = [], active = false, tab, setTab, requestPreview, full = false, interactive = true, eventFilters = normalizeInspectorEventFilters(), onEventFiltersChange = () => undefined, collapsedEventTurns = normalizeCollapsedEventTurns(), onCollapsedEventTurnsChange = () => undefined, onCreateMapping, selectedSequence, selectedNetworkId, onSelectEvent, scrollPositions = {}, onScrollPositionChange = () => undefined, networkInspector, onNetworkInspectorChange, onAddCheck }: { profile?: TurnStageProfile; snapshot?: SessionSnapshot; runs?: LocalRunSummary[]; networkEntries?: NetworkExchange[]; active?: boolean; tab: InspectorTab; setTab: (tab: InspectorTab) => void; requestPreview: unknown; full?: boolean; interactive?: boolean; eventFilters?: InspectorEventFilters; onEventFiltersChange?: (filters: InspectorEventFilters) => void; collapsedEventTurns?: CollapsedEventTurns; onCollapsedEventTurnsChange?: (turns: CollapsedEventTurns) => void; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; selectedNetworkId?: string; onSelectEvent?: (event?: Record<string, unknown>) => void; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; onScrollPositionChange?: (key: ScrollPositionKey, value: number) => void; networkInspector?: NetworkInspectorState; onNetworkInspectorChange?: (state: NetworkInspectorState) => void; onAddCheck?: (event: Record<string, unknown>) => void }): React.JSX.Element {
   const availableTabs: InspectorTab[] = profile && !componentVisible(profile, 'metrics') ? inspectorTabs.filter((item): item is InspectorTab => item !== 'Metrics') : [...inspectorTabs];
   const effectiveTab = availableTabs.includes(tab) ? tab : availableTabs[0]!;
   const tabCounts = inspectorTabCounts(snapshot, networkEntries, runs);
@@ -1032,7 +1066,7 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
           {eventKind === 'raw' && <button type="button" className="event-problems-filter" aria-pressed={filters.issue === 'problem'} disabled={!interactive} onClick={() => updateFilters({ issue: filters.issue === 'problem' ? 'all' : 'problem' })}>{t('Problems only')}</button>}
           <span role="status">{t('{filtered} of {total}', { filtered: formatNumber(filtered.length), total: formatNumber(data.length) })}</span>
         </div>}
-        {filtered.length ? <VirtualEvents items={filtered} messages={snapshot?.messages ?? []} kind={eventKind} eventDeltas={eventDeltas} terminalRawSequences={terminalRawSequences} label={t(effectiveTab)} collapsedTurnKeys={collapsedEventTurns[eventKind]} onCollapsedTurnKeysChange={(keys) => onCollapsedEventTurnsChange({ ...collapsedEventTurns, [eventKind]: keys })} onCreateMapping={effectiveTab === 'Raw Events' && interactive ? onCreateMapping : undefined} selectedSequence={selectedSequence} onSelectEvent={onSelectEvent} initialScrollTop={scrollPositions[`events.${eventKind}`]} onScrollTopChange={(value) => onScrollPositionChange(`events.${eventKind}`, value)} /> : <EventEmptyState eventKind={eventKind} filtersActive={filtersActive} active={active} canStart={snapshot?.sessionState === 'notStarted'} interactive={interactive} onClear={clearEventFilters} onStart={() => post({ type: 'session.start' })} />}
+        {filtered.length ? <VirtualEvents items={filtered} messages={snapshot?.messages ?? []} kind={eventKind} eventDeltas={eventDeltas} terminalRawSequences={terminalRawSequences} label={t(effectiveTab)} collapsedTurnKeys={collapsedEventTurns[eventKind]} onCollapsedTurnKeysChange={(keys) => onCollapsedEventTurnsChange({ ...collapsedEventTurns, [eventKind]: keys })} onCreateMapping={effectiveTab === 'Raw Events' && interactive ? onCreateMapping : undefined} onAddCheck={effectiveTab === 'Normalized' && interactive ? onAddCheck : undefined} selectedSequence={selectedSequence} onSelectEvent={onSelectEvent} initialScrollTop={scrollPositions[`events.${eventKind}`]} onScrollTopChange={(value) => onScrollPositionChange(`events.${eventKind}`, value)} /> : <EventEmptyState eventKind={eventKind} filtersActive={filtersActive} active={active} canStart={snapshot?.sessionState === 'notStarted'} interactive={interactive} onClear={clearEventFilters} onStart={() => post({ type: 'session.start' })} />}
       </div>
       : effectiveTab === 'Metrics'
         ? <MetricGrid metrics={snapshot?.metrics} enabled={profile?.metrics?.enabled} />
@@ -1289,7 +1323,7 @@ export function flattenEventTree(groups: readonly EventTurnGroup[], collapsedTur
   return rows;
 }
 
-export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas, terminalRawSequences = new Set<number>(), label, collapsedTurnKeys, onCollapsedTurnKeysChange, onCreateMapping, selectedSequence, onSelectEvent, initialScrollTop, onScrollTopChange }: { items: Array<Record<string, any>>; messages?: readonly ChatMessage[]; kind?: 'raw' | 'normalized'; eventDeltas?: ReadonlyMap<number, number | undefined>; terminalRawSequences?: ReadonlySet<number>; label: string; collapsedTurnKeys?: readonly string[]; onCollapsedTurnKeysChange?: (keys: string[]) => void; onCreateMapping?: (event: RawStreamEvent) => void; selectedSequence?: number; onSelectEvent?: (event?: Record<string, unknown>) => void; initialScrollTop?: number; onScrollTopChange?: (value: number) => void }): React.JSX.Element {
+export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas, terminalRawSequences = new Set<number>(), label, collapsedTurnKeys, onCollapsedTurnKeysChange, onCreateMapping, onAddCheck, selectedSequence, onSelectEvent, initialScrollTop, onScrollTopChange }: { items: Array<Record<string, any>>; messages?: readonly ChatMessage[]; kind?: 'raw' | 'normalized'; eventDeltas?: ReadonlyMap<number, number | undefined>; terminalRawSequences?: ReadonlySet<number>; label: string; collapsedTurnKeys?: readonly string[]; onCollapsedTurnKeysChange?: (keys: string[]) => void; onCreateMapping?: (event: RawStreamEvent) => void; onAddCheck?: (event: Record<string, unknown>) => void; selectedSequence?: number; onSelectEvent?: (event?: Record<string, unknown>) => void; initialScrollTop?: number; onScrollTopChange?: (value: number) => void }): React.JSX.Element {
   const rowHeight = 32;
   const listRef = useRef<HTMLDivElement>(null);
   const restoredScroll = useRef(false);
@@ -1462,7 +1496,7 @@ export function VirtualEvents({ items, messages = [], kind = 'raw', eventDeltas,
       })}</div></div>}
     </div>
     {selectedItem && <section id={selectedDetailId} className="event-detail" aria-labelledby={`${selectedDetailId}-heading`}>
-      <header><div className="event-detail__heading"><strong id={`${selectedDetailId}-heading`}>{t('Event payload')}</strong><span>{eventLabel(selectedItem)} · {eventTurnDescription(selectedItem)} · {t('Total {duration}', { duration: formatDuration(selectedItem.elapsedMs ?? 0) })}{eventDeltas ? ` · ${t('Gap {duration}', { duration: selectedDelta === undefined ? '—' : formatDuration(selectedDelta) })}` : ''}</span></div><div className="event-detail__actions">{onCreateMapping && <button onClick={() => onCreateMapping(selectedItem as RawStreamEvent)}>{t('Create mapping draft')}</button>}<IconButton type="button" icon="close" label={t('Close event payload')} onClick={closeEventDetail} /></div></header>
+      <header><div className="event-detail__heading"><strong id={`${selectedDetailId}-heading`}>{t('Event payload')}</strong><span>{eventLabel(selectedItem)} · {eventTurnDescription(selectedItem)} · {t('Total {duration}', { duration: formatDuration(selectedItem.elapsedMs ?? 0) })}{eventDeltas ? ` · ${t('Gap {duration}', { duration: selectedDelta === undefined ? '—' : formatDuration(selectedDelta) })}` : ''}</span></div><div className="event-detail__actions">{onCreateMapping && <button onClick={() => onCreateMapping(selectedItem as RawStreamEvent)}>{t('Create mapping draft')}</button>}{onAddCheck && eventCheckOptions(selectedItem).length > 0 && <button type="button" onClick={() => onAddCheck(selectedItem)}>{t('Add as check')}</button>}<IconButton type="button" icon="close" label={t('Close event payload')} onClick={closeEventDetail} /></div></header>
       <JsonBlock value={selectedItem} />
     </section>}
   </div>;

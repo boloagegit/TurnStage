@@ -273,6 +273,9 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     if (message.type === 'visual.baseline.save' || message.type === 'visual.compare') post({ type: 'visual.error', operation: message.type === 'visual.baseline.save' ? 'baseline' : 'compare', message: detail }, message.requestId);
+    // Case editors wait for a case-specific answer; a generic error would leave them loading.
+    else if (message.type === 'contract.case.request' || message.type === 'contract.case.save' || message.type === 'contract.case.delete') post({ type: 'contract.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: detail, conflict: /changed/iu.test(detail) }, message.requestId);
+    else if (message.type === 'adversarial.case.request' || message.type === 'adversarial.case.save' || message.type === 'adversarial.case.delete') post({ type: 'adversarial.case.error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: detail, conflict: /changed/iu.test(detail) }, message.requestId);
     else post({ type: 'request.error', error: { type: 'WebRuntimeError', message: detail } }, message.requestId);
   }
 }
