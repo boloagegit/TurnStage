@@ -217,7 +217,9 @@ export function MobileChatPreview({
   const trusted = snapshot?.trusted === true;
   const opening = snapshot?.opening ?? staticOpening(profile);
   const statusText = previewStatus(snapshot, active, continuationBlocked);
-  const sessionState = active ? snapshot?.turnState ?? 'streaming' : snapshot?.sessionState ?? 'notStarted';
+  // A ready session whose last turn failed or was stopped says so instead of a green Ready.
+  const lastTurnState = snapshot?.sessionState === 'ready' && (snapshot.turnState === 'failed' || snapshot.turnState === 'aborted') ? snapshot.turnState : undefined;
+  const sessionState = active ? snapshot?.turnState ?? 'streaming' : lastTurnState === 'failed' ? 'lastTurnFailed' : lastTurnState === 'aborted' ? 'lastTurnStopped' : snapshot?.sessionState ?? 'notStarted';
   const previewId = useId();
   const presetId = CHAT_VIEWPORT_PRESETS.some((preset) => preset.id === viewport.preset) ? viewport.preset : viewport.preset === 'responsive' ? 'responsive' : 'custom';
   const responsive = presetId === 'responsive';
@@ -1388,11 +1390,19 @@ function safeJson(value: unknown): string {
   }
 }
 
+/** Plain-language names for session and turn states; raw identifiers such as waitingStart are never shown. */
+const STATE_LABELS: Record<string, string> = {
+  idle: 'Idle', submitting: 'Sending', waitingStart: 'Waiting for response', streaming: 'Streaming', stopping: 'Stopping', completed: 'Completed',
+  failed: 'Failed', aborted: 'Stopped', notStarted: 'Not started', loadingOpening: 'Loading opening', ready: 'Ready', resetting: 'Resetting',
+  pending: 'Pending', running: 'Running', lastTurnFailed: 'Last turn failed', lastTurnStopped: 'Last turn stopped',
+};
+
 function humanize(value: string): string {
-  const fallback = humanizeFallback(value);
+  const label = STATE_LABELS[value];
+  if (label) return t(label);
   const stateKey = 'state.' + value;
   const translated = t(stateKey);
-  return translated && translated !== stateKey ? translated : t(fallback);
+  return translated && translated !== stateKey ? translated : t(humanizeFallback(value));
 }
 
 function humanizeRole(value: ChatMessage['role']): string {

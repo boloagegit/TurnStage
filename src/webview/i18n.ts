@@ -1698,6 +1698,19 @@ const zhTw: Record<string, string> = {
   "Save as test": "存成測試",
   "Save as test up to this reply": "將到此回覆為止的內容存成測試",
   "Save this conversation as a regression test": "將此對話存成回歸測試",
+  "Sending": "送出中",
+  "Waiting for response": "等待回覆",
+  "Loading opening": "載入開場中",
+  "Resetting": "重設中",
+  "Pending": "等待中",
+  "Last turn failed": "上一輪失敗",
+  "Last turn stopped": "上一輪已停止",
+  "{count} configuration error.": "{count} 個設定錯誤。",
+  "{count} configuration errors.": "{count} 個設定錯誤。",
+  "{count} test case issue.": "{count} 個測試案例問題。",
+  "{count} test case issues.": "{count} 個測試案例問題。",
+  "Chat still works; affected cases cannot run until they are fixed.": "對話仍可使用；受影響的案例修正前無法執行。",
+  "Fix the Profile errors listed above before sending a message.": "請先修正上方列出的設定檔錯誤，再傳送訊息。",
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {

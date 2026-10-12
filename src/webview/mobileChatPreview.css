@@ -152,6 +152,7 @@
   color: var(--vscode-progressBar-background, var(--mcp-focus));
 }
 
+.mobile-chat-preview__session-state--lastTurnFailed,
 .mobile-chat-preview__session-state--failed {
   color: var(--mcp-danger-foreground);
 }
@@ -1632,3 +1633,4 @@
   .response-content-dialog { outline: 2px solid ButtonText; }
   .response-content-dialog__tabs button[aria-selected='true'] { outline: 2px solid Highlight; outline-offset: -2px; }
 }
+.mobile-chat-preview__session-state--lastTurnStopped { color: var(--mcp-muted); }
