@@ -48,8 +48,8 @@ try {
   await page.evaluate(() => { globalThis.__turnstageMessages.length = 0; });
   await dialog.getByRole('button', { name: 'Add check' }).click();
   const patch = await page.evaluate(() => globalThis.__turnstageMessages.find((message) => message.type === 'profile.patch'));
-  assert.deepEqual(patch.path, ['tests', 'scenarios', 0, 'assertions']);
-  assert.equal(patch.value.at(-1).path, 'events.normalized[*].type');
+  assert.deepEqual(patch.path, ['tests', 'scenarios']);
+  assert.equal(patch.value.find((item) => item.id === 'slow-stream-contract').assertions.at(-1).path, 'events.normalized[*].type');
   await page.getByText(/^Check added to Slow stream contract\./).waitFor();
 
   // A linked case is loaded, extended, and saved against the revision that was loaded.

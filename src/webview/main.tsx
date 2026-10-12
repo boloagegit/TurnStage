@@ -6,8 +6,9 @@ import { browserUuid } from '../shared/uuid';
 import { isSensitiveHeaderName, networkCurlCommand } from '../shared/curlCommand';
 import { ClipboardButton } from './ClipboardButton';
 import { AddCheckDialog } from './AddCheckDialog';
-import { checkTargets, eventCheckOptions, hasAssertion, type CheckTarget, type EventCheckOption } from './eventCheck';
-import type { ScenarioAssertionDefinition } from '../shared/types';
+import { checkTargets, eventCheckOptions, type CheckTarget, type EventCheckOption } from './eventCheck';
+import { applyCaseEdit, MarkCasesReadyContext, MAX_CASE_TAGS, planCaseEdits, type CaseEdit, type LinkedCaseJob } from './bulkCaseEdits';
+import type { ScenarioDefinition } from '../shared/types';
 import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ChatMessage, ConversationDirectory, ConnectionDoctorSummary, EvidenceTimelineEntry, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { mappingDraftFromRawEvent } from './configEditors';
 import { JsonViewer, safeJson } from './JsonViewer';
@@ -94,6 +95,19 @@ const savedInspectorTab = (savedState as { inspectorTab?: unknown } | undefined)
 
 function post(message: WebviewPayload): void { vscode.postMessage({ ...message, protocolVersion: PROTOCOL_VERSION, editorInstanceId: instanceId, requestId: browserUuid() }); }
 
+interface CaseEditResult { changed: TestCaseIdentity[]; unchanged: number; failed: string[]; missing: number }
+/** One notice for a bulk edit: what changed, then what was left as it was or failed. */
+export function caseEditNotice(result: CaseEditResult, done: (count: string, one: boolean) => string): OperationNotice {
+  const parts = [result.changed.length ? done(formatNumber(result.changed.length), result.changed.length === 1) : t('No cases changed.')];
+  if (result.unchanged) parts.push(t('{count} already up to date.', { count: formatNumber(result.unchanged) }));
+  if (result.missing) parts.push(t('{count} no longer exist.', { count: formatNumber(result.missing) }));
+  if (result.failed.length) parts.push(t('{count} could not be changed: {error}', { count: formatNumber(result.failed.length), error: result.failed[0]! }));
+  const message = parts.join(' ');
+  return result.failed.length ? errorNotice(message) : message;
+}
+
+interface CaseEditQueue extends CaseEditResult { edit: CaseEdit; jobs: LinkedCaseJob[]; index: number; stage: 'loading' | 'saving'; describe: (result: CaseEditResult) => OperationNotice }
+
 function App(): React.JSX.Element {
   const savedSection = isWorkspaceSection(savedState?.section) ? savedState.section : 'test';
   const [configurationSection, setConfigurationSection] = useState<SettingsSectionId>(isSettingsSectionId(savedState?.configurationSection) ? savedState.configurationSection : savedSection === 'test' ? 'general' : savedSection);
@@ -127,8 +141,8 @@ function App(): React.JSX.Element {
   const [linkedAdversarialCaseEditor, setLinkedAdversarialCaseEditor] = useState<LinkedAdversarialCaseEditorState>();
   const [contractCaseCatalog, setContractCaseCatalog] = useState<ContractCaseCatalog>();
   const [addCheckEvent, setAddCheckEvent] = useState<Record<string, unknown>>();
-  // A check headed for a linked case: load the case, append the check, save against the loaded revision.
-  const pendingCheck = useRef<{ sourcePath: string; scenarioId: string; name: string; assertion: ScenarioAssertionDefinition; stage: 'loading' | 'saving' }>(undefined);
+  // Edits to linked cases run one at a time: load the case, apply the edit, save or delete against the loaded revision.
+  const caseEditQueue = useRef<CaseEditQueue>(undefined);
   const [linkedContractCaseEditor, setLinkedContractCaseEditor] = useState<LinkedContractCaseEditorState>();
   const [campaignDashboard, setCampaignDashboard] = useState<CampaignDashboardV1>();
   const [testHistory, setTestHistory] = useState<{ profileId: string; runs: TestRunHistoryRecord[]; baselines?: TestBaselineIds }>();
@@ -138,6 +152,53 @@ function App(): React.JSX.Element {
   const [profile, setProfile] = useState<TurnStageProfile>(); const [snapshot, setSnapshot] = useState<SessionSnapshot>(); const [runs, setRuns] = useState<LocalRunSummary[]>([]); const [requestPreview, setRequestPreview] = useState<unknown>(); const [networkEntries, setNetworkEntries] = useState<NetworkExchange[]>([]); const [diagnostics, setDiagnostics] = useState<Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number ; scope?: ProfileIssueScope }>>([]); const [profileDirty, setProfileDirty] = useState(false); const [profileReadOnly, setProfileReadOnly] = useState(false); const [environmentIds, setEnvironmentIds] = useState<string[]>([]); const [hostKind, setHostKind] = useState<'vscode' | 'web'>('vscode'); const [notice, setNotice] = useState<OperationNotice>(''); const [mappingTestResult, setMappingTestResult] = useState<MappingTestResult>(); const [remoteName, setRemoteName] = useState<string>(); const [, setLocaleVersion] = useState(0);
   useEffect(() => { setSelectedTestCases(new Map()); }, [profile?.id]);
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
+  const finishCaseEdits = (queue: CaseEditQueue) => {
+    caseEditQueue.current = undefined;
+    setNotice(queue.describe(queue));
+    if (queue.edit.type === 'delete' && queue.changed.length) {
+      const removed = new Set(queue.changed.map(testCaseKey));
+      setSelectedTestCases((current) => new Map([...current].filter(([key]) => !removed.has(key))));
+    }
+  };
+  const requestQueuedCase = (job: LinkedCaseJob) => post(job.kind === 'adversarial' ? { type: 'adversarial.case.request', sourcePath: job.sourcePath, scenarioId: job.scenarioId } : { type: 'contract.case.request', sourcePath: job.sourcePath, scenarioId: job.scenarioId });
+  const queuedCaseJob = (kind: 'contract' | 'adversarial', sourcePath: string, scenarioId: string, stage?: CaseEditQueue['stage']): boolean => {
+    const queue = caseEditQueue.current;
+    const job = queue?.jobs[queue.index];
+    return Boolean(queue && job && job.kind === kind && job.sourcePath === sourcePath && job.scenarioId === scenarioId && (!stage || queue.stage === stage));
+  };
+  const advanceCaseEditQueue = (outcome: 'changed' | 'unchanged' | 'failed', error?: string) => {
+    const queue = caseEditQueue.current;
+    const job = queue?.jobs[queue.index];
+    if (!queue || !job) return;
+    if (outcome === 'changed') queue.changed.push(job.identity);
+    else if (outcome === 'unchanged') queue.unchanged += 1;
+    else queue.failed.push(error ?? t('Unknown error'));
+    queue.index += 1;
+    queue.stage = 'loading';
+    const next = queue.jobs[queue.index];
+    if (next) requestQueuedCase(next); else finishCaseEdits(queue);
+  };
+  const applyQueuedCaseEdit = (scenario: ScenarioDefinition, revision: string) => {
+    const queue = caseEditQueue.current;
+    const job = queue?.jobs[queue.index];
+    if (!queue || !job) return;
+    const result = applyCaseEdit(scenario, queue.edit);
+    if (result === undefined) { advanceCaseEditQueue('unchanged'); return; }
+    queue.stage = 'saving';
+    if (result === 'delete') post(job.kind === 'adversarial' ? { type: 'adversarial.case.delete', sourcePath: job.sourcePath, scenarioId: job.scenarioId, expectedRevision: revision } : { type: 'contract.case.delete', sourcePath: job.sourcePath, scenarioId: job.scenarioId, expectedRevision: revision });
+    else post(job.kind === 'adversarial' ? { type: 'adversarial.case.save', sourcePath: job.sourcePath, scenarioId: job.scenarioId, expectedRevision: revision, scenario: result } : { type: 'contract.case.save', sourcePath: job.sourcePath, scenarioId: job.scenarioId, expectedRevision: revision, scenario: result });
+  };
+  /** Applies one edit to the given cases: Profile cases in one patch, linked cases one by one. */
+  const editCases = (identities: readonly TestCaseIdentity[], edit: CaseEdit, describe: CaseEditQueue['describe']) => {
+    if (!profile || caseEditQueue.current) { if (caseEditQueue.current) setNotice(t('Another case edit is still in progress.')); return; }
+    const plan = planCaseEdits(profile, identities, edit, { contract: contractCaseCatalog, adversarial: adversarialCaseCatalog });
+    if (plan.inlineScenarios) post({ type: 'profile.patch', path: ['tests', 'scenarios'], value: plan.inlineScenarios });
+    const queue: CaseEditQueue = { edit, jobs: plan.jobs, index: 0, stage: 'loading', changed: [...plan.inlineChanged], unchanged: plan.inlineUnchanged, failed: [], missing: plan.missing, describe };
+    const first = plan.jobs[0];
+    if (!first) { finishCaseEdits(queue); return; }
+    caseEditQueue.current = queue;
+    requestQueuedCase(first);
+  };
   useEffect(() => {
     const listener = (event: MessageEvent<HostMessage>) => {
       if (!isHostMessage(event.data, instanceId)) return;
@@ -170,27 +231,19 @@ function App(): React.JSX.Element {
       else if (message.type === 'adversarial.operation') setNotice(message.artifactId ? { message: message.detail, artifactId: message.artifactId } : message.detail);
       else if (message.type === 'test.captured' || message.type === 'adversarial.captured') setNotice(message.detail);
       else if (message.type === 'adversarial.catalog') setAdversarialCaseCatalog(message.catalog);
+      else if ((message.type === 'contract.case.loaded' || message.type === 'adversarial.case.loaded') && queuedCaseJob(message.type.startsWith('adversarial') ? 'adversarial' : 'contract', message.detail.sourcePath, message.detail.scenario.id, 'loading')) applyQueuedCaseEdit(message.detail.scenario, message.detail.revision);
+      else if ((message.type === 'contract.case.saved' || message.type === 'adversarial.case.saved') && queuedCaseJob(message.type.startsWith('adversarial') ? 'adversarial' : 'contract', message.detail.sourcePath, message.detail.scenario.id, 'saving')) advanceCaseEditQueue('changed');
+      else if ((message.type === 'contract.case.deleted' || message.type === 'adversarial.case.deleted') && queuedCaseJob(message.type.startsWith('adversarial') ? 'adversarial' : 'contract', message.sourcePath, message.scenarioId, 'saving')) advanceCaseEditQueue('changed');
+      else if ((message.type === 'contract.case.error' || message.type === 'adversarial.case.error') && queuedCaseJob(message.type.startsWith('adversarial') ? 'adversarial' : 'contract', message.sourcePath, message.scenarioId)) advanceCaseEditQueue('failed', message.message);
       else if (message.type === 'adversarial.case.loaded') setLinkedAdversarialCaseEditor({ status: 'loaded', detail: message.detail });
       else if (message.type === 'adversarial.case.saved') { setLinkedAdversarialCaseEditor({ status: 'saved', detail: message.detail }); setNotice(t('Linked case saved and verified from disk.')); }
       else if (message.type === 'adversarial.case.deleted') { setLinkedAdversarialCaseEditor(undefined); setNotice(t('Deleted case {name}.', { name: message.scenarioId })); }
       else if (message.type === 'adversarial.case.error') { setLinkedAdversarialCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict }); setNotice(errorNotice(message.message)); }
       else if (message.type === 'contract.operation') setNotice(message.artifactId ? { message: message.detail, artifactId: message.artifactId } : message.detail);
       else if (message.type === 'contract.catalog') setContractCaseCatalog(message.catalog);
-      else if (message.type === 'contract.case.loaded') {
-        const pending = pendingCheck.current;
-        if (pending?.stage === 'loading' && pending.sourcePath === message.detail.sourcePath && pending.scenarioId === message.detail.scenario.id) {
-          const { scenario } = message.detail;
-          if (hasAssertion(scenario.assertions, pending.assertion)) { pendingCheck.current = undefined; setNotice(t('{name} already has this check.', { name: pending.name })); }
-          else { pending.stage = 'saving'; post({ type: 'contract.case.save', sourcePath: pending.sourcePath, scenarioId: pending.scenarioId, expectedRevision: message.detail.revision, scenario: { ...scenario, assertions: [...(scenario.assertions ?? []), pending.assertion] } }); }
-        } else setLinkedContractCaseEditor({ status: 'loaded', detail: message.detail });
-      }
-      else if (message.type === 'contract.case.saved') {
-        const pending = pendingCheck.current;
-        if (pending?.stage === 'saving' && pending.sourcePath === message.detail.sourcePath && pending.scenarioId === message.detail.scenario.id) { pendingCheck.current = undefined; setNotice(t('Check added to {name}.', { name: pending.name })); }
-        else { setLinkedContractCaseEditor({ status: 'saved', detail: message.detail }); setNotice(t('Linked test case saved and verified from disk.')); }
-      }
+      else if (message.type === 'contract.case.loaded') setLinkedContractCaseEditor({ status: 'loaded', detail: message.detail });
+      else if (message.type === 'contract.case.saved') { setLinkedContractCaseEditor({ status: 'saved', detail: message.detail }); setNotice(t('Linked test case saved and verified from disk.')); }
       else if (message.type === 'contract.case.deleted') { setLinkedContractCaseEditor(undefined); setNotice(t('Deleted case {name}.', { name: message.scenarioId })); }
-      else if (message.type === 'contract.case.error' && pendingCheck.current?.sourcePath === message.sourcePath && pendingCheck.current.scenarioId === message.scenarioId) { pendingCheck.current = undefined; setNotice(errorNotice(t('Could not add the check: {error}', { error: message.message }))); }
       else if (message.type === 'contract.case.error') { setLinkedContractCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict }); setNotice(errorNotice(message.message)); }
       else if (message.type === 'test.results') { setTestResults(message.results); setAutomationResults(message.automationResults ?? []); }
       else if (message.type === 'test.history') setTestHistory({ profileId: message.profileId, runs: message.runs, baselines: message.baselines });
@@ -296,16 +349,13 @@ function App(): React.JSX.Element {
   if (!profile) return <AppSkeleton splitPercent={splitPercent} />;
   const addCheck = (option: EventCheckOption, target: CheckTarget) => {
     setAddCheckEvent(undefined);
-    if (target.kind === 'inline') {
-      const scenario = profile.tests?.scenarios?.[target.index];
-      if (!scenario) return;
-      if (hasAssertion(scenario.assertions, option.assertion)) { setNotice(t('{name} already has this check.', { name: target.name })); return; }
-      post({ type: 'profile.patch', path: ['tests', 'scenarios', target.index, 'assertions'], value: [...(scenario.assertions ?? []), option.assertion] });
-      setNotice(t('Check added to {name}.', { name: target.name }));
-      return;
-    }
-    pendingCheck.current = { sourcePath: target.sourcePath, scenarioId: target.scenarioId, name: target.name, assertion: option.assertion, stage: 'loading' };
-    post({ type: 'contract.case.request', sourcePath: target.sourcePath, scenarioId: target.scenarioId });
+    const identity: TestCaseIdentity | undefined = target.kind === 'inline'
+      ? { profileId: profile.id, kind: 'contract', scenarioId: profile.tests?.scenarios?.[target.index]?.id ?? '' }
+      : (() => { const entry = contractCaseCatalog?.entries.find((item) => item.sourcePath === target.sourcePath && item.scenarioId === target.scenarioId); return entry ? { profileId: profile.id, kind: 'contract' as const, suiteId: entry.suiteId, scenarioId: entry.scenarioId } : undefined; })();
+    if (!identity?.scenarioId) return;
+    editCases([identity], { type: 'addCheck', assertion: option.assertion }, (result) => result.failed.length
+      ? errorNotice(t('Could not add the check: {error}', { error: result.failed[0]! }))
+      : result.changed.length ? t('Check added to {name}.', { name: target.name }) : t('{name} already has this check.', { name: target.name }));
   };
   return <main className="app">
     <a className="skip" href="#main-panel">{t('Skip to content')}</a>
@@ -350,6 +400,7 @@ function App(): React.JSX.Element {
         conversations={conversations}
         narrowView={narrowView} setNarrowView={setNarrowView}
         onAddCheck={(event) => { setAddCheckEvent(event); if (!contractCaseCatalog) post({ type: 'contract.catalog.request' }); }}
+        editCases={profileReadOnly ? undefined : editCases}
       />
     </section>
     {addCheckEvent && <AddCheckDialog options={eventCheckOptions(addCheckEvent)} targets={checkTargets(profile, contractCaseCatalog)} readOnly={profileReadOnly} onClose={() => setAddCheckEvent(undefined)} onAdd={addCheck} />}
@@ -359,7 +410,7 @@ function App(): React.JSX.Element {
 
 const EMPTY_HISTORY_RUNS: TestRunHistoryRecord[] = [];
 
-function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, automationResults, contractCaseCatalog, linkedContractCaseEditor, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, testsSection, setTestsSection, selectedTestCases, setSelectedTestCases, testHistory, selectedAutomationResultKey, setSelectedAutomationResultKey, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, profileReadOnly, hostKind, environmentIds, diagnostics, scrollPositions, onScrollPositionChange, expandedContractCaseId, setExpandedContractCaseId, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector, conversations, narrowView, setNarrowView, onAddCheck }: {
+function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, automationResults, contractCaseCatalog, linkedContractCaseEditor, adversarialCaseCatalog, linkedAdversarialCaseEditor, adversarialCaseCollection, setAdversarialCaseCollection, adversarialResultCollection, setAdversarialResultCollection, campaignDashboard, activeEvidenceId, activeTimeline, onCloseEvidence, connectionResult, active, continuationBlocked, draft, setDraft, send, inspectorTab, setInspectorTab, requestPreview, splitPercent, setSplitPercent, splitCustomized, setSplitCustomized, chatViewport, setChatViewport, eventFilters, setEventFilters, collapsedEventTurns, setCollapsedEventTurns, selectedMessageId, selectedRawSequence, selectedNetworkId, acceptedForms, messageActionFeedback, visualFeedback, onMessageActionFeedback, onSelectMessage, onSelectEvent, onCreateMapping, rightPaneMode, setRightPaneMode, testsSection, setTestsSection, selectedTestCases, setSelectedTestCases, testHistory, selectedAutomationResultKey, setSelectedAutomationResultKey, redTeamSection, setRedTeamSection, selectedCampaignId, setSelectedCampaignId, configurationSection, setConfigurationSection, mappingTestResult, remoteName, profileDirty, profileReadOnly, hostKind, environmentIds, diagnostics, scrollPositions, onScrollPositionChange, expandedContractCaseId, setExpandedContractCaseId, expandedAdversarialCaseId, setExpandedAdversarialCaseId, networkInspector, setNetworkInspector, conversations, narrowView, setNarrowView, onAddCheck, editCases }: {
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
   runs: LocalRunSummary[];
@@ -408,6 +459,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   onSelectEvent: (event?: Record<string, unknown>) => void;
   onCreateMapping: (event: RawStreamEvent) => void;
   onAddCheck?: (event: Record<string, unknown>) => void;
+  editCases?: (identities: readonly TestCaseIdentity[], edit: CaseEdit, describe: (result: CaseEditResult) => OperationNotice) => void;
   rightPaneMode: RightPaneMode;
   setRightPaneMode: (mode: RightPaneMode) => void;
   testsSection: AutomationSectionId;
@@ -629,7 +681,20 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
     if (activeAutomationEvidence?.result.evidenceId) setSelectedAutomationResultKey(activeAutomationEvidence.result.evidenceId);
   }, [activeAutomationEvidence?.result.evidenceId, setSelectedAutomationResultKey]);
   const replayActive = snapshot?.replay && (snapshot.replay.status === 'playing' || snapshot.replay.status === 'paused') ? snapshot.replay : undefined;
-  const renderTestPane = () => <LiveCaseStatusContext.Provider value={liveCaseStatuses}><CaseResultContext.Provider value={caseResultState}><div className="unified-test-workspace">
+  const markCasesReady = useMemo(() => editCases ? (identities: TestCaseIdentity[]) => editCases(identities, { type: 'markReady' }, (result) => caseEditNotice(result, (count, one) => one ? t('Marked 1 draft ready.') : t('Marked {count} drafts ready.', { count }))) : undefined, [editCases]);
+  const tagSelectedCases = (tag: string) => editCases?.(selectedForProfile, { type: 'tag', tag }, (result) => caseEditNotice(result, (count, one) => one ? t('Tagged 1 case with “{tag}”.', { tag }) : t('Tagged {count} cases with “{tag}”.', { count, tag })));
+  const deleteSelectedCases = () => {
+    const cases = selectedForProfile;
+    const count = formatNumber(cases.length);
+    confirmHistoryAction({
+      title: t(cases.length === 1 ? 'Delete 1 case?' : 'Delete {count} cases?', { count }),
+      detail: t('Cases in linked suite files are removed from those files. Recorded results stay in run history.'),
+      actionLabel: t('Delete cases'),
+      tone: 'danger',
+      onConfirm: () => editCases?.(cases, { type: 'delete' }, (result) => caseEditNotice(result, (deleted, one) => one ? t('Deleted 1 case.') : t('Deleted {count} cases.', { count: deleted }))),
+    });
+  };
+  const renderTestPane = () => <LiveCaseStatusContext.Provider value={liveCaseStatuses}><CaseResultContext.Provider value={caseResultState}><MarkCasesReadyContext.Provider value={markCasesReady}><div className="unified-test-workspace">
     <div className="unified-test-workspace__toolbar">
       <div className="unified-test-workspace__sections" role="tablist" aria-label={t('Test sections')} onKeyDown={(event) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -659,9 +724,9 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
       {testKind === 'contract' && <AutomationWorkspace unified profile={profile} readOnly={profileReadOnly} automationResults={automationResults} campaignDashboard={campaignDashboard} testOperation={testOperation} trusted={snapshot?.trusted === true} vscodeFeatures={hostKind === 'vscode'} selectedCaseKeys={selectedCaseKeys} onToggleCase={toggleTestCase} onToggleCases={toggleTestCases} post={post} scrollTop={scrollPositions[`tests.${testsSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`tests.${testsSection}`, value)} activeSection={testsSection} onActiveSectionChange={setTestsSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedContractCaseId} onExpandedCaseIdChange={setExpandedContractCaseId} selectedResultKey={selectedAutomationResultKey} onSelectedResultKeyChange={setSelectedAutomationResultKey} linkedCaseCatalog={contractCaseCatalog} linkedCaseEditor={linkedContractCaseEditor} />}
       {testKind === 'adversarial' && <AdversarialWorkspace unified profile={profile} readOnly={profileReadOnly} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} trusted={snapshot?.trusted === true} vscodeFeatures={hostKind === 'vscode'} selectedCaseKeys={selectedCaseKeys} onToggleCase={toggleTestCase} onToggleCases={toggleTestCases} post={post} scrollTop={scrollPositions[`adversarial.${redTeamSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`adversarial.${redTeamSection}`, value)} activeSection={redTeamSection === 'timeline' && activeEvidence ? 'timeline' : activeTestSection === 'scenarios' ? 'cases' : 'results'} onActiveSectionChange={setRedTeamSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} linkedCaseCatalog={adversarialCaseCatalog} linkedCaseEditor={linkedAdversarialCaseEditor} caseCollection={adversarialCaseCollection} onCaseCollectionChange={setAdversarialCaseCollection} resultCollection={adversarialResultCollection} onResultCollectionChange={setAdversarialResultCollection} />}
     </div>
-    {activeTestSection === 'scenarios' && (selectedForProfile.length > 0 || selectionNotice || (completedRunForCurrentKind && !latestRunForKind)) && <div className="unified-test-workspace__run-actions" role="region" aria-label={t('Selected cases')}>{selectedForProfile.length > 0 && <span className="unified-test-workspace__selection-count">{t(selectedForProfile.length === 1 ? '1 case selected' : '{count} cases selected', { count: formatNumber(selectedForProfile.length) })}</span>}{selectedForProfile.length > 0 && <button type="button" onClick={() => { setSelectedTestCases((current) => new Map([...current].filter(([, item]) => item.profileId !== profile.id || item.kind !== testKind))); setSelectionNotice(undefined); }}>{t('Clear selection')}</button>}{completedRunForCurrentKind && !latestRunForKind && <button type="button" onClick={() => selectTestSection('results')}>{t('View test results')}</button>}{selectionNotice && <span role="alert">{selectionNotice}</span>}{selectedForProfile.length > 0 && <button type="button" className="primary" disabled={!selectedForProfile.length || isTestRunActive(testOperation)} onClick={() => { if (selectedRunAvailability.unresolved) { setSelectionNotice(t('Some selected cases are no longer available. Refresh the list before running.')); return; } if (selectedRunAvailability.unavailable) { setSelectionNotice(t('Some selected cases need review or are not supported in this app. Open or remove them before running.')); return; } setSelectionNotice(undefined); post({ type: 'test.runSelection', cases: selectedForProfile }); }}>{t('Run selected ({count})', { count: formatNumber(selectedForProfile.length) })}</button>}</div>}
+    {activeTestSection === 'scenarios' && (selectedForProfile.length > 0 || selectionNotice || (completedRunForCurrentKind && !latestRunForKind)) && <div className="unified-test-workspace__run-actions" role="region" aria-label={t('Selected cases')}>{selectedForProfile.length > 0 && <span className="unified-test-workspace__selection-count">{t(selectedForProfile.length === 1 ? '1 case selected' : '{count} cases selected', { count: formatNumber(selectedForProfile.length) })}</span>}{selectedForProfile.length > 0 && <button type="button" onClick={() => { setSelectedTestCases((current) => new Map([...current].filter(([, item]) => item.profileId !== profile.id || item.kind !== testKind))); setSelectionNotice(undefined); }}>{t('Clear selection')}</button>}{selectedForProfile.length > 0 && editCases && <SelectionEditActions disabled={isTestRunActive(testOperation)} onTag={tagSelectedCases} onDelete={deleteSelectedCases} />}{completedRunForCurrentKind && !latestRunForKind && <button type="button" onClick={() => selectTestSection('results')}>{t('View test results')}</button>}{selectionNotice && <span role="alert">{selectionNotice}</span>}{selectedForProfile.length > 0 && <button type="button" className="primary" disabled={!selectedForProfile.length || isTestRunActive(testOperation)} onClick={() => { if (selectedRunAvailability.unresolved) { setSelectionNotice(t('Some selected cases are no longer available. Refresh the list before running.')); return; } if (selectedRunAvailability.unavailable) { setSelectionNotice(t('Some selected cases need review or are not supported in this app. Open or remove them before running.')); return; } setSelectionNotice(undefined); post({ type: 'test.runSelection', cases: selectedForProfile }); }}>{t('Run selected ({count})', { count: formatNumber(selectedForProfile.length) })}</button>}</div>}
     {historyConfirmation}
-  </div></CaseResultContext.Provider></LiveCaseStatusContext.Provider>;
+  </div></MarkCasesReadyContext.Provider></CaseResultContext.Provider></LiveCaseStatusContext.Provider>;
   return <div className="test-surface" data-layout={narrow ? 'narrow' : 'wide'}>
     <div className="test-surface__header">
       {replayActive && <ReplayOperationStatus replay={replayActive} onOpenControls={() => { setRightPaneMode('debug'); setInspectorTab('Runs'); }} />}
@@ -1845,3 +1910,22 @@ export function rawSequencesForMessage(message?: ChatMessage): number[] {
 
 function terminalAnnouncement(state?: string): string { if (state === 'completed') return t('Response completed'); if (state === 'failed') return t('Response failed'); if (state === 'aborted') return t('Response stopped'); return ''; }
 if (rootElement) createRoot(rootElement).render(<App />);
+
+/** Tag or delete the selected cases. Tagging asks for the tag inline; VS Code webviews cannot show prompts. */
+function SelectionEditActions({ disabled, onTag, onDelete }: { disabled: boolean; onTag: (tag: string) => void; onDelete: () => void }): React.JSX.Element {
+  const [tag, setTag] = useState<string>();
+  const input = useRef<HTMLInputElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (tag === '') input.current?.focus(); }, [tag]);
+  const close = () => { setTag(undefined); requestAnimationFrame(() => trigger.current?.focus()); };
+  const apply = () => { const value = tag?.trim(); if (!value) { input.current?.focus(); return; } onTag(value); close(); };
+  if (tag !== undefined) return <form className="selection-tag-form" onSubmit={(event) => { event.preventDefault(); apply(); }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } }}>
+    <label><span className="sr-only">{t('Tag to add')}</span><input ref={input} value={tag} maxLength={64} placeholder={t('Tag to add')} onChange={(event) => setTag(event.target.value)} /></label>
+    <button type="submit" disabled={disabled || !tag.trim()}>{t('Add tag')}</button>
+    <button type="button" onClick={close}>{t('Cancel')}</button>
+  </form>;
+  return <>
+    <button ref={trigger} type="button" disabled={disabled} title={t('Cases keep at most {count} tags.', { count: formatNumber(MAX_CASE_TAGS) })} onClick={() => setTag('')}>{t('Add tag…')}</button>
+    <button type="button" disabled={disabled} onClick={onDelete}>{t('Delete…')}</button>
+  </>;
+}
