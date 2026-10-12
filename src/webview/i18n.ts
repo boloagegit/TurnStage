@@ -7,6 +7,8 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Default environment': '預設環境',
+  '{id} (not found)': '{id}（找不到）',
   'Search cases': '搜尋案例',
   'No test cases yet.': '還沒有測試案例。',
   'No cases match the current search.': '沒有符合搜尋條件的案例。',

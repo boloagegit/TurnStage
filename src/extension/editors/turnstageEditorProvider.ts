@@ -225,7 +225,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       }
       const parsed = this.codec.parse(text); const envEntries = await this.environments.discover(document.uri); if (disposed || document.version !== version) return; const issues = this.validator.validate(parsed.profile, parsed.tree, envEntries.map((item) => item.environment)); this.publishDiagnostics(document, issues);
       panel.title = profileEditorTitle(parsed.profile?.name, resourceTitle);
-      profileSnapshot = { type: 'profile.snapshot', profile: parsed.profile, parseError: parsed.errors.length ? localize('Invalid JSONC') : undefined, version: document.version, environments: envEntries.map((item) => item.environment.id) };
+      profileSnapshot = { type: 'profile.snapshot', profile: parsed.profile, parseError: parsed.errors.length ? localize('Invalid JSONC') : undefined, version: document.version, environments: [...new Set([...envEntries.map((item) => item.environment.id), builtInEnvironment().id])] };
       validationSnapshot = { type: 'profile.validation', diagnostics: withIssueScope(text, issues) };
       latestConnectionResult = undefined;
       logAt(this.output, 'debug', `[profile] loaded ${parsed.profile?.id ?? document.uri.toString()} at document version ${version}`);

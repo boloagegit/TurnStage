@@ -155,6 +155,8 @@ export interface SettingsWorkspaceProps {
   readOnly?: boolean;
   /** Whether controls backed only by the VS Code Extension Host are available. */
   vscodeFeatures?: boolean;
+  /** Environment IDs the host can resolve for this Profile. */
+  environmentIds?: readonly string[];
 }
 
 type PatchPath = Array<string | number>;
@@ -205,7 +207,8 @@ export function SettingsWorkspace({
   scrollTop,
   onScrollTopChange,
   readOnly = false,
-  vscodeFeatures = true
+  vscodeFeatures = true,
+  environmentIds = []
 }: SettingsWorkspaceProps): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
   useRestoredScrollPosition(scrollRef, scrollStateKey, scrollTop);
@@ -258,7 +261,7 @@ export function SettingsWorkspace({
           </div>
           {readOnly && <ReadOnlyNotice post={post} />}
           <fieldset className="settings-editable-region" disabled={readOnly}>
-          {active.id === 'general' && <GeneralSection profile={profile} snapshot={snapshot} post={post} patch={patch} vscodeFeatures={vscodeFeatures} />}
+          {active.id === 'general' && <GeneralSection profile={profile} snapshot={snapshot} post={post} patch={patch} vscodeFeatures={vscodeFeatures} environmentIds={environmentIds} />}
           {active.id === 'opening-flow' && <OpeningFlowSection profile={profile} post={post} />}
           {active.id === 'request' && <RequestSection profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} connectionResult={connectionResult} post={post} patch={patch} vscodeFeatures={vscodeFeatures} />}
           {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
@@ -380,7 +383,7 @@ export function AdversarialWorkspace({ profile, post, testResults = [], campaign
   </div>;
 }
 
-function GeneralSection({ profile, snapshot, post, patch, vscodeFeatures }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; post: SettingsWorkspacePost; patch: (path: PatchPath, value: unknown) => void; vscodeFeatures: boolean }): React.JSX.Element {
+function GeneralSection({ profile, snapshot, post, patch, vscodeFeatures, environmentIds }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; post: SettingsWorkspacePost; patch: (path: PatchPath, value: unknown) => void; vscodeFeatures: boolean; environmentIds: readonly string[] }): React.JSX.Element {
   const controls = profile.controls ?? [];
   return <div className="settings-section-stack">
     <section className="settings-card" aria-labelledby="general-profile-heading">
@@ -396,7 +399,13 @@ function GeneralSection({ profile, snapshot, post, patch, vscodeFeatures }: { pr
           <PatchInput id="settings-profile-description" value={profile.description ?? ''} onCommit={(value) => patch(['description'], value || undefined)} multiline rows={3} />
         </SettingField>
         <SettingField label={t('Environment ID')} id="settings-profile-environment" hint={t(hostText('The environment is resolved by the Extension Host when a run starts.', 'The environment is resolved in this browser when a request is sent.'))}>
-          <PatchInput id="settings-profile-environment" value={profile.environment ?? ''} onCommit={(value) => patch(['environment'], value || undefined)} autoComplete="off" placeholder="local" />
+          {environmentIds.length
+            ? <select id="settings-profile-environment" value={profile.environment ?? ''} onChange={(event) => patch(['environment'], event.target.value || undefined)}>
+              {!profile.environment && <option value="">{t('Default environment')}</option>}
+              {environmentIds.map((id) => <option key={id} value={id}>{id}</option>)}
+              {profile.environment && !environmentIds.includes(profile.environment) && <option value={profile.environment}>{t('{id} (not found)', { id: profile.environment })}</option>}
+            </select>
+            : <PatchInput id="settings-profile-environment" value={profile.environment ?? ''} onCommit={(value) => patch(['environment'], value || undefined)} autoComplete="off" placeholder="local" />}
         </SettingField>
         <SettingField label={t('Schema version')} id="settings-profile-version" hint={t('Schema migrations are handled by TurnStage.')}>
           <input id="settings-profile-version" value={String(profile.version)} readOnly aria-readonly="true" />

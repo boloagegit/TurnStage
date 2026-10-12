@@ -1,5 +1,7 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Default environment': '既定の環境',
+  '{id} (not found)': '{id}（見つかりません）',
   'Test case saved: {name}': 'テストケースを保存しました：{name}',
   'No visual baseline for this viewport. Save one first.': 'この表示サイズの比較元はありません。先に保存してください。',
   'Replace visual baseline for this viewport?': 'この表示サイズの比較元を置き換えますか？',
