@@ -13,6 +13,7 @@ import { RequestAuthorizationService } from '../security/requestAuthorization';
 import { isActive, SessionController } from '../runtime/sessionController';
 import { MappingEngine } from '../mapping/mappingEngine';
 import { localize } from '../l10n';
+import { defaultExportUri } from '../exportLocation';
 import { validateFormSubmission } from './formSubmission';
 import { resolveDisplayLanguage, textDirection } from '../displayLanguage';
 import { profileEditorTitle } from './profileEditorTitle';
@@ -200,7 +201,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       const delta = sessionDeltaTracker.next(payload);
       if (delta) queueSessionPost({ type: 'session.delta', delta });
       else { sessionDeltaTracker.checkpoint(payload); queueSessionPost(payload); }
-    }, boundedNumber(vscode.workspace.getConfiguration('turnstage').get('streamBatchIntervalMs', 32), 16, 1000, 32), Number.MAX_SAFE_INTEGER);
+    }, boundedNumber(vscode.workspace.getConfiguration('turnstage').get('streamBatchIntervalMs', 32), 16, 100, 32), Number.MAX_SAFE_INTEGER);
     const syncTurnActiveContext = () => {
       if (panel.active) observeBackground(vscode.commands.executeCommand('setContext', 'turnstage.turnActive', Boolean(controller && isActive(controller.snapshot.turnState))), 'set-context');
     };
@@ -640,7 +641,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           if (!this.scenarioTests) throw new Error('Campaign runtime is unavailable.');
           const run = await this.scenarioTests.getCampaignRun(document.uri, message.runId);
           if (!run || run.campaignId !== message.campaignId) throw new Error('Campaign run was not found.');
-          const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`${run.campaignId}-${run.id}.results.jsonl`), filters: { JSONL: ['jsonl'] } });
+          const uri = await vscode.window.showSaveDialog({ defaultUri: defaultExportUri(`${run.campaignId}-${run.id}.results.jsonl`, document.uri), filters: { JSONL: ['jsonl'] } });
           if (uri) {
             await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(serializeCampaignResultsJsonl(run)));
             await post({ type: 'campaign.exported', ...registerArtifact(uri) }, message.requestId);
@@ -958,7 +959,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     if (!profile) throw new Error(localize('Profile could not be parsed.'));
     if (action === 'importJsonc' || action === 'importCsv') throw new Error(localize('Importing a browser-local suite copy is available only in TurnStage Web.'));
     if (action === 'csvTemplate') {
-      const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file('turnstage-tests-template.csv'), filters: { CSV: ['csv'] } });
+      const uri = await vscode.window.showSaveDialog({ defaultUri: defaultExportUri('turnstage-tests-template.csv', document.uri), filters: { CSV: ['csv'] } });
       if (!uri) return cancelledOperation();
       await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(contractCsvTemplate()));
       return completedOperation(localize('Test CSV template exported.'), uri);
@@ -970,7 +971,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       const issues = validateContractSuite(suite);
       if (issues.length) throw new Error(issues.slice(0, 20).map((issue) => `${issue.path}: ${issue.message}`).join('\n'));
       const csv = action === 'exportCsv';
-      const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`${profile.id}.tests.${csv ? 'csv' : 'jsonc'}`), filters: csv ? { CSV: ['csv'] } : { JSONC: ['jsonc'] } });
+      const uri = await vscode.window.showSaveDialog({ defaultUri: defaultExportUri(`${profile.id}.tests.${csv ? 'csv' : 'jsonc'}`, document.uri), filters: csv ? { CSV: ['csv'] } : { JSONC: ['jsonc'] } });
       if (!uri) return cancelledOperation();
       await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(csv ? serializeContractCsv(scenarios) : serializeContractSuite(suite)));
       return completedOperation(localize('Exported {count} test cases.', { count: String(scenarios.length) }), uri);
@@ -997,7 +998,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const profile = this.codec.parse(document.getText()).profile;
     if (!profile) throw new Error(localize('Profile could not be parsed.'));
     if (action === 'csvTemplate') {
-      const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file('turnstage-adversarial-template.csv'), filters: { CSV: ['csv'] } });
+      const uri = await vscode.window.showSaveDialog({ defaultUri: defaultExportUri('turnstage-adversarial-template.csv', document.uri), filters: { CSV: ['csv'] } });
       if (!uri) return cancelledOperation();
       await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(adversarialCsvTemplate()));
       return completedOperation(localize('CSV template exported.'), uri);
@@ -1008,7 +1009,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       const jsonc = action === 'exportJsonc';
       const jsonl = action === 'exportJsonl';
       const uri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(`${profile.id}.adversarial.${jsonc ? 'jsonc' : jsonl ? 'jsonl' : 'csv'}`),
+        defaultUri: defaultExportUri(`${profile.id}.adversarial.${jsonc ? 'jsonc' : jsonl ? 'jsonl' : 'csv'}`, document.uri),
         filters: jsonc ? { JSONC: ['jsonc'] } : jsonl ? { JSONL: ['jsonl'] } : { CSV: ['csv'] },
       });
       if (!uri) return cancelledOperation();
@@ -1166,7 +1167,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       else await this.patchDocument(document, ['tests'], { scenarios: [scenario] });
     } else if (destination.value === 'new') {
       const suffix = kind === 'adversarial' ? 'adversarial.jsonc' : 'tests.jsonc';
-      const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`${scenario.id}.${suffix}`), filters: { JSONC: ['jsonc'] }, saveLabel: localize('Create Test Suite') });
+      const uri = await vscode.window.showSaveDialog({ defaultUri: defaultExportUri(`${scenario.id}.${suffix}`, document.uri), filters: { JSONC: ['jsonc'] }, saveLabel: localize('Create Test Suite') });
       if (!uri) return undefined;
       const contents = kind === 'adversarial'
         ? serializeAdversarialSuite(createAdversarialSuite(`${scenario.id}-suite`, `${scenario.name} suite`, [scenario]))

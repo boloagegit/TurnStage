@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { CampaignRunRecordV1, ScenarioReportFormat, ScenarioReportingDefinition } from '../../shared/types';
 import { localize } from '../l10n';
+import { defaultExportUri } from '../exportLocation';
 import { isSafeReportDirectory } from './scenarioConfig';
 import { createScenarioReport, serializeAdversarialEventsCsv, serializeAdversarialFindingsCsv, serializeAdversarialNetworkCsv, serializeAdversarialSummaryCsv, serializeAdversarialTurnsCsv, serializeScenarioHtml, serializeScenarioJson, serializeScenarioJUnit, type ScenarioExecutionRecord } from './scenarioReport';
 import type { VisualRegressionService } from './visualRegression';
@@ -58,7 +59,7 @@ export class ScenarioReportService {
     if (!selected.length) return undefined;
     const extension = reportExtension(format);
     const uri = await vscode.window.showSaveDialog({
-      defaultUri: vscode.Uri.file(`${safeFilePart(baseName)}.${extension}`),
+      defaultUri: defaultExportUri(`${safeFilePart(baseName)}.${extension}`),
       filters: format === 'junit' ? { [localize('JUnit XML')]: ['xml'] } : format === 'html' ? { HTML: ['html'] } : { [localize('JSON')]: ['json'] },
     });
     if (!uri) return undefined;

@@ -213,7 +213,7 @@ describe('LocalRunRepository', () => {
 
     expect(exported).toBe(target);
     expect(mock.showSaveDialog).toHaveBeenCalledWith({
-      defaultUri: expect.objectContaining({ path: 'profile-a-run-7.turnstage-run.json' }),
+      defaultUri: expect.objectContaining({ path: expect.stringMatching(/^\/.+\/profile-a-run-7\.turnstage-run\.json$/) }),
       filters: { 'TurnStage Run': ['json'] },
     });
     expect(JSON.parse(storedText('/exports/run-7.turnstage-run.json'))).toEqual({

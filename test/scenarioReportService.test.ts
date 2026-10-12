@@ -17,6 +17,7 @@ const mock = vi.hoisted(() => {
           writeFile: vi.fn(async (target: { path: string }, bytes: Uint8Array) => { writes.push({ path: target.path, text: new TextDecoder().decode(bytes) }); }),
           copy: vi.fn(),
         },
+        workspaceFolders: [{ uri: uri('/workspace') }],
         getWorkspaceFolder: vi.fn(() => ({ uri: uri('/workspace') })),
         asRelativePath: (target: { path: string }) => target.path.replace('/workspace/', ''),
       },
@@ -78,7 +79,7 @@ describe('ScenarioReportService', () => {
     expect(mock.writes[0]?.text).not.toContain('Private');
 
     await service.exportRecords('html', [{ profileId: 'safe-profile', profileName: 'Private', scenarioId: 'selected-case', scenarioName: 'Private case', status: 'failed' }], 'turnstage-selected-case-result');
-    expect(mock.vscode.window.showSaveDialog).toHaveBeenLastCalledWith(expect.objectContaining({ defaultUri: expect.objectContaining({ path: 'turnstage-selected-case-result.html' }) }));
+    expect(mock.vscode.window.showSaveDialog).toHaveBeenLastCalledWith(expect.objectContaining({ defaultUri: expect.objectContaining({ path: '/workspace/turnstage-selected-case-result.html' }) }));
     expect(mock.writes.at(-1)?.text).toContain('<!doctype html>');
     expect(mock.writes.at(-1)?.text).not.toContain('Private case');
   });
