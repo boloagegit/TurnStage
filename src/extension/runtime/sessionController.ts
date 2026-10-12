@@ -138,6 +138,30 @@ export class SessionController implements vscode.Disposable {
     const safeRun = this.publicRun(run);
     this.runs = [safeRun, ...this.runs.filter((item) => item.id !== safeRun.id)]; this.changed();
   }
+  /**
+   * Keeps the conversation on screen when an edit to the Profile file rebuilds the session. The earlier turns
+   * are a record of what happened; only turns sent from now on use the edited Profile.
+   */
+  carryConversation(previous: SessionController): boolean {
+    if (previous === this || previous.profile.id !== this.profile.id || isActive(previous.snapshot.turnState) || !previous.snapshot.messages.some((message) => message.role === 'user')) return false;
+    for (const definition of this.profile.controls ?? []) {
+      if (definition.persist === 'secret') continue;
+      const value = previous.controls[definition.id];
+      if (value !== undefined && isControlValue(definition, value)) this.controls[definition.id] = structuredClone(value);
+    }
+    this.snapshot = structuredClone(previous.snapshot);
+    this.snapshot.trusted = vscode.workspace.isTrusted;
+    this.refreshSnapshotControls();
+    this.networkEntries = structuredClone(previous.networkEntries);
+    this.requestPreview = previous.requestPreview ? structuredClone(previous.requestPreview) : undefined;
+    this.rawBuffer.replace(this.snapshot.rawEvents);
+    this.synchronizeEventIdentity();
+    this.finalized = true;
+    this.lastInteraction = previous.lastInteraction ? structuredClone(previous.lastInteraction) : undefined;
+    if (previous.conversations) this.conversations?.continueAs(previous.conversations.currentKey);
+    this.changed(true);
+    return true;
+  }
   applyScenarioEvidence(evidence: ScenarioRunEvidence): boolean {
     if (isActive(this.snapshot.turnState) || evidence.profileId !== this.profile.id) return false;
     // The evidence becomes a conversation of its own, so a follow-up turn does not overwrite the previous archive entry.

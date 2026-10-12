@@ -46,6 +46,8 @@ export class BrowserSession {
   private sequence = 0;
   private replay?: ReplayEngine;
   private turnIndex = 0;
+  private pendingProfile?: { profile: TurnStageProfile; environment: TurnStageEnvironment };
+  private profileSwitch?: Promise<void>;
 
   constructor(
     private profile: TurnStageProfile,
@@ -54,10 +56,39 @@ export class BrowserSession {
     private readonly changed: (state: BrowserSessionState) => void,
   ) { this.resetControls(); }
 
+  /**
+   * Applies an edited Profile. A conversation that already has turns stays on screen, since it records what
+   * happened; an active turn is first stopped through the Profile's stop request instead of being dropped.
+   */
   updateProfile(profile: TurnStageProfile, environment: TurnStageEnvironment): void {
+    this.pendingProfile = { profile, environment };
+    if (this.abortController) {
+      this.profileSwitch ??= this.abort().catch(() => undefined).finally(() => {
+        this.profileSwitch = undefined;
+        if (this.pendingProfile) this.applyProfile(this.pendingProfile.profile, this.pendingProfile.environment);
+      });
+      return;
+    }
+    this.applyProfile(profile, environment);
+  }
+
+  private applyProfile(profile: TurnStageProfile, environment: TurnStageEnvironment): void {
+    this.pendingProfile = undefined;
+    const keepConversation = this.state.snapshot.messages.some((message) => message.role === 'user');
     this.cancelActive();
     this.profile = profile;
     this.environment = environment;
+    if (keepConversation) {
+      const previousControls = this.state.snapshot.controls;
+      this.resetControls();
+      for (const definition of profile.controls ?? []) {
+        const value = previousControls[definition.id];
+        if (definition.persist !== 'secret' && value !== undefined && isControlValue(definition, value)) this.state.snapshot.controls[definition.id] = value;
+      }
+      this.currentTurn = undefined;
+      this.emit();
+      return;
+    }
     this.state = { snapshot: createSnapshot(true, browserUuid), networkEntries: [] };
     this.sequence = 0;
     this.turnIndex = 0;

@@ -172,6 +172,8 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const evidencePosters = this.evidencePosters.get(documentKey) ?? new Set<typeof postEvidence>();
     evidencePosters.add(postEvidence);
     this.evidencePosters.set(documentKey, evidencePosters);
+    // The last session whose conversation should survive while the Profile is briefly invalid during an edit.
+    let conversationSource: SessionController | undefined;
     const disposeController = (): Promise<void> => {
       const current = controller;
       controller = undefined;
@@ -230,8 +232,13 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       await post(validationSnapshot);
       await post({ type: 'profile.editState', dirty: document.isDirty });
       if (disposed || document.version !== version) return;
-      if (!parsed.profile || issues.some((item) => item.severity === 'error')) { await disposeController(); return; }
+      if (!parsed.profile || issues.some((item) => item.severity === 'error')) { conversationSource = controller ?? conversationSource; await disposeController(); return; }
       if (!controller || controller.profile !== parsed.profile) {
+        // An edit rebuilds the session; stop an active turn through the Profile's stop request and keep the conversation.
+        if (controller && isActive(controller.snapshot.turnState)) await controller.abort();
+        if (disposed || document.version !== version) return;
+        const previousController = controller ?? conversationSource;
+        conversationSource = undefined;
         await disposeController(); const environment = envEntries.find((item) => item.environment.id === parsed.profile!.environment)?.environment ?? builtInEnvironment();
         const nextController = new SessionController(parsed.profile, document.uri, environment, this.context, this.secrets, this.runs, sendSession, this.output, {
           authorizeRequest: (request, purpose, hasSecrets) => this.requestAuthorization.authorize(document.uri, parsed.profile!, environment, request, purpose, hasSecrets),
@@ -241,6 +248,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           },
         }); await nextController.loadRuns();
         if (disposed || document.version !== version) { nextController.dispose(); return; }
+        if (previousController) nextController.carryConversation(previousController);
         controller = nextController;
         syncTurnActiveContext();
         if (document.uri.scheme === 'turnstage-demo' || parsed.profile.stream.transport === 'fixture') {

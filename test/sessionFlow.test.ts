@@ -188,6 +188,33 @@ describe('SessionController end-to-end functional flow', () => {
     expect(fresh.snapshot.sessionState).toBe('ready');
   });
 
+  it('keeps the conversation and its archive entry when a Profile edit rebuilds the session', async () => {
+    const { SessionController } = await import('../src/extension/runtime/sessionController');
+    const profile = basicProfile();
+    profile.conversation.send.variants!.push({ id: 'continuation', when: { path: 'conversation.id', operator: 'exists' }, body: { message: { $value: 'input.text' }, conversationId: { $value: 'conversation.id' } } });
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: { baseUrl } };
+    let stored: unknown[] = [];
+    const make = (value: TurnStageProfile) => new SessionController(value, {} as never, environment, {} as never, { get: vi.fn(async () => 'test-token') } as never, { list: vi.fn(async () => []), save: vi.fn(async () => undefined) } as never, vi.fn(), { appendLine: vi.fn() } as never, {
+      authorizeRequest: async () => true,
+      conversations: { storage: { load: async () => stored as never, save: async (items) => { stored = items; } }, changed: () => undefined },
+    });
+    const before = make(profile);
+    await before.loadRuns();
+    await before.send('First turn', { kind: 'manual' });
+    const key = before.getConversationDirectory()!.currentKey;
+    const after = make({ ...profile, description: 'Edited' });
+    await after.loadRuns();
+    expect(after.carryConversation(before)).toBe(true);
+    expect(after.snapshot.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(after.getConversationDirectory()!.currentKey).toBe(key);
+    await after.send('Second turn', { kind: 'manual' });
+    expect(after.snapshot.messages.filter((message) => message.role === 'user')).toHaveLength(2);
+    expect(stored).toHaveLength(1);
+    expect(make({ ...profile, id: 'other-profile' }).carryConversation(after)).toBe(false);
+    before.dispose();
+    after.dispose();
+  });
+
   it('blocks transport when authorization is denied and recognizes transformed secret controls', async () => {
     const { SessionController } = await import('../src/extension/runtime/sessionController');
     const profile = basicProfile();
