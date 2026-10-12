@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { access, writeFile } from 'node:fs/promises';
 import { executeHeadlessCli } from './runner';
 import { NodeCliRuntime } from './nodeRuntime';
 
@@ -12,6 +12,10 @@ async function main(): Promise<void> {
     writeStdout: (text: string) => new Promise<void>((resolve, reject) => process.stdout.write(text, (error) => error ? reject(error) : resolve())),
     writeStderr: (text: string) => new Promise<void>((resolve, reject) => process.stderr.write(text, (error) => error ? reject(error) : resolve())),
     writeFile: (path: string, text: string) => writeFile(path, text, { encoding: 'utf8', flag: 'wx' }).then(() => undefined),
+    checkOutputPath: (path: string) => access(path).then(
+      () => `The output file already exists: ${path}. Choose a new --output path or remove the file; TurnStage never overwrites reports.`,
+      () => undefined,
+    ),
   };
   const result = await executeHeadlessCli(process.argv.slice(2), new NodeCliRuntime(__TURNSTAGE_VERSION__), io, cancellation.signal);
   process.exitCode = result.exitCode;

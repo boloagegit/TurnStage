@@ -1,31 +1,42 @@
 import type { CliOutputFormat, CliParseResult, CliRunOptions, CliVerifyOptions } from './contracts';
 
-export const CLI_USAGE = `Usage: turnstage <run|verify> [options] [profile ...]
+export const CLI_USAGE = `Usage: turnstage run [options] [profile ...]
+       turnstage verify [--manifest] <provenance.json>
 
 Commands:
   run       Execute selected contracts against configured HTTP/SSE backends.
+            Without profile paths, loads .vscode/turnstage/profiles/*.turnstage.jsonc.
   verify    Verify a provenance manifest and its evidence-file digests.
 
+Workspace:
+  --workspace <dir>    Workspace root for profiles, environments, and suites (default: current directory).
+
 Run selectors:
-  --profile <id>       Select a profile (repeatable).
-  --suite <id>         Select an adversarial suite (repeatable).
-  --case <id>          Select a case (repeatable).
-  --tag <tag>          Select cases by tag (repeatable).
-  --changed-file <p>   Explain impact from a changed workspace path (repeatable).
+  --profile <id>       Select a profile (repeatable, comma-separated).
+  --suite <id>         Select a linked suite (repeatable, comma-separated).
+  --case <id>          Select a case (repeatable, comma-separated).
+  --tag <tag>          Select cases that have every given tag (repeatable).
+  --changed-file <p>   Select cases affected by a changed workspace path (repeatable).
+  --include-unbound    With --changed-file, also include cases without source bindings.
 
 Run policy:
-  --repetitions <n>    Optional default repetition override.
-  --concurrency <n>    Optional concurrency cap.
-  --timeout-ms <n>     Optional case timeout.
-  --max-requests <n>   Optional request budget.
-  --fail-fast          Stop after the first blocking outcome.
-  --include-unbound    Include cases without explicit source bindings.
+  --repetitions <n>    Red Team repetition override (1-50).
+  --concurrency <n>    Concurrent cases (1-8, default 3).
+  --timeout-ms <n>     Red Team case timeout (1000-300000).
+  --max-requests <n>   Refuse to start if the selection plans more requests.
+  --fail-fast          Stop Red Team repetitions after the first blocking outcome.
 
 Output:
-  --format <json|junit|html|evidence>
-  --output <path>      Write output through the host-provided file writer.
-  --no-color
+  --format <json|junit|html|evidence>  Report format (default json; --json, --junit, --html also work).
+  --output <path>      Write the report to a new file instead of stdout. Existing files are never overwritten.
   --help, --version
+
+Exit codes:
+  0  All selected cases passed or resisted.
+  1  A case failed its checks, regressed against its baseline, or an attack succeeded.
+  2  Indeterminate: invalid arguments or configuration, no matching cases, a budget
+     refusal, an existing --output file, or a manifest that does not verify.
+  3  Infrastructure: a Red Team infrastructure error, a runtime failure, or an unwritable report.
 `;
 
 const OUTPUT_FORMATS = new Set<CliOutputFormat>(['json', 'junit', 'html', 'evidence']);

@@ -83,6 +83,8 @@ export interface CliExecutionResult {
   manifestDigest?: string;
   verification?: CliVerificationResult;
   provenance?: unknown;
+  /** Static, credential-free guidance for the operator. Written to stderr only, never to a report. */
+  diagnostics?: readonly string[];
 }
 
 export interface CliExecutionRuntime {
@@ -94,6 +96,8 @@ export interface CliIo {
   writeStdout(text: string): void | Promise<void>;
   writeStderr(text: string): void | Promise<void>;
   writeFile?(path: string, text: string): void | Promise<void>;
+  /** Returns why `path` cannot receive output, checked before any request is sent. */
+  checkOutputPath?(path: string): string | undefined | Promise<string | undefined>;
 }
 
 export interface CliExecutionSummary {

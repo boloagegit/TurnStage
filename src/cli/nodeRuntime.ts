@@ -25,6 +25,9 @@ interface LoadedCase {
   environments: TurnStageEnvironment[];
 }
 
+/** A configuration problem whose message is static or names only workspace paths and line numbers. */
+class CliConfigurationError extends Error {}
+
 const MAX_PROFILE_BYTES = 5 * 1024 * 1024;
 const MAX_ENVIRONMENT_BYTES = 1024 * 1024;
 
@@ -45,7 +48,7 @@ export class NodeCliRuntime implements CliExecutionRuntime {
         const ids = new Set(impact.selected.map((item) => item.id));
         selected = selected.filter((item) => ids.has(item.key));
       }
-      if (!selected.length) return { records: [{ id: 'selection', outcome: 'policy' }] };
+      if (!selected.length) return { records: [{ id: 'selection', outcome: 'policy' }], diagnostics: ['No ready test cases matched the selected profiles, suites, cases, tags, or changed files.'] };
 
       const repetitions = request.policy.repetitions;
       const selectedWithPolicy = selected.map((item) => ({ ...item, scenario: applyPolicy(item.scenario, repetitions, request.policy.timeoutMs, request.policy.failFast) }));
@@ -55,7 +58,7 @@ export class NodeCliRuntime implements CliExecutionRuntime {
         const opening = item.profile.opening?.mode === 'request' ? 1 : 0;
         return sum + (turns + opening) * executions;
       }, 0);
-      if (request.policy.maxRequests !== undefined && plannedRequests > request.policy.maxRequests) return { records: [{ id: 'request-budget', outcome: 'policy' }] };
+      if (request.policy.maxRequests !== undefined && plannedRequests > request.policy.maxRequests) return { records: [{ id: 'request-budget', outcome: 'policy' }], diagnostics: [`The selected cases plan ${plannedRequests} requests, more than --max-requests ${request.policy.maxRequests}. Narrow the selection or raise the budget.`] };
 
       const records = await runPool(selectedWithPolicy, request.policy.concurrency ?? 3, signal, (item) => runCase(item, workspaceRoot, signal));
       const runId = crypto.randomUUID();
@@ -70,8 +73,8 @@ export class NodeCliRuntime implements CliExecutionRuntime {
         result: records,
       });
       return { runId, records, manifestDigest: provenance.manifestDigest, provenance };
-    } catch {
-      return { records: [{ id: 'configuration', outcome: 'configuration' }] };
+    } catch (error) {
+      return { records: [{ id: 'configuration', outcome: 'configuration' }], diagnostics: [configurationDiagnostic(error, workspaceRoot)] };
     }
   }
 
@@ -98,7 +101,7 @@ export class NodeCliRuntime implements CliExecutionRuntime {
 
 async function loadCases(workspaceRoot: string, configured: readonly string[]): Promise<LoadedCase[]> {
   const profileFiles = configured.length ? configured.map((value) => resolveSafe(workspaceRoot, value)) : await discoverFiles(resolve(workspaceRoot, '.vscode/turnstage/profiles'), /\.turnstage\.jsonc?$/i);
-  if (!profileFiles.length) throw new Error('No TurnStage profiles were found.');
+  if (!profileFiles.length) throw new CliConfigurationError('No TurnStage profiles were found in .vscode/turnstage/profiles. Pass profile paths as arguments or use --workspace.');
   const environments = [builtInEnvironment(), ...(await Promise.all((await discoverFiles(resolve(workspaceRoot, '.vscode/turnstage/environments'), /\.environment\.jsonc?$/i)).map((path) => readJsonc<TurnStageEnvironment>(path, MAX_ENVIRONMENT_BYTES))))];
   const uniqueEnvironments = [...new Map(environments.map((item) => [item.id, item])).values()];
   const result: LoadedCase[] = [];
@@ -107,7 +110,8 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
     const profile = parse(text, [], { allowTrailingComma: true, disallowComments: false }) as TurnStageProfile;
     const tree = parseTree(text, [], { allowTrailingComma: true, disallowComments: false });
     const issues = new ProfileValidator().validate(profile, tree, uniqueEnvironments);
-    if (issues.some((issue) => issue.severity === 'error')) throw new Error('Profile validation failed.');
+    const errors = issues.filter((issue) => issue.severity === 'error');
+    if (errors.length) throw new CliConfigurationError(`Profile validation failed: ${displayPath(workspaceRoot, profilePath)} has ${errors.length} ${errors.length === 1 ? 'error' : 'errors'} (first at line ${lineAt(text, errors[0]!.offset)}). Validate it in VS Code with "TurnStage: Validate Profile".`);
     for (const scenario of profile.tests?.scenarios ?? []) {
       if (!isScenarioReady(scenario)) continue;
       result.push({ key: `${profile.id}/inline/${scenario.id}`, profile, scenario, environments: uniqueEnvironments });
@@ -115,9 +119,9 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
     for (const suitePath of profile.tests?.contractSuites ?? []) {
       const path = resolveSafe(workspaceRoot, suitePath);
       const parsed = parseContractSource(suitePath, await readFile(path, 'utf8'));
-      if (!parsed.suite || parsed.issues.length) throw new Error('Test suite validation failed.');
+      if (!parsed.suite || parsed.issues.length) throw new CliConfigurationError(`Test suite validation failed: ${parsed.issues[0] ?? suitePath}`);
       const scenarios = parsed.scenarios;
-      if (validateContractScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new Error('Test suite is incompatible with its profile.');
+      if (validateContractScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new CliConfigurationError(`Test suite ${suitePath} is incompatible with profile ${displayPath(workspaceRoot, profilePath)}.`);
       for (const scenario of scenarios) {
         if (!isScenarioReady(scenario)) continue;
         result.push({ key: `${profile.id}/${parsed.suite.id}/${scenario.id}`, profile, scenario, suiteId: parsed.suite.id, suite: parsed.suite, environments: uniqueEnvironments });
@@ -126,9 +130,9 @@ async function loadCases(workspaceRoot: string, configured: readonly string[]): 
     for (const suitePath of profile.tests?.adversarialSuites ?? []) {
       const path = resolveSafe(workspaceRoot, suitePath);
       const parsed = parseAdversarialSource(suitePath, await readFile(path, 'utf8'));
-      if (!parsed.suite || parsed.issues.length) throw new Error('Adversarial suite validation failed.');
+      if (!parsed.suite || parsed.issues.length) throw new CliConfigurationError(`Adversarial suite validation failed: ${parsed.issues[0] ?? suitePath}`);
       const scenarios = parsed.scenarios;
-      if (validateAdversarialScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new Error('Adversarial suite is incompatible with its profile.');
+      if (validateAdversarialScenariosAgainstProfile(profile, scenarios, uniqueEnvironments).length) throw new CliConfigurationError(`Adversarial suite ${suitePath} is incompatible with profile ${displayPath(workspaceRoot, profilePath)}.`);
       for (const scenario of scenarios) {
         if (!isScenarioReady(scenario)) continue;
         result.push({ key: `${profile.id}/${parsed.suite.id}/${scenario.id}`, profile, scenario, suiteId: parsed.suite.id, suite: parsed.suite, environments: uniqueEnvironments });
@@ -178,7 +182,7 @@ function applyPolicy(scenario: ScenarioDefinition, repetitions: number | undefin
 
 function selectEnvironment(values: readonly TurnStageEnvironment[], id: string | undefined): TurnStageEnvironment {
   const selected = values.find((item) => item.id === (id ?? 'local'));
-  if (!selected) throw new Error('Configured environment was not found.');
+  if (!selected) throw new CliConfigurationError(`Environment "${id ?? 'local'}" was not found in .vscode/turnstage/environments.`);
   return selected;
 }
 
@@ -209,15 +213,34 @@ async function readJsonc<T>(path: string, maxBytes: number): Promise<T> { return
 
 async function readBoundedUtf8(path: string, maxBytes: number): Promise<string> { return new TextDecoder().decode(await readBoundedBytes(path, maxBytes)); }
 async function readBoundedBytes(path: string, maxBytes: number): Promise<Uint8Array> {
-  if ((await stat(path)).size > maxBytes) throw new Error('File exceeds the safety limit.');
+  if ((await stat(path)).size > maxBytes) throw new CliConfigurationError(`File exceeds the ${Math.round(maxBytes / 1024 / 1024)} MiB safety limit: ${path}`);
   const bytes = new Uint8Array(await readFile(path));
-  if (bytes.byteLength > maxBytes) throw new Error('File exceeds the safety limit.');
+  if (bytes.byteLength > maxBytes) throw new CliConfigurationError(`File exceeds the ${Math.round(maxBytes / 1024 / 1024)} MiB safety limit: ${path}`);
   return bytes;
 }
 
 function resolveSafe(root: string, value: string): string {
   const target = resolve(root, value);
   const path = relative(root, target);
-  if (isAbsolute(path) || path === '..' || path.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)) throw new Error('Path leaves the workspace root.');
+  if (isAbsolute(path) || path === '..' || path.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)) throw new CliConfigurationError(`Path leaves the workspace root: ${value}`);
   return target;
+}
+
+function configurationDiagnostic(error: unknown, workspaceRoot: string): string {
+  if (error instanceof CliConfigurationError) return error.message;
+  const code = (error as { code?: unknown } | undefined)?.code;
+  const path = (error as { path?: unknown } | undefined)?.path;
+  if ((code === 'ENOENT' || code === 'EACCES' || code === 'EISDIR') && typeof path === 'string') return `${code === 'ENOENT' ? 'File not found' : 'File could not be read'}: ${displayPath(workspaceRoot, path)}`;
+  return 'TurnStage could not load the selected profiles or suites.';
+}
+
+function displayPath(workspaceRoot: string, path: string): string {
+  const relativePath = relative(workspaceRoot, path);
+  return relativePath && !relativePath.startsWith('..') && !isAbsolute(relativePath) ? relativePath : path;
+}
+
+function lineAt(text: string, offset: number): number {
+  let line = 1;
+  for (let index = 0; index < offset && index < text.length; index += 1) if (text.charCodeAt(index) === 10) line += 1;
+  return line;
 }
