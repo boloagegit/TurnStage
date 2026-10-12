@@ -1,5 +1,9 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Copy as cURL': 'cURL としてコピー',
+  'Where the time went': '時間の内訳',
+  'Waiting for response headers': 'レスポンスヘッダーを待機',
+  'Waiting for first chunk': '最初のチャンクを待機',
   'Default environment': '既定の環境',
   '{id} (not found)': '{id}（見つかりません）',
   'Test case saved: {name}': 'テストケースを保存しました：{name}',

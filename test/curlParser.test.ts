@@ -7,6 +7,15 @@ function expectCode(command: string, code: CurlParseError['code']): void {
 }
 
 describe('safe cURL parser', () => {
+  it('reads multi-line commands joined with backslash continuations', () => {
+    for (const newline of ['\n', '\r\n']) {
+      const parsed = parseCurlCommand(`curl 'https://api.example.test/v1/chat' \\${newline}  -X POST \\${newline}  -H 'Content-Type: application/json' \\${newline}  --data-raw '{"a":1}'`);
+      expect(parsed.method).toBe('POST');
+      expect(parsed.url).toBe('https://api.example.test/v1/chat');
+      expect(parsed.bodyFormat).toBe('json');
+    }
+  });
+
   it('parses quoted JSON, Chinese text, headers, and an explicit method without executing a shell', () => {
     const parsed = parseCurlCommand(String.raw`curl -X POST 'https://api.example.test/v1/chat/completions' -H 'Authorization: Bearer sk-test_12345678901234567890' -H 'Content-Type: application/json' --data-raw '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"請用中文回答"}],"stream":true}'`);
     expect(parsed.method).toBe('POST');

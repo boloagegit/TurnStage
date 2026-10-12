@@ -7,6 +7,10 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Copy as cURL': '複製為 cURL',
+  'Where the time went': '時間花在哪裡',
+  'Waiting for response headers': '等待回應標頭',
+  'Waiting for first chunk': '等待第一個資料區塊',
   'Default environment': '預設環境',
   '{id} (not found)': '{id}（找不到）',
   'Search cases': '搜尋案例',
