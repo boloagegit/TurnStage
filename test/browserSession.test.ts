@@ -229,6 +229,36 @@ describe('BrowserSession', () => {
     expect(session.current.snapshot.turnState).toBe('aborted');
   });
 
+  it('keeps the conversation when the Profile is edited after a turn', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('event: message\ndata: {"text":"Kept"}\n\nevent: done\ndata: {}\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } })));
+    const session = new BrowserSession(profile, environment, new Map(), () => undefined);
+    await session.start();
+    await session.send('Hello', { kind: 'manual' });
+    session.updateProfile({ ...profile, description: 'Edited description' }, environment);
+    expect(session.current.snapshot.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(session.current.networkEntries).toHaveLength(1);
+  });
+
+  it('stops an active stream through the Profile stop request before applying an edit', async () => {
+    const fetch = vi.fn().mockImplementationOnce((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))))
+      .mockResolvedValueOnce(new Response('{"stopped":true}', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    const stopProfile: TurnStageProfile = { ...profile, conversation: { ...profile.conversation, stop: { strategy: 'abortThenRequest', request: { method: 'POST', url: '${env.baseUrl}/stop' }, requiredContext: ['turn.clientRequestId'] } } };
+    const session = new BrowserSession(stopProfile, environment, new Map(), () => undefined);
+    await session.start();
+    const running = session.send('Hello', { kind: 'manual' });
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+
+    session.updateProfile({ ...stopProfile, description: 'Edited while streaming' }, environment);
+    await running;
+    await vi.waitFor(() => expect(session.busy).toBe(false));
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(String(fetch.mock.calls[1]?.[0])).toContain('/stop');
+    expect(session.current.snapshot.turnState).toBe('aborted');
+    expect(session.current.snapshot.messages.some((message) => message.role === 'user')).toBe(true);
+  });
+
   it('persists non-secret controls by Profile, resets requested values, and never exposes secret controls', async () => {
     const values = new Map<string, string>();
     vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) });

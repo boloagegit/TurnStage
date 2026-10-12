@@ -339,6 +339,13 @@ export class ConversationManager {
     await this.persist();
   }
 
+  /** Continues recording under an existing key, for a session rebuilt around the same conversation. */
+  continueAs(key: string): void {
+    if (key === this.state.currentKey) return;
+    this.state.currentKey = key;
+    this.publish();
+  }
+
   /** Starts a fresh conversation key; callers reset their snapshot. */
   beginNew(): void {
     this.state.currentKey = localConversationKey(this.adapter.createId());
