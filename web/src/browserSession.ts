@@ -279,6 +279,33 @@ export class BrowserSession {
     this.emit();
   }
 
+  /**
+   * Shows a test's recorded conversation as the live session, as VS Code does, so a follow-up message or
+   * "Save as test" acts on the conversation that is on screen. Refused while a request is active.
+   */
+  applyEvidence(evidence: { snapshot: SessionSnapshot; networkEntries: NetworkExchange[]; requestPreview?: unknown }): boolean {
+    if (this.busy) return false;
+    this.replay?.dispose();
+    this.replay = undefined;
+    const snapshot = structuredClone(evidence.snapshot);
+    const controls = { ...this.state.snapshot.controls };
+    for (const definition of this.profile.controls ?? []) {
+      const value = snapshot.controls[definition.id];
+      if (definition.persist !== 'secret' && value !== undefined && isControlValue(definition, value)) controls[definition.id] = structuredClone(value);
+    }
+    snapshot.controls = controls;
+    snapshot.trusted = true;
+    this.state = { snapshot, networkEntries: structuredClone(evidence.networkEntries), requestPreview: structuredClone(evidence.requestPreview) };
+    this.sequence = Math.max(0, ...snapshot.rawEvents.map((event) => event.sequence).filter(Number.isSafeInteger));
+    this.turnIndex = 1 + Math.max(-1, ...[...snapshot.rawEvents, ...snapshot.normalizedEvents].map((event) => event.turnIndex).filter((value): value is number => typeof value === 'number' && Number.isSafeInteger(value)));
+    this.rawSizes.length = 0;
+    for (const raw of snapshot.rawEvents) this.rawSizes.push(new TextEncoder().encode(JSON.stringify(raw)).byteLength);
+    this.rawBytes = this.rawSizes.reduce((total, size) => total + size, 0);
+    this.currentTurn = undefined;
+    this.emit();
+    return true;
+  }
+
   /** Performs the Profile's conversation list or history request and returns the parsed body. */
   async fetchConversationJson(kind: 'list' | 'history', conversationId?: string): Promise<unknown> {
     const definition = kind === 'list' ? this.profile.conversations?.list?.request : this.profile.conversations?.history?.request;

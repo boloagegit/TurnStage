@@ -210,7 +210,7 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       case 'test.resume': tests.resume(); break;
       case 'test.capture': await captureTest(message.source, message.suggestedKind ?? 'contract', message.requestId); break;
       case 'adversarial.capture': await captureTest({ kind: 'conversation' }, 'adversarial', message.requestId); break;
-      case 'test.evidence.open': await tests.openEvidence(message.evidenceId); post({ type: 'inspector.focus', tab: message.location.kind === 'network' ? 'Network' : message.location.kind === 'normalizedEvent' ? 'Normalized' : 'Raw Events', evidenceId: message.evidenceId, networkId: message.location.kind === 'network' ? message.location.networkId : undefined, sequence: message.location.kind === 'rawEvent' || message.location.kind === 'normalizedEvent' ? message.location.sequence : undefined }); break;
+      case 'test.evidence.open': await openTestEvidence(message.evidenceId); post({ type: 'inspector.focus', tab: message.location.kind === 'network' ? 'Network' : message.location.kind === 'normalizedEvent' ? 'Normalized' : 'Raw Events', evidenceId: message.evidenceId, networkId: message.location.kind === 'network' ? message.location.networkId : undefined, sequence: message.location.kind === 'rawEvent' || message.location.kind === 'normalizedEvent' ? message.location.sequence : undefined }); break;
       case 'test.report.export': await tests.exportReport(message.format, message.evidenceId, message.kind); break;
       case 'test.timeline.open': await tests.postTimeline(message.evidenceId); break;
       case 'test.evidenceBundle.export': await tests.exportEvidenceBundle(); break;
@@ -644,6 +644,14 @@ function confirmSessionChange(action: 'clear' | 'restart'): boolean {
     en: action === 'clear' ? 'Clear the current conversation?\n\nMessages, conversation ID, network entries, and event data will be removed. Recorded runs are kept.' : 'Start a new conversation?\n\nCurrent messages, conversation ID, and event data will be cleared. Recorded runs are kept.',
   };
   return window.confirm(messages[locale as keyof typeof messages] ?? messages.en);
+}
+
+/** Loads a test's recorded conversation as the live chat so sending and capturing act on what is shown. */
+async function openTestEvidence(evidenceId: string): Promise<void> {
+  const evidence = await tests.evidenceConversation(evidenceId);
+  if (session.busy) throw new Error(t('Finish or stop the current request before opening test evidence.'));
+  conversations?.beginNew();
+  session.applyEvidence(evidence);
 }
 
 function confirmRunDeletion(scope: 'one' | 'all'): boolean {

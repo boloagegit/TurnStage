@@ -378,11 +378,11 @@ export class WebTestController {
     return value.sourcePath;
   }
 
-  async openEvidence(evidenceId: string): Promise<void> {
+  /** The recorded conversation behind a result, for the host to load into its live session. */
+  async evidenceConversation(evidenceId: string): Promise<RetainedEvidence['result']['evidence']> {
     const retained = await this.store.get<RetainedEvidence>('evidence', evidenceId);
     if (!retained) throw new Error('The selected Web evidence is no longer available.');
-    const result = retained.value.result;
-    this.post({ type: 'session.snapshot', snapshot: result.evidence.snapshot, runs: [], requestPreview: result.evidence.requestPreview, networkEntries: result.evidence.networkEntries });
+    return retained.value.result.evidence;
   }
 
   async postTimeline(evidenceId: string): Promise<void> {

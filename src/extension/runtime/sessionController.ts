@@ -139,6 +139,8 @@ export class SessionController implements vscode.Disposable {
   }
   applyScenarioEvidence(evidence: ScenarioRunEvidence): boolean {
     if (isActive(this.snapshot.turnState) || evidence.profileId !== this.profile.id) return false;
+    // The evidence becomes a conversation of its own, so a follow-up turn does not overwrite the previous archive entry.
+    this.conversations?.beginNew();
     this.replayEngine?.dispose();
     for (const definition of this.profile.controls ?? []) {
       if (definition.persist === 'secret') continue;
