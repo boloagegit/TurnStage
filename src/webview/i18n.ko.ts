@@ -1,5 +1,14 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Compare with baseline': '기준과 비교',
+  'This run': '이번 실행',
+  'Result': '결과',
+  'Attempts': '시도 횟수',
+  'Run started': '실행 시작',
+  'No change': '변화 없음',
+  'Duration change: {delta}': '소요 시간 변화: {delta}',
+  'The case definition differs, so results may not be comparable.': '케이스 정의가 달라 결과를 직접 비교하기 어려울 수 있습니다.',
+  'Settings differ, so results may not be comparable.': '설정이 달라 결과를 직접 비교하기 어려울 수 있습니다.',
   'Flaky': '불안정',
   'Passed {passes} and failed {failures} of the last {runs} runs of this definition': '이 정의의 최근 {runs}회 실행 중 {passes}회 통과, {failures}회 실패',
   'Copy as cURL': 'cURL로 복사',

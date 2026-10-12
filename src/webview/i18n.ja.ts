@@ -1,5 +1,14 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Compare with baseline': '比較元と比較',
+  'This run': '今回の実行',
+  'Result': '結果',
+  'Attempts': '試行回数',
+  'Run started': '実行開始',
+  'No change': '変化なし',
+  'Duration change: {delta}': '所要時間の変化：{delta}',
+  'The case definition differs, so results may not be comparable.': 'ケースの定義が異なるため、結果を直接比較できない場合があります。',
+  'Settings differ, so results may not be comparable.': '設定が異なるため、結果を直接比較できない場合があります。',
   'Flaky': '不安定',
   'Passed {passes} and failed {failures} of the last {runs} runs of this definition': 'この定義の直近 {runs} 回の実行で {passes} 回成功、{failures} 回失敗',
   'Copy as cURL': 'cURL としてコピー',
