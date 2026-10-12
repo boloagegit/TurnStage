@@ -106,6 +106,9 @@ try {
   // Narrow editors show the workspace as a tab (the pane box dissolves into the workspace grid).
   assert.equal(await page.getByRole('tab', { name: 'General tests' }).getAttribute('aria-selected'), 'true', 'Narrow editor keeps the pane the user was working in');
   assert.equal(await page.locator('.right-pane-panel').evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'Narrow test pane must not overflow horizontally');
+  // Session evidence is collapsed under Run history; open it to inspect check-level results.
+  const showChecks = page.getByRole('button', { name: /^Show checks/u });
+  if (await showChecks.count()) await showChecks.click();
   await page.locator('.automation-result-table').scrollIntoViewIfNeeded();
   await page.locator('.test-workspace').screenshot({ path: resolve(artifacts, 'unified-run-history-narrow.png') });
   await page.evaluate(() => {

@@ -1,5 +1,10 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Each turn you send is recorded here when it completes, fails, or is stopped.': '보낸 각 턴은 완료, 실패 또는 중지되면 여기에 기록됩니다.',
+  'No baseline yet. Pick a run you trust; later runs are compared with it.': '아직 기준이 없습니다. 신뢰할 수 있는 실행을 고르면 이후 실행이 그것과 비교됩니다.',
+  'Check-by-check detail for runs since this window opened. Run history above lists every recorded run.': '이 창을 연 이후 실행의 검사별 세부 정보입니다. 위의 실행 기록에는 기록된 모든 실행이 표시됩니다.',
+  'Hide checks': '검사 숨기기',
+  'Show checks ({count})': '검사 표시 ({count})',
   'Review it and mark it ready to run it with other cases.': '검토 후 실행 가능으로 표시하면 다른 케이스와 함께 실행할 수 있습니다.',
   'Review now': '지금 검토',
   'Try draft {name} once': '초안 {name} 한 번 실행해 보기',
