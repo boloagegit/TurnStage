@@ -1219,7 +1219,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
   private async invokeAction(actionId: string, sourceMessageId: string | undefined, controller: SessionController): Promise<void> {
     const message = sourceMessageId ? controller.snapshot.messages.find((item) => item.id === sourceMessageId) : undefined;
     if (actionId === 'message.copy' && message) { await vscode.env.clipboard.writeText(message.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text).join('')); return; }
-    if (actionId === 'message.retry') { await controller.retry(); return; }
+    if (actionId === 'message.retry') { await controller.retry(sourceMessageId); return; }
     if (actionId === 'request.abort') { await controller.abort(); return; }
     if (actionId === 'conversation.new') { if (await confirmRestartSession()) await controller.newConversation(); return; }
     if (actionId === 'conversation.clear') { if (await confirmClearConversation()) controller.clearConversation(); return; }
@@ -1267,7 +1267,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     }
     const allowed = controller.profile.security?.allowedCommands ?? [];
     if (action?.actionId.startsWith('vscodeCommand.invoke:')) { if (!vscode.workspace.isTrusted) throw new Error(localize('Profile commands are disabled in untrusted workspaces.')); const command = action.actionId.slice('vscodeCommand.invoke:'.length); if (!allowed.includes(command)) throw new Error(localize('Command {command} is not allowlisted.', { command })); if (isBlockedLifecycleCommand(command)) throw new Error(localize('Command {command} is blocked because it can reload, restart, or close VS Code.', { command })); await vscode.commands.executeCommand(command); return; }
-    if (action.actionId === 'message.retry') { await controller.retry(); return; }
+    if (action.actionId === 'message.retry') { await controller.retry(sourceMessageId); return; }
     if (['input.fill', 'event.inspect', 'form.open', 'form.submit', 'form.cancel'].includes(action.actionId)) return;
     throw new Error(localize('This response action is not supported: {action}.', { action: action.actionId }));
   }

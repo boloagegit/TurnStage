@@ -25,6 +25,7 @@ import { captureVSCodeNetworkPath, resolveVSCodeInsecureTlsRoute, type VSCodeNet
 import type { RequestAuthorizationPurpose } from '../security/requestAuthorization';
 import { ConversationManager, type ConversationStorage } from '../../shared/conversationHistory';
 import type { ConversationDirectory } from '../../shared/types';
+import { promptBeforeReply } from '../../shared/retryPrompt';
 
 const MAX_NETWORK_ENTRIES = 50;
 const MAX_NETWORK_RESPONSE_PREVIEW_CHARS = 64 * 1024;
@@ -427,7 +428,12 @@ export class SessionController implements vscode.Disposable {
     }
   }
 
-  async retry(): Promise<void> { if (this.lastInteraction) await this.send(this.lastInteraction.text, { ...this.lastInteraction.interaction, kind: 'retry' }); }
+  /** Resends the prompt behind `sourceMessageId`, or the last interaction when no reply is named. */
+  async retry(sourceMessageId?: string): Promise<void> {
+    const text = sourceMessageId ? promptBeforeReply(this.snapshot.messages, sourceMessageId) : undefined;
+    if (text !== undefined) { await this.send(text, { kind: 'retry', sourceMessageId }); return; }
+    if (this.lastInteraction) await this.send(this.lastInteraction.text, { ...this.lastInteraction.interaction, kind: 'retry' });
+  }
   async abort(): Promise<void> {
     if (this.disposed) return;
     if (this.activeStop) return this.activeStop;
