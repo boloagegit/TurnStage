@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.36.1
+
+- New TurnStage icon: a white chat bubble with a blue signal trace on a dark navy tile. It replaces the framed branch mark in the Extensions list, Marketplace, Copilot Chat, the Activity Bar, and the TurnStage Web favicon, and stays readable at small sizes in light and dark themes.
+- The workspace tabs (Chat, tests, inspectors) fit in narrow editors again when the system UI font is wider than expected, such as next to TurnStage Web's compact library sidebar.
+- No settings, Profile, or data-format changes; no migration is needed.
+
 ## 0.36.0
 
 - Streaming responses render much more smoothly in VS Code and Web. Completed messages no longer re-render or re-parse Markdown while a later message streams, completed Markdown blocks of the streaming message are parsed once, and Web now sends the same bounded session deltas as VS Code instead of a full session copy per stream chunk. In a three-turn, 1,341-event benchmark, Webview script time dropped by about 60% and frames slower than 50 ms fell from about 75 to under 5.
