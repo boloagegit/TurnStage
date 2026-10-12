@@ -152,7 +152,7 @@ describe('profile UI schema', () => {
     expect(propertySchema(uiSchema, 'messageActions')).toEqual({
       type: 'array',
       uniqueItems: true,
-      items: { enum: ['message.copy', 'message.retry', 'message.editAndResend', 'message.inspectRaw'] },
+      items: { enum: ['message.copy', 'message.retry', 'message.editAndResend', 'message.inspectRaw', 'message.saveAsTest'] },
     });
     expect(propertySchema(uiSchema, 'messageActionVisibility').enum).toEqual(['always', 'interaction']);
   });

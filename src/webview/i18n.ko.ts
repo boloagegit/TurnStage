@@ -1564,4 +1564,7 @@ export const ko: Record<string, string> = {
   "Last result before this case was edited: {outcome}, {date}": "이 케이스를 편집하기 전의 마지막 결과: {outcome}, {date}",
   "Browser storage is full, so evidence for some cases was not kept. Their results are still recorded. Clear run history or export evidence to free space.": "브라우저 저장 공간이 가득 차 일부 케이스의 증거를 보관하지 못했습니다. 결과는 계속 기록됩니다. 실행 기록을 지우거나 증거를 내보내 공간을 확보하세요.",
   "{preset} is a read-only preset, so TurnStage created the editable copy {copy} and saved the test there.": "{preset}은(는) 읽기 전용 사전 설정이므로 TurnStage가 편집 가능한 사본 {copy}을(를) 만들고 그곳에 테스트를 저장했습니다.",
+  "Save as test": "테스트로 저장",
+  "Save as test up to this reply": "이 답변까지 테스트로 저장",
+  "Save this conversation as a regression test": "이 대화를 회귀 테스트로 저장",
 };

@@ -9,7 +9,7 @@ export const NEEDS_REVIEW_TAG = 'needs-review';
 
 export type CaptureKind = 'contract' | 'adversarial';
 export type CaptureSource =
-  | { kind: 'conversation' }
+  | { kind: 'conversation'; throughMessageId?: string }
   | { kind: 'run'; runId: string }
   | { kind: 'evidence'; evidenceId: string };
 
@@ -85,6 +85,14 @@ export function capturedControls(profile: TurnStageProfile, snapshot: SessionSna
     .filter((definition) => definition.persist !== 'secret' && snapshot.controls[definition.id] !== undefined)
     .map((definition) => [definition.id, structuredClone(snapshot.controls[definition.id])] as const);
   return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+/** The conversation as it stood at `throughMessageId`, so a test can be saved from an earlier turn. */
+export function snapshotThrough(snapshot: SessionSnapshot, throughMessageId?: string): SessionSnapshot {
+  if (!throughMessageId) return snapshot;
+  const index = snapshot.messages.findIndex((message) => message.id === throughMessageId);
+  if (index < 0) throw new Error('The selected message is no longer in this conversation.');
+  return { ...snapshot, messages: snapshot.messages.slice(0, index + 1) };
 }
 
 export function capturedUserSteps(snapshot: SessionSnapshot): ScenarioDefinition['steps'] {

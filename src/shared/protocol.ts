@@ -41,7 +41,7 @@ export interface MappingTestResult {
 }
 
 export type TestCaptureSource =
-  | { kind: 'conversation' }
+  | { kind: 'conversation'; /** Capture only the turns up to and including this message. */ throughMessageId?: string }
   | { kind: 'run'; runId: string }
   | { kind: 'evidence'; evidenceId: string };
 
@@ -468,7 +468,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
 
 function isTestCaptureSource(value: unknown): value is TestCaptureSource {
   if (!isRecord(value)) return false;
-  if (value.kind === 'conversation') return Object.keys(value).length === 1;
+  if (value.kind === 'conversation') return Object.keys(value).every((key) => key === 'kind' || key === 'throughMessageId') && (value.throughMessageId === undefined || (isBoundedString(value.throughMessageId) && Boolean(value.throughMessageId.trim())));
   if (value.kind === 'run') return Object.keys(value).length === 2 && isBoundedString(value.runId) && Boolean(value.runId.trim());
   if (value.kind === 'evidence') return Object.keys(value).length === 2 && isBoundedString(value.evidenceId) && Boolean(value.evidenceId.trim());
   return false;

@@ -19,6 +19,7 @@ const messageActionOptions: Array<{ id: MessageActionId; label: string }> = [
   { id: 'message.retry', label: 'Retry' },
   { id: 'message.editAndResend', label: 'Edit & resend' },
   { id: 'message.inspectRaw', label: 'Inspect message' },
+  { id: 'message.saveAsTest', label: 'Save as test' },
 ];
 const sampleProtocols = ['sse', 'ndjson', 'json', 'text-stream'] as const;
 

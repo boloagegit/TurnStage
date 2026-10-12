@@ -296,15 +296,23 @@ describe('Webview DOM behavior', () => {
     render(<MobileChatPreview {...mobileProps({ post, snapshot: { ...snapshot, messages: [userMessage, ...snapshot.messages] } })} />);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'More actions' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Save as test…' }));
+    await user.click(screen.getByRole('button', { name: 'Save as test' }));
     expect(post).toHaveBeenCalledWith({ type: 'test.capture', source: { kind: 'conversation' } });
+  });
+
+  it('saves a test up to a chosen reply from that reply\'s actions', async () => {
+    const post = vi.fn();
+    const userMessage: ChatMessage = { id: 'user-1', role: 'user', status: 'completed', createdAt: 0, completedAt: 1, parts: [{ type: 'text', text: 'Probe' }], citations: [], actions: [], followups: [] };
+    const reply: ChatMessage = { id: 'assistant-1', role: 'assistant', status: 'completed', createdAt: 1, completedAt: 2, parts: [{ type: 'text', text: 'Answer' }], citations: [], actions: [], followups: [] };
+    render(<MobileChatPreview {...mobileProps({ post, profile: { ...profile, ui: { ...profile.ui, messageActions: ['message.copy', 'message.saveAsTest'] } }, snapshot: { ...snapshot, messages: [userMessage, reply] } })} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Save as test up to this reply' }));
+    expect(post).toHaveBeenCalledWith({ type: 'test.capture', source: { kind: 'conversation', throughMessageId: 'assistant-1' } });
   });
 
   it('uses distinct visual symbols for test capture and visual baselines', async () => {
     render(<MobileChatPreview {...mobileProps()} />);
+    expect(screen.getByRole('button', { name: 'Save as test' }).querySelector('.codicon-beaker')).toBeTruthy();
     await userEvent.setup().click(screen.getByRole('button', { name: 'More actions' }));
-    expect(screen.getByRole('menuitem', { name: 'Save as test…' }).querySelector('.codicon-beaker')).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: 'Save visual baseline' }).querySelector('.codicon-save')).toBeTruthy();
   });
 

@@ -473,8 +473,8 @@ export function MobileChatPreview({
       </div>
       <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(screenshotMode === 'download' ? capturingScreenshot ? 'Downloading chat screenshot…' : 'Download chat screenshot' : capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
       {onConfigure && <IconButton icon="settings-gear" label={t('Configure profile')} type="button" onClick={onConfigure} />}
+      <button type="button" className="mobile-chat-preview__capture" disabled={!trusted || active || !snapshot?.messages.some((message) => message.role === 'user')} title={t('Save this conversation as a regression test')} onClick={() => post({ type: 'test.capture', source: { kind: 'conversation' } })}><ProductIcon name="beaker" /><span>{t('Save as test')}</span></button>
       <ToolbarOverflow>
-        <button role="menuitem" type="button" disabled={!trusted || active || !snapshot?.messages.some((message) => message.role === 'user')} onClick={() => post({ type: 'test.capture', source: { kind: 'conversation' } })}><ProductIcon name="beaker" /><span>{t('Save as test…')}</span></button>
         <button role="menuitem" type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'baseline'} onClick={() => void runVisual('baseline')}><ProductIcon name="save" /><span>{t(capturingVisual === 'baseline' ? 'Capturing visual baseline…' : 'Save visual baseline')}</span></button>
         <button role="menuitem" type="button" disabled={!trusted || Boolean(capturingVisual)} aria-busy={capturingVisual === 'compare'} onClick={() => void runVisual('compare')}><ProductIcon name="diff" /><span>{t(capturingVisual === 'compare' ? 'Comparing visual baseline…' : 'Compare visual baseline')}</span></button>
       </ToolbarOverflow>
@@ -905,6 +905,8 @@ const MobileMessage = memo(function MobileMessage({ profile, message, messageTag
             ? <IconButton key={actionId} icon={feedback?.actionId === actionId ? feedback.status === 'success' ? 'check' : feedback.status === 'error' ? 'warning' : 'copy' : 'copy'} label={feedback?.actionId === actionId ? feedback.message : t('Copy')} type="button" onClick={() => { reportFeedback(actionId, 'pending', t('Copying message…')); post({ type: 'action.invoke', actionId, sourceMessageId: message.id }); }} />
             : actionId === 'message.retry'
               ? <IconButton key={actionId} icon="refresh" label={feedback?.actionId === actionId ? feedback.message : t('Retry')} type="button" disabled={!trusted} onClick={() => { reportFeedback(actionId, 'info', t('Retry requested.')); post({ type: 'action.invoke', actionId, sourceMessageId: message.id }); }} />
+              : actionId === 'message.saveAsTest'
+                ? <IconButton key={actionId} icon="beaker" label={t('Save as test up to this reply')} type="button" disabled={!trusted || message.status !== 'completed'} onClick={() => post({ type: 'test.capture', source: { kind: 'conversation', throughMessageId: message.id } })} />
               : <IconButton key={actionId} icon={feedback?.actionId === actionId ? 'check' : 'edit'} label={feedback?.actionId === actionId ? feedback.message : t('Edit & resend')} type="button" disabled={!trusted} onClick={() => { setDraft(text); reportFeedback(actionId, 'success', t('Message moved to the composer.')); }} />)}
         {feedback && <span className={`mobile-chat-preview__message-action-feedback mobile-chat-preview__message-action-feedback--${feedback.status}`} role="status" aria-live="polite" aria-atomic="true">{feedback.message}</span>}
       </footer>}

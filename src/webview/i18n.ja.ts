@@ -1564,4 +1564,7 @@ export const ja: Record<string, string> = {
   "Last result before this case was edited: {outcome}, {date}": "このケースを編集する前の最後の結果：{outcome}、{date}",
   "Browser storage is full, so evidence for some cases was not kept. Their results are still recorded. Clear run history or export evidence to free space.": "ブラウザーのストレージがいっぱいのため、一部のケースの証拠は保存されませんでした。結果は記録されています。実行履歴を消去するか証拠をエクスポートして空き容量を確保してください。",
   "{preset} is a read-only preset, so TurnStage created the editable copy {copy} and saved the test there.": "{preset} は読み取り専用のプリセットのため、TurnStage は編集可能なコピー {copy} を作成し、そこにテストを保存しました。",
+  "Save as test": "テストとして保存",
+  "Save as test up to this reply": "この返信までをテストとして保存",
+  "Save this conversation as a regression test": "この会話を回帰テストとして保存",
 };

@@ -221,7 +221,7 @@
         "messageActions": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "enum": ["message.copy", "message.retry", "message.editAndResend", "message.inspectRaw"] }
+          "items": { "enum": ["message.copy", "message.retry", "message.editAndResend", "message.inspectRaw", "message.saveAsTest"] }
         },
         "messageActionVisibility": { "enum": ["always", "interaction"] },
         "messageTags": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/messageTagRule" } }

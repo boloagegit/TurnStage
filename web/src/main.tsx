@@ -2,14 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { applyEdits, modify } from 'jsonc-parser';
-import type { HostMessage, HostPayload, WebviewMessage } from '../../src/shared/protocol';
+import type { HostMessage, HostPayload, TestCaptureSource, WebviewMessage } from '../../src/shared/protocol';
 import { PROTOCOL_VERSION } from '../../src/shared/protocol';
 import type { LocalRun, LocalRunSummary, TurnStageEnvironment, TurnStageProfile } from '../../src/shared/types';
 import { ProfileCodec } from '../../src/extension/config/profileCodec';
 import { ProfileValidator } from '../../src/extension/config/profileValidator';
 import { MappingEngine } from '../../src/extension/mapping/mappingEngine';
 import { validateFormSubmission } from '../../src/extension/editors/formSubmission';
-import { buildCapturedScenario } from '../../src/extension/testing/scenarioCapture';
+import { buildCapturedScenario, snapshotThrough } from '../../src/extension/testing/scenarioCapture';
 import { BrowserSession, type BrowserSessionState } from './browserSession';
 import { WebTestController } from './webTestController';
 import { WebCampaignController } from './webCampaignController';
@@ -457,8 +457,8 @@ async function clearRuns(): Promise<void> {
   post({ type: 'run.history.changed', deletedCount: records.length, deletedBytes: records.reduce((sum, item) => sum + JSON.stringify(item.value).length, 0) });
 }
 
-async function captureTest(source: { kind: 'conversation' } | { kind: 'run'; runId: string } | { kind: 'evidence'; evidenceId: string }, kind: 'contract' | 'adversarial', requestId?: string): Promise<void> {
-  const snapshot = source.kind === 'conversation' ? session.current.snapshot : source.kind === 'run' ? (await findRun(source.runId))?.snapshot : (await tests.evidenceResult(source.evidenceId))?.result.evidence.snapshot;
+async function captureTest(source: TestCaptureSource, kind: 'contract' | 'adversarial', requestId?: string): Promise<void> {
+  const snapshot = source.kind === 'conversation' ? snapshotThrough(session.current.snapshot, source.throughMessageId) : source.kind === 'run' ? (await findRun(source.runId))?.snapshot : (await tests.evidenceResult(source.evidenceId))?.result.evidence.snapshot;
   if (!snapshot) throw new Error('The selected browser-local evidence is no longer available.');
   // A read-only preset cannot hold a reviewable case, so the first save forks it and continues in the copy.
   let forkedNotice: string | undefined;
