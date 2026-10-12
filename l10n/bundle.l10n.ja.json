@@ -775,5 +775,8 @@
   "The conversation history response exceeded the maximum allowed size.": "会話履歴のレスポンスが許容サイズを超えました。",
   "The conversation history response is not valid JSON.": "会話履歴のレスポンスが有効な JSON ではありません。",
   "Conversation archive size must be an integer from 1 to 100.": "会話の保存数は 1〜100 の整数で指定してください。",
-  "The conversation history request should reference conversation.id so TurnStage can load a specific conversation.": "特定の会話を読み込めるように、会話履歴リクエストでは conversation.id を参照してください。"
+  "The conversation history request should reference conversation.id so TurnStage can load a specific conversation.": "特定の会話を読み込めるように、会話履歴リクエストでは conversation.id を参照してください。",
+  "There is no running TurnStage test run to pause.": "一時停止できる実行中の TurnStage テストはありません。",
+  "There is no paused TurnStage test run to resume.": "再開できる一時停止中の TurnStage テストはありません。",
+  "There is no active TurnStage test run to cancel.": "キャンセルできる TurnStage テストはありません。"
 }

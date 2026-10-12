@@ -775,5 +775,8 @@
   "The conversation history response exceeded the maximum allowed size.": "대화 기록 응답이 허용 크기를 초과했습니다.",
   "The conversation history response is not valid JSON.": "대화 기록 응답이 올바른 JSON이 아닙니다.",
   "Conversation archive size must be an integer from 1 to 100.": "대화 보관 수는 1에서 100 사이의 정수여야 합니다.",
-  "The conversation history request should reference conversation.id so TurnStage can load a specific conversation.": "특정 대화를 불러올 수 있도록 대화 기록 요청에서 conversation.id를 참조해야 합니다."
+  "The conversation history request should reference conversation.id so TurnStage can load a specific conversation.": "특정 대화를 불러올 수 있도록 대화 기록 요청에서 conversation.id를 참조해야 합니다.",
+  "There is no running TurnStage test run to pause.": "일시 중지할 실행 중인 TurnStage 테스트가 없습니다.",
+  "There is no paused TurnStage test run to resume.": "다시 시작할 일시 중지된 TurnStage 테스트가 없습니다.",
+  "There is no active TurnStage test run to cancel.": "취소할 활성 TurnStage 테스트가 없습니다."
 }
