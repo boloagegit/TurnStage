@@ -394,3 +394,6 @@
 .scenario-controls-disclosure > div { display: grid; gap: var(--ts-space-3); }
 .settings-card-subtitle { max-width: 60ch; margin: var(--ts-space-1) 0 0; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-small); line-height: 1.45; }
 .settings-card-heading__toggle { margin-top: var(--ts-space-2); }
+.settings-empty__more { flex: 1 1 100%; order: 2; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-small); }
+.settings-empty__more > summary { width: fit-content; cursor: pointer; }
+.settings-empty__more > p { max-width: 60ch; margin: var(--ts-space-1) 0 0; line-height: 1.5; }
