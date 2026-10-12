@@ -46,11 +46,13 @@ export function buildCapturedScenario(input: CaptureScenarioInput): ScenarioDefi
     ...(input.source.kind === 'run' ? { runId: boundedRequired(input.source.runId, 256, 'Run id') } : {}),
     ...(input.source.kind === 'evidence' ? { evidenceId: boundedRequired(input.source.evidenceId, 256, 'Evidence id') } : {}),
   };
+  const controls = capturedControls(input.profile, input.snapshot);
   const common: ScenarioDefinition = {
     id,
     name,
     tags: [CAPTURED_TAG, NEEDS_REVIEW_TAG],
     capture,
+    ...(controls ? { controls } : {}),
     steps,
   };
   if (input.kind === 'contract') return {
@@ -72,6 +74,17 @@ export function buildCapturedScenario(input: CaptureScenarioInput): ScenarioDefi
       forbid,
     },
   };
+}
+
+/**
+ * The non-secret control values the conversation ran with. Without them a test session falls back to whatever
+ * the user has selected at run time (or the Profile defaults in the CLI), so the captured behavior may not recur.
+ */
+export function capturedControls(profile: TurnStageProfile, snapshot: SessionSnapshot): Record<string, unknown> | undefined {
+  const entries = (profile.controls ?? [])
+    .filter((definition) => definition.persist !== 'secret' && snapshot.controls[definition.id] !== undefined)
+    .map((definition) => [definition.id, structuredClone(snapshot.controls[definition.id])] as const);
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
 export function capturedUserSteps(snapshot: SessionSnapshot): ScenarioDefinition['steps'] {
