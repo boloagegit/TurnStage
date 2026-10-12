@@ -73,6 +73,27 @@ describe('WebTestController', () => {
     expect(history.cases.filter((item) => item.completedAttempts === 0)).toHaveLength(4);
   });
 
+  it('leaves General cases stopped mid-turn unfinished instead of failed', async () => {
+    const scenarios = Array.from({ length: 2 }, (_, index) => ({ id: `case-${index}`, name: `Case ${index}`, steps: [{ id: 'turn', input: 'Hello', assertions: [{ path: 'turn.state', operator: 'equals' as const, value: 'completed' }] }] }));
+    const profile: TurnStageProfile = { version: 1, id: `stop-active-${crypto.randomUUID()}`, name: 'Stop active', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios } };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    let started = 0;
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      started += 1;
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    })));
+    const messages: HostPayload[] = [];
+    const controller = new WebTestController(() => profile, () => environment, new Map(), (payload) => messages.push(payload));
+    const running = controller.run('runContracts');
+    await vi.waitFor(() => expect(started).toBe(2));
+    controller.cancel();
+    await running;
+    const history = messages.filter((item): item is Extract<HostPayload, { type: 'test.history' }> => item.type === 'test.history').at(-1)!.runs[0]!;
+    expect(history.status).toBe('cancelled');
+    expect(history.cases).toHaveLength(2);
+    expect(history.cases.every((item) => item.completedAttempts === 0 && item.outcome === undefined)).toBe(true);
+  });
+
   it('keeps latest results and exports isolated when profiles reuse a case ID', async () => {
     const scenario = { id: 'shared-id', name: 'Same case ID', steps: [{ id: 'turn', input: 'Hello' }] };
     const base: TurnStageProfile = { version: 1, id: `isolation-a-${crypto.randomUUID()}`, name: 'A', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios: [scenario] } };

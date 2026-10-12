@@ -188,6 +188,8 @@ export class WebTestController {
           try {
             if (this.profile().id !== profile.id) throw new Error('The active profile changed during this test run. The remaining cases were not sent.');
             const execution = await this.executeScenario(item, true, { profile, environment, secrets });
+            // A General case stopped mid-turn has no verdict; leave it unfinished so it is offered again, as VS Code does.
+            if (this.cancelled && !item.scenario.adversarial) continue;
             const outcome = execution.result.adversarial?.outcome ?? (execution.result.evidence.snapshot.errors.some((error) => error.type === 'WebTestExecutionError') ? 'error' : execution.result.passed ? 'passed' : 'failed');
             const result: CompletedTestRunCase = { profileId: profile.id, suiteId: item.suiteId, scenarioId: item.scenario.id, kind: item.scenario.adversarial ? 'adversarial' : 'contract', outcome, completedAttempts: execution.result.repetitions?.completedAttempts ?? 1, durationMs: execution.result.durationMs, evidenceId: execution.evidenceId };
             completedCases.push(result);
