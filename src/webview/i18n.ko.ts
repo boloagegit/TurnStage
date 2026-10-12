@@ -1562,4 +1562,5 @@ export const ko: Record<string, string> = {
   "Settings changed since baseline": "비교 기준 이후 설정이 변경됨",
   "Changed since last run": "마지막 실행 후 변경됨",
   "Last result before this case was edited: {outcome}, {date}": "이 케이스를 편집하기 전의 마지막 결과: {outcome}, {date}",
+  "Browser storage is full, so evidence for some cases was not kept. Their results are still recorded. Clear run history or export evidence to free space.": "브라우저 저장 공간이 가득 차 일부 케이스의 증거를 보관하지 못했습니다. 결과는 계속 기록됩니다. 실행 기록을 지우거나 증거를 내보내 공간을 확보하세요.",
 };

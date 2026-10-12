@@ -1693,6 +1693,7 @@ const zhTw: Record<string, string> = {
   "Settings changed since baseline": "設定自基準後已變更",
   "Changed since last run": "上次執行後已變更",
   "Last result before this case was edited: {outcome}, {date}": "此案例編輯前的最後結果：{outcome}，{date}",
+  "Browser storage is full, so evidence for some cases was not kept. Their results are still recorded. Clear run history or export evidence to free space.": "瀏覽器儲存空間已滿，部分案例的證據未被保留，但結果仍已記錄。請清除執行記錄或匯出證據以釋放空間。",
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {
