@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCapturedScenario, captureEffectOptions, capturedUserSteps, isScenarioReady, markCapturedScenarioReady, MAX_CAPTURED_TURN_CHARACTERS } from '../src/extension/testing/scenarioCapture';
+import { buildCapturedScenario, captureEffectOptions, capturedUserSteps, isScenarioReady, markCapturedScenarioReady, MAX_CAPTURED_TURN_CHARACTERS, snapshotThrough } from '../src/extension/testing/scenarioCapture';
 import type { ChatMessage, SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 
 const profile: TurnStageProfile = {
@@ -52,6 +52,13 @@ describe('captured test scenarios', () => {
     });
     expect(scenario.controls).toEqual({ mode: 'partial-error', verbose: false });
     expect(buildCapturedScenario({ kind: 'contract', name: 'Plain', snapshot: snapshot([message('user-1', 'user', 'Hello')]), profile, source: { kind: 'conversation' } }).controls).toBeUndefined();
+  });
+
+  it('captures only the turns up to a chosen reply', () => {
+    const full = snapshot([message('u1', 'user', 'First'), message('a1', 'assistant', 'One'), message('u2', 'user', 'Second'), message('a2', 'assistant', 'Two')]);
+    expect(capturedUserSteps(snapshotThrough(full, 'a1')).map((step) => step.input)).toEqual(['First']);
+    expect(capturedUserSteps(snapshotThrough(full)).map((step) => step.input)).toEqual(['First', 'Second']);
+    expect(() => snapshotThrough(full, 'gone')).toThrow(/no longer in this conversation/u);
   });
 
   it('builds a bounded multi-turn adversarial draft and unique id', () => {

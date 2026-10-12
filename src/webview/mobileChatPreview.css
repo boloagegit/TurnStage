@@ -69,6 +69,9 @@
 }
 .mobile-chat-preview__viewport-settings { position: relative; flex: 0 0 auto; }
 .mobile-chat-preview__viewport-settings > summary { display: flex; align-items: center; gap: var(--mcp-space-1); min-height: var(--mcp-control-height); padding: var(--mcp-space-1) var(--mcp-space-2); border: 1px solid var(--vscode-button-border, var(--mcp-border)); border-radius: 2px; color: var(--vscode-button-secondaryForeground, var(--mcp-foreground)); background: var(--vscode-button-secondaryBackground, var(--mcp-surface)); cursor: pointer; list-style: none; white-space: nowrap; }
+.mobile-chat-preview__capture { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--mcp-space-1); min-height: var(--mcp-control-height); padding: var(--mcp-space-1) var(--mcp-space-2); border: 1px solid var(--vscode-button-border, var(--mcp-border)); border-radius: 2px; color: var(--vscode-button-secondaryForeground, var(--mcp-foreground)); background: var(--vscode-button-secondaryBackground, var(--mcp-surface)); white-space: nowrap; }
+.mobile-chat-preview__capture:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, var(--mcp-toolbar-hover)); }
+.mobile-chat-preview__capture:disabled { color: var(--vscode-disabledForeground, var(--mcp-disabled-foreground)); cursor: default; }
 .mobile-chat-preview__viewport-settings > summary::-webkit-details-marker { display: none; }.mobile-chat-preview__viewport-settings > summary::after { content: '\eab4'; font-family: codicon; font-size: 1em; }.mobile-chat-preview__viewport-settings[open] > summary::after { transform: rotate(180deg); }
 .mobile-chat-preview__viewport-settings > summary small { color: var(--vscode-descriptionForeground, var(--mcp-muted)); font-size: .846em; font-variant-numeric: tabular-nums; }
 .mobile-chat-preview__viewport-settings-panel { position: absolute; z-index: 20; inset-block-start: calc(100% + 4px); inset-inline-start: 0; display: grid; box-sizing: border-box; width: min(24em, calc(100vw - 24px)); gap: var(--mcp-space-2); padding: var(--mcp-space-3); border: 1px solid var(--vscode-widget-border, var(--mcp-border)); border-radius: 4px; background: var(--vscode-menu-background, var(--mcp-background)); box-shadow: 0 8px 24px var(--vscode-widget-shadow, rgba(0, 0, 0, .35)); }
@@ -1568,6 +1571,7 @@
   .mobile-chat-preview__session-tools { margin-inline-start: auto; padding-inline-start: 0; }
   /* Every toolbar action stays reachable: labels collapse to their icons but keep their accessible names. */
   .mobile-chat-preview__viewport-settings > summary > span:not(.product-icon),
+  .mobile-chat-preview__capture > span:not(.product-icon),
   .mobile-chat-preview__session-state > span:not(.product-icon),
   .mobile-chat-preview__history-check > span:not(.product-icon, .mobile-chat-preview__history-check-mark, .mobile-chat-preview__history-check-count) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .mobile-chat-preview__viewport-toolbar { gap: 2px; }

@@ -42,7 +42,7 @@ import { parseContractSource } from '../testing/contractSource';
 import { appendLinkedContractCase, deleteLinkedContractCase, LinkedContractCaseConflictError, loadEditableLinkedContractCase, saveEditableLinkedContractCase } from '../testing/linkedContractCase';
 import { SessionDeltaTracker } from '../../shared/sessionDelta';
 import { isBlockedLifecycleCommand } from '../../shared/vscodeCommandPolicy';
-import { buildCapturedScenario, captureEffectOptions, type CaptureKind } from '../testing/scenarioCapture';
+import { buildCapturedScenario, captureEffectOptions, snapshotThrough, type CaptureKind } from '../testing/scenarioCapture';
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 150;
 
@@ -1088,7 +1088,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
     const evidenceReference = source.kind === 'evidence' ? this.scenarioTests?.getEvidence(source.evidenceId) : undefined;
     if (evidenceReference && evidenceReference.evidence.profileId !== profile.id) throw new Error(localize('The selected test evidence belongs to a different Profile.'));
     const snapshot = source.kind === 'conversation'
-      ? controller.snapshot
+      ? snapshotThrough(controller.snapshot, source.throughMessageId)
       : source.kind === 'run'
         ? controller.getRuns().find((run) => run.id === source.runId)?.snapshot
         : evidenceReference?.evidence.snapshot;

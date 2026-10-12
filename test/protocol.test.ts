@@ -73,6 +73,8 @@ describe('cross-boundary message validation', () => {
     expect(isWebviewMessage({ ...envelope, type: 'test.history.clear', kind: 'unknown' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.history.rerun', runId: 'run-1', kind: 'unknown' }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'conversation' } }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'conversation', throughMessageId: 'assistant-1' } }, 'editor-1')).toBe(true);
+    expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'conversation', runId: 'smuggled' } }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'run', runId: 'run-1' }, suggestedKind: 'contract' }, 'editor-1')).toBe(true);
     expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'run', runId: 'run-1', evidenceId: 'smuggled' } }, 'editor-1')).toBe(false);
     expect(isWebviewMessage({ ...envelope, type: 'test.capture', source: { kind: 'evidence', evidenceId: '' } }, 'editor-1')).toBe(false);

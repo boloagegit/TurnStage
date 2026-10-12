@@ -1695,6 +1695,9 @@ const zhTw: Record<string, string> = {
   "Last result before this case was edited: {outcome}, {date}": "此案例編輯前的最後結果：{outcome}，{date}",
   "Browser storage is full, so evidence for some cases was not kept. Their results are still recorded. Clear run history or export evidence to free space.": "瀏覽器儲存空間已滿，部分案例的證據未被保留，但結果仍已記錄。請清除執行記錄或匯出證據以釋放空間。",
   "{preset} is a read-only preset, so TurnStage created the editable copy {copy} and saved the test there.": "{preset} 是唯讀的預設設定檔，因此 TurnStage 已建立可編輯的副本 {copy}，並將測試存在其中。",
+  "Save as test": "存成測試",
+  "Save as test up to this reply": "將到此回覆為止的內容存成測試",
+  "Save this conversation as a regression test": "將此對話存成回歸測試",
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {

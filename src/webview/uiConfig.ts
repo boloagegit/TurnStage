@@ -2,7 +2,7 @@ import type { TurnStageProfile, UiDefinition } from '../shared/types';
 
 export type UiLayoutPreset = NonNullable<NonNullable<UiDefinition['layout']>['preset']>;
 export type InspectorPosition = NonNullable<NonNullable<UiDefinition['layout']>['inspectorPosition']>;
-export type MessageActionId = 'message.copy' | 'message.retry' | 'message.editAndResend' | 'message.inspectRaw';
+export type MessageActionId = 'message.copy' | 'message.retry' | 'message.editAndResend' | 'message.inspectRaw' | 'message.saveAsTest';
 export type MessageActionVisibility = NonNullable<UiDefinition['messageActionVisibility']>;
 export type StreamingEffect = NonNullable<NonNullable<UiDefinition['streaming']>['effect']>;
 export type StreamingIndicator = NonNullable<NonNullable<UiDefinition['streaming']>['indicator']>;
@@ -14,6 +14,7 @@ export const DEFAULT_MESSAGE_ACTIONS: MessageActionId[] = [
   'message.retry',
   'message.editAndResend',
   'message.inspectRaw',
+  'message.saveAsTest',
 ];
 export const DEFAULT_MESSAGE_ACTION_VISIBILITY: MessageActionVisibility = 'always';
 
@@ -92,7 +93,7 @@ export function resolveMessageActions(profile: TurnStageProfile, role: 'user' | 
   const configured = profile.ui?.messageActions ?? DEFAULT_MESSAGE_ACTIONS;
   const supported = new Set<MessageActionId>(DEFAULT_MESSAGE_ACTIONS);
   return configured.filter((id, index): id is MessageActionId => supported.has(id as MessageActionId) && configured.indexOf(id) === index).filter((id) => {
-    if (id === 'message.retry' || id === 'message.editAndResend') return role === 'assistant';
+    if (id === 'message.retry' || id === 'message.editAndResend' || id === 'message.saveAsTest') return role === 'assistant';
     if (id === 'message.inspectRaw') return canInspect;
     return true;
   });
