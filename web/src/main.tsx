@@ -38,6 +38,7 @@ import environmentRaw from '../../resources/templates/local.environment.jsonc?ra
 import './vscode-token-compat.css';
 import './web.css';
 import { promptBeforeReply } from '../../src/shared/retryPrompt';
+import { blocksSession, withIssueScope } from '../../src/shared/profileIssueScope';
 
 type VsCodeApiState = Record<string, unknown>;
 type BridgeApi = { postMessage(message: unknown): void; getState(): VsCodeApiState | undefined; setState(state: VsCodeApiState): void };
@@ -156,7 +157,11 @@ async function handleWebviewMessage(raw: unknown): Promise<void> {
       case 'session.start': await session.start(); break;
       case 'opening.retry': await session.start(); break;
       case 'opening.useFallback': session.useOpeningFallback(); break;
-      case 'request.send': await session.send(message.text, message.interaction); break;
+      case 'request.send':
+        // Match VS Code: a Profile error outside its test cases stops chat requests until it is fixed.
+        if (diagnostics(active.raw).some(blocksSession)) throw new Error(t('Fix the Profile errors listed above before sending a message.'));
+        await session.send(message.text, message.interaction);
+        break;
       case 'citation.open': openCitation(message.citationId); break;
       case 'action.invoke': await invokeAction(message.actionId, message.sourceMessageId, message.requestId); break;
       case 'form.submit': {
@@ -324,7 +329,7 @@ function diagnostics(raw: string): ProfileSourceDiagnostic[] {
   if (!parsed.profile) return [{ code: 'jsonc.root', severity: 'error', message: 'The profile root must be an object.', offset: 0, length: 1, path: [] }];
   const availableEnvironments = environments.flatMap((item) => { const environment = parseEnvironment(item.raw); return environment ? [environment] : []; });
   const semantic = validator.validate(parsed.profile, parsed.tree, availableEnvironments).map((issue) => ({ ...issue, code: 'profile.semantic', path: [] }));
-  return [...schemaDiagnostics(parsed.profile, parsed.tree, preferences.locale), ...semantic, ...webCompatibilityDiagnostics(parsed.profile, parsed.tree, availableEnvironments, preferences.locale)];
+  return withIssueScope(raw, [...schemaDiagnostics(parsed.profile, parsed.tree, preferences.locale), ...semantic, ...webCompatibilityDiagnostics(parsed.profile, parsed.tree, availableEnvironments, preferences.locale)]);
 }
 
 function selectProfile(id: string): void {

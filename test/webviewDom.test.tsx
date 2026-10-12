@@ -309,6 +309,13 @@ describe('Webview DOM behavior', () => {
     expect(post).toHaveBeenCalledWith({ type: 'test.capture', source: { kind: 'conversation', throughMessageId: 'assistant-1' } });
   });
 
+  it('reports a failed last turn and plain state names instead of a green Ready', () => {
+    const { rerender } = render(<MobileChatPreview {...mobileProps({ snapshot: { ...snapshot, sessionState: 'ready', turnState: 'failed' } })} />);
+    expect(screen.getByRole('status', { name: 'Conversation status: Last turn failed' })).toBeTruthy();
+    rerender(<MobileChatPreview {...mobileProps({ active: true, snapshot: { ...snapshot, sessionState: 'ready', turnState: 'waitingStart' } })} />);
+    expect(screen.getByRole('status', { name: 'Conversation status: Waiting for response' })).toBeTruthy();
+  });
+
   it('uses distinct visual symbols for test capture and visual baselines', async () => {
     render(<MobileChatPreview {...mobileProps()} />);
     expect(screen.getByRole('button', { name: 'Save as test' }).querySelector('.codicon-beaker')).toBeTruthy();

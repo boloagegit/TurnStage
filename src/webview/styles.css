@@ -49,6 +49,7 @@ h1 { margin: 0; font-size: var(--ts-type-title); line-height: 1.4; } h2 { margin
 .trust-banner, .validation-banner { padding: 7px 14px; border-bottom: 1px solid var(--vscode-notifications-border, var(--vscode-editorWidget-border)); color: var(--vscode-notifications-foreground, var(--vscode-editor-foreground)); background: var(--vscode-notifications-background, var(--vscode-editorWidget-background)); }
 .trust-banner strong { color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-editorWarning-foreground)); }
 .validation-banner strong { color: var(--vscode-notificationsErrorIcon-foreground, var(--vscode-errorForeground)); }
+.validation-banner--tests strong { color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-editorWarning-foreground)); }
 .operation-status { position: relative; z-index: 1; display: flex; align-items: center; gap: var(--ts-space-2); width: 100%; min-height: calc(var(--ts-control-height) + var(--ts-space-1)); padding: var(--ts-space-1) var(--ts-space-2); border-block-end: 1px solid var(--vscode-notifications-border, var(--vscode-editorWidget-border)); background: var(--vscode-notifications-background, var(--vscode-editorWidget-background)); color: var(--vscode-notifications-foreground, var(--vscode-editor-foreground)); }
 .operation-status > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .operation-status > .product-icon { color: var(--vscode-notificationsInfoIcon-foreground, var(--vscode-editorInfo-foreground)); }

@@ -13,6 +13,7 @@ import { RequestAuthorizationService } from '../security/requestAuthorization';
 import { isActive, SessionController } from '../runtime/sessionController';
 import { MappingEngine } from '../mapping/mappingEngine';
 import { localize } from '../l10n';
+import { blocksSession, withIssueScope } from '../../shared/profileIssueScope';
 import { canOpenInLocalBrowser, defaultExportUri } from '../exportLocation';
 import { validateFormSubmission } from './formSubmission';
 import { resolveDisplayLanguage, textDirection } from '../displayLanguage';
@@ -225,14 +226,15 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
       const parsed = this.codec.parse(text); const envEntries = await this.environments.discover(document.uri); if (disposed || document.version !== version) return; const issues = this.validator.validate(parsed.profile, parsed.tree, envEntries.map((item) => item.environment)); this.publishDiagnostics(document, issues);
       panel.title = profileEditorTitle(parsed.profile?.name, resourceTitle);
       profileSnapshot = { type: 'profile.snapshot', profile: parsed.profile, parseError: parsed.errors.length ? localize('Invalid JSONC') : undefined, version: document.version, environments: envEntries.map((item) => item.environment.id) };
-      validationSnapshot = { type: 'profile.validation', diagnostics: issues };
+      validationSnapshot = { type: 'profile.validation', diagnostics: withIssueScope(text, issues) };
       latestConnectionResult = undefined;
       logAt(this.output, 'debug', `[profile] loaded ${parsed.profile?.id ?? document.uri.toString()} at document version ${version}`);
       await post(profileSnapshot);
       await post(validationSnapshot);
       await post({ type: 'profile.editState', dirty: document.isDirty });
       if (disposed || document.version !== version) return;
-      if (!parsed.profile || issues.some((item) => item.severity === 'error')) { conversationSource = controller ?? conversationSource; await disposeController(); return; }
+      // Errors in test cases only stop those cases; any other error stops chat requests until it is fixed.
+      if (!parsed.profile || validationSnapshot.diagnostics.some(blocksSession)) { conversationSource = controller ?? conversationSource; await disposeController(); return; }
       if (!controller || controller.profile !== parsed.profile) {
         // An edit rebuilds the session; stop an active turn through the Profile's stop request and keep the conversation.
         if (controller && isActive(controller.snapshot.turnState)) await controller.abort();
