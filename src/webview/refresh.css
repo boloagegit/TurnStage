@@ -389,5 +389,5 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
   .right-pane-tabs .right-pane-tab__icon { display: inline-block; }
   .right-pane-tab--chat .right-pane-tab__label { display: none; }
   /* Icon-only, so keep the WCAG 2.5.8 minimum target. */
-  .right-pane-tab--chat { min-width: 28px; justify-content: center; }
+  .right-pane-tab--chat { min-width: 28px; justify-content: flex-start; }
 }

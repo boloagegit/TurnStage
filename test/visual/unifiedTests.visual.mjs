@@ -3,9 +3,14 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
+import { Buffer } from 'node:buffer';
+import { build } from 'esbuild';
 import { chromium } from 'playwright';
 
 const root = resolve(import.meta.dirname, '../..');
+// History fixtures must carry the case's real definition digest, or the workspace reports them as changed since the run.
+const digestBundle = await build({ stdin: { contents: "export { caseDefinitionDigest } from './src/shared/testRunHistory';", resolveDir: root, loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'node' });
+const { caseDefinitionDigest } = await import(`data:text/javascript;base64,${Buffer.from(digestBundle.outputFiles[0].text).toString('base64')}`);
 const artifacts = resolve(root, 'artifacts', 'visual-regression');
 const browserCandidates = [process.env.TURNSTAGE_CHROMIUM_EXECUTABLE, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'].filter(Boolean);
 const executablePath = browserCandidates.find((candidate) => existsSync(candidate));
@@ -70,7 +75,8 @@ try {
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-run-selected.png') });
 
   const key = JSON.stringify(['slow-sse-proof', 'contract', null, 'slow-stream-contract']);
-  const caseBase = { profileId: 'slow-sse-proof', scenarioId: 'slow-stream-contract', kind: 'contract', key, name: 'Slow stream contract', definitionDigest: 'a'.repeat(64), environmentDigest: 'c'.repeat(64), requestedAttempts: 1, completedAttempts: 1, durationMs: 20 };
+  const definitionDigest = caseDefinitionDigest(await page.evaluate(() => globalThis.__turnstageHarness.profile.tests.scenarios.find((item) => item.id === 'slow-stream-contract')));
+  const caseBase = { profileId: 'slow-sse-proof', scenarioId: 'slow-stream-contract', kind: 'contract', key, name: 'Slow stream contract', definitionDigest, environmentDigest: 'c'.repeat(64), requestedAttempts: 1, completedAttempts: 1, durationMs: 20 };
   const base = { format: 'turnstage-test-run-history', version: 1, id: 'base', profileId: 'slow-sse-proof', startedAt: 1_790_000_000_000, finishedAt: 1_790_000_000_020, status: 'completed', runner: 'vscode', evaluatorVersion: 1, profileDigest: 'b'.repeat(64), environmentDigest: 'c'.repeat(64), cases: [{ ...caseBase, outcome: 'passed' }] };
   const current = { ...base, id: 'current', startedAt: base.startedAt + 1000, finishedAt: base.finishedAt + 1000, cases: [{ ...caseBase, outcome: 'failed' }] };
   await page.evaluate(({ base, current }) => globalThis.__turnstageHarness.dispatch({ type: 'test.history', profileId: 'slow-sse-proof', runs: [current, base], baselines: { contract: 'base' } }), { base, current });
