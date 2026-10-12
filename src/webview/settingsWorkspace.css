@@ -50,7 +50,7 @@
 .settings-code-input, .settings-preview pre { font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size, 1em); }.settings-field-control { display: grid; gap: var(--ts-space-1); }.settings-apply-action { justify-self: start; }
 .settings-checkbox-group { min-width: 0; margin: 0; padding: 0; border: 0; }.settings-checkbox-group > p { margin: 2px 0 var(--ts-space-2); color: var(--vscode-descriptionForeground); font-size: .846em; }.settings-checkbox-group > div { display: grid; gap: var(--ts-space-1); }
 .settings-checkbox { display: flex; align-items: center; gap: calc(var(--ts-space-1) + 3px); min-height: var(--ts-control-height); }.settings-checkbox input { width: 1.23em; min-height: 1.23em; margin: 0; }
-.settings-status-grid, .settings-request-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.75em, 1fr)); gap: 1px; margin-top: var(--ts-space-3); background: var(--vscode-editorWidget-border); }
+.settings-status-grid, .settings-request-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.75em, 1fr)); gap: 1px; margin-top: var(--ts-space-3); margin-inline: calc(-1 * (var(--ts-space-2) + 2px)); clip-path: inset(0 calc(var(--ts-space-2) + 2px)); /* cell text lands on the content edge; the dividers stop at it */ background: var(--vscode-editorWidget-border); }
 .settings-status-item { display: grid; gap: 2px; min-width: 0; padding: var(--ts-space-2) calc(var(--ts-space-2) + 2px); background: var(--vscode-editor-background); }.settings-status-item span { color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); }.settings-status-item strong { overflow: hidden; font-family: var(--vscode-editor-font-family); font-size: .846em; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }.settings-status-item.is-warning strong { color: var(--vscode-editorWarning-foreground); }
 .settings-controls-summary, .settings-history-note { margin-top: 12px; padding: 8px 10px; border: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-textBlockQuote-background); }
 .settings-controls-summary > div, .settings-history-note { display: flex; justify-content: space-between; gap: 12px; }.settings-controls-summary ul { margin: 8px 0 0; padding: 0; list-style: none; }.settings-controls-summary li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-top: 1px solid var(--vscode-editorWidget-border); }.settings-controls-summary code { font-family: var(--vscode-editor-font-family); color: var(--vscode-descriptionForeground); }
@@ -96,7 +96,7 @@
 .adversarial-linked-suites { display: grid; gap: var(--ts-space-1); margin: var(--ts-space-2) 0 var(--ts-space-3); }
 .adversarial-linked-suites > strong { font-size: .846em; }
 .adversarial-linked-suites ul { display: grid; gap: 1px; margin: 0; padding: 0; background: var(--vscode-editorWidget-border); list-style: none; }
-.adversarial-linked-suites li { display: flex; align-items: center; justify-content: space-between; gap: var(--ts-space-2); min-height: var(--ts-control-height); padding: var(--ts-space-1) var(--ts-space-2); background: var(--vscode-editor-background); }
+.adversarial-linked-suites li { display: flex; align-items: center; justify-content: space-between; gap: var(--ts-space-2); min-height: var(--ts-control-height); padding: var(--ts-space-1) 0; background: var(--vscode-editor-background); }
 .adversarial-linked-suites code { overflow: hidden; font-family: var(--vscode-editor-font-family); font-size: .846em; text-overflow: ellipsis; white-space: nowrap; }
 .adversarial-linked-suite-actions { display: flex; flex: 0 0 auto; gap: var(--ts-space-1); }
 .settings-workspace--evaluation { grid-template-rows: minmax(0, 1fr); }
@@ -315,7 +315,7 @@
 @container (max-width: 38em) { .assertion-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; }.assertion-row > button { justify-self: end; }.scenario-step > header > div { flex-wrap: wrap; } }
 .scenario-editor button { transition-property: transform; transition-duration: 80ms; }.scenario-editor button:active:not(:disabled) { transform: scale(.96); }
 .settings-trust-card { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 10px; border: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-textBlockQuote-background); }.settings-trust-icon { color: var(--vscode-testing-iconPassed); font-weight: 600; }.settings-trust-card.is-restricted .settings-trust-icon { color: var(--vscode-editorWarning-foreground); }
-.settings-header--embedded { padding-inline: var(--ts-space-2); }
+.settings-header--embedded { padding-inline: var(--ts-pane-inline) var(--ts-space-2); }
 .settings-workspace--embedded .settings-subtitle,
 .settings-workspace--embedded .settings-section-count { display: none; }
 .settings-workspace--embedded .settings-content-layout { grid-template-columns: 1fr; }
@@ -340,6 +340,8 @@
 .settings-workspace--embedded .scenario-budget__cell-label { display: block; }
 .settings-workspace--embedded .settings-field-wide,
 .settings-workspace--embedded .field-wide { grid-column: auto; }
+/* One column: every field shares the same right edge. */
+.settings-workspace--embedded .settings-field-wide :is(input, select, textarea) { max-width: 640px; }
 @media (max-width: 46em) { .assertion-row { grid-template-columns: 1fr; align-items: stretch; }.assertion-row > button { justify-self: end; }.settings-empty--action { align-items: flex-start; flex-direction: column; }.scenario-target-grid { grid-template-columns: 1fr; }.scenario-budget__header { display: none; }.scenario-budget__row { grid-template-columns: repeat(3, minmax(0, 1fr)); }.scenario-budget__row > span { grid-column: 1 / -1; }.scenario-budget__cell { gap: 2px; }.scenario-budget__cell-label { display: block; } }
 @media (max-width: 46em) { .adversarial-forbid { grid-template-columns: 1fr; }.adversarial-forbid__checks { grid-column: auto; } }
 @media (max-width: 46em) { .red-team-section > .settings-card-heading { align-items: stretch; flex-direction: column; }.adversarial-case-heading-actions { justify-content: flex-start; } }

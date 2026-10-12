@@ -282,7 +282,9 @@
 
 .mobile-chat-preview__controls summary {
   min-height: calc(var(--mcp-control-height) + var(--mcp-space-2));
-  padding: var(--mcp-space-2) var(--mcp-space-4);
+  /* Same column as the header avatar and the messages below. */
+  padding-block: var(--mcp-space-2);
+  padding-inline: max(var(--mcp-space-3), calc((100% - 48rem) / 2));
   color: var(--mcp-muted);
   cursor: pointer;
   font-size: .846em;
@@ -292,7 +294,8 @@
 .mobile-chat-preview__controls-grid {
   display: grid;
   gap: var(--mcp-space-2);
-  padding: 0 var(--mcp-space-4) var(--mcp-space-3);
+  padding-block: 0 var(--mcp-space-3);
+  padding-inline: max(var(--mcp-space-3), calc((100% - 48rem) / 2));
 }
 
 .mobile-chat-preview__secret-control-row {
