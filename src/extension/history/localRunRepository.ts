@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { isResponseActionIcon, type ChatMessage, type Citation, type Followup, type LocalRun, type MessageMetric, type MessageMetricAggregation, type MessagePart, type MetricsSnapshot, type NormalizedEvent, type RawStreamEvent, type RemoteSessionReference, type ReplaySnapshot, type ResponseAction, type RuntimeErrorData, type SessionSnapshot, type Starter } from '../../shared/types';
 import { localize } from '../l10n';
+import { defaultExportUri } from '../exportLocation';
 import { logAt } from '../logging';
 
 type UnknownRecord = Record<string, unknown>;
@@ -129,7 +130,7 @@ export class LocalRunRepository {
   }
 
   async export(run: LocalRun): Promise<vscode.Uri | undefined> {
-    const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`${run.profileId}-${run.id}.turnstage-run.json`), filters: { 'TurnStage Run': ['json'] } });
+    const uri = await vscode.window.showSaveDialog({ defaultUri: defaultExportUri(`${run.profileId}-${run.id}.turnstage-run.json`), filters: { 'TurnStage Run': ['json'] } });
     if (uri) {
       const exported = { format: LOCAL_RUN_EXPORT_FORMAT, version: LOCAL_RUN_EXPORT_VERSION, exportedAt: Date.now(), run };
       const bytes = new TextEncoder().encode(JSON.stringify(exported, null, 2));

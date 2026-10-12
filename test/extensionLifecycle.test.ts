@@ -86,6 +86,14 @@ describe('Extension host editor lifecycle', () => {
     expect(activateSource).toContain("configuration.update('notifications.enabled', false, vscode.ConfigurationTarget.Global)");
   });
 
+  it('never lets the notification snooze hide errors', () => {
+    const helper = activateSource.slice(activateSource.indexOf('async function showNotification('));
+    const errorBranch = helper.indexOf("if (kind === 'error')");
+    expect(errorBranch).toBeGreaterThan(-1);
+    expect(errorBranch).toBeLessThan(helper.indexOf("'notifications.enabled', true"));
+    expect(helper.slice(0, helper.indexOf('\n}\n'))).not.toMatch(/showErrorMessage\([^)]*doNotShowAgain/);
+  });
+
   it('renders exported virtual-workspace URIs without assuming a local fsPath', () => {
     expect(activateSource).toContain('displayExportUri(exported)');
     expect(activateSource).toContain("uri.scheme === 'file' ? uri.fsPath : uri.toString(true)");

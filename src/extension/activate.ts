@@ -193,9 +193,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   command('exportRun', async (item?: ProfileTreeItem | vscode.Uri) => { if (!requireWorkspaceTrust()) return; const uri = asUri(item) ?? activeCustomEditorUri(); if (!uri) { void showNotification('error', vscode.l10n.t('Open a profile in the TurnStage editor first.')); return; } const controller = await openAndWaitForController(editor, uri, true); if (!controller) { void showNotification('error', vscode.l10n.t('The TurnStage profile editor did not become ready in time.')); return; } const exported = await editor.exportRun(uri); if (exported) { void showNotification('information', vscode.l10n.t('Run exported to {path}.', { path: displayExportUri(exported) })); return; } await editor.showSection(uri, 'test'); void showNotification('information', vscode.l10n.t('No recorded runs are available. Open Test to run a profile first.')); });
   command('openOutput', () => output.show(true));
   command('runContractTests', () => scenarioTests.runAll());
-  command('pauseTests', () => scenarioTests.pauseActiveManualRun());
-  command('resumeTests', () => scenarioTests.resumeActiveManualRun());
-  command('cancelTests', () => scenarioTests.cancelActiveManualRun());
+  command('pauseTests', () => reportRunControl(scenarioTests.pauseActiveManualRun(), vscode.l10n.t('There is no running TurnStage test run to pause.')));
+  command('resumeTests', () => reportRunControl(scenarioTests.resumeActiveManualRun(), vscode.l10n.t('There is no paused TurnStage test run to resume.')));
+  command('cancelTests', () => reportRunControl(scenarioTests.cancelActiveManualRun(), vscode.l10n.t('There is no active TurnStage test run to cancel.')));
   command('rerunLatestTests', async (uri?: vscode.Uri, status?: unknown) => {
     if (!requireWorkspaceTrust()) return;
     if (!uri || (status !== 'failed' && status !== 'unstable' && status !== 'incomplete')) return;
@@ -417,18 +417,26 @@ function displayProfilePath(uri: vscode.Uri, repository: ProfileRepository): str
   return vscode.workspace.asRelativePath(uri);
 }
 
+/** Run-control commands are always in the Command Palette, so say why nothing happened instead of returning silently. */
+function reportRunControl(applied: boolean, unavailableMessage: string): boolean {
+  if (!applied) void showNotification('information', unavailableMessage);
+  return applied;
+}
+
 type NotificationKind = 'information' | 'error';
 
 async function showNotification(kind: NotificationKind, message: string): Promise<void> {
   try {
     const configuration = vscode.workspace.getConfiguration('turnstage');
+    // Errors stay visible even when status notifications are turned off, so a failed or blocked action is never silent.
+    if (kind === 'error') {
+      const openOutput = vscode.l10n.t('Open TurnStage Output');
+      if (await vscode.window.showErrorMessage(message, openOutput) === openOutput) activeOutput?.show(true);
+      return;
+    }
     if (configuration.get<boolean>('notifications.enabled', true) === false) return;
     const doNotShowAgain = vscode.l10n.t('Do not show again');
-    const openOutput = vscode.l10n.t('Open TurnStage Output');
-    const action = kind === 'error'
-      ? await vscode.window.showErrorMessage(message, openOutput, doNotShowAgain)
-      : await vscode.window.showInformationMessage(message, doNotShowAgain);
-    if (action === openOutput) activeOutput?.show(true);
+    const action = await vscode.window.showInformationMessage(message, doNotShowAgain);
     if (action === doNotShowAgain) {
       try { await configuration.update('notifications.enabled', false, vscode.ConfigurationTarget.Global); } catch { /* notification preferences are best effort */ }
     }

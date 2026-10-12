@@ -224,12 +224,13 @@ The following tables collect common commands and settings; see
 | `turnstage.displayLanguage` | `auto` | Application-wide language for TurnStage profile editors: follow VS Code, Traditional Chinese, Japanese, Korean, or English |
 | `turnstage.profileGlob` | `.vscode/turnstage/profiles/*.turnstage.jsonc` | Workspace-relative discovery glob |
 | `turnstage.maxBufferedEvents` | `5000` | Maximum raw and normalized events kept in the live session |
-| `turnstage.maxConversationMessages` | `500` | Maximum conversation messages kept in memory (50–5000) |
+| `turnstage.maxConversationMessages` | `500` | Maximum conversation messages kept in memory (50–1000) |
 | `turnstage.maxBufferedBytes` | `10485760` | Maximum raw-buffer JSON bytes (10 MiB) |
 | `turnstage.streamBatchIntervalMs` | `32` | Batching interval for Host-to-Webview session updates (16–100 ms); normal updates are deltas after a full checkpoint |
 | `turnstage.runRetention` | `20` | Fallback local-run retention (1–100) |
+| `turnstage.adversarialConcurrency` | `3` | Maximum Test Explorer scenarios run in parallel (1–8); lower it for rate-limited targets |
 | `turnstage.logLevel` | `info` | Minimum output-channel level: error, warn, info, or debug |
-| `turnstage.notifications.enabled` | `true` | Show non-modal TurnStage notifications; selecting **Do not show again** sets it false at user scope |
+| `turnstage.notifications.enabled` | `true` | Show non-modal TurnStage status notifications; selecting **Do not show again** sets it false at user scope. Errors are always shown |
 
 Display language is application-scoped, discovery is resource-scoped, and
 runtime limits are window-scoped. Endpoint-specific configuration belongs
