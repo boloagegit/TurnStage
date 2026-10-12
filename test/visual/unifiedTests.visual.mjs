@@ -97,6 +97,11 @@ try {
   assert.equal(await page.getByRole('text', { name: 'New failure' }).count(), 0); // plain text lives in a list row, not a role-specific control
   assert.match(await page.getByRole('region', { name: 'Run history' }).innerText(), /New failure/);
   await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-run-history.png') });
+  await page.getByRole('button', { name: 'Compare with baseline' }).click();
+  const comparison = page.locator('.case-compare');
+  assert.match(await comparison.getByRole('region', { name: 'Baseline' }).innerText(), /Passed/);
+  assert.match(await comparison.getByRole('region', { name: 'This run' }).innerText(), /Failed/);
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifacts, 'unified-run-history-compare.png') });
   await page.setViewportSize({ width: 760, height: 720 });
   // Narrow editors show the workspace as a tab (the pane box dissolves into the workspace grid).
   assert.equal(await page.getByRole('tab', { name: 'General tests' }).getAttribute('aria-selected'), 'true', 'Narrow editor keeps the pane the user was working in');
@@ -144,7 +149,7 @@ try {
   assert.deepEqual(await page.getByRole('checkbox', { name: /^Select case /u }).evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label')).sort()), allGeneralCases, 'Clearing history restores every original General case, including linked cases');
   assert.equal(await page.getByText('Test run completed', { exact: true }).filter({ visible: true }).count(), 0, 'Clearing history must not resurrect a stale completed card');
   assert.deepEqual(errors, [], 'No browser runtime errors');
-  console.log(JSON.stringify({ passed: true, screenshots: ['unified-general-cases.png', 'unified-red-team-cases.png', 'unified-run-selected.png', 'unified-run-completed.png', 'unified-run-history.png', 'unified-run-history-narrow.png', 'unified-run-history-light.png', 'unified-run-history-high-contrast.png', 'unified-run-history-200-percent.png', 'unified-red-team-zh-TW.png', 'unified-red-team-ja-JP.png', 'unified-red-team-ko-KR.png'], artifacts }, null, 2));
+  console.log(JSON.stringify({ passed: true, screenshots: ['unified-general-cases.png', 'unified-red-team-cases.png', 'unified-run-selected.png', 'unified-run-completed.png', 'unified-run-history.png', 'unified-run-history-compare.png', 'unified-run-history-narrow.png', 'unified-run-history-light.png', 'unified-run-history-high-contrast.png', 'unified-run-history-200-percent.png', 'unified-red-team-zh-TW.png', 'unified-red-team-ja-JP.png', 'unified-red-team-ko-KR.png'], artifacts }, null, 2));
 } finally {
   await browser.close();
   await new Promise((done) => server.close(done));

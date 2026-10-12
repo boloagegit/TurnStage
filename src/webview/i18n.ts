@@ -7,6 +7,15 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Compare with baseline': '與基準比較',
+  'This run': '本次執行',
+  'Result': '結果',
+  'Attempts': '嘗試次數',
+  'Run started': '執行開始',
+  'No change': '沒有變化',
+  'Duration change: {delta}': '耗時變化：{delta}',
+  'The case definition differs, so results may not be comparable.': '案例定義不同，結果可能無法直接比較。',
+  'Settings differ, so results may not be comparable.': '設定不同，結果可能無法直接比較。',
   'Flaky': '不穩定',
   'Passed {passes} and failed {failures} of the last {runs} runs of this definition': '此定義最近 {runs} 次執行中通過 {passes} 次、失敗 {failures} 次',
   'Copy as cURL': '複製為 cURL',

@@ -385,3 +385,16 @@ body.vscode-high-contrast .json-token, body.vscode-high-contrast-light .json-tok
   .network-waterfall__bar, .network-phases__track > span { background: CanvasText; forced-color-adjust: none; }
 }
 @container (max-width: 420px) { .network-phases__item { grid-template-columns: 1fr auto; } .network-phases__track { grid-column: 1 / -1; grid-row: 2; } }
+
+/* Per-case comparison with the baseline run */
+.unified-history-cases__compare-toggle[aria-expanded='true'] { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground)); }
+.case-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ts-space-2); flex: 1 0 100%; margin-block: var(--ts-space-1); padding: var(--ts-space-2); border: 1px solid var(--vscode-editorGroup-border); border-radius: 4px; background: var(--vscode-editorWidget-background, transparent); }
+.case-compare__column { display: grid; align-content: start; gap: var(--ts-space-1); min-width: 0; }
+.case-compare__column h4 { margin: 0; font-size: var(--ts-type-small); font-weight: 600; text-transform: none; }
+.case-compare__column dl { display: grid; grid-template-columns: minmax(5.5em, auto) minmax(0, 1fr); gap: 2px var(--ts-space-2); margin: 0; }
+.case-compare__column dl > div { display: contents; }
+.case-compare__column dt { color: var(--vscode-descriptionForeground); }
+.case-compare__column dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.case-compare__column > button { justify-self: start; }
+.case-compare__note { display: grid; gap: 2px; grid-column: 1 / -1; margin: 0; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-small); }
+@container (max-width: 420px) { .case-compare { grid-template-columns: minmax(0, 1fr); } }
