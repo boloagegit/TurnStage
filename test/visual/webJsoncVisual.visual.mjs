@@ -166,9 +166,10 @@ try {
   await capturePage.locator('.mobile-chat-preview__composer textarea').fill('Please search for sample information.');
   await capturePage.getByRole('button', { name: '傳送訊息' }).click();
   await capturePage.locator('.mobile-chat-preview__session-state--ready').waitFor();
-  await capturePage.locator('.mobile-chat-preview__viewport-toolbar').getByRole('button', { name: '更多動作' }).click();
-  await capturePage.getByRole('menuitem', { name: '另存為測試…' }).click();
-  await capturePage.locator('.operation-status').filter({ hasText: '已儲存測試案例：Please search for sample information.' }).waitFor();
+  // Save as test sits on the chat toolbar, labeled, rather than in the overflow menu.
+  await capturePage.getByRole('button', { name: '存成測試', exact: true }).click();
+  // A read-only preset is forked on first save, so either notice confirms the case was stored.
+  await capturePage.locator('.operation-status').filter({ hasText: /已儲存測試案例：Please search for sample information\.|是唯讀的預設設定檔，因此 TurnStage 已建立可編輯的副本/u }).waitFor();
   await screenshot(capturePage, 'captured-case-localized');
   assert.deepEqual(errors, [], 'No browser errors during mock conversation capture');
   await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, screenshots, baselineCount }, null, 2));
