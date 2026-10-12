@@ -370,3 +370,16 @@
 .test-case-readonly-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 /* Read-only values should not look like inputs waiting for text. */
 :is(.settings-workspace, .settings-section, .settings-card) :is(input, textarea, select):disabled { border-style: dashed; background: transparent; cursor: default; }
+
+/* Add check from an inspected event: a short dialog, not the full case editor. */
+.case-editor-dialog.add-check-dialog { width: min(100%, 36em); }
+.add-check-dialog .case-editor-dialog__body { display: grid; align-content: start; gap: var(--ts-space-3); padding: var(--ts-space-3) var(--ts-space-4); overflow: auto; }
+.add-check-dialog__options { display: grid; gap: var(--ts-space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
+.add-check-dialog__options legend { margin-bottom: var(--ts-space-1); padding: 0; font-weight: 600; }
+.add-check-dialog__options label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--ts-space-2); overflow-wrap: anywhere; cursor: pointer; }
+.add-check-dialog__options input { width: auto; height: auto; min-height: 0; margin: 0.2em 0 0; }
+.add-check-dialog__target { display: grid; gap: var(--ts-space-1); font-weight: 600; }
+.add-check-dialog__target select { width: 100%; min-width: 0; font-weight: 400; }
+.add-check-dialog__empty, .add-check-dialog__hint { margin: 0; color: var(--vscode-descriptionForeground); }
+.add-check-dialog .case-editor-dialog__footer > .clipboard-action { margin-inline-end: auto; }
+@media (max-width: 46em) { .case-editor-overlay:has(> .add-check-dialog) { padding: var(--ts-space-3); }.case-editor-dialog.add-check-dialog { height: auto; max-height: calc(100dvh - 2 * var(--ts-space-3)); } }
