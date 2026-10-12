@@ -138,6 +138,21 @@ describe('WebTestController', () => {
     expect(await store.get('evidence', 'orphan')).toBeUndefined();
   });
 
+  it('copies browser-local cases to a duplicated Profile', async () => {
+    const source: TurnStageProfile = { version: 1, id: `preset-${crypto.randomUUID()}`, name: 'Preset', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [] } };
+    const copy: TurnStageProfile = { ...source, id: `${source.id}-copy`, name: 'Preset Copy' };
+    let active = source;
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    const messages: HostPayload[] = [];
+    const controller = new WebTestController(() => active, () => environment, new Map(), (payload) => messages.push(payload));
+    await controller.saveCapturedScenario({ id: 'captured', name: 'Captured', steps: [{ id: 'turn', input: 'Hello' }] }, 'contract');
+    active = copy;
+    await controller.copySuites(source.id, copy.id);
+    const catalog = messages.filter((item): item is Extract<HostPayload, { type: 'contract.catalog' }> => item.type === 'contract.catalog').at(-1)!.catalog;
+    expect(catalog.entries.map((entry) => entry.scenarioId)).toEqual(['captured']);
+    expect((await controller.scenarioEntries(copy)).map((entry) => entry.scenario.id)).toEqual(['captured']);
+  });
+
   it('keeps latest results and exports isolated when profiles reuse a case ID', async () => {
     const scenario = { id: 'shared-id', name: 'Same case ID', steps: [{ id: 'turn', input: 'Hello' }] };
     const base: TurnStageProfile = { version: 1, id: `isolation-a-${crypto.randomUUID()}`, name: 'A', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios: [scenario] } };

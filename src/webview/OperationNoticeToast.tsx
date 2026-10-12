@@ -9,6 +9,10 @@ export const errorNotice = (message: string): OperationNotice => ({ message, sev
 
 const NOTICE_MS = 3200;
 const ARTIFACT_NOTICE_MS = 8000;
+const MAX_NOTICE_MS = 10_000;
+
+/** Short notices keep the familiar 3.2 s; longer ones stay long enough to read. */
+function readingTime(text: string): number { return Math.min(MAX_NOTICE_MS, Math.max(NOTICE_MS, text.length * 60)); }
 
 /** A floating operation notice. Errors stay until dismissed; other notices wait while the pointer or keyboard focus is on them. */
 export function OperationNoticeToast({ notice, onDismiss, post }: { notice: OperationNotice; onDismiss: () => void; post: (message: WebviewPayload) => void }): React.JSX.Element | null {
@@ -18,7 +22,7 @@ export function OperationNoticeToast({ notice, onDismiss, post }: { notice: Oper
   useEffect(() => setHeld(false), [notice]);
   useEffect(() => {
     if (!notice || held || isError) return;
-    const timeout = window.setTimeout(onDismiss, artifactId ? ARTIFACT_NOTICE_MS : NOTICE_MS);
+    const timeout = window.setTimeout(onDismiss, artifactId ? ARTIFACT_NOTICE_MS : readingTime(typeof notice === 'string' ? notice : notice.message));
     return () => window.clearTimeout(timeout);
   }, [notice, held, isError, artifactId, onDismiss]);
   if (!notice) return null;
