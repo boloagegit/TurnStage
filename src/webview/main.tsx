@@ -22,6 +22,8 @@ import './refresh.css';
 import './vscodeNative.css';
 import { LiveCaseStatusContext, useLiveCaseStatuses, CaseResultContext, latestCaseOutcomes, liveCaseKey, type CaseOutcomeFilter } from './liveCaseStatus';
 import { CaseRunSummary } from './CaseRunSummary';
+import { errorNotice, OperationNoticeToast, type OperationNotice } from './OperationNoticeToast';
+import { useRestoreUnsentDraft } from './unsentDraft';
 
 declare function acquireVsCodeApi<T = unknown>(): { postMessage(message: unknown): void; getState(): T | undefined; setState(state: T): void };
 export type EventMappingFilter = 'all' | 'matched' | 'unmatched';
@@ -75,7 +77,6 @@ export function useNarrowWorkspace(ref: React.RefObject<HTMLElement | null>): bo
 }
 export interface WebviewState { version?: number; sessionId?: string; section?: WorkspaceSection; configurationSection?: SettingsSectionId; rightPaneMode?: RightPaneMode; testsSection?: AutomationSectionId; testKind?: TestKindFilter; redTeamSection?: RedTeamSectionId; draft?: string; inspectorTab?: InspectorTab; splitPercent?: number; splitCustomized?: boolean; selectedMessageId?: string; selectedRawSequence?: number; selectedNetworkId?: string; activeEvidenceId?: string; selectedAutomationResultKey?: string; selectedCampaignId?: string; chatViewport?: ChatViewportState; eventFilters?: Partial<InspectorEventFilters>; collapsedEventTurns?: Partial<CollapsedEventTurns>; scrollPositions?: Partial<Record<ScrollPositionKey, number>>; expandedContractCaseId?: string; expandedAdversarialCaseId?: string; adversarialCaseCollection?: Partial<AdversarialCaseCollectionState>; adversarialResultCollection?: Partial<AdversarialResultCollectionState>; networkInspector?: Partial<NetworkInspectorState>; acceptedForms?: string[]; narrowView?: NarrowView }
 type VsCodeApi = { postMessage(message: unknown): void; getState(): WebviewState | undefined; setState(state: WebviewState): void };
-type OperationNotice = string | { message: string; artifactId: string };
 const rootElement = typeof document === 'undefined' ? undefined : document.getElementById('root');
 const instanceId = rootElement?.dataset.instanceId ?? 'test-instance';
 const vscode: VsCodeApi = typeof acquireVsCodeApi === 'function'
@@ -151,7 +152,7 @@ function App(): React.JSX.Element {
       else if (message.type === 'session.delta') { const next = applySessionDelta(snapshotRef.current, message.delta); if (!next) { post({ type: 'webview.ready' }); return; } snapshotRef.current = next; setSnapshot(next); if (message.delta.runs) setRuns(message.delta.runs); if (message.delta.requestPreviewChanged) setRequestPreview(message.delta.requestPreview); if (message.delta.networkEntries) setNetworkEntries(message.delta.networkEntries); setConnectionResult(undefined); }
       else if (message.type === 'conversations.state') setConversations(message.state);
       else if (message.type === 'mapping.test.result') setMappingTestResult(message.result);
-      else if (message.type === 'request.error') setNotice(message.error.message);
+      else if (message.type === 'request.error') setNotice(message.error.type === 'WebCapabilityUnavailable' ? message.error.message : errorNotice(message.error.message));
       else if (message.type === 'action.feedback') setMessageActionFeedback({ actionId: message.actionId, sourceMessageId: message.sourceMessageId, status: message.status, message: message.message });
       else if (message.type === 'form.accepted') { setAcceptedForms((current) => new Set(current).add(`${message.sourceMessageId ?? ''}:${message.formId}`)); setNotice(t('Form submitted.')); }
       else if (message.type === 'run.imported') setNotice(t(message.duplicate ? 'Run imported as a copy from {path}' : 'Run imported from {path}', { path: message.path }));
@@ -163,13 +164,13 @@ function App(): React.JSX.Element {
       else if (message.type === 'adversarial.case.loaded') setLinkedAdversarialCaseEditor({ status: 'loaded', detail: message.detail });
       else if (message.type === 'adversarial.case.saved') { setLinkedAdversarialCaseEditor({ status: 'saved', detail: message.detail }); setNotice(t('Linked case saved and verified from disk.')); }
       else if (message.type === 'adversarial.case.deleted') { setLinkedAdversarialCaseEditor(undefined); setNotice(t('Deleted case {name}.', { name: message.scenarioId })); }
-      else if (message.type === 'adversarial.case.error') { setLinkedAdversarialCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict }); setNotice(message.message); }
+      else if (message.type === 'adversarial.case.error') { setLinkedAdversarialCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict }); setNotice(errorNotice(message.message)); }
       else if (message.type === 'contract.operation') setNotice(message.artifactId ? { message: message.detail, artifactId: message.artifactId } : message.detail);
       else if (message.type === 'contract.catalog') setContractCaseCatalog(message.catalog);
       else if (message.type === 'contract.case.loaded') setLinkedContractCaseEditor({ status: 'loaded', detail: message.detail });
       else if (message.type === 'contract.case.saved') { setLinkedContractCaseEditor({ status: 'saved', detail: message.detail }); setNotice(t('Linked test case saved and verified from disk.')); }
       else if (message.type === 'contract.case.deleted') { setLinkedContractCaseEditor(undefined); setNotice(t('Deleted case {name}.', { name: message.scenarioId })); }
-      else if (message.type === 'contract.case.error') { setLinkedContractCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict }); setNotice(message.message); }
+      else if (message.type === 'contract.case.error') { setLinkedContractCaseEditor({ status: 'error', sourcePath: message.sourcePath, scenarioId: message.scenarioId, message: message.message, conflict: message.conflict }); setNotice(errorNotice(message.message)); }
       else if (message.type === 'test.results') { setTestResults(message.results); setAutomationResults(message.automationResults ?? []); }
       else if (message.type === 'test.history') setTestHistory({ profileId: message.profileId, runs: message.runs, baselineRunId: message.baselineRunId });
       else if (message.type === 'test.exported') { const text = t(message.kind === 'evidenceBundle' ? 'Evidence Bundle exported to {path}' : 'Test report exported to {path}', { path: message.path }); setNotice(message.artifactId ? { message: text, artifactId: message.artifactId } : text); }
@@ -187,7 +188,7 @@ function App(): React.JSX.Element {
     return () => window.removeEventListener('message', listener);
   }, []);
   useEffect(() => { if (!messageActionFeedback || messageActionFeedback.status === 'pending') return; const timeout = window.setTimeout(() => setMessageActionFeedback(undefined), 2400); return () => window.clearTimeout(timeout); }, [messageActionFeedback]);
-  useEffect(() => { if (!notice) return; const timeout = window.setTimeout(() => setNotice(''), 3200); return () => window.clearTimeout(timeout); }, [notice]);
+  const dismissNotice = useCallback(() => setNotice(''), []);
   const checkpointSessionId = useRef(savedState?.sessionId);
   useEffect(() => {
     const nextSessionId = snapshot?.sessionId;
@@ -235,7 +236,8 @@ function App(): React.JSX.Element {
   useEffect(() => { if (profile && inspectorTab === 'Metrics' && !componentVisible(profile, 'metrics')) setInspectorTab('Raw Events'); }, [inspectorTab, profile?.ui?.components?.metrics?.visible]);
   const active = snapshot ? ['submitting', 'waitingStart', 'streaming', 'stopping'].includes(snapshot.turnState) : false;
   const continuationBlocked = snapshot?.turnState === 'failed' && profile?.errorPolicy?.allowContinuation === false;
-  const send = (text = draft, interaction: any = { kind: 'manual' }) => { if (!text.trim() || active || snapshot?.trusted !== true) return; post({ type: 'request.send', text, interaction }); setDraft(''); };
+  const trackSend = useRestoreUnsentDraft(snapshot, setDraft);
+  const send = (text = draft, interaction: any = { kind: 'manual' }) => { if (!text.trim() || active || snapshot?.trusted !== true) return; post({ type: 'request.send', text, interaction }); if (interaction?.kind === 'manual') trackSend(text); setDraft(''); };
   const selectMessage = (messageId: string) => {
     setSelectedMessageId(messageId);
     const message = snapshot?.messages.find((item) => item.id === messageId);
@@ -274,7 +276,7 @@ function App(): React.JSX.Element {
     {snapshot?.trusted === false && <div className="trust-banner" role="status"><strong>{t('Restricted mode.')}</strong> {t('This workspace is not trusted. Network requests are disabled; fixture replay remains available.')}</div>}
     {diagnostics.length > 0 && <div className="validation-banner" role="alert"><strong>{t(diagnostics.length === 1 ? '{count} configuration issue.' : '{count} configuration issues.', { count: formatNumber(diagnostics.length) })}</strong> {t('Requests are blocked until errors are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></div>}
     <section id="main-panel" tabIndex={-1} className="panel" aria-label={t('Test')}>
-      {notice && <div className="operation-status" role="status" aria-live="polite" aria-atomic="true"><ProductIcon name="info" /><span>{typeof notice === 'string' ? notice : notice.message}</span>{typeof notice !== 'string' && <div className="operation-status__actions"><button type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'open' })}>{t('Open')}</button><IconButton icon="folder-opened" label={t('Reveal in file explorer')} type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'reveal' })} /><IconButton icon="copy" label={t('Copy path')} type="button" onClick={() => post({ type: 'artifact.action', artifactId: notice.artifactId, action: 'copyPath' })} /></div>}<IconButton icon="close" label={t('Dismiss notification')} type="button" onClick={() => setNotice('')} /></div>}
+      <OperationNoticeToast notice={notice} onDismiss={dismissNotice} post={post} />
       <TestWorkspace
         profile={profile} snapshot={snapshot} runs={runs} networkEntries={networkEntries}
         testResults={testResults} automationResults={automationResults}

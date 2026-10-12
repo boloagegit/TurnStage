@@ -4,6 +4,7 @@ import type { AdversarialForbidDefinition, AdversarialResultSummary, AutomationR
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
 import { IconButton, ProductIcon } from './Icon';
 import { ClipboardButton } from './ClipboardButton';
+import { consumeRevert, revertField } from './fieldRevert';
 import { CaseEditorOverlay } from './CaseEditorOverlay';
 import { useConfirmAction } from './ConfirmAction';
 import { JsonViewer } from './JsonViewer';
@@ -1829,18 +1830,6 @@ function ListPatchInput({ id, value, placeholder, onCommit }: { id: string; valu
  * closure, so mark the revert to skip that commit, and keep the key from also
  * closing an enclosing dialog: the first Escape cancels the edit only.
  */
-function revertField(event: React.KeyboardEvent, reverting: React.MutableRefObject<boolean>): void {
-  reverting.current = true;
-  event.preventDefault();
-  event.stopPropagation();
-}
-
-function consumeRevert(reverting: React.MutableRefObject<boolean>): boolean {
-  if (!reverting.current) return false;
-  reverting.current = false;
-  return true;
-}
-
 function JsonPreview({ value, label }: { value: unknown; label: string }): React.JSX.Element {
   return <div className="settings-preview"><div className="settings-preview-heading"><span>{label}</span></div><JsonViewer value={value} copyLabel={t('Copy')} /></div>;
 }

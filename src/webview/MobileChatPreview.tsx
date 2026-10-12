@@ -720,7 +720,15 @@ function MobileComposer({ profile, active, sessionReady, turnState, continuation
     }
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.nativeEvent.isComposing || composing.current) return;
+    if (event.nativeEvent.isComposing || composing.current) return;
+    // Escape stops the active turn from the keyboard, including Profiles that hide the Stop button.
+    if (event.key === 'Escape' && active && !stopping) {
+      event.preventDefault();
+      event.stopPropagation();
+      post({ type: 'request.abort' });
+      return;
+    }
+    if (event.key !== 'Enter') return;
     const behavior = composer.multiline ? (event.shiftKey ? composer.shiftEnterBehavior : composer.enterBehavior) : 'send';
     const canSubmit = active ? composer.showStopWhileStreaming && !stopping : canSend && Boolean(draft.trim());
     if (behavior === 'send' && canSubmit) {
@@ -749,7 +757,7 @@ function MobileComposer({ profile, active, sessionReady, turnState, continuation
       {composer.multiline
         ? <textarea ref={textareaRef} id={inputId} rows={1} value={draft} placeholder={placeholder} disabled={inputDisabled} aria-describedby={continuationBlocked ? `${inputId}-blocked` : undefined} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={onKeyDown} />
         : <input id={inputId} type="text" value={draft} placeholder={placeholder} disabled={inputDisabled} aria-describedby={continuationBlocked ? `${inputId}-blocked` : undefined} onChange={(event) => setDraft(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={onKeyDown} />}
-      {showAction && <button className={`mobile-chat-preview__send mobile-chat-preview__button ${active ? 'mobile-chat-preview__button--danger' : 'mobile-chat-preview__button--primary'}`} type="submit" disabled={active ? stopping : !draft.trim() || !canSend} aria-label={actionLabel} title={actionLabel}><ProductIcon name={active ? 'stop' : 'send'} /></button>}
+      {showAction && <button className={`mobile-chat-preview__send mobile-chat-preview__button ${active ? 'mobile-chat-preview__button--danger' : 'mobile-chat-preview__button--primary'}`} type="submit" disabled={active ? stopping : !draft.trim() || !canSend} aria-label={actionLabel} aria-keyshortcuts={active ? 'Escape' : undefined} title={actionLabel}><ProductIcon name={active ? 'stop' : 'send'} /></button>}
     </div>
     {continuationBlocked && <span id={`${inputId}-blocked`} className="mobile-chat-preview__composer-hint">{t('Start a new conversation to continue.')}</span>}
   </form>;

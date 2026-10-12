@@ -13,6 +13,7 @@ import { RichMarkdown, splitStreamingMarkdown } from '../src/webview/RichMarkdow
 import { tokenizeJson } from '../src/webview/JsonViewer';
 import { AutomationWorkspace, SettingsWorkspace } from '../src/webview/SettingsWorkspace';
 import { useConfirmAction } from '../src/webview/ConfirmAction';
+import { FlowEditor } from '../src/webview/configEditors';
 import { formatDuration, formatNumber, setLocale } from '../src/webview/i18n';
 import { LiveCaseStatusBadge, LiveCaseStatusContext, useLiveCaseStatuses } from '../src/webview/liveCaseStatus';
 import { isHostMessage, PROTOCOL_VERSION, type TestOperationSnapshot } from '../src/shared/protocol';
@@ -152,6 +153,27 @@ describe('editing safeguards', () => {
     await user.keyboard('{Escape}');
     expect(field.value).toBe('Render performance');
     expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch', path: ['name'] }));
+  });
+
+  it('reverts a Profile Editor flow field with Escape without committing the typed value', async () => {
+    const post = vi.fn();
+    render(<FlowEditor profile={profile} post={post} />);
+    const user = userEvent.setup();
+    const field = screen.getByRole('textbox', { name: 'Conversation request URL' }) as HTMLInputElement;
+    await user.clear(field);
+    await user.type(field, 'https://discarded.test');
+    await user.keyboard('{Escape}');
+    expect(field.value).toBe('https://example.test');
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch' }));
+  });
+
+  it('stops the active turn with Escape in the composer even when the Profile hides the Stop button', () => {
+    const post = vi.fn();
+    const hiddenStop: TurnStageProfile = { ...profile, ui: { composer: { showStopWhileStreaming: false } } };
+    render(<MobileChatPreview profile={hiddenStop} active continuationBlocked={false} draft="" setDraft={vi.fn()} send={vi.fn()} post={post} snapshot={snapshot([message('live', 'Partial', 'streaming')])} />);
+    expect(screen.queryByRole('button', { name: /stop/i })).toBeNull();
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message' }), { key: 'Escape' });
+    expect(post).toHaveBeenCalledWith({ type: 'request.abort' });
   });
 
   it('closes only the confirmation when Escape is pressed inside a nested dialog', () => {

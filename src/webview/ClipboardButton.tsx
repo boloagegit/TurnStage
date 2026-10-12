@@ -1,10 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { IconButton } from './Icon';
 import { t } from './i18n';
 import { copyText } from './clipboardText';
 
 export function ClipboardButton({ text, label }: { text: string; label: string }): React.JSX.Element {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  useEffect(() => {
+    if (state !== 'copied') return;
+    const timeout = window.setTimeout(() => setState('idle'), 2000);
+    return () => window.clearTimeout(timeout);
+  }, [state]);
   const copy = async (): Promise<void> => {
     try {
       await copyText(text);
