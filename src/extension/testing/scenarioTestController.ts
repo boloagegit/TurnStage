@@ -48,7 +48,7 @@ import { TestRunControl } from '../../shared/testRunControl';
 import { ExternalAdversarialSuiteRepository } from './externalAdversarialSuite';
 import { isScenarioReady } from './scenarioCapture';
 import { resolveTestSelection, testCaseKey, type TestCaseIdentity } from '../../shared/testSelection';
-import { createTestRunHistoryRecord, nonPassingCases, unfinishedCases, type CompletedTestRunCase, type TestRunHistoryRecord } from '../../shared/testRunHistory';
+import { createTestRunHistoryRecord, nonPassingCases, unfinishedCases, type CompletedTestRunCase, type TestBaselineIds, type TestRunHistoryRecord } from '../../shared/testRunHistory';
 import { TestRunHistoryRepository } from './testRunHistoryRepository';
 
 type TestData =
@@ -213,7 +213,7 @@ export class ScenarioTestController implements vscode.Disposable {
   readonly onDidChangeResults = this.resultsEmitter.event;
   private readonly campaignEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; dashboard: CampaignDashboardV1 }>();
   readonly onDidChangeCampaigns = this.campaignEmitter.event;
-  private readonly historyEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; profileId: string; runs: TestRunHistoryRecord[]; baselineRunId?: string }>();
+  private readonly historyEmitter = new vscode.EventEmitter<{ uri: vscode.Uri; profileId: string; runs: TestRunHistoryRecord[]; baselines: TestBaselineIds }>();
   readonly onDidChangeTestHistory = this.historyEmitter.event;
   private readonly campaignProgressEmitter = new vscode.EventEmitter<CampaignProgressEvent>();
   readonly onDidChangeCampaignProgress = this.campaignProgressEmitter.event;
@@ -257,12 +257,11 @@ export class ScenarioTestController implements vscode.Disposable {
 
   dispose(): void { this.activeManualRun?.cancel(); this.resultsEmitter.dispose(); this.campaignEmitter.dispose(); this.historyEmitter.dispose(); this.campaignProgressEmitter.dispose(); this.controller.dispose(); }
 
-  async getTestHistory(uri: vscode.Uri): Promise<{ profileId: string; runs: TestRunHistoryRecord[]; baselineRunId?: string }> {
+  async getTestHistory(uri: vscode.Uri): Promise<{ profileId: string; runs: TestRunHistoryRecord[]; baselines: TestBaselineIds }> {
     const entry = await this.profiles.read(uri);
     if (!entry.profile) throw new Error(entry.error ?? 'Profile could not be parsed.');
     const runs = (await this.testHistory.list(entry.profile.id)).map((run) => ({ ...run, cases: run.cases.map((item) => ({ ...item, evidenceAvailable: Boolean(item.evidenceId && this.evidence.has(item.evidenceId)) })) }));
-    const baselineRunId = (await this.testHistory.baseline(entry.profile.id))?.id;
-    return { profileId: entry.profile.id, runs, ...(baselineRunId ? { baselineRunId } : {}) };
+    return { profileId: entry.profile.id, runs, baselines: await this.testHistory.baselines(entry.profile.id) };
   }
 
   async acceptTestBaseline(uri: vscode.Uri, runId: string): Promise<void> {

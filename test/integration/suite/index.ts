@@ -193,7 +193,7 @@ async function assertScopedTestHistoryClear(): Promise<void> {
     await repository.acceptBaseline(profileId, 'red-only');
     await repository.clear(profileId, 'adversarial');
     assert.deepEqual((await repository.list(profileId)).map((item) => [item.id, item.cases.map((testCase) => testCase.kind)]), [['mixed', ['contract']]]);
-    assert.equal(await repository.baseline(profileId), undefined, 'Clearing the baseline run removes its baseline marker');
+    assert.deepEqual(await repository.baselines(profileId), {}, 'Clearing the baseline run removes its baseline marker');
     await repository.clear(profileId, 'contract');
     assert.deepEqual(await repository.list(profileId), []);
   } finally {

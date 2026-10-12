@@ -8,12 +8,12 @@ import { createContractSuite, serializeContractSuite, validateContractSuite } fr
 import { runScenario } from '../../src/extension/testing/scenarioRunner';
 import { runScenarioGroup } from '../../src/extension/testing/scenarioExecution';
 import { BrowserSession } from './browserSession';
-import { ArtifactStore, type StoredArtifact } from './artifactStore';
+import { ArtifactStore, type StoredArtifact, type StoredTestBaselines } from './artifactStore';
 import { redactKnownSecrets } from '../../src/shared/redaction';
 import { buildEvidenceTimeline } from '../../src/extension/testing/evidenceTimeline';
 import { isScenarioReady } from '../../src/extension/testing/scenarioCapture';
 import { resolveTestSelection, testCaseKey, type TestCaseIdentity } from '../../src/shared/testSelection';
-import { createTestRunHistoryRecord, nonPassingCases, unfinishedCases, type CompletedTestRunCase, type TestRunHistoryRecord } from '../../src/shared/testRunHistory';
+import { acceptTestBaseline, baselineRunIdList, createTestRunHistoryRecord, nonPassingCases, normalizeTestBaselines, unfinishedCases, type CompletedTestRunCase, type TestBaselineIds, type TestRunHistoryRecord } from '../../src/shared/testRunHistory';
 import { strToU8, zipSync } from 'fflate';
 import { browserSha256, browserUuid } from './browserCrypto';
 import { renderTestReportHtml, type TestReportKind, type TestReportOutcome } from '../../src/shared/testReportHtml';
@@ -279,10 +279,12 @@ export class WebTestController {
       item.value = recovered;
       await this.store.deleteMany('runs', stored.filter((checkpoint) => checkpoint.kind === 'test-checkpoint' && (checkpoint.value as WebCaseCheckpoint).runId === item.value.id).map((checkpoint) => checkpoint.id));
     }
-    const runs = batches.filter((item) => !liveRunIds.has(item.value.id)).map((item) => item.value).slice(0, 21)
+    const settled = batches.filter((item) => !liveRunIds.has(item.value.id)).map((item) => item.value);
+    const baselines = await this.baselines(profileId, settled);
+    const pinned = new Set(baselineRunIdList(baselines));
+    const runs = [...settled.slice(0, 20), ...settled.slice(20).filter((run) => pinned.has(run.id))]
       .map((run) => ({ ...run, cases: run.cases.map((item) => ({ ...item, evidenceAvailable: Boolean(item.evidenceId && evidenceIds.has(item.evidenceId)) })) }));
-    const baselineRunId = (await this.store.get<{ runId: string }>('runs', `test-baseline:${profileId}`))?.value.runId;
-    if (this.profile().id === profileId) this.post({ type: 'test.history', profileId, runs, ...(baselineRunId ? { baselineRunId } : {}) });
+    if (this.profile().id === profileId) this.post({ type: 'test.history', profileId, runs, baselines });
   }
 
   private scheduleHistoryPoll(profileId: string): void {
@@ -298,7 +300,9 @@ export class WebTestController {
     const profileId = this.profile().id;
     const artifact = await this.store.get<TestRunHistoryRecord>('runs', `test-batch:${profileId}:${runId}`);
     if (!artifact || artifact.value.status !== 'completed') throw new Error('Only a completed test run can be used as a baseline.');
-    await this.store.put('runs', { id: `test-baseline:${profileId}`, profileId, kind: 'test-baseline', name: 'Accepted test baseline', updatedAt: Date.now(), value: { runId } });
+    const runs = (await this.store.listByKind<TestRunHistoryRecord>('runs', profileId, 'test-batch')).map((item) => item.value);
+    const baselines = acceptTestBaseline(await this.baselines(profileId, runs), artifact.value);
+    await this.store.put<StoredTestBaselines>('runs', { id: `test-baseline:${profileId}`, profileId, kind: 'test-baseline', name: 'Accepted test baselines', updatedAt: Date.now(), value: { baselines } });
     await this.postHistory();
   }
 
@@ -311,8 +315,13 @@ export class WebTestController {
 
   private async trimRunHistory(profileId: string): Promise<void> {
     const runs = (await this.store.listByKind<WebPendingRun>('runs', profileId, 'test-batch')).filter((item) => item.value.checkpointState !== 'running');
-    const pinned = (await this.store.get<{ runId: string }>('runs', `test-baseline:${profileId}`))?.value.runId;
-    for (const item of runs.slice(20)) if (item.value.id !== pinned) await this.store.delete('runs', item.id);
+    const pinned = new Set(baselineRunIdList(await this.baselines(profileId, runs.map((item) => item.value))));
+    for (const item of runs.slice(20)) if (!pinned.has(item.value.id)) await this.store.delete('runs', item.id);
+  }
+
+  private async baselines(profileId: string, runs: readonly TestRunHistoryRecord[]): Promise<TestBaselineIds> {
+    const stored = (await this.store.get<StoredTestBaselines>('runs', `test-baseline:${profileId}`))?.value;
+    return stored ? normalizeTestBaselines(stored.baselines ?? stored.runId, runs) : {};
   }
 
   cancel(): void { this.cancelled = true; this.runControl?.cancel(); for (const listener of this.cancellationListeners) listener(); }

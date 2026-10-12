@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearTestRunHistoryKind, compareTestRuns, createTestRunHistoryRecord, nonPassingCases } from '../src/shared/testRunHistory';
+import { acceptTestBaseline, clearTestRunHistoryKind, compareTestRuns, createTestRunHistoryRecord, nonPassingCases, normalizeTestBaselines } from '../src/shared/testRunHistory';
 
 const scenario = { id: 'same', name: 'Case', steps: [{ id: 'turn', input: 'private-token' }] };
 const identity = { profileId: 'profile', scenarioId: 'same', kind: 'contract' as const };
@@ -25,8 +25,8 @@ describe('test run history', () => {
   it('classifies a regression and recovery only for comparable runs', () => {
     expect(compareTestRuns(record('base', 'passed'), record('new', 'failed'))[0]?.difference).toBe('new-failure');
     expect(compareTestRuns(record('base', 'failed'), record('new', 'passed'))[0]?.difference).toBe('recovered');
-    expect(compareTestRuns(record('base', 'passed'), record('new', 'failed', scenario, { target: 'uat' }))[0]?.difference).toBe('configuration-changed');
-    expect(compareTestRuns(record('base', 'passed'), record('new', 'failed', { ...scenario, steps: [{ id: 'turn', input: 'changed' }] }))[0]?.difference).toBe('definition-changed');
+    expect(compareTestRuns(record('base', 'passed'), record('new', 'passed', scenario, { target: 'uat' }))[0]?.difference).toBe('configuration-changed');
+    expect(compareTestRuns(record('base', 'passed'), record('new', 'passed', { ...scenario, steps: [{ id: 'turn', input: 'changed' }] }))[0]?.difference).toBe('definition-changed');
     expect(compareTestRuns(record('base', 'passed'), record('new', 'error'))[0]?.difference).toBe('infrastructure-error');
     expect(compareTestRuns(record('base', 'indeterminate'), record('new', 'passed'))[0]?.difference).toBe('indeterminate');
   });
@@ -57,6 +57,33 @@ describe('test run history', () => {
     expect(compareTestRuns(baseline, same).some((item) => item.difference === 'removed-case')).toBe(true);
   });
 
+  it('keeps a new failure visible when the case or its settings also changed', () => {
+    expect(compareTestRuns(record('base', 'passed'), record('new', 'failed', scenario, { target: 'uat' }))[0]).toMatchObject({ difference: 'new-failure', changed: 'configuration' });
+    expect(compareTestRuns(record('base', 'passed'), record('new', 'failed', { ...scenario, steps: [{ id: 'turn', input: 'changed' }] }))[0]).toMatchObject({ difference: 'new-failure', changed: 'definition' });
+    expect(compareTestRuns(record('base', 'failed'), record('new', 'passed', scenario, { target: 'uat' }))[0]).toMatchObject({ difference: 'recovered', changed: 'configuration' });
+  });
+
+  it('ignores Profile name, description, and presentation edits when comparing settings', () => {
+    const make = (id: string, extra: Record<string, unknown>) => createTestRunHistoryRecord({
+      id, profileId: 'profile', startedAt: 1, finishedAt: 2, status: 'completed', runner: 'web' as const,
+      profile: { id: 'profile', conversation: { endpoint: '/chat' }, ...extra }, environment: { id: 'sit' },
+      cases: [{ ...identity, name: 'Case', scenario }],
+      completed: [{ ...identity, outcome: 'failed' as const, completedAttempts: 1, durationMs: 10 }],
+    });
+    const base = { ...make('base', { name: 'Before', description: 'Old', ui: { theme: 'a' }, history: { localRuns: { maxRuns: 5 } } }), cases: make('base', {}).cases.map((item) => ({ ...item, outcome: 'passed' as const })) };
+    expect(compareTestRuns(base, make('new', { name: 'After', description: 'New', ui: { theme: 'b' }, history: { localRuns: { maxRuns: 9 } } }))[0]).toEqual({ key: base.cases[0]!.key, difference: 'new-failure' });
+    expect(compareTestRuns(base, make('new', { conversation: { endpoint: '/other' } }))[0]).toMatchObject({ difference: 'new-failure', changed: 'configuration' });
+  });
+
+  it('keeps a separate baseline for General tests and Red Team', () => {
+    const general = { ...record('general', 'passed'), cases: record('general', 'passed').cases.map((item) => ({ ...item, kind: 'contract' as const })) };
+    const red = { ...record('red', 'passed'), cases: record('red', 'passed').cases.map((item) => ({ ...item, kind: 'adversarial' as const })) };
+    const accepted = acceptTestBaseline(acceptTestBaseline({}, general), red);
+    expect(accepted).toEqual({ contract: 'general', adversarial: 'red' });
+    expect(normalizeTestBaselines('general', [general, red])).toEqual({ contract: 'general' });
+    expect(normalizeTestBaselines({ contract: 'general', adversarial: 'missing' }, [general, red])).toEqual({ contract: 'general' });
+  });
+
   it('rejects duplicate case identities', () => {
     expect(() => createTestRunHistoryRecord({
       id: 'bad', profileId: 'profile', startedAt: 1, finishedAt: 2, status: 'completed', runner: 'web', profile: {}, environment: {},
@@ -70,8 +97,8 @@ describe('test run history', () => {
     const value = createTestRunHistoryRecord({ id: 'mixed', profileId: 'profile', startedAt: 1, finishedAt: 2, status: 'completed', runner: 'vscode', profile: {}, environment: {}, cases, completed });
     expect(value.cases.map((item) => item.outcome)).toEqual(['passed', 'resisted']);
     const red = { ...value, id: 'red', cases: value.cases.filter((item) => item.kind === 'adversarial') };
-    expect(clearTestRunHistoryKind([value, red], 'adversarial', 'red')).toEqual({ runs: [{ ...value, cases: value.cases.filter((item) => item.kind === 'contract') }] });
-    expect(clearTestRunHistoryKind([value], 'contract', value.id)).toEqual({ runs: [{ ...value, cases: value.cases.filter((item) => item.kind === 'adversarial') }], baselineRunId: value.id });
+    expect(clearTestRunHistoryKind([value, red], 'adversarial', { adversarial: 'red', contract: value.id })).toEqual({ runs: [{ ...value, cases: value.cases.filter((item) => item.kind === 'contract') }], baselines: { contract: value.id } });
+    expect(clearTestRunHistoryKind([value], 'contract', { contract: value.id, adversarial: value.id })).toEqual({ runs: [{ ...value, cases: value.cases.filter((item) => item.kind === 'adversarial') }], baselines: { adversarial: value.id } });
   });
 
   it('selects only non-passing cases from a specific run and retains the source reference', () => {

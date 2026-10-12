@@ -1,4 +1,7 @@
-import { clearTestRunHistoryKind, type TestRunHistoryRecord } from '../../src/shared/testRunHistory';
+import { baselineRunIdList, clearTestRunHistoryKind, normalizeTestBaselines, type TestBaselineIds, type TestRunHistoryRecord } from '../../src/shared/testRunHistory';
+
+/** Accepted Web baselines per test type; `runId` is the single baseline earlier versions stored. */
+export interface StoredTestBaselines { baselines?: TestBaselineIds; runId?: string }
 
 export type ArtifactStoreName = 'suites' | 'runs' | 'evidence' | 'campaigns' | 'visualBaselines';
 
@@ -100,15 +103,17 @@ export class ArtifactStore {
         const batches = (request.result as Array<StoredArtifact<TestRunHistoryRecord & { checkpointState?: string }>>).filter((item) => item.value.checkpointState !== 'running');
         const baselineRequest = objectStore.get(`test-baseline:${profileId}`);
         baselineRequest.onsuccess = () => {
-          const baseline = baselineRequest.result as StoredArtifact<{ runId: string }> | undefined;
-          const cleared = clearTestRunHistoryKind(batches.map((item) => item.value), kind, baseline?.value.runId);
+          const baseline = baselineRequest.result as StoredArtifact<StoredTestBaselines> | undefined;
+          const runs = batches.map((item) => item.value);
+          const cleared = clearTestRunHistoryKind(runs, kind, baseline ? normalizeTestBaselines(baseline.value.baselines ?? baseline.value.runId, runs) : {});
           const retained = new Map(cleared.runs.map((run) => [run.id, run]));
           for (const item of batches) {
             const run = retained.get(item.value.id);
             if (!run) objectStore.delete(item.id);
             else if (run.cases.length !== item.value.cases.length) objectStore.put({ ...item, value: run });
           }
-          if (baseline && !cleared.baselineRunId) objectStore.delete(baseline.id);
+          if (baseline && !baselineRunIdList(cleared.baselines).length) objectStore.delete(baseline.id);
+          else if (baseline) objectStore.put({ ...baseline, value: { baselines: cleared.baselines } });
         };
       };
       request.onerror = () => reject(request.error ?? new Error('Could not read test history.'));

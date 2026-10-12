@@ -1553,4 +1553,11 @@ export const ko: Record<string, string> = {
   "Percent": "백분율",
   "Finish or stop the current request before opening test evidence.": "테스트 증거를 열기 전에 현재 요청을 완료하거나 중지하세요.",
   "Opened test evidence.": "테스트 증거를 열었습니다.",
+  "New failures": "새 실패",
+  "Changed": "변경됨",
+  "Not in this run": "이번 실행에 없음",
+  "Filter cases by difference from baseline": "비교 기준과의 차이로 케이스 필터링",
+  "No cases have this difference.": "이 차이에 해당하는 케이스가 없습니다.",
+  "Case changed since baseline": "비교 기준 이후 케이스가 변경됨",
+  "Settings changed since baseline": "비교 기준 이후 설정이 변경됨",
 };

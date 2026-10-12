@@ -254,7 +254,7 @@ export type HostMessage = Envelope & (
   | { type: 'contract.case.error'; sourcePath: string; scenarioId: string; message: string; conflict: boolean }
   | { type: 'test.operation'; operation: TestOperationSnapshot }
   | { type: 'test.results'; results: AdversarialResultSummary[]; automationResults?: AutomationResultSummary[] }
-  | { type: 'test.history'; profileId: string; runs: import('./testRunHistory').TestRunHistoryRecord[]; baselineRunId?: string }
+  | { type: 'test.history'; profileId: string; runs: import('./testRunHistory').TestRunHistoryRecord[]; baselines?: import('./testRunHistory').TestBaselineIds }
   | { type: 'campaign.dashboard'; dashboard: CampaignDashboardV1 }
   | { type: 'campaign.preview'; campaignId: string; selectedCases: number; plannedAttempts: number; plannedRequests: number; maximumDurationMs: number; maxConcurrency: number; warnings: string[] }
   | { type: 'campaign.exported'; path: string; artifactId: string }
@@ -446,7 +446,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
       && (message.operation.progress === undefined || isTestOperationProgress(message.operation.progress));
     case 'test.results': return isAdversarialResults(message.results)
       && (message.automationResults === undefined || isAutomationResults(message.automationResults));
-    case 'test.history': return isBoundedId(message.profileId) && Array.isArray(message.runs) && message.runs.length <= 21 && message.runs.every(isTestRunHistoryRecord) && (message.baselineRunId === undefined || isBoundedId(message.baselineRunId));
+    case 'test.history': return isBoundedId(message.profileId) && Array.isArray(message.runs) && message.runs.length <= 22 && message.runs.every(isTestRunHistoryRecord) && (message.baselines === undefined || (isRecord(message.baselines) && Object.entries(message.baselines).every(([kind, runId]) => (kind === 'contract' || kind === 'adversarial') && (runId === undefined || isBoundedId(runId)))));
     case 'campaign.dashboard': return isRecord(message.dashboard) && isStructuredValue(message.dashboard, MAX_HOST_VALUE_NODES);
     case 'campaign.preview': return isBoundedString(message.campaignId) && [message.selectedCases, message.plannedAttempts, message.plannedRequests, message.maximumDurationMs, message.maxConcurrency].every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0) && Array.isArray(message.warnings) && message.warnings.length <= 100 && message.warnings.every((entry) => isBoundedString(entry, 4096));
     case 'campaign.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedId(message.artifactId);
