@@ -68,6 +68,8 @@ html[data-host='vscode'] .unified-test-workspace__sections button:first-child[ar
 html[data-host='vscode'] .mini-tabs[role='tablist'] { height: 30px; margin: 0 var(--ts-space-2); }
 html[data-host='vscode'] .mini-tabs[role='tablist'] button:first-child { padding-inline-start: 0; }
 html[data-host='vscode'] .mini-tabs[role='tablist'] button:first-child[aria-selected='true']::after { inset-inline-start: 0; }
+/* Phone-width panes: a narrower inset so all six view tabs stay on one row (see refresh.css). */
+@container (max-width: 420px) { html[data-host='vscode'] .mini-tabs[role='tablist'] { margin-inline: var(--ts-space-1); } }
 html[data-host='vscode'] .conversation-drawer__views { height: 100%; }
 html[data-host='vscode'] .conversation-drawer__views button:first-child { padding-inline-start: 0; }
 html[data-host='vscode'] .conversation-drawer__views button:first-child[aria-selected='true']::after { inset-inline-start: 0; }
@@ -130,7 +132,7 @@ html[data-host='vscode'] .right-pane-view { animation-duration: 100ms; }
 html[data-host='vscode'] .right-pane-tabs .right-pane-tab__icon { display: none; }
 @container (max-width: 460px) {
   html[data-host='vscode'] .mini-tabs[role='tablist'] button { gap: 2px; padding-inline: 3px; }
-  html[data-host='vscode'] .mini-tabs[role='tablist'] button .inspector-tab-count { margin-inline-start: 0; }
+  html[data-host='vscode'] .mini-tabs[role='tablist'] button .inspector-tab-count { min-width: 16px; margin-inline-start: 0; padding-inline: 4px; }
   html[data-host='vscode'] .mini-tabs[role='tablist'] button[aria-selected='true']::after { inset-inline: 3px; }
   html[data-host='vscode'] .right-pane-heading { padding-inline: calc(var(--ts-pane-inline, 16px) - 4px) 4px; }
   html[data-host='vscode'] .right-pane-tabs { gap: 0; }

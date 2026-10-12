@@ -106,9 +106,11 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
   .mini-tabs .inspector-tab-count { margin-inline-start: 0; }
 }
 @container (max-width: 420px) {
-  /* Wrap rather than hide tabs off the edge of a phone-width pane. */
-  .mini-tabs[role='tablist'] { flex-wrap: wrap; margin-inline: var(--ts-space-1); overflow-x: visible; }
-  .mini-tabs[role='tablist'] button { padding-inline: 4px; font-size: var(--ts-type-label); }
+  /* Tighter tabs keep all six on one row at phone widths; narrower panes scroll the row rather than
+     wrap it, because a wrapped row in this column layout is sized as one line and overlaps the filters. */
+  .mini-tabs[role='tablist'] { flex-shrink: 0; margin-inline: var(--ts-space-1); overflow-x: auto; scrollbar-width: thin; }
+  .mini-tabs[role='tablist'] button { padding-inline: 3px; font-size: var(--ts-type-label); }
+  .mini-tabs .inspector-tab-count { min-width: 14px; padding-inline: 3px; }
 }
 .right-pane-tab-count { font-family: var(--ts-mono); font-size: var(--ts-type-caption); font-weight: 600; color: var(--vscode-descriptionForeground); }
 .right-pane-tabs button[aria-selected='true'] .right-pane-tab-count { color: var(--vscode-foreground); }
