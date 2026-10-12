@@ -407,6 +407,14 @@ export class WebTestController {
 
   async evidenceResult(evidenceId: string): Promise<RetainedEvidence | undefined> { return (await this.store.get<RetainedEvidence>('evidence', evidenceId))?.value; }
 
+  /** Copies browser-local suites (imported or captured cases) to another Profile, e.g. when a preset is duplicated. */
+  async copySuites(fromProfileId: string, toProfileId: string): Promise<void> {
+    for (const suite of await this.store.list<WebSuite>('suites', fromProfileId)) {
+      await this.store.put<WebSuite>('suites', { ...suite, id: `${toProfileId}:${suite.value.sourcePath}`, profileId: toProfileId, updatedAt: Date.now() });
+    }
+    if (this.profile().id === toProfileId) { await this.postCatalog('contract'); await this.postCatalog('adversarial'); }
+  }
+
   async saveCapturedScenario(scenario: ScenarioDefinition, kind: 'contract' | 'adversarial'): Promise<string> {
     const suite: WebSuite = { suiteId: `captured-${kind}`, name: `Captured ${kind} cases`, kind, sourceFormat: 'jsonc', sourcePath: `browser://captured/${kind}`, revision: '', scenarios: [scenario], raw: '' };
     const existing = (await this.store.list<WebSuite>('suites', this.profile().id)).find((item) => item.value.sourcePath === suite.sourcePath);

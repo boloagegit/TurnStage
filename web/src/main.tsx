@@ -460,13 +460,22 @@ async function clearRuns(): Promise<void> {
 async function captureTest(source: { kind: 'conversation' } | { kind: 'run'; runId: string } | { kind: 'evidence'; evidenceId: string }, kind: 'contract' | 'adversarial', requestId?: string): Promise<void> {
   const snapshot = source.kind === 'conversation' ? session.current.snapshot : source.kind === 'run' ? (await findRun(source.runId))?.snapshot : (await tests.evidenceResult(source.evidenceId))?.result.evidence.snapshot;
   if (!snapshot) throw new Error('The selected browser-local evidence is no longer available.');
+  // A read-only preset cannot hold a reviewable case, so the first save forks it and continues in the copy.
+  let forkedNotice: string | undefined;
+  if (active.builtIn) {
+    const preset = active;
+    const conversation = session.current;
+    const fork = await forkProfile(preset);
+    session.applyEvidence(conversation);
+    forkedNotice = t('{preset} is a read-only preset, so TurnStage created the editable copy {copy} and saved the test there.', { preset: preset.name, copy: fork.name });
+  }
   const existing = new Set((await tests.scenarioEntries()).map((item) => item.scenario.id));
   const lastText = [...snapshot.messages].reverse().find((item) => item.role === 'user')?.parts.filter((part) => part.type === 'text' || part.type === 'markdown').map((part) => part.text).join(' ').trim();
   const forbidText = kind === 'adversarial' ? window.prompt('Forbidden response text for this adversarial draft:')?.trim() : undefined;
   if (kind === 'adversarial' && !forbidText) return;
   const scenario = buildCapturedScenario({ kind, name: (lastText || `Captured ${kind} case`).slice(0, 120), snapshot, profile: activeProfile(), source, existingIds: existing, ...(forbidText ? { forbid: { content: [forbidText] } } : {}) });
   const sourcePath = await tests.saveCapturedScenario(scenario, kind);
-  post({ type: 'test.captured', detail: t('Test case saved: {name}', { name: scenario.name }), kind, scenarioId: scenario.id, sourcePath }, requestId);
+  post({ type: 'test.captured', detail: forkedNotice ?? t('Test case saved: {name}', { name: scenario.name }), kind, scenarioId: scenario.id, sourcePath }, requestId);
   post({ type: 'workspace.navigate', destination: kind === 'adversarial' ? { pane: 'adversarial', section: 'cases' } : { pane: 'tests', section: 'scenarios' } });
 }
 
@@ -574,6 +583,17 @@ function duplicateProfile(source: StoredProfile): StoredProfile {
   const item = deriveLocalProfile(source);
   profiles = [...profiles, item];
   persistLibrary();
+  selectProfile(item.id);
+  void tests.copySuites(source.id, item.id).catch(() => undefined);
+  return item;
+}
+
+/** Creates an editable copy that keeps the source's browser-local cases, then switches to it. */
+async function forkProfile(source: StoredProfile): Promise<StoredProfile> {
+  const item = deriveLocalProfile(source);
+  profiles = [...profiles, item];
+  persistLibrary();
+  await tests.copySuites(source.id, item.id);
   selectProfile(item.id);
   return item;
 }
