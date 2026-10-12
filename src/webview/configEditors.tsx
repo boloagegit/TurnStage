@@ -8,6 +8,7 @@ import { consumeRevert, revertField } from './fieldRevert';
 import { JsonSyntax } from './JsonViewer';
 import { useConfirmAction } from './ConfirmAction';
 import { DEFAULT_MESSAGE_ACTIONS, resolveMessageActionVisibility, resolveStreaming, type MessageActionId } from './uiConfig';
+import { hostText } from './hostCopy';
 
 type Post = (message: WebviewPayload) => void;
 
@@ -98,7 +99,7 @@ export function FlowEditor({ profile, post }: { profile: TurnStageProfile; post:
       <div className="section-heading"><div><h3 id="request-heading">{t('Conversation request')}</h3><p>{t('The base endpoint is shared by first-turn and continuation variants.')}</p></div></div>
       <div className="form-grid">
         <Field label={t('HTTP method')}><select aria-label={t('Conversation request method')} value={profile.conversation.send.method} onChange={(event) => patch(['conversation', 'send', 'method'], event.target.value)}>{methods.map((method) => <option key={method}>{method}</option>)}</select></Field>
-        <Field label={t('Request URL')} hint={t('Template values such as ${env.baseUrl} are resolved in the Extension Host.')} wide error={!profile.conversation.send.url.trim() ? t('A request URL is required.') : undefined}><PatchText aria-label={t('Conversation request URL')} value={profile.conversation.send.url} required spellCheck={false} onCommit={(value) => patch(['conversation', 'send', 'url'], value)} /></Field>
+        <Field label={t('Request URL')} hint={t(hostText('Template values such as ${env.baseUrl} are resolved in the Extension Host.', 'Template values such as ${env.baseUrl} are resolved in this browser.'))} wide error={!profile.conversation.send.url.trim() ? t('A request URL is required.') : undefined}><PatchText aria-label={t('Conversation request URL')} value={profile.conversation.send.url} required spellCheck={false} onCommit={(value) => patch(['conversation', 'send', 'url'], value)} /></Field>
       </div>
     </section>
 
@@ -121,7 +122,7 @@ export function FlowEditor({ profile, post }: { profile: TurnStageProfile; post:
           if (strategy === 'abortThenRequest' && !stopRequest) patch(['conversation', 'stop', 'request'], { method: 'POST', url: '', body: {} });
         }}><option value="abortOnly">{t('Local abort only')}</option><option value="abortThenRequest">{t('Abort then request')}</option></select></Field>
         <Field label={t('Stop request method')} hint={t('Required when Stop mode is Abort then request.')}><select aria-label={t('Stop request method')} disabled={stop?.strategy !== 'abortThenRequest'} value={stopRequest?.method ?? 'POST'} onChange={(event) => patch(['conversation', 'stop', 'request', 'method'], event.target.value)}>{methods.map((method) => <option key={method}>{method}</option>)}</select></Field>
-        <Field label={t('Stop request URL')} hint={t('Secrets and template values are resolved only in the Extension Host.')} wide error={stop?.strategy === 'abortThenRequest' && !stopRequest?.url?.trim() ? t('A stop request URL is required for this mode.') : undefined}><PatchText aria-label={t('Stop request URL')} disabled={stop?.strategy !== 'abortThenRequest'} value={stopRequest?.url ?? ''} spellCheck={false} onCommit={(value) => patch(['conversation', 'stop', 'request', 'url'], value)} /></Field>
+        <Field label={t('Stop request URL')} hint={t(hostText('Secrets and template values are resolved only in the Extension Host.', 'Secrets and template values are resolved in this browser.'))} wide error={stop?.strategy === 'abortThenRequest' && !stopRequest?.url?.trim() ? t('A stop request URL is required for this mode.') : undefined}><PatchText aria-label={t('Stop request URL')} disabled={stop?.strategy !== 'abortThenRequest'} value={stopRequest?.url ?? ''} spellCheck={false} onCommit={(value) => patch(['conversation', 'stop', 'request', 'url'], value)} /></Field>
         <Field label={t('Stop request headers (JSON)')} wide><JsonPatchEditor ariaLabel={t('Stop request headers JSON')} disabled={stop?.strategy !== 'abortThenRequest'} value={stopRequest?.headers ?? {}} onCommit={(value) => patch(['conversation', 'stop', 'request', 'headers'], value)} /></Field>
         <Field label={t('Stop request body (JSON)')} wide><JsonPatchEditor ariaLabel={t('Stop request body JSON')} disabled={stop?.strategy !== 'abortThenRequest'} value={stopRequest?.body ?? {}} onCommit={(value) => patch(['conversation', 'stop', 'request', 'body'], value)} /></Field>
         <Field label={t('Stop context')} hint={t('Comma-separated paths required before sending a remote stop request.')} wide><PatchText aria-label={t('Required stop context')} value={(stop?.requiredContext ?? []).join(', ')} disabled={stop?.strategy !== 'abortThenRequest'} onCommit={(value) => patch(['conversation', 'stop', 'requiredContext'], parseList(value))} /></Field>

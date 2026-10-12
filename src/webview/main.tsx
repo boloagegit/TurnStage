@@ -852,7 +852,7 @@ export function AutomationEvidenceReviewBar({ results, selection, trusted, testR
       <ProductIcon name={outcomeIcon} />
       <div className="evidence-summary__body">
         <h2 id="active-automation-evidence-heading" className="evidence-summary__heading"><span className={`automation-outcome automation-outcome--${result.outcome}`}>{t(localizeHumanized(result.outcome))}</span><span aria-hidden="true">·</span><span>{result.scenarioName}</span></h2>
-        <p>{t('{passed} passed · {failed} failed', { passed: formatNumber(result.passedChecks), failed: formatNumber(result.failedChecks) })} · {formatDuration(result.durationMs)}</p>
+        <p>{t('{passed} checks passed · {failed} failed', { passed: formatNumber(result.passedChecks), failed: formatNumber(result.failedChecks) })} · {formatDuration(result.durationMs)}</p>
         {(result.comparison || result.performance) && <span>{[result.comparison ? t('Comparison') : '', result.performance ? t('Performance') : ''].filter(Boolean).join(' · ')}</span>}
       </div>
     </section>}
@@ -994,7 +994,8 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
   const availableTabs: InspectorTab[] = profile && !componentVisible(profile, 'metrics') ? inspectorTabs.filter((item): item is InspectorTab => item !== 'Metrics') : [...inspectorTabs];
   const effectiveTab = availableTabs.includes(tab) ? tab : availableTabs[0]!;
   const tabCounts = inspectorTabCounts(snapshot, networkEntries, runs);
-  const data = effectiveTab === 'Raw Events' ? snapshot?.rawEvents ?? [] : effectiveTab === 'Normalized' ? snapshot?.normalizedEvents ?? [] : [];
+  const normalizedWithTiming = useMemo(() => withRawEventTiming(snapshot?.normalizedEvents ?? [], snapshot?.rawEvents ?? []), [snapshot?.normalizedEvents, snapshot?.rawEvents]);
+  const data = effectiveTab === 'Raw Events' ? snapshot?.rawEvents ?? [] : effectiveTab === 'Normalized' ? normalizedWithTiming : [];
   const eventKind = effectiveTab === 'Normalized' ? 'normalized' : 'raw';
   const filters = eventFilters[eventKind];
   const deferredQuery = useDeferredValue(filters.query);
@@ -1033,7 +1034,7 @@ export function Inspector({ profile, snapshot, runs = [], networkEntries = [], a
       : effectiveTab === 'Metrics'
         ? <MetricGrid metrics={snapshot?.metrics} enabled={profile?.metrics?.enabled} />
         : effectiveTab === 'Errors'
-          ? <div className="error-list">{snapshot?.errors.length ? snapshot.errors.map((error, index) => <LazyDetails key={`${error.type}-${index}`} summary={error.type}><p>{error.message}</p><JsonBlock value={error} /></LazyDetails>) : <p className="muted">{t('No runtime errors.')}</p>}</div>
+          ? <div className="error-list">{snapshot?.errors.length ? snapshot.errors.map((error, index) => <LazyDetails key={`${error.type}-${index}`} summary={<span className="error-list__summary"><strong>{error.status !== undefined ? `${error.type} · HTTP ${error.status}` : error.type}</strong><span>{error.message}</span></span>}><p>{error.message}</p>{error.suggestion && <p className="muted">{error.suggestion}</p>}<JsonBlock value={error} /></LazyDetails>) : <p className="muted">{t('No runtime errors.')}</p>}</div>
           : <Replay runs={runs} replay={snapshot?.replay} remoteSessions={snapshot?.remoteSessions} active={active} trusted={snapshot?.trusted === true} />;
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, currentTab: InspectorTab) => {
     const currentIndex = availableTabs.indexOf(currentTab);
@@ -1074,7 +1075,8 @@ export function NetworkInspector({ entries, legacyRequestPreview, selectedEntryI
   }, [entries, selectedEntryId]);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filtered = useMemo(() => entries.filter((entry) => !normalizedQuery || `${entry.kind} ${entry.method} ${entry.url} ${entry.status ?? ''} ${entry.state} ${entry.variantId ?? ''} ${entry.correlation?.traceId ?? ''} ${entry.correlation?.spanId ?? ''} ${entry.correlation?.requestId ?? ''}`.toLocaleLowerCase().includes(normalizedQuery)), [entries, normalizedQuery]);
-  const selected = filtered.find((entry) => entry.id === selectedId) ?? filtered.at(-1);
+  // Without a choice, show the latest conversation stream; history and stop requests follow it and are rarely what was sent.
+  const selected = filtered.find((entry) => entry.id === selectedId) ?? [...filtered].reverse().find((entry) => entry.kind === 'stream') ?? filtered.at(-1);
   const selectedIndex = selected ? filtered.findIndex((entry) => entry.id === selected.id) : -1;
   const select = (entry: NetworkExchange, focus = false) => {
     updateState({ selectedId: entry.id });
@@ -1143,7 +1145,7 @@ function parseJsonPreview(value: string | undefined): { ok: true; value: unknown
   try { return { ok: true, value: JSON.parse(value) as unknown }; } catch { return { ok: false }; }
 }
 
-function NetworkHeaderGroup({ title, headers }: { title: string; headers: Record<string, string> }): React.JSX.Element { const items = Object.entries(headers); return <section><h4>{title}</h4>{items.length ? <dl className="network-header-list">{items.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{isSensitiveHeaderName(name) ? '••••••••' : value}</dd></div>)}</dl> : <p className="muted">{t('No headers captured.')}</p>}</section>; }
+function NetworkHeaderGroup({ title, headers }: { title: string; headers: Record<string, string> }): React.JSX.Element { const items = Object.entries(headers); return <section><h3>{title}</h3>{items.length ? <dl className="network-header-list">{items.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{isSensitiveHeaderName(name) ? '••••••••' : value}</dd></div>)}</dl> : <p className="muted">{t('No headers captured.')}</p>}</section>; }
 function NetworkProperty({ label, value }: { label: string; value: string }): React.JSX.Element { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
 function isSensitiveHeaderName(name: string): boolean { return /^(?:authorization|proxy-authorization|cookie2?|set-cookie|x-api-key|api-key)$/iu.test(name) || /(?:^|[-_])(?:token|secret|credential|password|api[-_]?key)(?:$|[-_])/iu.test(name); }
 function networkRequestName(entry: NetworkExchange): string { try { const url = new URL(entry.url); return url.pathname.split('/').filter(Boolean).at(-1) || url.host; } catch { return entry.kind; } }
@@ -1425,7 +1427,21 @@ function LazyDetails({ summary, children }: { summary: React.ReactNode; children
 function eventTreeRowId(row: EventTreeRow, fallbackIndex: number): string {
   return row.kind === 'turn' ? `inspector-event-turn-${stableIdToken(row.group.key)}` : eventRowId(row.item, fallbackIndex);
 }
-function MetricGrid({ metrics, enabled }: { metrics?: SessionSnapshot['metrics']; enabled?: string[] }): React.JSX.Element { if (!metrics) return <p className="muted">{t('No metrics yet.')}</p>; const allow = enabled?.length ? new Set(enabled) : undefined; const entries = Object.entries(metrics).filter(([key, value]) => value !== undefined && (!allow || allow.has(key))); if (!entries.length) return <p className="muted">{t('No enabled metrics have values yet.')}</p>; return <dl className="metrics">{entries.map(([key, value]) => <div key={key}><dt>{localizeHumanized(key)}</dt><dd>{typeof value === 'number' ? (/latency|duration|gap/i.test(key) ? formatDuration(value) : formatNumber(value)) : String(value)}</dd></div>)}</dl>; }
+function MetricGrid({ metrics, enabled }: { metrics?: SessionSnapshot['metrics']; enabled?: string[] }): React.JSX.Element { if (!metrics) return <p className="muted">{t('No metrics yet.')}</p>; const allow = enabled?.length ? new Set(enabled) : undefined; const entries = Object.entries(metrics).filter(([key, value]) => value !== undefined && (!allow || allow.has(key))); if (!entries.length) return <p className="muted">{t('No enabled metrics have values yet.')}</p>; return <dl className="metrics">{entries.map(([key, value]) => <div key={key}><dt>{METRIC_LABELS[key] ? t(METRIC_LABELS[key]) : localizeHumanized(key)}</dt><dd>{formatMetricValue(key, value)}</dd></div>)}</dl>; }
+
+/** Plain names for session metrics; durations are always shown with a unit. */
+const METRIC_LABELS: Record<string, string> = {
+  requestStartedAt: 'Request started', headersLatency: 'Time to headers', firstChunkLatency: 'Time to first chunk', firstEventLatency: 'Time to first event', ttft: 'Time to first token',
+  streamDuration: 'Stream duration', totalDuration: 'Total duration', eventCount: 'Events', byteCount: 'Bytes received', averageEventGap: 'Average event gap', maxEventGap: 'Longest event gap',
+  parseErrorCount: 'Parse errors', mappingErrorCount: 'Mapping errors', unmatchedEventCount: 'Unmatched events', reconnectCount: 'Reconnects', abortReason: 'Stop reason',
+};
+const DURATION_METRICS = new Set(['headersLatency', 'firstChunkLatency', 'firstEventLatency', 'ttft', 'streamDuration', 'totalDuration', 'averageEventGap', 'maxEventGap']);
+function formatMetricValue(key: string, value: unknown): string {
+  if (typeof value !== 'number') return localizeHumanized(String(value));
+  if (key === 'requestStartedAt') return formatDateTime(value);
+  if (key === 'byteCount') return formatBytes(value);
+  return DURATION_METRICS.has(key) ? formatDuration(value) : formatNumber(value);
+}
 
 function ReplayOperationStatus({ replay, onOpenControls }: { replay: ReplaySnapshot; onOpenControls: () => void }): React.JSX.Element {
   const progress = replay.total ? Math.round((replay.index / replay.total) * 100) : 0;
@@ -1609,6 +1625,20 @@ export function normalizeWebviewState(value: unknown): WebviewState | undefined 
 
 function boundedOptionalString<K extends 'sessionId' | 'selectedMessageId' | 'selectedNetworkId' | 'activeEvidenceId' | 'selectedAutomationResultKey' | 'expandedContractCaseId' | 'expandedAdversarialCaseId' | 'selectedCampaignId'>(key: K, value: unknown): Partial<Record<K, string>> {
   return typeof value === 'string' && value.length <= 512 ? { [key]: value } as Partial<Record<K, string>> : {};
+}
+
+/**
+ * Normalized events carry no stream time of their own; take it from the raw event they were mapped from so the
+ * Normalized tab shows real offsets and gaps instead of +0 ms.
+ */
+export function withRawEventTiming<T extends { rawSequence?: number; elapsedMs?: unknown }>(normalized: readonly T[], raw: ReadonlyArray<{ sequence: number; elapsedMs?: number }>): T[] {
+  if (!normalized.length || normalized.every((item) => typeof item.elapsedMs === 'number')) return normalized as T[];
+  const elapsedBySequence = new Map(raw.flatMap((item) => typeof item.elapsedMs === 'number' ? [[item.sequence, item.elapsedMs] as const] : []));
+  return normalized.map((item) => {
+    if (typeof item.elapsedMs === 'number' || item.rawSequence === undefined) return item;
+    const elapsedMs = elapsedBySequence.get(item.rawSequence);
+    return elapsedMs === undefined ? item : { ...item, elapsedMs };
+  });
 }
 
 export function terminalSequences(normalizedEvents: Array<Record<string, unknown>>): ReadonlySet<number> {

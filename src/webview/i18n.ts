@@ -1711,6 +1711,26 @@ const zhTw: Record<string, string> = {
   "{count} test case issues.": "{count} 個測試案例問題。",
   "Chat still works; affected cases cannot run until they are fixed.": "對話仍可使用；受影響的案例修正前無法執行。",
   "Fix the Profile errors listed above before sending a message.": "請先修正上方列出的設定檔錯誤，再傳送訊息。",
+  "{passed} checks passed · {failed} failed": "{passed} 項檢查通過 · {failed} 項失敗",
+  "Request started": "請求開始時間",
+  "Time to headers": "標頭回應時間",
+  "Time to first chunk": "首個資料塊時間",
+  "Time to first event": "首個事件時間",
+  "Events": "事件",
+  "Bytes received": "已接收位元組",
+  "Longest event gap": "最長事件間隔",
+  "Stop reason": "停止原因",
+  "Select all ready cases ({selectable} of {total})": "勾選所有可執行案例（{selectable}／{total}）",
+  "A Red Team case sends fixed adversarial messages and checks that prohibited content, URLs, calls to action, tool calls, or events do not appear. Each run ends as Resisted, Attack succeeded, Indeterminate, or Infrastructure error; a timeout never counts as Resisted.": "紅隊案例會送出固定的對抗訊息，並檢查回應中沒有出現被禁止的內容、URL、行動呼籲、工具呼叫或事件。每次執行的結果為「已抵禦」、「攻擊成功」、「無法判定」或「基礎架構錯誤」；逾時不會被視為已抵禦。",
+  "A test case replays the user messages of a conversation and checks the result. The quickest way to make one is Save as test in the chat after a reply you want to keep.": "測試案例會重播對話中的使用者訊息並檢查結果。最快的建立方式，是在想保留的回覆之後，於對話中按「存成測試」。",
+  "The environment is resolved in this browser when a request is sent.": "環境會在傳送請求時於此瀏覽器中解析。",
+  "The endpoint is shared by first-turn and continuation variants. Templates are resolved in this browser.": "首輪與後續變體共用此端點。範本會在此瀏覽器中解析。",
+  "This is the redacted request prepared in this browser. Secret values are not shown.": "這是在此瀏覽器中準備並已遮蔽的請求，不會顯示機密值。",
+  "Runs are stored in this browser and can be replayed without sending another request.": "執行記錄儲存在此瀏覽器中，可在不重新送出請求的情況下重播。",
+  "Network requests are sent directly from this browser to the configured endpoint.": "網路請求會直接從此瀏覽器送往設定的端點。",
+  "This browser": "此瀏覽器",
+  "Template values such as ${env.baseUrl} are resolved in this browser.": "${env.baseUrl} 等範本值會在此瀏覽器中解析。",
+  "Secrets and template values are resolved in this browser.": "機密與範本值會在此瀏覽器中解析。",
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {
@@ -1780,7 +1800,15 @@ export function formatDuration(value: number): string {
   return cachedFormatter('duration', () => new Intl.NumberFormat(locale, { maximumFractionDigits: 0, style: 'unit', unit: 'millisecond', unitDisplay: 'short' })).format(value);
 }
 
+/** Identifiers whose word-split form reads as jargon ("Waiting Start", "Ttft"); everything else is split into words. */
+const HUMANIZED_LABELS: Record<string, string> = {
+  waitingStart: 'Waiting for response', submitting: 'Sending', aborted: 'Stopped', notStarted: 'Not started',
+  loadingOpening: 'Loading opening', ttft: 'Time to first token', lastTurnFailed: 'Last turn failed',
+};
+
 export function localizeHumanized(value: string): string {
+  const label = HUMANIZED_LABELS[value];
+  if (label) return t(label);
   return t(value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[._-]/g, ' ').replace(/^./, (char) => char.toUpperCase()));
 }
 

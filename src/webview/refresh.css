@@ -100,6 +100,15 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
 @container (max-width: 600px) {
   .mini-tabs .mini-tab__short { display: inline; }
   .mini-tabs .mini-tab__full { display: none; }
+  /* Six evidence tabs with counts must fit a typical right pane without hiding Runs or Errors. */
+  .mini-tabs[role='tablist'] { gap: 0; }
+  .mini-tabs[role='tablist'] button { gap: 4px; padding-inline: 7px; }
+  .mini-tabs .inspector-tab-count { margin-inline-start: 0; }
+}
+@container (max-width: 420px) {
+  /* Wrap rather than hide tabs off the edge of a phone-width pane. */
+  .mini-tabs[role='tablist'] { flex-wrap: wrap; margin-inline: var(--ts-space-1); overflow-x: visible; }
+  .mini-tabs[role='tablist'] button { padding-inline: 4px; font-size: var(--ts-type-label); }
 }
 .right-pane-tab-count { font-family: var(--ts-mono); font-size: var(--ts-type-caption); font-weight: 600; color: var(--vscode-descriptionForeground); }
 .right-pane-tabs button[aria-selected='true'] .right-pane-tab-count { color: var(--vscode-foreground); }
@@ -379,4 +388,6 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
   .right-pane-tabs button { padding-inline: 3px; font-size: var(--ts-type-label); }
   .right-pane-tabs .right-pane-tab__icon { display: inline-block; }
   .right-pane-tab--chat .right-pane-tab__label { display: none; }
+  /* Icon-only, so keep the WCAG 2.5.8 minimum target. */
+  .right-pane-tab--chat { min-width: 28px; justify-content: center; }
 }

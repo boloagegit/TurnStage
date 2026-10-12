@@ -1342,7 +1342,7 @@ describe('Webview DOM behavior', () => {
     const { rerender } = render(<AutomationWorkspace activeSection="results" profile={configured} post={post} trusted automationResults={automationResults} />);
 
     expect(screen.queryByRole('button', { name: 'Run all' })).toBeNull();
-    expect(screen.getAllByText('3 passed · 1 failed')).toHaveLength(1);
+    expect(screen.getAllByText('3 checks passed · 1 failed')).toHaveLength(1);
     expect(screen.queryByRole('region', { name: 'Review test result' })).toBeNull();
     await user.click(screen.getAllByRole('button', { name: 'Open evidence' })[0]!);
     expect(post).toHaveBeenCalledWith({ type: 'test.evidence.open', evidenceId: 'contract-evidence', location: { kind: 'message', messageId: 'assistant-1' } });
@@ -1836,7 +1836,7 @@ describe('Webview DOM behavior', () => {
     const selector = screen.getByRole('combobox', { name: 'Review test result' }) as HTMLSelectElement;
     expect(selector.value).toBe('contract-evidence-1');
     expect(selector.options).toHaveLength(2);
-    expect(screen.getByText('3 passed · 1 failed · 120 ms')).toBeTruthy();
+    expect(screen.getByText('3 checks passed · 1 failed · 120 ms')).toBeTruthy();
     expect(screen.getByText('Comparison · Performance')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Next test result' }));
     expect(onSelect).toHaveBeenCalledWith(results[1]);
