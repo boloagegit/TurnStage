@@ -1,5 +1,7 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Flaky': '不安定',
+  'Passed {passes} and failed {failures} of the last {runs} runs of this definition': 'この定義の直近 {runs} 回の実行で {passes} 回成功、{failures} 回失敗',
   'Copy as cURL': 'cURL としてコピー',
   'Where the time went': '時間の内訳',
   'Waiting for response headers': 'レスポンスヘッダーを待機',

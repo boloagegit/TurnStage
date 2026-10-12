@@ -391,3 +391,5 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
   /* Icon-only, so keep the WCAG 2.5.8 minimum target. */
   .right-pane-tab--chat { min-width: 28px; justify-content: flex-start; }
 }
+/* Flaky: the case flipped between passing and failing on the same definition. Text, not color, carries it. */
+.live-case-status__flaky { margin-inline-start: var(--ts-space-1); padding: 0 4px; border: 1px dashed currentColor; border-radius: 3px; color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground)); font-size: 0.86em; font-weight: 600; line-height: 1.4; white-space: nowrap; }

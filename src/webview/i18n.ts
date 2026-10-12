@@ -7,6 +7,8 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Flaky': '不穩定',
+  'Passed {passes} and failed {failures} of the last {runs} runs of this definition': '此定義最近 {runs} 次執行中通過 {passes} 次、失敗 {failures} 次',
   'Copy as cURL': '複製為 cURL',
   'Where the time went': '時間花在哪裡',
   'Waiting for response headers': '等待回應標頭',
