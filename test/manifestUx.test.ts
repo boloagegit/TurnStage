@@ -83,26 +83,20 @@ describe('VS Code contribution UX', () => {
     expect(icon).toContain('viewBox="0 0 24 24"');
     expect(icon).toContain('stroke="currentColor"');
     expect(icon).toContain('fill="currentColor"');
-    expect(icon).toContain('<rect x="2.5" y="2.5" width="19" height="19"');
+    expect(icon).toContain('d="M17 5.5H8.75a3.25 3.25 0 0 0 0 6.5h6.5a3.25 3.25 0 0 1 0 6.5H7"');
     expect(icon).not.toMatch(/#[0-9a-f]{3,8}/iu);
   });
 
-  it('keeps the Marketplace icon on the exact Activity Bar mark geometry', () => {
+  it('keeps the Marketplace icon and Web favicon on the exact Activity Bar mark path', () => {
     const activityIcon = readFileSync(resolve(import.meta.dirname, '..', 'media', 'activity.svg'), 'utf8');
     const marketplaceIcon = readFileSync(resolve(import.meta.dirname, '..', 'media', 'icon.svg'), 'utf8');
-    const sharedGeometry = [
-      'x="2.5" y="2.5" width="19" height="19" rx="3.25"',
-      'd="M12 6.4v4.9m0 0-4.25 4.5m4.25-4.5 4.25 4.5"',
-      'cx="12" cy="6.4" r="1.3"',
-      'cx="7.75" cy="15.8" r="1.3"',
-      'x="14.95" y="14.5" width="2.6" height="2.6" rx="0.58"',
-    ];
+    const webPage = readFileSync(resolve(import.meta.dirname, '..', 'web', 'index.html'), 'utf8');
+    const markPath = 'M17 5.5H8.75a3.25 3.25 0 0 0 0 6.5h6.5a3.25 3.25 0 0 1 0 6.5H7';
 
-    for (const geometry of sharedGeometry) {
-      expect(activityIcon).toContain(geometry);
-      expect(marketplaceIcon).toContain(geometry);
-    }
-    expect(marketplaceIcon).toContain('transform="scale(10.6666666667)"');
+    expect(activityIcon).toContain(`d="${markPath}"`);
+    expect(marketplaceIcon).toContain(`d="${markPath}"`);
+    expect(marketplaceIcon).toContain('transform="translate(26 26) scale(8.5)"');
+    expect(webPage).toContain(`d='${markPath}'`);
     expect(manifest).toMatchObject({ icon: 'media/icon.png' });
   });
 
