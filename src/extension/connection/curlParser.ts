@@ -310,8 +310,9 @@ function tokenize(input: string, maxTokenBytes: number): Token[] {
   for (let index = 0; index < input.length; index += 1) {
     const character = input[index]!;
     if (escaped) {
-      if (character !== '\n' && character !== '\r') current += character;
-      started = true;
+      // A backslash before a line break continues the command; it is not an argument of its own.
+      if (character !== '\n' && character !== '\r') { current += character; started = true; }
+      else if (character === '\r' && input[index + 1] === '\n') index += 1;
       escaped = false;
       continue;
     }
@@ -339,7 +340,6 @@ function tokenize(input: string, maxTokenBytes: number): Token[] {
     if (character === '"') { quote = 'double'; started = true; continue; }
     if (character === '\\' || character === '^') {
       escaped = true;
-      started = true;
       continue;
     }
     if (/\s/.test(character)) { push(); continue; }

@@ -1019,6 +1019,11 @@ describe('Webview DOM behavior', () => {
     expect(container.querySelectorAll('.network-detail-panel:not([hidden]) .json-token--boolean')).toHaveLength(1);
     await user.click(screen.getByRole('tab', { name: 'Response' }));
     expect(screen.getByText(/event: start/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy as cURL' })).toBeTruthy();
+    await user.click(screen.getByRole('tab', { name: 'Timing' }));
+    const phases = screen.getByRole('list', { name: 'Where the time went' });
+    expect(within(phases).getAllByRole('listitem').map((item) => item.querySelector('.network-phases__label')?.textContent)).toEqual(['Waiting for response headers', 'Waiting for first chunk', 'Streaming']);
+    expect(container.querySelectorAll('.network-row .network-waterfall__bar')).toHaveLength(2);
     await user.click(within(list).getByRole('option', { name: /opening/i }));
     await user.click(screen.getByRole('tab', { name: 'Headers' }));
     expect(screen.queryByText('Bearer local-debug-token')).toBeNull();

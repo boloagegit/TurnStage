@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import type { AdversarialCaseCatalog, ContractCaseCatalog, HostMessage, MappingTestResult, TestOperationSnapshot, WebviewPayload, WorkspaceSection } from '../shared/protocol';
 import { isHostMessage, isWorkspaceSection, isTestRunActive, PROTOCOL_VERSION } from '../shared/protocol';
 import { browserUuid } from '../shared/uuid';
+import { isSensitiveHeaderName, networkCurlCommand } from '../shared/curlCommand';
+import { ClipboardButton } from './ClipboardButton';
 import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ChatMessage, ConversationDirectory, ConnectionDoctorSummary, EvidenceTimelineEntry, EvidenceTimelineSummary, LocalRunSummary, NetworkExchange, RawStreamEvent, RemoteSessionReference, ReplaySnapshot, ScenarioEvidenceLocation, SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { mappingDraftFromRawEvent } from './configEditors';
 import { JsonViewer, safeJson } from './JsonViewer';
@@ -1079,6 +1081,7 @@ export function NetworkInspector({ entries, legacyRequestPreview, selectedEntryI
   // Without a choice, show the latest conversation stream; history and stop requests follow it and are rarely what was sent.
   const selected = filtered.find((entry) => entry.id === selectedId) ?? [...filtered].reverse().find((entry) => entry.kind === 'stream') ?? filtered.at(-1);
   const selectedIndex = selected ? filtered.findIndex((entry) => entry.id === selected.id) : -1;
+  const timeWindow = useMemo(() => networkTimeWindow(filtered), [filtered]);
   const select = (entry: NetworkExchange, focus = false) => {
     updateState({ selectedId: entry.id });
     if (focus) requestAnimationFrame(() => document.getElementById(networkRowId(entry.id))?.focus());
@@ -1113,13 +1116,13 @@ export function NetworkInspector({ entries, legacyRequestPreview, selectedEntryI
           const accessibleName = `${networkRequestName(entry)}${entry.attempt > 1 ? `, ${t('Attempt {attempt}', { attempt: formatNumber(entry.attempt) })}` : ''}`;
           return <button type="button" id={networkRowId(entry.id)} role="option" aria-label={t('{name}, method {method}, status {status}, type {type}, time {time}, size {size}', { name: accessibleName, method: entry.method, status: String(entry.status ?? localizeHumanized(entry.state)), type: entry.protocol ?? responseContentType(entry), time: entry.timing.total === undefined ? '—' : formatDuration(entry.timing.total), size: formatBytes(entry.transferredBytes) })} aria-selected={active} tabIndex={active || (selectedIndex < 0 && index === 0) ? 0 : -1} className={`network-row ${active ? 'selected' : ''}`} key={entry.id} onClick={() => select(entry)} onKeyDown={(event) => handleRowKeyDown(event, index)}>
             <span className="network-name"><ProductIcon name={networkStateIcon(entry)} /><span><strong>{networkRequestName(entry)}</strong><small>{t(networkKindLabel(entry.kind))}{entry.attempt > 1 ? ` · ${t('Attempt {attempt}', { attempt: formatNumber(entry.attempt) })}` : ''}</small></span></span>
-            <span>{entry.method}</span><span className={`network-status network-status--${entry.state}`}>{entry.status ?? localizeHumanized(entry.state)}</span><span>{entry.protocol ?? responseContentType(entry)}</span><span>{entry.timing.total === undefined ? '—' : formatDuration(entry.timing.total)}</span><span>{formatBytes(entry.transferredBytes)}</span>
+            <span>{entry.method}</span><span className={`network-status network-status--${entry.state}`}>{entry.status ?? localizeHumanized(entry.state)}</span><span>{entry.protocol ?? responseContentType(entry)}</span><span className="network-time">{entry.timing.total === undefined ? '—' : formatDuration(entry.timing.total)}<NetworkWaterfallBar entry={entry} window={timeWindow} /></span><span>{formatBytes(entry.transferredBytes)}</span>
           </button>;
         })}
       </div>
     </div>
     {selected && <section className="network-detail" aria-label={t('Request details')}>
-      <header><div><strong title={selected.url}>{networkRequestName(selected)}</strong><span>{selected.method} · {selected.status ?? localizeHumanized(selected.state)} · {formatDuration(selected.timing.total ?? 0)}</span></div></header>
+      <header><div><strong title={selected.url}>{networkRequestName(selected)}</strong><span>{selected.method} · {selected.status ?? localizeHumanized(selected.state)} · {formatDuration(selected.timing.total ?? 0)}</span></div><ClipboardButton text={networkCurlCommand(selected)} label={t('Copy as cURL')} /></header>
       <div className="network-detail-tabs" role="tablist" aria-label={t('Request detail views')}>{networkDetailTabs.map((tab) => <button key={tab} id={networkDetailTabId(tab)} role="tab" aria-selected={detailTab === tab} aria-controls={networkDetailPanelId(tab)} tabIndex={detailTab === tab ? 0 : -1} onClick={() => updateState({ detailTab: tab })} onKeyDown={(event) => handleDetailTabKeyDown(event, tab)}>{t(tab)}</button>)}</div>
       {networkDetailTabs.map((tab) => <div key={tab} id={networkDetailPanelId(tab)} role="tabpanel" aria-labelledby={networkDetailTabId(tab)} hidden={detailTab !== tab} className="network-detail-panel">{detailTab === tab ? <NetworkDetailContent entry={selected} tab={tab} /> : null}</div>)}
     </section>}
@@ -1132,7 +1135,7 @@ function NetworkDetailContent({ entry, tab }: { entry: NetworkExchange; tab: Net
     const parsed = parseJsonPreview(entry.responseBodyPreview);
     return <div className="network-response">{parsed.ok ? <JsonBlock value={parsed.value} /> : <pre>{entry.responseBodyPreview || t('No response body captured.')}</pre>}{entry.responseBodyTruncated && <p className="warning">{t('Response preview was truncated at the safety limit.')}</p>}</div>;
   }
-  if (tab === 'Timing') return <dl className="network-properties network-properties--timing"><NetworkProperty label={t('Started')} value={formatDateTime(entry.startedAt)} /><NetworkProperty label={t('Headers')} value={optionalDuration(entry.timing.headers)} /><NetworkProperty label={t('First chunk')} value={optionalDuration(entry.timing.firstChunk)} /><NetworkProperty label={t('Total')} value={optionalDuration(entry.timing.total)} /><NetworkProperty label={t('Request timeout')} value={optionalDuration(entry.timing.timeout)} /><NetworkProperty label={t('Idle timeout')} value={optionalDuration(entry.timing.idleTimeout)} />{entry.timing.retryDelay !== undefined && <NetworkProperty label={t('Retry delay')} value={formatDuration(entry.timing.retryDelay)} />}</dl>;
+  if (tab === 'Timing') return <><NetworkTimingPhases entry={entry} /><dl className="network-properties network-properties--timing"><NetworkProperty label={t('Started')} value={formatDateTime(entry.startedAt)} /><NetworkProperty label={t('Headers')} value={optionalDuration(entry.timing.headers)} /><NetworkProperty label={t('First chunk')} value={optionalDuration(entry.timing.firstChunk)} /><NetworkProperty label={t('Total')} value={optionalDuration(entry.timing.total)} /><NetworkProperty label={t('Request timeout')} value={optionalDuration(entry.timing.timeout)} /><NetworkProperty label={t('Idle timeout')} value={optionalDuration(entry.timing.idleTimeout)} />{entry.timing.retryDelay !== undefined && <NetworkProperty label={t('Retry delay')} value={formatDuration(entry.timing.retryDelay)} />}</dl></>;
   return <div className="network-headers"><dl className="network-properties"><NetworkProperty label={t('Request URL')} value={entry.url} /><NetworkProperty label={t('Request method')} value={entry.method} /><NetworkProperty label={t('Status')} value={entry.status === undefined ? localizeHumanized(entry.state) : String(entry.status)} /><NetworkProperty label={t('Request type')} value={t(networkKindLabel(entry.kind))} />{entry.variantId && <NetworkProperty label={t('Variant')} value={entry.variantId} />}</dl>{entry.correlation && <section><h4>{t('Correlation')}</h4><dl className="network-properties">{entry.correlation.traceId && <NetworkProperty label={t('Trace ID')} value={entry.correlation.traceId} />}{entry.correlation.spanId && <NetworkProperty label={t('Span ID')} value={entry.correlation.spanId} />}{entry.correlation.traceFlags && <NetworkProperty label={t('Trace flags')} value={entry.correlation.traceFlags} />}{entry.correlation.requestId && <NetworkProperty label={entry.correlation.requestIdHeader ?? t('Request ID')} value={entry.correlation.requestId} />}</dl></section>}<NetworkHeaderGroup title={t('Request headers')} headers={entry.requestHeaders} /><NetworkHeaderGroup title={t('Response headers')} headers={entry.responseHeaders ?? {}} />{entry.error && <section><h4>{t('Error')}</h4><JsonBlock value={entry.error} /></section>}</div>;
 }
 
@@ -1146,9 +1149,55 @@ function parseJsonPreview(value: string | undefined): { ok: true; value: unknown
   try { return { ok: true, value: JSON.parse(value) as unknown }; } catch { return { ok: false }; }
 }
 
+export interface NetworkTimingPhase { id: 'waiting' | 'first-chunk' | 'streaming'; label: string; startMs: number; durationMs: number }
+
+/** Split a request into where its time went: server wait, wait for the first chunk, and streaming. */
+export function networkTimingPhases(entry: Pick<NetworkExchange, 'timing'>): NetworkTimingPhase[] {
+  const { headers, firstChunk, total } = entry.timing;
+  const phases: NetworkTimingPhase[] = [];
+  const add = (id: NetworkTimingPhase['id'], label: string, start: number | undefined, end: number | undefined) => {
+    if (start === undefined || end === undefined || !Number.isFinite(start) || !Number.isFinite(end) || end < start) return;
+    phases.push({ id, label, startMs: start, durationMs: end - start });
+  };
+  add('waiting', 'Waiting for response headers', 0, headers);
+  add('first-chunk', 'Waiting for first chunk', headers, firstChunk);
+  add('streaming', 'Streaming', firstChunk, total);
+  return phases;
+}
+
+function NetworkTimingPhases({ entry }: { entry: NetworkExchange }): React.JSX.Element | null {
+  const phases = networkTimingPhases(entry);
+  const end = Math.max(entry.timing.total ?? 0, ...phases.map((phase) => phase.startMs + phase.durationMs));
+  if (!phases.length || end <= 0) return null;
+  return <ol className="network-phases" aria-label={t('Where the time went')}>{phases.map((phase) => <li key={phase.id} className={`network-phases__item network-phases__item--${phase.id}`}>
+    <span className="network-phases__label">{t(phase.label)}</span>
+    <span className="network-phases__track" aria-hidden="true"><span style={{ left: `${(phase.startMs / end) * 100}%`, width: `${Math.max(0.5, (phase.durationMs / end) * 100)}%` }} /></span>
+    <span className="network-phases__value">{formatDuration(phase.durationMs)}</span>
+  </li>)}</ol>;
+}
+
+/** The span of time covered by the listed requests, so each row's bar shares one scale. */
+export function networkTimeWindow(entries: readonly NetworkExchange[]): { start: number; end: number } | undefined {
+  let start = Number.POSITIVE_INFINITY;
+  let end = Number.NEGATIVE_INFINITY;
+  for (const entry of entries) {
+    if (!Number.isFinite(entry.startedAt)) continue;
+    start = Math.min(start, entry.startedAt);
+    end = Math.max(end, entry.startedAt + (entry.timing.total ?? (entry.completedAt !== undefined ? entry.completedAt - entry.startedAt : 0)));
+  }
+  return Number.isFinite(start) && end > start ? { start, end } : undefined;
+}
+
+function NetworkWaterfallBar({ entry, window }: { entry: NetworkExchange; window?: { start: number; end: number } }): React.JSX.Element | null {
+  if (!window || entry.timing.total === undefined) return null;
+  const span = window.end - window.start;
+  const left = ((entry.startedAt - window.start) / span) * 100;
+  const width = Math.max(1, (entry.timing.total / span) * 100);
+  return <span className="network-waterfall" aria-hidden="true"><span className={`network-waterfall__bar network-waterfall__bar--${entry.state}`} style={{ left: `${Math.min(99, Math.max(0, left))}%`, width: `${Math.min(100 - Math.min(99, Math.max(0, left)), width)}%` }} /></span>;
+}
+
 function NetworkHeaderGroup({ title, headers }: { title: string; headers: Record<string, string> }): React.JSX.Element { const items = Object.entries(headers); return <section><h3>{title}</h3>{items.length ? <dl className="network-header-list">{items.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{isSensitiveHeaderName(name) ? '••••••••' : value}</dd></div>)}</dl> : <p className="muted">{t('No headers captured.')}</p>}</section>; }
 function NetworkProperty({ label, value }: { label: string; value: string }): React.JSX.Element { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
-function isSensitiveHeaderName(name: string): boolean { return /^(?:authorization|proxy-authorization|cookie2?|set-cookie|x-api-key|api-key)$/iu.test(name) || /(?:^|[-_])(?:token|secret|credential|password|api[-_]?key)(?:$|[-_])/iu.test(name); }
 function networkRequestName(entry: NetworkExchange): string { try { const url = new URL(entry.url); return url.pathname.split('/').filter(Boolean).at(-1) || url.host; } catch { return entry.kind; } }
 function networkKindLabel(kind: NetworkExchange['kind']): string { return kind === 'opening' ? 'Opening' : kind === 'stop' ? 'Stop request' : kind === 'history' ? 'Conversation history' : 'Conversation stream'; }
 function responseContentType(entry: NetworkExchange): string { return Object.entries(entry.responseHeaders ?? {}).find(([name]) => name.toLocaleLowerCase() === 'content-type')?.[1]?.split(';')[0] ?? 'fetch'; }

@@ -1,5 +1,9 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Copy as cURL': 'cURL로 복사',
+  'Where the time went': '시간 사용 내역',
+  'Waiting for response headers': '응답 헤더 대기',
+  'Waiting for first chunk': '첫 번째 청크 대기',
   'Default environment': '기본 환경',
   '{id} (not found)': '{id} (찾을 수 없음)',
   'Test case saved: {name}': '테스트 사례 저장됨: {name}',

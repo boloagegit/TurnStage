@@ -364,3 +364,24 @@ body.vscode-high-contrast .json-token, body.vscode-high-contrast-light .json-tok
 .unified-history-cases__changed { color: var(--vscode-descriptionForeground); }
 .error-list__summary { display: inline-flex; flex-wrap: wrap; gap: 0 var(--ts-space-2); min-width: 0; }
 .error-list__summary > span { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+
+/* Network: copy action in the detail header, per-row waterfall, and where a request spent its time. */
+.network-detail > header { justify-content: space-between; gap: var(--ts-space-2); }
+.network-detail > header > .clipboard-action { flex: none; }
+.network-row > span.network-time { position: relative; }
+.network-waterfall { position: absolute; inset-inline: var(--ts-space-2); bottom: 4px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--vscode-editorWidget-border) 55%, transparent); }
+.network-waterfall__bar { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: var(--vscode-charts-blue, var(--vscode-focusBorder)); }
+.network-waterfall__bar--failed { background: var(--vscode-errorForeground); }
+.network-waterfall__bar--aborted { background: var(--vscode-descriptionForeground); }
+.network-phases { display: grid; gap: var(--ts-space-2); margin: 0; padding: var(--ts-space-3) calc(var(--ts-pane-inline) + var(--ts-space-1)) var(--ts-space-1); list-style: none; }
+.network-phases__item { display: grid; grid-template-columns: minmax(9em, auto) minmax(60px, 1fr) minmax(4.5em, auto); align-items: center; gap: var(--ts-space-2); font-size: var(--ts-type-small); }
+.network-phases__label { color: var(--vscode-descriptionForeground); }
+.network-phases__value { text-align: end; font-variant-numeric: tabular-nums; }
+.network-phases__track { position: relative; height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--vscode-editorWidget-border) 45%, transparent); }
+.network-phases__track > span { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--vscode-charts-blue, var(--vscode-focusBorder)); }
+.network-phases__item--waiting .network-phases__track > span { background: var(--vscode-charts-yellow, var(--vscode-descriptionForeground)); }
+.network-phases__item--first-chunk .network-phases__track > span { background: var(--vscode-charts-purple, var(--vscode-focusBorder)); }
+@media (forced-colors: active) {
+  .network-waterfall__bar, .network-phases__track > span { background: CanvasText; forced-color-adjust: none; }
+}
+@container (max-width: 420px) { .network-phases__item { grid-template-columns: 1fr auto; } .network-phases__track { grid-column: 1 / -1; grid-row: 2; } }

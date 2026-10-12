@@ -117,3 +117,15 @@ body { background: var(--vscode-editor-background); }
   .library-open .library-filters { display: grid; }
   .library-open .profile-folder .folder-heading { display: flex; }
 }
+
+/* Create profile from cURL */
+.curl-import { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--vscode-editorWidget-border); border-radius: 6px; color: var(--vscode-editor-foreground); background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); box-shadow: 0 12px 32px rgb(0 0 0 / 28%); }
+.curl-import::backdrop { background: rgb(0 0 0 / 45%); }
+.curl-import form { display: grid; gap: var(--ts-space-3); padding: var(--ts-space-4); }
+.curl-import h2 { margin: 0; font-size: 15px; }
+.curl-import__hint { margin: 0; color: var(--vscode-descriptionForeground); line-height: 1.5; }
+.curl-import__field { display: grid; gap: var(--ts-space-1); }
+.curl-import__field textarea { width: 100%; min-height: 10em; resize: vertical; padding: var(--ts-space-2); border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border)); border-radius: 2px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); font-family: var(--vscode-editor-font-family, ui-monospace, monospace); font-size: 12px; }
+.curl-import__field textarea[aria-invalid='true'] { border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); }
+.curl-import__error { margin: 0; color: var(--vscode-errorForeground); overflow-wrap: anywhere; }
+.curl-import__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ts-space-2); }

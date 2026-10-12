@@ -24,6 +24,8 @@ import { applyWebAppearance, bindSystemAppearance } from './theme';
 import { decodeWebProfileBundle, encodeWebProfileBundle, encodeWebProfileWithCases, type WebProfileBundle } from './profileBundle';
 import { parseWebSuiteInWorker, type WebSuite } from './suiteParser';
 import { IconButton } from '../../src/webview/Icon';
+import { CurlImportDialog } from './CurlImportDialog';
+import { profileFromCurl } from './curlImport';
 import { copyText } from '../../src/webview/clipboardText';
 import { t } from '../../src/webview/i18n';
 import { browserUuid } from './browserCrypto';
@@ -584,6 +586,24 @@ function createBlankProfile(): void {
   selectProfile(item.id);
 }
 
+/** Creates a sanitized Profile from a pasted cURL command; returns an error message instead of throwing. */
+function createProfileFromCurl(command: string, failedLabel: string): string | undefined {
+  try {
+    // The draft uses the command's absolute URL, so it needs no Environment; its secrets resolve by name from this tab.
+    const imported = profileFromCurl(command);
+    const id = uniqueId(imported.profile.id);
+    const profile: TurnStageProfile = { ...imported.profile, id };
+    const item: StoredProfile = { id, name: profile.name, raw: JSON.stringify(profile, null, 2), updatedAt: Date.now() };
+    profiles = [...profiles, item];
+    persistLibrary();
+    for (const [name, value] of imported.secrets) secrets.set(name, value);
+    selectProfile(item.id);
+    return undefined;
+  } catch (error) {
+    return `${failedLabel} ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
 function duplicateProfile(source: StoredProfile): StoredProfile {
   const item = deriveLocalProfile(source);
   profiles = [...profiles, item];
@@ -788,6 +808,7 @@ function ProfileLibrary(): React.JSX.Element {
   const [referenceProfileId, setReferenceProfileId] = useState<string | undefined>();
   const [itemMenu, setItemMenu] = useState<{ id: string; top: number; left: number } | undefined>();
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+  const [curlImportOpen, setCurlImportOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const activeProfileButton = useRef<HTMLButtonElement>(null);
@@ -933,7 +954,8 @@ function ProfileLibrary(): React.JSX.Element {
   return <div className={`profile-library${libraryOpen ? ' library-open' : ''}`}>
     <a className="skip" href="#main-panel">{labels.skipToWorkspace}</a>
     <header className="brand"><span className="brand-mark" aria-hidden="true">T</span><h1><strong>TurnStage</strong><small>Web</small></h1></header>
-    <div className="library-heading"><span>{labels.profiles}</span><div className="library-heading-actions" role="group" aria-label={labels.profileActions}><IconButton className="sidebar-icon" icon="add" label={labels.newProfile} onClick={createBlankProfile} /><IconButton className="sidebar-icon" icon="file-add" label={labels.import} onClick={() => input.current?.click()} /><IconButton className="sidebar-icon" icon="folder-opened" label={labels.newFolder} onClick={() => createFolder()} /><IconButton className="sidebar-icon compact-library-toggle" icon={libraryOpen ? 'close' : 'search'} label={libraryOpen ? labels.closeLibrary : labels.searchProfiles} onClick={() => setLibraryOpen(!libraryOpen)} /></div></div>
+    <div className="library-heading"><span>{labels.profiles}</span><div className="library-heading-actions" role="group" aria-label={labels.profileActions}><IconButton className="sidebar-icon" icon="add" label={labels.newProfile} onClick={createBlankProfile} /><IconButton className="sidebar-icon" icon="file-add" label={labels.import} onClick={() => input.current?.click()} /><IconButton className="sidebar-icon" icon="file-code" label={labels.fromCurl} onClick={() => setCurlImportOpen(true)} /><IconButton className="sidebar-icon" icon="folder-opened" label={labels.newFolder} onClick={() => createFolder()} /><IconButton className="sidebar-icon compact-library-toggle" icon={libraryOpen ? 'close' : 'search'} label={libraryOpen ? labels.closeLibrary : labels.searchProfiles} onClick={() => setLibraryOpen(!libraryOpen)} /></div></div>
+    <CurlImportDialog open={curlImportOpen} labels={labels} onClose={() => setCurlImportOpen(false)} onCreate={(command) => createProfileFromCurl(command, labels.curlFailed)} />
     <input ref={input} className="visually-hidden" type="file" tabIndex={-1} aria-hidden="true" aria-label={labels.import} accept=".jsonc,.json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importProfile(file); event.target.value = ''; }} />
     <div className="library-filters"><label className="library-search"><span className="visually-hidden">{labels.searchProfiles}</span><input ref={searchInput} type="search" value={query} placeholder={labels.searchProfiles} onChange={(event) => setQuery(event.target.value)} /></label><label className="visually-hidden" htmlFor="profile-source-filter">{labels.filterSource}</label><select id="profile-source-filter" value={source} onChange={(event) => setSource(event.target.value as typeof source)}><option value="all">{labels.allSources}</option><option value="official">{labels.official}</option><option value="local">{labels.browser}</option></select></div>
     <nav aria-label={labels.profiles}>{groups.length === 0 && <p className="library-empty">{labels.noProfilesFound}</p>}{groups.map((group) => renderGroup(group))}</nav>
@@ -1040,6 +1062,7 @@ function copy(locale: string) {
     skipToWorkspace: '跳到工作區', duplicate: '複製', export: '匯出', exportWithCases: '匯出設定檔與案例', delete: '刪除', reset: '還原預設', profileGuide: '設定檔指南', viewJsonc: '檢視 JSONC', editJsonc: '編輯 JSONC', moveToFolder: '移至資料夾',
     catalogFallback: '無法載入預設設定檔，已改用內建範本。', language: '顯示語言', theme: '外觀主題', displayPreferences: '語言與外觀', themeSystem: '跟隨系統', themeDark: '深色', themeLight: '淺色',
     secrets: '工作階段密鑰', memoryOnly: '僅保留於記憶體',
+    fromCurl: '從 cURL 建立設定檔', curlTitle: '從 cURL 建立設定檔', curlHint: '貼上 cURL 指令。TurnStage 不經過 shell 解析，也不會執行它；憑證會換成密鑰參照，原值只保留在這個分頁的記憶體中。', curlCommand: 'cURL 指令', curlCreate: '建立設定檔', curlCancel: '取消', curlFailed: '無法從這段 cURL 建立設定檔。',
     searchProfiles: '搜尋設定檔', filterSource: '篩選來源', allSources: '全部', noProfilesFound: '沒有符合的設定檔', newFolder: '新增資料夾', newSubfolder: '新增子資料夾', moveFolderUp: '上移資料夾', moveFolderDown: '下移資料夾', folderName: '資料夾名稱', folder: '資料夾', renameFolder: '重新命名資料夾', deleteFolder: '刪除資料夾', confirmDeleteFolder: '刪除「{name}」資料夾？其中的設定檔與子資料夾會移到上一層。', closeLibrary: '收合設定檔側欄',
   } : locale === 'ja' ? {
     profiles: 'プロファイル', profileActions: 'プロファイル操作', newProfile: '新規プロファイル', newProfileName: '新規プロファイル', import: 'インポート',
@@ -1047,6 +1070,7 @@ function copy(locale: string) {
     skipToWorkspace: 'ワークスペースへ移動', duplicate: '複製', export: '書き出し', exportWithCases: 'プロファイルとケースを書き出し', delete: '削除', reset: 'デフォルトに戻す', profileGuide: 'プロファイルガイド', viewJsonc: 'JSONC を表示', editJsonc: 'JSONC を編集', moveToFolder: 'フォルダーへ移動',
     catalogFallback: 'デフォルトを読み込めません。内蔵プリセットを使用しています。', language: '表示言語', theme: '外観テーマ', displayPreferences: '言語と外観', themeSystem: 'システム設定', themeDark: 'ダーク', themeLight: 'ライト',
     secrets: 'セッションシークレット', memoryOnly: 'メモリのみ',
+    fromCurl: 'cURL からプロファイルを作成', curlTitle: 'cURL からプロファイルを作成', curlHint: 'cURL コマンドを貼り付けてください。TurnStage はシェルを使わずに解析し、実行しません。認証情報はシークレット参照に置き換えられ、元の値はこのタブのメモリにのみ保持されます。', curlCommand: 'cURL コマンド', curlCreate: 'プロファイルを作成', curlCancel: 'キャンセル', curlFailed: 'この cURL からプロファイルを作成できません。',
     searchProfiles: 'プロファイルを検索', filterSource: '提供元で絞り込み', allSources: 'すべて', noProfilesFound: '該当するプロファイルはありません', newFolder: 'フォルダーを作成', newSubfolder: 'サブフォルダーを作成', moveFolderUp: 'フォルダーを上へ', moveFolderDown: 'フォルダーを下へ', folderName: 'フォルダー名', folder: 'フォルダー', renameFolder: 'フォルダー名を変更', deleteFolder: 'フォルダーを削除', confirmDeleteFolder: '「{name}」フォルダーを削除しますか？プロファイルとサブフォルダーは親フォルダーに移動します。', closeLibrary: 'プロファイル一覧を閉じる',
   } : locale === 'ko' ? {
     profiles: '프로필', profileActions: '프로필 작업', newProfile: '새 프로필', newProfileName: '새 프로필', import: '가져오기',
@@ -1054,6 +1078,7 @@ function copy(locale: string) {
     skipToWorkspace: '작업 영역으로 건너뛰기', duplicate: '복제', export: '내보내기', exportWithCases: '프로필과 케이스 내보내기', delete: '삭제', reset: '기본값 복원', profileGuide: '프로필 가이드', viewJsonc: 'JSONC 보기', editJsonc: 'JSONC 편집', moveToFolder: '폴더로 이동',
     catalogFallback: '기본 프로필을 불러오지 못했습니다. 내장 프리셋을 사용합니다.', language: '표시 언어', theme: '화면 테마', displayPreferences: '언어 및 화면', themeSystem: '시스템 설정', themeDark: '어둡게', themeLight: '밝게',
     secrets: '세션 비밀', memoryOnly: '메모리에만 저장',
+    fromCurl: 'cURL로 프로필 만들기', curlTitle: 'cURL로 프로필 만들기', curlHint: 'cURL 명령을 붙여 넣으세요. TurnStage는 셸 없이 분석하며 실행하지 않습니다. 자격 증명은 비밀 참조로 바뀌고 원래 값은 이 탭의 메모리에만 보관됩니다.', curlCommand: 'cURL 명령', curlCreate: '프로필 만들기', curlCancel: '취소', curlFailed: '이 cURL로 프로필을 만들 수 없습니다.',
     searchProfiles: '프로필 검색', filterSource: '출처별 필터', allSources: '전체', noProfilesFound: '일치하는 프로필이 없습니다', newFolder: '폴더 만들기', newSubfolder: '하위 폴더 만들기', moveFolderUp: '폴더 위로', moveFolderDown: '폴더 아래로', folderName: '폴더 이름', folder: '폴더', renameFolder: '폴더 이름 변경', deleteFolder: '폴더 삭제', confirmDeleteFolder: '“{name}” 폴더를 삭제할까요? 프로필과 하위 폴더는 상위 폴더로 이동합니다.', closeLibrary: '프로필 목록 닫기',
   } : {
     profiles: 'Profiles', profileActions: 'Profile actions', newProfile: 'New profile', newProfileName: 'New Profile', import: 'Import profile',
@@ -1061,6 +1086,7 @@ function copy(locale: string) {
     skipToWorkspace: 'Skip to workspace', duplicate: 'Duplicate', export: 'Export', exportWithCases: 'Export profile and cases', delete: 'Delete', reset: 'Restore default', profileGuide: 'Profile guide', viewJsonc: 'View JSONC', editJsonc: 'Edit JSONC', moveToFolder: 'Move to folder',
     catalogFallback: 'Default profiles unavailable. Using bundled presets.', language: 'Display language', theme: 'Appearance theme', displayPreferences: 'Language and appearance', themeSystem: 'Use system setting', themeDark: 'Dark', themeLight: 'Light',
     secrets: 'Session secrets', memoryOnly: 'Memory only',
+    fromCurl: 'Create profile from cURL', curlTitle: 'Create profile from cURL', curlHint: 'Paste a cURL command. TurnStage parses it without a shell and never runs it. Credentials become secret references; their values stay in this tab\'s memory only.', curlCommand: 'cURL command', curlCreate: 'Create profile', curlCancel: 'Cancel', curlFailed: 'Could not create a profile from this cURL.',
     searchProfiles: 'Search profiles', filterSource: 'Filter by source', allSources: 'All', noProfilesFound: 'No matching profiles', newFolder: 'New folder', newSubfolder: 'New subfolder', moveFolderUp: 'Move folder up', moveFolderDown: 'Move folder down', folderName: 'Folder name', folder: 'Folder', renameFolder: 'Rename folder', deleteFolder: 'Delete folder', confirmDeleteFolder: 'Delete “{name}”? Profiles and subfolders will move up one level.', closeLibrary: 'Close profile sidebar',
   };
   return common;
