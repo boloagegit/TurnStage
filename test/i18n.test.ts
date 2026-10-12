@@ -77,20 +77,25 @@ describe('localization catalogs', () => {
     expect([...usedMessages].filter((message) => !translatedMessages.has(message)).sort()).toEqual([]);
   });
 
-  it('covers the chat surface in Japanese and Korean', () => {
-    const chatSources = [
-      'src/webview/MobileChatPreview.tsx',
-      'src/webview/ConversationDrawer.tsx',
-      'src/webview/CaseEditorOverlay.tsx',
-      'src/webview/JsonViewer.tsx',
-      'src/webview/ClipboardButton.tsx',
-      'src/webview/OperationNoticeToast.tsx'
-    ].map((path) => readFileSync(resolve(root, path), 'utf8')).join('\n');
-    const usedMessages = new Set([...chatSources.matchAll(/\bt\(\s*(['"])(.*?)\1/g)].map((match) => match[2]));
+  it('covers every literal Webview message in Japanese and Korean', () => {
+    const webviewSources = readdirSync(resolve(root, 'src/webview'))
+      .filter((name) => /\.tsx?$/.test(name) && !name.startsWith('i18n'))
+      .map((name) => readFileSync(resolve(root, 'src/webview', name), 'utf8'))
+      .join('\n');
+    const usedMessages = new Set([...webviewSources.matchAll(/\bt\(\s*(['"])(.*?)\1/g)].map((match) => match[2]));
     for (const locale of ['ja', 'ko']) {
       const catalogSource = readFileSync(resolve(root, `src/webview/i18n.${locale}.ts`), 'utf8');
       const translatedMessages = new Set([...catalogSource.matchAll(/^\s*(['"])(.*?)\1:\s*(['"])/gm)].map((match) => match[2]));
       expect([...usedMessages].filter((message) => !translatedMessages.has(message)).sort(), locale).toEqual([]);
+    }
+  });
+
+  it('translates Extension Host messages in Japanese and Korean', () => {
+    const english = json('l10n/bundle.l10n.json');
+    const sameInEveryLanguage = new Set(['TurnStage', 'JSON', 'HTML', 'CSV', 'JSONC', 'JSONL', 'JUnit XML', 'Profile', 'Profile: {name}', 'HTTP {status}.', 'HTTP {status}: {detail}', '{id}: {error}']);
+    for (const locale of ['ja', 'ko']) {
+      const translated = json(`l10n/bundle.l10n.${locale}.json`);
+      expect(Object.keys(english).filter((key) => translated[key] === english[key] && !sameInEveryLanguage.has(key)), locale).toEqual([]);
     }
   });
 
