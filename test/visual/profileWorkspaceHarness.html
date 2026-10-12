@@ -423,6 +423,10 @@
           setTimeout(() => dispatch({ type: 'contract.case.loaded', detail: { sourcePath: entry.sourcePath, sourceFormat: 'jsonc', revision: 'c'.repeat(64), scenario: { id: entry.scenarioId, name: entry.scenarioName, tags: entry.tags, performance: { thresholds: { 'metrics.ttft': 2000 } }, steps: [{ id: 'linked-first', name: 'First turn', input: 'Visual linked functional prompt' }, { id: 'linked-follow-up', name: 'Follow-up', input: 'Continue the visual linked contract', assertions: [{ path: 'turn.state', operator: 'equals', value: 'completed' }] }], assertions: [{ path: 'assistant.text', operator: 'exists' }] } } }), 0);
           return;
         }
+        if (message.type === 'contract.case.delete') {
+          setTimeout(() => dispatch({ type: 'contract.case.deleted', sourcePath: message.sourcePath, scenarioId: message.scenarioId }), 0);
+          return;
+        }
         if (message.type === 'contract.case.save') {
           setTimeout(() => dispatch({ type: 'contract.case.saved', detail: { sourcePath: message.sourcePath, sourceFormat: message.sourcePath.endsWith('.csv') ? 'csv' : 'jsonc', revision: 'd'.repeat(64), scenario: message.scenario } }), 0);
           return;

@@ -1,4 +1,4 @@
-import React, { useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useContext, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AdversarialCaseCatalog, ContractCaseCatalog, LinkedAdversarialCaseDetail, LinkedAdversarialCaseSummary, LinkedContractCaseDetail, LinkedContractCaseSummary, MappingTestResult, TestOperationSnapshot, WebviewPayload } from '../shared/protocol';
 import type { AdversarialForbidDefinition, AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, ConnectionNetworkPathSummary, NetworkPathFinding, QualityRubricDefinition, ScenarioAssertionDefinition, ScenarioAssertionOperator, ScenarioDefinition, ScenarioPerformanceMetric, ScenarioReportFormat, ScenarioStepDefinition, SessionSnapshot, TestCampaignDefinition, TurnStageProfile } from '../shared/types';
 import { EventsEditor, FlowEditor, UiConfigEditor } from './configEditors';
@@ -14,6 +14,7 @@ import { webUnsupportedTestFeature } from '../shared/webTestCapabilities';
 import { isTestRunActive } from '../shared/protocol';
 import './settingsWorkspace.css';
 import { LiveCaseStatusBadge, useCaseOutcomeFilter } from './liveCaseStatus';
+import { captureNeedsReview, markCaptureReady, MarkCasesReadyContext } from './bulkCaseEdits';
 import { hostText } from './hostCopy';
 
 /**
@@ -834,7 +835,7 @@ function ScenarioTestsSection({ view, unifiedSections = false, automationSection
       {(profile.tests?.contractSuites?.length ?? 0) > 0 && <div className="adversarial-linked-suites"><strong>{t('Linked suites')}</strong><ul>{profile.tests!.contractSuites!.map((path, index) => { const label = linkedSuiteLabel(path); return <li key={`${path}-${index}`}><code title={path}>{label}</code><div className="adversarial-linked-suite-actions"><IconButton type="button" icon="go-to-file" label={t('Open linked suite {path}', { path: label })} disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'contract.openLinkedSuite', path })} /><IconButton type="button" icon="remove" disabled={readOnly} label={t('Unlink suite {path}', { path: label })} onClick={() => requestConfirm({ title: t('Unlink suite {path}', { path: label }), actionLabel: t('Unlink'), detail: t('This removes the suite from the current Profile. The source file is not deleted.'), onConfirm: () => unlinkContractSuite(index, path) })} /></div></li>; })}</ul></div>}
       {contractRows.length > 0 && <label className="automation-search case-list-search"><span>{t('Search cases')}</span><input type="search" value={automationScenarioQuery} placeholder={t('Case name, ID, tag, or suite')} onChange={(event) => { setAutomationScenarioQuery(event.target.value); setAutomationScenarioPage(0); }} /></label>}
       {contractRows.length > 0 && <div className="adversarial-case-collection-status"><span>{t('{filtered} of {total} cases', { filtered: formatNumber(matchingContracts.length), total: formatNumber(contractRows.length) })}</span>{linkedContractCatalog?.truncated && <span className="is-warning">{t('Only the first {count} linked cases are shown to protect performance.', { count: formatNumber(linkedContractCatalog.entries.length) })}</span>}</div>}
-      <SelectAllCases rows={matchingContracts} profileId={profile.id} kind="contract" selectedCaseKeys={selectedCaseKeys} onToggleCase={onToggleCase} onToggleCases={onToggleCases} testRunActive={testRunActive} vscodeFeatures={vscodeFeatures} filtered={Boolean(automationScenarioQuery.trim()) || outcomeFilter.filter !== 'all'} />
+      <SelectAllCases rows={matchingContracts} profileId={profile.id} kind="contract" selectedCaseKeys={selectedCaseKeys} onToggleCase={onToggleCase} onToggleCases={onToggleCases} testRunActive={testRunActive} vscodeFeatures={vscodeFeatures} filtered={Boolean(automationScenarioQuery.trim()) || outcomeFilter.filter !== 'all'}>{!readOnly && <MarkCasesReady rows={matchingContracts} profileId={profile.id} kind="contract" testRunActive={testRunActive} />}</SelectAllCases>
       {linkedContractCatalog?.issues.length ? <details className="adversarial-catalog-issues"><summary>{t('{count} linked source issues', { count: formatNumber(linkedContractCatalog.issues.length) })}</summary><ul>{linkedContractCatalog.issues.map((issue) => <li key={`${issue.sourcePath}:${issue.message}`}><code>{linkedSuiteLabel(issue.sourcePath)}</code><span>{issue.message}</span></li>)}</ul></details> : null}
       {!contractRows.length ? <div className="settings-empty settings-empty--action"><span>{t(profile.tests?.contractSuites?.length && !linkedContractCatalog ? 'Loading linked test cases…' : 'No test cases yet.')}</span>{!profile.tests?.contractSuites?.length && <p className="settings-empty__hint">{t('A test case replays the user messages of a conversation and checks the result. The quickest way to make one is Save as test in the chat after a reply you want to keep.')}</p>}<div><button type="button" disabled={readOnly} onClick={addScenario}>{t('Add case')}</button><button type="button" disabled={readOnly || !trusted || !vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'contract.file', action: 'linkSuite' })}>{t('Link suite')}</button></div></div> : !matchingContracts.length ? outcomeFilter.filter !== 'all' && !automationScenarioQuery.trim() ? <div className="settings-empty settings-empty--action"><span>{t('No cases match this result filter.')}</span><button type="button" onClick={outcomeFilter.reset}>{t('Show all cases')}</button></div> : <p className="settings-empty">{t('No cases match the current search.')}</p> : <>
         <ContractCaseList rows={visibleContracts} editorRows={contractRows} profileId={profile.id} selectedCaseKeys={selectedCaseKeys} onToggleCase={onToggleCase} expandedCaseId={expandedContractCaseId} onExpandedCaseIdChange={setExpandedContractCaseId} linkedCaseEditor={linkedContractEditor} trusted={trusted} vscodeFeatures={vscodeFeatures} readOnly={readOnly} post={post} testOperation={testOperation} onInlineChange={(index, value) => save(replaceAt(scenarios, index, value))} onInlineDelete={(index, scenario, afterDelete) => requestConfirm({ title: t('Delete scenario {name}', { name: scenario.name || scenario.id }), actionLabel: t('Delete'), onConfirm: () => { saveDestructive(t('Deleted scenario {name}.', { name: scenario.name || scenario.id }), scenarios.filter((_, itemIndex) => itemIndex !== index)); afterDelete(); } })} />
@@ -1064,7 +1065,6 @@ function inlineCaseRowKey(scenario: ScenarioDefinition, index: number): string {
 function linkedCaseRowKey(entry: Pick<LinkedAdversarialCaseSummary, 'sourcePath' | 'scenarioId'>): string { return `linked:${entry.sourcePath}:${entry.scenarioId}`; }
 function automationResultKey(result: AutomationResultSummary, index: number): string { return result.evidenceId ?? `${result.suiteId ?? 'inline'}:${result.scenarioId}:${index}`; }
 function cloneScenario(scenario: ScenarioDefinition): ScenarioDefinition { return JSON.parse(JSON.stringify(scenario)) as ScenarioDefinition; }
-function captureNeedsReview(capture: ScenarioDefinition['capture'], tags: readonly string[] = []): boolean { return capture?.status === 'needsReview' || tags.includes('needs-review'); }
 function caseSelectionBlockReason(row: { capture?: ScenarioDefinition['capture']; tags: readonly string[]; scenario?: ScenarioDefinition; comparison?: boolean; performance?: boolean; faults?: boolean; webUnsupported?: boolean }, vscodeFeatures: boolean): string | undefined {
   if (captureNeedsReview(row.capture, row.tags)) return t('Review this case before selecting it.');
   if (row.scenario && !row.scenario.name?.trim()) return t('Add a case name.');
@@ -1075,7 +1075,30 @@ function caseSelectionBlockReason(row: { capture?: ScenarioDefinition['capture']
   return undefined;
 }
 
-function SelectAllCases({ rows, profileId, kind, selectedCaseKeys, onToggleCase, onToggleCases, testRunActive, vscodeFeatures, filtered }: {
+/** Captured drafts wait for review before they can run; after checking them, mark the listed ones ready in one step. */
+function MarkCasesReady({ rows, profileId, kind, testRunActive }: {
+  rows: readonly { scenarioId: string; suiteId?: string; capture?: ScenarioDefinition['capture']; tags: readonly string[] }[];
+  profileId: string;
+  kind: TestCaseIdentity['kind'];
+  testRunActive: boolean;
+}): React.JSX.Element | null {
+  const markReady = useContext(MarkCasesReadyContext);
+  const [requestConfirm, confirmationDialog] = useConfirmAction();
+  const drafts = rows.filter((row) => captureNeedsReview(row.capture, row.tags));
+  if (!markReady || !drafts.length) return null;
+  const count = formatNumber(drafts.length);
+  return <>
+    <button type="button" disabled={testRunActive} onClick={() => requestConfirm({
+      title: t(drafts.length === 1 ? 'Mark 1 draft ready?' : 'Mark {count} drafts ready?', { count }),
+      detail: t('Do this only after checking each draft’s messages and checks. Ready cases can be selected and run.'),
+      actionLabel: t('Mark ready'),
+      onConfirm: () => markReady(drafts.map((row) => ({ profileId, kind, suiteId: row.suiteId, scenarioId: row.scenarioId }))),
+    })}>{t(drafts.length === 1 ? 'Mark 1 draft ready' : 'Mark {count} drafts ready', { count })}</button>
+    {confirmationDialog}
+  </>;
+}
+
+function SelectAllCases({ rows, profileId, kind, selectedCaseKeys, onToggleCase, onToggleCases, testRunActive, vscodeFeatures, filtered, children }: {
   rows: readonly { scenarioId: string; suiteId?: string; capture?: ScenarioDefinition['capture']; tags: readonly string[]; scenario?: ScenarioDefinition; comparison?: boolean; performance?: boolean; faults?: boolean; webUnsupported?: boolean }[];
   profileId: string;
   kind: TestCaseIdentity['kind'];
@@ -1084,18 +1107,13 @@ function SelectAllCases({ rows, profileId, kind, selectedCaseKeys, onToggleCase,
   testRunActive: boolean;
   vscodeFeatures: boolean;
   filtered: boolean;
+  /** Other actions on the listed cases, shown on the same row. */
+  children?: React.ReactNode;
 }): React.JSX.Element | null {
   if (!onToggleCase || !rows.length) return null;
   const selectable = rows.filter((row) => !caseSelectionBlockReason(row, vscodeFeatures));
   const remaining = selectable.filter((row) => !selectedCaseKeys?.has(testCaseKey({ profileId, kind, suiteId: row.suiteId, scenarioId: row.scenarioId })));
-  return <div className="collection-filter-actions"><button type="button" disabled={testRunActive || !remaining.length} onClick={() => { const identities = remaining.map((row) => ({ profileId, kind, suiteId: row.suiteId, scenarioId: row.scenarioId })); if (onToggleCases) onToggleCases(identities); else identities.forEach(onToggleCase); }}>{t(filtered ? 'Select matching cases ({selectable}/{total})' : 'Select all ready cases ({selectable} of {total})', { selectable: formatNumber(selectable.length), total: formatNumber(rows.length) })}</button></div>;
-}
-function markCaptureReady(scenario: ScenarioDefinition): ScenarioDefinition {
-  return {
-    ...scenario,
-    tags: (scenario.tags ?? []).filter((tag) => tag !== 'needs-review'),
-    ...(scenario.capture ? { capture: { ...scenario.capture, status: 'ready' } } : {}),
-  };
+  return <div className="collection-filter-actions">{children}<button type="button" disabled={testRunActive || !remaining.length} onClick={() => { const identities = remaining.map((row) => ({ profileId, kind, suiteId: row.suiteId, scenarioId: row.scenarioId })); if (onToggleCases) onToggleCases(identities); else identities.forEach(onToggleCase); }}>{t(filtered ? 'Select matching cases ({selectable}/{total})' : 'Select all ready cases ({selectable} of {total})', { selectable: formatNumber(selectable.length), total: formatNumber(rows.length) })}</button></div>;
 }
 
 function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEditor, trusted, vscodeFeatures, readOnly = false, post, testOperation, profileId, selectedCaseKeys, onToggleCase, onToggleCases, collection, onCollectionChange, onRefresh, expandedCaseId, onToggle, onClose, onChange, onDelete, onOpenSource }: {
@@ -1282,7 +1300,7 @@ function AdversarialCaseTable({ entries, linkedEntries, catalog, linkedCaseEdito
       <button type="button" className="adversarial-case-clear" disabled={!filterCount} onClick={clearCaseFilters}>{t('Clear')}{filterCount ? ` (${formatNumber(filterCount)})` : ''}</button>
     </div>
     <div className="adversarial-case-collection-status"><span>{t('{filtered} of {total} cases', { filtered: formatNumber(filtered.length), total: formatNumber(rows.length) })}</span>{catalog?.truncated && <span className="is-warning">{t('Only the first {count} linked cases are shown to protect performance.', { count: formatNumber(catalog.entries.length) })}</span>}</div>
-    {profileId && <SelectAllCases rows={filtered} profileId={profileId} kind="adversarial" selectedCaseKeys={selectedCaseKeys} onToggleCase={onToggleCase} onToggleCases={onToggleCases} testRunActive={testRunActive} vscodeFeatures={vscodeFeatures} filtered={Boolean(collection.query.trim()) || collection.mode !== 'all' || collection.source !== 'all' || collection.tag !== 'all'} />}
+    {profileId && <SelectAllCases rows={filtered} profileId={profileId} kind="adversarial" selectedCaseKeys={selectedCaseKeys} onToggleCase={onToggleCase} onToggleCases={onToggleCases} testRunActive={testRunActive} vscodeFeatures={vscodeFeatures} filtered={Boolean(collection.query.trim()) || collection.mode !== 'all' || collection.source !== 'all' || collection.tag !== 'all'}>{!readOnly && <MarkCasesReady rows={filtered} profileId={profileId} kind="adversarial" testRunActive={testRunActive} />}</SelectAllCases>}
     {catalog?.issues.length ? <details className="adversarial-catalog-issues"><summary>{t('{count} linked source issues', { count: formatNumber(catalog.issues.length) })}</summary><ul>{catalog.issues.map((issue) => <li key={`${issue.sourcePath}:${issue.message}`}><code>{linkedSuiteLabel(issue.sourcePath)}</code><span>{issue.message}</span></li>)}</ul></details> : null}
     <div className="adversarial-case-list" role="list" aria-label={t('Adversarial case settings')}>{visible.map((row) => {
       const blockReason = caseSelectionBlockReason(row, vscodeFeatures);
