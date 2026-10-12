@@ -78,6 +78,8 @@ export function isTestRunActive(operation?: TestOperationSnapshot): boolean {
 export interface LinkedAdversarialCaseSummary {
   sourcePath: string;
   revision?: string;
+  /** Digest of the case definition, compared with run history to mark results that predate an edit. */
+  definitionDigest?: string;
   suiteId: string;
   suiteName: string;
   scenarioId: string;
@@ -109,6 +111,8 @@ export interface LinkedAdversarialCaseDetail {
 export interface LinkedContractCaseSummary {
   sourcePath: string;
   revision?: string;
+  /** Digest of the case definition, compared with run history to mark results that predate an edit. */
+  definitionDigest?: string;
   suiteId: string;
   suiteName: string;
   scenarioId: string;
@@ -446,7 +450,7 @@ export function isHostMessage(value: unknown, instanceId: string): value is Host
       && (message.operation.progress === undefined || isTestOperationProgress(message.operation.progress));
     case 'test.results': return isAdversarialResults(message.results)
       && (message.automationResults === undefined || isAutomationResults(message.automationResults));
-    case 'test.history': return isBoundedId(message.profileId) && Array.isArray(message.runs) && message.runs.length <= 22 && message.runs.every(isTestRunHistoryRecord) && (message.baselines === undefined || (isRecord(message.baselines) && Object.entries(message.baselines).every(([kind, runId]) => (kind === 'contract' || kind === 'adversarial') && (runId === undefined || isBoundedId(runId)))));
+    case 'test.history': return isBoundedId(message.profileId) && Array.isArray(message.runs) && message.runs.length <= 60 && message.runs.every(isTestRunHistoryRecord) && (message.baselines === undefined || (isRecord(message.baselines) && Object.entries(message.baselines).every(([kind, runId]) => (kind === 'contract' || kind === 'adversarial') && (runId === undefined || isBoundedId(runId)))));
     case 'campaign.dashboard': return isRecord(message.dashboard) && isStructuredValue(message.dashboard, MAX_HOST_VALUE_NODES);
     case 'campaign.preview': return isBoundedString(message.campaignId) && [message.selectedCases, message.plannedAttempts, message.plannedRequests, message.maximumDurationMs, message.maxConcurrency].every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0) && Array.isArray(message.warnings) && message.warnings.length <= 100 && message.warnings.every((entry) => isBoundedString(entry, 4096));
     case 'campaign.exported': return isBoundedString(message.path, MAX_TEXT_LENGTH) && isBoundedId(message.artifactId);
@@ -476,6 +480,7 @@ function isAdversarialCaseCatalog(value: unknown): boolean {
   return value.entries.every((entry) => isRecord(entry)
     && [entry.sourcePath, entry.suiteId, entry.suiteName, entry.scenarioId, entry.scenarioName].every((item) => isBoundedString(item, 4096))
     && (entry.revision === undefined || isRevision(entry.revision))
+    && (entry.definitionDigest === undefined || isRevision(entry.definitionDigest))
     && Array.isArray(entry.tags) && entry.tags.length <= 20 && entry.tags.every((tag) => isBoundedString(tag, 64))
     && (entry.capture === undefined || isScenarioCapture(entry.capture))
     && (entry.mode === 'singleTurn' || entry.mode === 'multiTurn')
@@ -500,6 +505,7 @@ function isContractCaseCatalog(value: unknown): boolean {
   return value.entries.every((entry) => isRecord(entry)
     && [entry.sourcePath, entry.suiteId, entry.suiteName, entry.scenarioId, entry.scenarioName].every((item) => isBoundedString(item, 4096))
     && (entry.revision === undefined || isRevision(entry.revision))
+    && (entry.definitionDigest === undefined || isRevision(entry.definitionDigest))
     && Array.isArray(entry.tags) && entry.tags.length <= 20 && entry.tags.every((tag) => isBoundedString(tag, 64))
     && (entry.capture === undefined || isScenarioCapture(entry.capture))
     && boundedNonNegativeInteger(entry.turns, 100)

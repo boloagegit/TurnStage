@@ -13,7 +13,7 @@ import { redactKnownSecrets } from '../../src/shared/redaction';
 import { buildEvidenceTimeline } from '../../src/extension/testing/evidenceTimeline';
 import { isScenarioReady } from '../../src/extension/testing/scenarioCapture';
 import { resolveTestSelection, testCaseKey, type TestCaseIdentity } from '../../src/shared/testSelection';
-import { acceptTestBaseline, baselineRunIdList, createTestRunHistoryRecord, nonPassingCases, normalizeTestBaselines, unfinishedCases, type CompletedTestRunCase, type TestBaselineIds, type TestRunHistoryRecord } from '../../src/shared/testRunHistory';
+import { acceptTestBaseline, caseDefinitionDigest, createTestRunHistoryRecord, nonPassingCases, normalizeTestBaselines, selectRetainedTestRuns, unfinishedCases, type CompletedTestRunCase, type TestBaselineIds, type TestRunHistoryRecord } from '../../src/shared/testRunHistory';
 import { strToU8, zipSync } from 'fflate';
 import { browserSha256, browserUuid } from './browserCrypto';
 import { renderTestReportHtml, type TestReportKind, type TestReportOutcome } from '../../src/shared/testReportHtml';
@@ -281,8 +281,7 @@ export class WebTestController {
     }
     const settled = batches.filter((item) => !liveRunIds.has(item.value.id)).map((item) => item.value);
     const baselines = await this.baselines(profileId, settled);
-    const pinned = new Set(baselineRunIdList(baselines));
-    const runs = [...settled.slice(0, 20), ...settled.slice(20).filter((run) => pinned.has(run.id))]
+    const runs = selectRetainedTestRuns(settled, baselines)
       .map((run) => ({ ...run, cases: run.cases.map((item) => ({ ...item, evidenceAvailable: Boolean(item.evidenceId && evidenceIds.has(item.evidenceId)) })) }));
     if (this.profile().id === profileId) this.post({ type: 'test.history', profileId, runs, baselines });
   }
@@ -315,8 +314,8 @@ export class WebTestController {
 
   private async trimRunHistory(profileId: string): Promise<void> {
     const runs = (await this.store.listByKind<WebPendingRun>('runs', profileId, 'test-batch')).filter((item) => item.value.checkpointState !== 'running');
-    const pinned = new Set(baselineRunIdList(await this.baselines(profileId, runs.map((item) => item.value))));
-    for (const item of runs.slice(20)) if (!pinned.has(item.value.id)) await this.store.delete('runs', item.id);
+    const retained = new Set(selectRetainedTestRuns(runs.map((item) => item.value), await this.baselines(profileId, runs.map((item) => item.value))).map((run) => run.id));
+    for (const item of runs) if (!retained.has(item.value.id)) await this.store.delete('runs', item.id);
   }
 
   private async baselines(profileId: string, runs: readonly TestRunHistoryRecord[]): Promise<TestBaselineIds> {
@@ -470,13 +469,13 @@ export class WebTestController {
     const suites = (await this.store.list<WebSuite>('suites', this.profile().id)).filter((suite) => suite.value.kind === kind);
     if (kind === 'adversarial') {
       const entries: AdversarialCaseCatalog['entries'] = suites.flatMap(({ value }) => value.scenarios.map((scenario) => ({
-        sourcePath: value.sourcePath, revision: value.revision, suiteId: value.suiteId, suiteName: value.name, scenarioId: scenario.id, scenarioName: scenario.name, tags: scenario.tags ?? [], capture: scenario.capture,
+        sourcePath: value.sourcePath, revision: value.revision, definitionDigest: caseDefinitionDigest(scenario), suiteId: value.suiteId, suiteName: value.name, scenarioId: scenario.id, scenarioName: scenario.name, tags: (scenario.tags ?? []).slice(0, 20), capture: scenario.capture,
         mode: scenario.adversarial?.mode ?? 'singleTurn', turns: scenario.steps.length, maxTurns: scenario.adversarial?.maxTurns ?? scenario.steps.length, repetitions: scenario.adversarial?.repetitions ?? 1, timeoutMs: scenario.adversarial?.timeoutMs ?? 60_000,
         prohibit: { content: scenario.adversarial?.forbid?.content?.length ?? 0, events: scenario.adversarial?.forbid?.events?.length ?? 0, urls: scenario.adversarial?.forbid?.urls === true, ctas: scenario.adversarial?.forbid?.ctas === true, tools: scenario.adversarial?.forbid?.tools === true },
       })));
       this.post({ type: 'adversarial.catalog', catalog: { entries, total: entries.length, truncated: false, issues: [] } });
     } else {
-      const entries: ContractCaseCatalog['entries'] = suites.flatMap(({ value }) => value.scenarios.map((scenario) => ({ sourcePath: value.sourcePath, revision: value.revision, suiteId: value.suiteId, suiteName: value.name, scenarioId: scenario.id, scenarioName: scenario.name, tags: scenario.tags ?? [], capture: scenario.capture, turns: scenario.steps.length, assertions: scenario.steps.reduce((sum, step) => sum + (step.assertions?.length ?? 0), scenario.assertions?.length ?? 0), comparison: Boolean(scenario.comparison), performance: Boolean(scenario.performance), faults: Boolean(scenario.faults), webUnsupported: Boolean(webUnsupportedTestFeature(scenario)) })));
+      const entries: ContractCaseCatalog['entries'] = suites.flatMap(({ value }) => value.scenarios.map((scenario) => ({ sourcePath: value.sourcePath, revision: value.revision, definitionDigest: caseDefinitionDigest(scenario), suiteId: value.suiteId, suiteName: value.name, scenarioId: scenario.id, scenarioName: scenario.name, tags: (scenario.tags ?? []).slice(0, 20), capture: scenario.capture, turns: scenario.steps.length, assertions: scenario.steps.reduce((sum, step) => sum + (step.assertions?.length ?? 0), scenario.assertions?.length ?? 0), comparison: Boolean(scenario.comparison), performance: Boolean(scenario.performance), faults: Boolean(scenario.faults), webUnsupported: Boolean(webUnsupportedTestFeature(scenario)) })));
       this.post({ type: 'contract.catalog', catalog: { entries, total: entries.length, truncated: false, issues: [] } });
     }
   }

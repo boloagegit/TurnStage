@@ -1560,4 +1560,6 @@ export const ko: Record<string, string> = {
   "No cases have this difference.": "이 차이에 해당하는 케이스가 없습니다.",
   "Case changed since baseline": "비교 기준 이후 케이스가 변경됨",
   "Settings changed since baseline": "비교 기준 이후 설정이 변경됨",
+  "Changed since last run": "마지막 실행 후 변경됨",
+  "Last result before this case was edited: {outcome}, {date}": "이 케이스를 편집하기 전의 마지막 결과: {outcome}, {date}",
 };

@@ -2,6 +2,7 @@ import type * as vscode from 'vscode';
 import type { AdversarialCaseCatalog, LinkedAdversarialCaseSummary } from '../../shared/protocol';
 import type { ScenarioDefinition, TurnStageProfile } from '../../shared/types';
 import { loadAdversarialSuite } from './adversarialSuiteRepository';
+import { caseDefinitionDigest } from '../../shared/testRunHistory';
 
 /**
  * Load only enough linked-suite metadata to fill the Webview catalog. Prompts,
@@ -37,7 +38,9 @@ function summarizeLinkedCase(sourcePath: string, suiteId: string, suiteName: str
     suiteName,
     scenarioId: scenario.id,
     scenarioName: scenario.name || scenario.id,
-    tags: (scenario.tags ?? []).slice(0, 100),
+    // The catalog message accepts at most 20 tags per case; more would reject the whole Red Team list.
+    tags: (scenario.tags ?? []).slice(0, 20),
+    definitionDigest: caseDefinitionDigest(scenario),
     capture: scenario.capture ? structuredClone(scenario.capture) : undefined,
     mode: adversarial.mode ?? (scenario.steps.length > 1 ? 'multiTurn' : 'singleTurn'),
     turns: scenario.steps.length,

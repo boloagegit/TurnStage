@@ -1,10 +1,9 @@
 import * as vscode from 'vscode';
 import type { TestBaselineIds, TestRunHistoryRecord } from '../../shared/testRunHistory';
-import { acceptTestBaseline, baselineRunIdList, clearTestRunHistoryKind, normalizeTestBaselines, TEST_RUN_HISTORY_FORMAT, TEST_RUN_HISTORY_VERSION } from '../../shared/testRunHistory';
+import { acceptTestBaseline, clearTestRunHistoryKind, MAX_RETAINED_TEST_RUNS, normalizeTestBaselines, selectRetainedTestRuns, TEST_RUN_HISTORY_FORMAT, TEST_RUN_HISTORY_VERSION } from '../../shared/testRunHistory';
 import { testCaseKey } from '../../shared/testSelection';
 import { sha256Hex } from '../../shared/sha256';
 
-const RETAIN_RUNS = 20;
 const queue = new Map<string, Promise<void>>();
 
 interface StoredHistory {
@@ -43,12 +42,7 @@ export class TestRunHistoryRepository {
     if (!validRun(record) || record.profileId !== record.cases[0]?.profileId) throw new Error('Test run history metadata is invalid.');
     await this.update(record.profileId, (history) => {
       const ordered = [record, ...history.runs.filter((item) => item.id !== record.id)].sort((left, right) => right.startedAt - left.startedAt);
-      const retained = ordered.slice(0, RETAIN_RUNS);
-      for (const baselineId of baselineRunIdList(history.baselines)) {
-        const baseline = ordered.find((item) => item.id === baselineId);
-        if (baseline && !retained.some((item) => item.id === baseline.id)) retained.push(baseline);
-      }
-      return { ...history, runs: retained };
+      return { ...history, runs: selectRetainedTestRuns(ordered, history.baselines) };
     });
   }
 
@@ -63,7 +57,7 @@ export class TestRunHistoryRepository {
       const bytes = await vscode.workspace.fs.readFile(uri);
       const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
       if (!isRecord(parsed) || parsed.format !== 'turnstage-test-history-store' || parsed.version !== 1 || !Array.isArray(parsed.runs)) throw new Error('Test history has an unsupported format.');
-      const runs = parsed.runs.filter((value): value is TestRunHistoryRecord => validRun(value) && value.profileId === profileId).slice(0, RETAIN_RUNS + 2);
+      const runs = parsed.runs.filter((value): value is TestRunHistoryRecord => validRun(value) && value.profileId === profileId).slice(0, MAX_RETAINED_TEST_RUNS);
       return { format: 'turnstage-test-history-store', version: 1, runs, baselines: normalizeTestBaselines(parsed.baselines ?? parsed.baselineRunId, runs) };
     } catch (error) {
       if (isMissing(error)) return emptyHistory();

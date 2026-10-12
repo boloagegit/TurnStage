@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { acceptTestBaseline, clearTestRunHistoryKind, compareTestRuns, createTestRunHistoryRecord, nonPassingCases, normalizeTestBaselines } from '../src/shared/testRunHistory';
+import { acceptTestBaseline, caseDefinitionDigest, clearTestRunHistoryKind, compareTestRuns, createTestRunHistoryRecord, MAX_RETAINED_TEST_RUNS, nonPassingCases, normalizeTestBaselines, selectRetainedTestRuns } from '../src/shared/testRunHistory';
 
 const scenario = { id: 'same', name: 'Case', steps: [{ id: 'turn', input: 'private-token' }] };
 const identity = { profileId: 'profile', scenarioId: 'same', kind: 'contract' as const };
@@ -82,6 +82,28 @@ describe('test run history', () => {
     expect(accepted).toEqual({ contract: 'general', adversarial: 'red' });
     expect(normalizeTestBaselines('general', [general, red])).toEqual({ contract: 'general' });
     expect(normalizeTestBaselines({ contract: 'general', adversarial: 'missing' }, [general, red])).toEqual({ contract: 'general' });
+  });
+
+  it('records the same case digest the case lists compute for out-of-date detection', () => {
+    const value = createTestRunHistoryRecord({ id: 'run', profileId: 'profile', startedAt: 1, finishedAt: 2, status: 'completed', runner: 'vscode', profile: {}, environment: {}, cases: [{ ...identity, name: 'Case', scenario }], completed: [] });
+    expect(value.cases[0]?.definitionDigest).toBe(caseDefinitionDigest(scenario));
+    expect(caseDefinitionDigest({ ...scenario, steps: [{ id: 'turn', input: 'edited' }] })).not.toBe(caseDefinitionDigest(scenario));
+  });
+
+  it('keeps each case\'s latest result when single cases are rerun many times', () => {
+    const single = (id: string, scenarioId: string) => createTestRunHistoryRecord({
+      id, profileId: 'profile', startedAt: 1, finishedAt: 2, status: 'completed', runner: 'web', profile: {}, environment: {},
+      cases: [{ ...identity, scenarioId, name: scenarioId, scenario: { ...scenario, id: scenarioId } }],
+      completed: [{ ...identity, scenarioId, outcome: 'passed', completedAttempts: 1, durationMs: 1 }],
+    });
+    const newestFirst = [...Array.from({ length: 30 }, (_, index) => single(`rerun-${index}`, 'hot')), single('only-other', 'other'), single('older-other', 'other')];
+    const retained = selectRetainedTestRuns(newestFirst, {}).map((run) => run.id);
+    expect(retained).toHaveLength(21);
+    expect(retained).toContain('only-other');
+    expect(retained).not.toContain('older-other');
+    expect(selectRetainedTestRuns(newestFirst, { contract: 'older-other' }).map((run) => run.id)).toContain('older-other');
+    const many = Array.from({ length: 100 }, (_, index) => single(`case-${index}`, `case-${index}`));
+    expect(selectRetainedTestRuns(many, {})).toHaveLength(MAX_RETAINED_TEST_RUNS);
   });
 
   it('rejects duplicate case identities', () => {
