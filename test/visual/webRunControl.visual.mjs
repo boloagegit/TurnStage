@@ -78,7 +78,7 @@ try {
     await page.getByRole('button', { name: 'Import CSV', exact: true }).click();
     await (await chooser).setFiles({ name: `large-${kind}.csv`, mimeType: 'text/csv', buffer: Buffer.from(`${csvRow(columns)}\r\n${rows.join('\r\n')}\r\n`) });
     await page.getByRole('button', { name: `Run case Case ${kind}-0001`, exact: true }).waitFor();
-    await page.getByRole('button', { name: /Select all selectable cases/u }).click();
+    await page.getByRole('button', { name: /Select all ready cases/u }).click();
     await page.getByRole('button', { name: 'Run selected (5,000)', exact: true }).waitFor();
     probe.hold = true;
     probe.requests.length = 0;

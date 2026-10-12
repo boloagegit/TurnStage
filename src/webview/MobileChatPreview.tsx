@@ -466,7 +466,7 @@ export function MobileChatPreview({
           <span>{humanize(sessionState)}</span>
         </span>
         {historyCheck && <button type="button" className={`mobile-chat-preview__history-check mobile-chat-preview__history-check--${historyCheck.status}`} title={historyCheckLabel} aria-controls={conversationDrawer ? conversationDrawerId : undefined} onClick={() => setConversationDrawer((current) => current === 'check' ? undefined : 'check')}>
-          {historyCheck.status === 'checking' ? <ProductIcon name="loading" className="codicon-modifier-spin" /> : <span className="mobile-chat-preview__history-check-mark" aria-hidden="true" />}
+          {historyCheck.status === 'checking' ? <ProductIcon name="loading" className="codicon-modifier-spin" /> : historyCheck.status === 'match' ? <ProductIcon name="check" className="mobile-chat-preview__history-check-icon" /> : <span className="mobile-chat-preview__history-check-mark" aria-hidden="true" />}
           <span>{historyCheckLabel}</span>
           {historyCheck.status === 'mismatch' && <span className="mobile-chat-preview__history-check-count" aria-hidden="true">{formatNumber(historyCheck.differences)}</span>}
         </button>}

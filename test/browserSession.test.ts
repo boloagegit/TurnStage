@@ -259,6 +259,21 @@ describe('BrowserSession', () => {
     expect(session.current.snapshot.messages.some((message) => message.role === 'user')).toBe(true);
   });
 
+  it('reports an idle timeout with its limit even when the aborted body ends like a normal stream', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('event: message\ndata: {"text":"Partial"}\n\n'));
+        init?.signal?.addEventListener('abort', () => controller.close(), { once: true });
+      },
+    }), { status: 200, headers: { 'content-type': 'text/event-stream' } })));
+    const idleProfile: TurnStageProfile = { ...profile, conversation: { ...profile.conversation, send: { ...profile.conversation.send, idleTimeoutMs: 50 } } };
+    const session = new BrowserSession(idleProfile, environment, new Map(), () => undefined);
+    await session.start();
+    await session.send('Hello', { kind: 'manual' });
+    expect(session.current.snapshot.turnState).toBe('failed');
+    expect(session.current.snapshot.errors.at(-1)).toMatchObject({ type: 'IdleTimeoutError', message: 'The response stream sent no data for 50 ms (idleTimeoutMs).' });
+  });
+
   it('persists non-secret controls by Profile, resets requested values, and never exposes secret controls', async () => {
     const values = new Map<string, string>();
     vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) });

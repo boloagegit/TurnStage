@@ -52,7 +52,7 @@ describe('case selection guidance', () => {
     expect(within(cases).getByRole('button', { name: 'Case 2. Add the message for step 1.' })).toBeTruthy();
     expect(within(cases).getByRole('button', { name: 'Case 4. Add the message for step 1.' })).toBeTruthy();
     expect((within(cases).getByRole('checkbox', { name: /Select case Case 2/ }) as HTMLInputElement).disabled).toBe(true);
-    const selectAll = screen.getByRole('button', { name: 'Select all selectable cases (2/4)' });
+    const selectAll = screen.getByRole('button', { name: 'Select all ready cases (2 of 4)' });
     fireEvent.click(selectAll);
     expect(onToggleCase.mock.calls.map(([item]) => item.scenarioId)).toEqual(['ready-1', 'ready-3']);
   });
@@ -70,7 +70,7 @@ describe('case selection guidance', () => {
     rerender(<AdversarialWorkspace profile={mixedProfile} post={vi.fn()} activeSection="cases" vscodeFeatures={false} selectedCaseKeys={new Set()} onToggleCase={onToggleCase} />);
     expect(screen.getByRole('button', { name: 'Draft red. Review this case before selecting it.' })).toBeTruthy();
     expect((screen.getByRole('checkbox', { name: /Select case Draft red/ }) as HTMLInputElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Select all selectable cases (1/2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select all ready cases (1 of 2)' }));
     expect(onToggleCase.mock.calls.map(([item]) => item.scenarioId)).toEqual(['red-ready']);
   });
 });

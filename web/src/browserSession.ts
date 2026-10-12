@@ -415,6 +415,7 @@ export class BrowserSession {
     const turnIndex = this.turnIndex++;
     const metrics = new MetricsCollector();
     let timeoutKind: 'request' | 'idle' | undefined;
+    let timeoutLimits: { timeoutMs?: number; idleTimeoutMs?: number } = {};
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     let idleHandle: ReturnType<typeof setTimeout> | undefined;
     let turnNetwork: NetworkExchange | undefined;
@@ -439,6 +440,7 @@ export class BrowserSession {
       if (generation !== this.generation) return;
       if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
       const browserRequest = enforceBrowserTls(request);
+      timeoutLimits = { timeoutMs: browserRequest.timeoutMs, idleTimeoutMs: browserRequest.idleTimeoutMs };
       this.registerSecrets(browserRequest);
       this.state.requestPreview = browserRequest.redacted;
       this.state.snapshot.messages.push({ id: `user-${clientRequestId}`, role: 'user', status: 'completed', createdAt: Date.now(), completedAt: Date.now(), parts: [{ type: 'text', text }], citations: [], actions: [], followups: [], metadata: { clientRequestId } });
@@ -500,6 +502,8 @@ export class BrowserSession {
         this.boundCollections();
         this.emit();
       }
+      // An aborted body can end like a normal one; report the timeout that caused it, not a missing terminal event.
+      if (timeoutKind) throw new DOMException('The stream timed out.', 'TimeoutError');
       const tail: StreamRecord[] = sse ? sse.finish().map((item) => ({ raw: item.raw, sse: item })) : ndjson ? ndjson.finish().map((raw) => ({ raw })) : [];
       for (const record of tail) this.accept(record.raw, protocol, startedAt, metrics, record.sse, network, clientRequestId, turnIndex);
       if (!['completed', 'failed', 'aborted'].includes(this.state.snapshot.turnState)) {
@@ -518,7 +522,7 @@ export class BrowserSession {
       if ((error as DOMException)?.name === 'AbortError' && !timeoutKind) this.state.snapshot.turnState = 'aborted';
       else {
         this.state.snapshot.turnState = 'failed';
-        this.state.snapshot.errors.push({ type: timeoutKind ? timeoutKind === 'idle' ? 'IdleTimeoutError' : 'RequestTimeoutError' : error instanceof TypeError ? 'BrowserNetworkError' : 'RequestError', message: timeoutKind ? timeoutKind === 'idle' ? 'The browser response stream was idle for longer than the configured limit.' : 'The browser request exceeded its configured timeout.' : browserErrorMessage(error), retrySafe: true });
+        this.state.snapshot.errors.push({ type: timeoutKind ? timeoutKind === 'idle' ? 'IdleTimeoutError' : 'RequestTimeoutError' : error instanceof TypeError ? 'BrowserNetworkError' : 'RequestError', message: timeoutKind ? timeoutKind === 'idle' ? `The response stream sent no data for ${formatSeconds(timeoutLimits.idleTimeoutMs)} (idleTimeoutMs).` : `The request did not finish within ${formatSeconds(timeoutLimits.timeoutMs ?? 120_000)} (timeoutMs).` : browserErrorMessage(error), retrySafe: true });
       }
       const network = turnNetwork;
       if (network && network.state !== 'completed') {
@@ -871,4 +875,9 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
     const onAbort = () => { clearTimeout(timeout); reject(signal.reason ?? new DOMException('Aborted', 'AbortError')); };
     signal.addEventListener('abort', onAbort, { once: true });
   });
+}
+
+function formatSeconds(milliseconds: number | undefined): string {
+  if (milliseconds === undefined) return 'the configured time';
+  return milliseconds % 1000 === 0 ? `${milliseconds / 1000} s` : `${milliseconds} ms`;
 }

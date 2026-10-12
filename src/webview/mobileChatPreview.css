@@ -1324,6 +1324,8 @@
 }
 
 .mobile-chat-preview__composer-control:focus-within { border-color: var(--mcp-focus); }
+/* Keyboard focus needs more than a 1px colour change: a ring matching the workbench focus border. */
+.mobile-chat-preview__composer-control:has(:focus-visible) { outline: 2px solid var(--vscode-focusBorder, var(--mcp-focus)); outline-offset: 1px; }
 
 .mobile-chat-preview .mobile-chat-preview__composer textarea:focus-visible,
 .mobile-chat-preview .mobile-chat-preview__composer input[type='text']:focus-visible { outline: 0; }
@@ -1564,6 +1566,11 @@
   }
 }
 
+/* Medium widths (for example 200% zoom): drop the longest toolbar labels before actions are pushed out of view. */
+@container (max-width: 680px) {
+  .mobile-chat-preview__capture > span:not(.product-icon),
+  .mobile-chat-preview__history-check > span:not(.product-icon, .mobile-chat-preview__history-check-mark, .mobile-chat-preview__history-check-count) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
 @container (max-width: 430px) {
   .mobile-chat-preview__fit-scale { display: none; }
   .mobile-chat-preview__viewport-settings > summary small,
@@ -1634,3 +1641,10 @@
   .response-content-dialog__tabs button[aria-selected='true'] { outline: 2px solid Highlight; outline-offset: -2px; }
 }
 .mobile-chat-preview__session-state--lastTurnStopped { color: var(--mcp-muted); }
+
+/* Short viewports (including 200% zoom on a laptop): give the conversation the height instead of fixed chrome. */
+@media (max-height: 560px) {
+  .mobile-chat-preview__app-header { min-height: 36px; padding-block: 2px; }
+  .mobile-chat-preview__app-avatar { flex-basis: 22px; width: 22px; height: 22px; }
+  .mobile-chat-preview__controls summary { min-height: 0; padding-block: 2px; }
+}
