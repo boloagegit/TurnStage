@@ -24,6 +24,7 @@ import { registerTurnStageChatParticipant } from './copilot/chatParticipant';
 import { createCopilotArtifactRepository } from './copilot/artifacts';
 import { buildOpenAICompatibleProfileDraft, parseCurlCommand } from './connection';
 import { configureTurnStageLogging, logAt, startLogOperation } from './logging';
+import { canOpenInLocalBrowser } from './exportLocation';
 
 let activeEditor: TurnStageEditorProvider | undefined;
 let activeOutput: vscode.OutputChannel | undefined;
@@ -92,13 +93,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   command('refreshProfiles', refreshProfileState);
   command('initializeWorkspace', async () => { if (!requireWorkspaceTrust()) return; await initializeWorkspace(context); await refreshProfileState(); });
   command('initializeUser', async () => { if (!requireWorkspaceTrust()) return; await initializeUser(context, repository, environments); await refreshProfileState(); });
-  command('createProfile', async (scopeItem?: ProfileScopeTreeItem) => { if (!requireWorkspaceTrust()) return; const destination = await pickProfileDestination(scopeItem?.scope); if (!destination) return; const uri = await createEmptyProfile(repository, destination); if (uri) { await refreshProfileState(); await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor'); void showNotification('information', vscode.l10n.t('Created empty profile {path}.', { path: displayProfilePath(uri, repository) })); } });
+  command('createProfile', async (scopeItem?: ProfileScopeTreeItem) => { if (!requireWorkspaceTrust()) return; const destination = await pickProfileDestination(scopeItem?.scope); if (!destination) return; const uri = await createEmptyProfile(repository, destination); if (uri) { await refreshProfileState(); await warnIfUndiscovered(repository, uri); await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor'); void showNotification('information', vscode.l10n.t('Created empty profile {path}.', { path: displayProfilePath(uri, repository) })); } });
   command('importProfile', async (scopeItem?: ProfileScopeTreeItem) => {
     if (!requireWorkspaceTrust()) return;
     const selected = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: vscode.l10n.t('Import Profile'), filters: { [vscode.l10n.t('TurnStage Profiles')]: ['jsonc', 'json'] } });
     if (!selected?.[0]) return;
     const destination = await pickProfileDestination(scopeItem?.scope); if (!destination) return;
-    try { const uri = await repository.import(selected[0], destination); await refreshProfileState(); await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor'); void showNotification('information', vscode.l10n.t('Imported {path}.', { path: displayProfilePath(uri, repository) })); }
+    try { const uri = await repository.import(selected[0], destination); await refreshProfileState(); await warnIfUndiscovered(repository, uri); await vscode.commands.executeCommand('vscode.openWith', uri, 'turnstage.profileEditor'); void showNotification('information', vscode.l10n.t('Imported {path}.', { path: displayProfilePath(uri, repository) })); }
     catch (error) { void showNotification('error', vscode.l10n.t('Could not import profile: {error}', { error: error instanceof Error ? error.message : String(error) })); }
   });
   command('importCurl', async (scopeItem?: ProfileScopeTreeItem) => {
@@ -220,7 +221,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (uri) {
       const index = vscode.Uri.joinPath(uri, 'index.html');
       void showNotification('information', vscode.l10n.t('Evidence bundle exported to {path}.', { path: displayExportUri(uri) }));
-      await vscode.env.openExternal(index);
+      if (canOpenInLocalBrowser(index)) await vscode.env.openExternal(index);
     }
   });
   command('openTestEvidence', async (argument?: unknown) => {
@@ -398,6 +399,7 @@ async function importProfileFromCurl(repository: ProfileRepository, preferredSco
     const target = await duplicateIfExists(vscode.Uri.joinPath(directory, `${draft.profile.id}.turnstage.jsonc`));
     await vscode.workspace.fs.writeFile(target, new TextEncoder().encode(text));
     await refresh();
+    await warnIfUndiscovered(repository, target);
     await vscode.commands.executeCommand('vscode.openWith', target, 'turnstage.profileEditor');
     void showNotification('information', vscode.l10n.t('Created sanitized profile {path}. Set the referenced secrets before testing.', { path: displayProfilePath(target, repository) }));
   } catch (error) {
@@ -423,17 +425,24 @@ function reportRunControl(applied: boolean, unavailableMessage: string): boolean
   return applied;
 }
 
-type NotificationKind = 'information' | 'error';
+/** A Profile outside every folder's `turnstage.profileGlob` would silently vanish from the sidebar and Test Explorer. */
+async function warnIfUndiscovered(repository: ProfileRepository, uri: vscode.Uri): Promise<void> {
+  if (await repository.isDiscoveredProfile(uri)) return;
+  void showNotification('warning', vscode.l10n.t('{path} does not match the turnstage.profileGlob setting, so it will not appear in the TurnStage sidebar or Test Explorer. Move the file or update the setting.', { path: displayProfilePath(uri, repository) }));
+}
+
+type NotificationKind = 'information' | 'warning' | 'error';
 
 async function showNotification(kind: NotificationKind, message: string): Promise<void> {
   try {
     const configuration = vscode.workspace.getConfiguration('turnstage');
-    // Errors stay visible even when status notifications are turned off, so a failed or blocked action is never silent.
+    // Errors and warnings stay visible even when status notifications are turned off, so a failed or blocked action is never silent.
     if (kind === 'error') {
       const openOutput = vscode.l10n.t('Open TurnStage Output');
       if (await vscode.window.showErrorMessage(message, openOutput) === openOutput) activeOutput?.show(true);
       return;
     }
+    if (kind === 'warning') { await vscode.window.showWarningMessage(message); return; }
     if (configuration.get<boolean>('notifications.enabled', true) === false) return;
     const doNotShowAgain = vscode.l10n.t('Do not show again');
     const action = await vscode.window.showInformationMessage(message, doNotShowAgain);

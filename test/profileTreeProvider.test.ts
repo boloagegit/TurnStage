@@ -52,6 +52,8 @@ const mock = vi.hoisted(() => {
       workspaceFolders: [{ uri: new Uri('/workspace') }],
       getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }),
       createFileSystemWatcher: () => ({ onDidCreate: vi.fn(), onDidChange: vi.fn(), onDidDelete: vi.fn(), dispose: vi.fn() }),
+      onDidChangeConfiguration: () => ({ dispose: vi.fn() }),
+      onDidChangeWorkspaceFolders: () => ({ dispose: vi.fn() }),
     },
   };
 });

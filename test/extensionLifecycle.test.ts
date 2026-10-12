@@ -173,6 +173,6 @@ describe('Extension host editor lifecycle', () => {
     expect(activateSource).toContain("command('exportEvidenceBundle'");
     expect(activateSource).toContain('scenarioTests.exportEvidenceBundle()');
     expect(activateSource).toContain("vscode.Uri.joinPath(uri, 'index.html')");
-    expect(activateSource).toContain('await vscode.env.openExternal(index)');
+    expect(activateSource).toContain('if (canOpenInLocalBrowser(index)) await vscode.env.openExternal(index)');
   });
 });

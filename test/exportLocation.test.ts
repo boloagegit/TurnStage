@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mock = vi.hoisted(() => {
   const uri = (path: string) => ({ path });
   const workspace: { workspaceFolders?: Array<{ uri: { path: string } }>; getWorkspaceFolder: ReturnType<typeof vi.fn> } = { workspaceFolders: undefined, getWorkspaceFolder: vi.fn() };
-  return { uri, workspace, vscode: { workspace, Uri: { file: uri, joinPath: (base: { path: string }, ...segments: string[]) => uri([base.path.replace(/\/$/, ''), ...segments].join('/')) } } };
+  const env: { remoteName?: string } = {};
+  return { uri, workspace, env, vscode: { workspace, env, Uri: { file: uri, joinPath: (base: { path: string }, ...segments: string[]) => uri([base.path.replace(/\/$/, ''), ...segments].join('/')) } } };
 });
 
 vi.mock('vscode', () => mock.vscode);
 vi.mock('node:os', () => ({ homedir: () => '/home/tester' }));
 
-import { defaultExportUri } from '../src/extension/exportLocation';
+import { canOpenInLocalBrowser, defaultExportUri } from '../src/extension/exportLocation';
 
 describe('defaultExportUri', () => {
   beforeEach(() => {
@@ -28,5 +29,13 @@ describe('defaultExportUri', () => {
     expect(defaultExportUri('report.html').path).toBe('/first/report.html');
     mock.workspace.workspaceFolders = undefined;
     expect(defaultExportUri('report.html').path).toBe('/home/tester/report.html');
+  });
+
+  it('opens exported files in the system browser only when the Extension Host is local', () => {
+    expect(canOpenInLocalBrowser({ scheme: 'file', path: '/w/report.html' } as never)).toBe(true);
+    mock.env.remoteName = 'ssh-remote';
+    expect(canOpenInLocalBrowser({ scheme: 'file', path: '/w/report.html' } as never)).toBe(false);
+    mock.env.remoteName = undefined;
+    expect(canOpenInLocalBrowser({ scheme: 'vscode-vfs', path: '/w/report.html' } as never)).toBe(false);
   });
 });

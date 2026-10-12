@@ -618,7 +618,7 @@
   "Open TurnStage Output": "Open TurnStage Output",
   "TurnStage Campaign Progress": "TurnStage Campaign Progress",
   "TurnStage campaign progress: {completed} of {total} cases": "TurnStage campaign progress: {completed} of {total} cases",
-  "TurnStage could not complete {action}.": "TurnStage could not complete {action}.",
+  "TurnStage could not complete an action in {profile}: {error}": "TurnStage could not complete an action in {profile}: {error}",
   "{count} TurnStage campaigns are running": "{count} TurnStage campaigns are running",
   "**TurnStage evidence context**": "**TurnStage evidence context**",
   "Add the exact run ID, evidence ID, profile ID, case ID, or selection you want TurnStage to use. The assistant will not guess identifiers.": "Add the exact run ID, evidence ID, profile ID, case ID, or selection you want TurnStage to use. The assistant will not guess identifiers.",
@@ -778,5 +778,6 @@
   "The conversation history request should reference conversation.id so TurnStage can load a specific conversation.": "The conversation history request should reference conversation.id so TurnStage can load a specific conversation.",
   "There is no running TurnStage test run to pause.": "There is no running TurnStage test run to pause.",
   "There is no paused TurnStage test run to resume.": "There is no paused TurnStage test run to resume.",
-  "There is no active TurnStage test run to cancel.": "There is no active TurnStage test run to cancel."
+  "There is no active TurnStage test run to cancel.": "There is no active TurnStage test run to cancel.",
+  "{path} does not match the turnstage.profileGlob setting, so it will not appear in the TurnStage sidebar or Test Explorer. Move the file or update the setting.": "{path} does not match the turnstage.profileGlob setting, so it will not appear in the TurnStage sidebar or Test Explorer. Move the file or update the setting."
 }

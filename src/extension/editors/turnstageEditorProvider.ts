@@ -13,7 +13,7 @@ import { RequestAuthorizationService } from '../security/requestAuthorization';
 import { isActive, SessionController } from '../runtime/sessionController';
 import { MappingEngine } from '../mapping/mappingEngine';
 import { localize } from '../l10n';
-import { defaultExportUri } from '../exportLocation';
+import { canOpenInLocalBrowser, defaultExportUri } from '../exportLocation';
 import { validateFormSubmission } from './formSubmission';
 import { resolveDisplayLanguage, textDirection } from '../displayLanguage';
 import { profileEditorTitle } from './profileEditorTitle';
@@ -571,7 +571,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
             : message.kind ? await this.scenarioTests.exportLatestKindReport(document.uri, message.kind, message.format) : await this.scenarioTests.exportLastReport(message.format);
           if (!uri) return;
           await post({ type: 'test.exported', kind: 'report', ...registerArtifact(uri) }, message.requestId);
-          if (message.format === 'html') await vscode.env.openExternal(uri);
+          if (message.format === 'html' && canOpenInLocalBrowser(uri)) await vscode.env.openExternal(uri);
           return;
         }
         if (message.type === 'test.history.export') {
@@ -579,7 +579,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           const uri = await this.scenarioTests.exportRunReport(document.uri, message.runId, message.format, message.kind);
           if (!uri) return;
           await post({ type: 'test.exported', kind: 'report', ...registerArtifact(uri) }, message.requestId);
-          if (message.format === 'html') await vscode.env.openExternal(uri);
+          if (message.format === 'html' && canOpenInLocalBrowser(uri)) await vscode.env.openExternal(uri);
           return;
         }
         if (message.type === 'test.evidenceBundle.export') {
@@ -589,7 +589,7 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           if (!uri) return;
           const index = vscode.Uri.joinPath(uri, 'index.html');
           await post({ type: 'test.exported', kind: 'evidenceBundle', ...registerArtifact(uri, index) }, message.requestId);
-          await vscode.env.openExternal(index);
+          if (canOpenInLocalBrowser(index)) await vscode.env.openExternal(index);
           return;
         }
         if (message.type === 'campaign.preview') {
@@ -673,8 +673,8 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
           const artifact = artifacts.get(message.artifactId);
           if (!artifact) throw new Error(localize('This exported artifact is no longer available from this editor.'));
           if (message.action === 'copyPath') await vscode.env.clipboard.writeText(artifact.path);
-          else if (message.action === 'reveal') await vscode.commands.executeCommand('revealFileInOS', artifact.uri);
-          else if (artifact.openUri.path.endsWith('.html')) await vscode.env.openExternal(artifact.openUri);
+          else if (message.action === 'reveal') await vscode.commands.executeCommand(canOpenInLocalBrowser(artifact.uri) ? 'revealFileInOS' : 'revealInExplorer', artifact.uri);
+          else if (artifact.openUri.path.endsWith('.html') && canOpenInLocalBrowser(artifact.openUri)) await vscode.env.openExternal(artifact.openUri);
           else await vscode.commands.executeCommand('vscode.openWith', artifact.openUri, 'default');
           return;
         }
@@ -865,8 +865,11 @@ export class TurnStageEditorProvider implements vscode.CustomTextEditorProvider 
         const detail = error instanceof Error ? error.message : String(error);
         if (message.type === 'visual.baseline.save' || message.type === 'visual.compare') await post({ type: 'visual.error', operation: message.type === 'visual.baseline.save' ? 'baseline' : 'compare', message: detail }, message.requestId);
         else await post({ type: 'request.error', error: { type, message: detail } }, message.requestId);
-        const openOutput = localize('Open TurnStage Output');
-        observeBackground(vscode.window.showErrorMessage(localize('TurnStage could not complete {action}.', { action: message.type }), openOutput).then((choice) => { if (choice === openOutput) this.output.show(true); }), 'error-notification');
+        // A visible editor already shows the error in place; a hidden one needs a workbench notification.
+        if (!panel.visible) {
+          const openOutput = localize('Open TurnStage Output');
+          observeBackground(vscode.window.showErrorMessage(localize('TurnStage could not complete an action in {profile}: {error}', { profile: panel.title, error: detail }), openOutput).then((choice) => { if (choice === openOutput) this.output.show(true); }), 'error-notification');
+        }
       }
     });
     panel.onDidDispose(() => { disposed = true; sessionBatcher.dispose(); if (loadTimer) clearTimeout(loadTimer); this.activeCampaignRuns.get(documentKey)?.cancellation.cancel(); void disposeController(); posters.delete(postSection); if (!posters.size) { this.sectionPosters.delete(documentKey); this.pendingSections.delete(documentKey); } navigationPosters.delete(postNavigation); if (!navigationPosters.size) { this.navigationPosters.delete(documentKey); this.pendingDestinations.delete(documentKey); } resultPosters.delete(postResults); if (!resultPosters.size) this.resultPosters.delete(documentKey); campaignPosters.delete(postCampaigns); if (!campaignPosters.size) this.campaignPosters.delete(documentKey); evidencePosters.delete(postEvidence); if (!evidencePosters.size) this.evidencePosters.delete(documentKey); documentListener.dispose(); saveListener.dispose(); trustListener.dispose(); configurationListener.dispose(); viewStateListener.dispose(); messageListener.dispose(); });

@@ -618,7 +618,7 @@
   "Open TurnStage Output": "開啟 TurnStage Output",
   "TurnStage Campaign Progress": "TurnStage Campaign 進度",
   "TurnStage campaign progress: {completed} of {total} cases": "TurnStage Campaign 進度：已完成 {completed}／{total} 個案例",
-  "TurnStage could not complete {action}.": "TurnStage 無法完成 {action}。",
+  "TurnStage could not complete an action in {profile}: {error}": "TurnStage 無法完成 {profile} 中的動作：{error}",
   "{count} TurnStage campaigns are running": "有 {count} 個 TurnStage Campaign 正在執行",
   "**TurnStage evidence context**": "**TurnStage 證據情境**",
   "Add the exact run ID, evidence ID, profile ID, case ID, or selection you want TurnStage to use. The assistant will not guess identifiers.": "請加入要讓 TurnStage 使用的確切 Run ID、Evidence ID、設定檔 ID、Case ID 或測試選取範圍。助理不會猜測識別碼。",
@@ -778,5 +778,6 @@
   "The conversation history request should reference conversation.id so TurnStage can load a specific conversation.": "對話歷史請求應引用 conversation.id，TurnStage 才能載入指定的對話。",
   "There is no running TurnStage test run to pause.": "目前沒有可暫停的 TurnStage 測試。",
   "There is no paused TurnStage test run to resume.": "目前沒有可繼續的已暫停 TurnStage 測試。",
-  "There is no active TurnStage test run to cancel.": "目前沒有可取消的 TurnStage 測試。"
+  "There is no active TurnStage test run to cancel.": "目前沒有可取消的 TurnStage 測試。",
+  "{path} does not match the turnstage.profileGlob setting, so it will not appear in the TurnStage sidebar or Test Explorer. Move the file or update the setting.": "{path} 不符合 turnstage.profileGlob 設定，因此不會出現在 TurnStage 側邊欄或測試總管中。請移動檔案或更新設定。"
 }

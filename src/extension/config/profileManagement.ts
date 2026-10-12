@@ -49,3 +49,22 @@ function applyJsonEdits(text: string, edits: Array<{ offset: number; length: num
   return result;
 }
 import { modify } from 'jsonc-parser';
+
+export const DEFAULT_PROFILE_GLOB = '.vscode/turnstage/profiles/*.turnstage.jsonc';
+
+/**
+ * Workspace-relative folder where new Profiles are written for a discovery glob: the path segments before the
+ * first wildcard. Globs that are absolute or leave the workspace fall back to the default folder.
+ */
+export function profileGlobDirectory(glob: string): string[] {
+  const normalized = glob.trim().replace(/\\/g, '/');
+  const fallback = DEFAULT_PROFILE_GLOB.split('/').slice(0, -1);
+  if (!normalized || normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) return fallback;
+  const directory: string[] = [];
+  for (const segment of normalized.split('/').slice(0, -1)) {
+    if (/[*?[\]{}!]/.test(segment)) break;
+    if (segment === '..') return fallback;
+    if (segment && segment !== '.') directory.push(segment);
+  }
+  return directory;
+}

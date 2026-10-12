@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ProfileRepository, type ProfileEntry, type ProfileScope } from '../config/profileRepository';
+import { ProfileFileWatcher } from '../config/profileFileWatcher';
 
 export class ProfileTreeItem extends vscode.TreeItem {
   override readonly contextValue = 'turnstageProfile';
@@ -39,16 +40,11 @@ export type ProfileTreeNode = ProfileScopeTreeItem | ProfileTreeItem;
 export class ProfileTreeProvider implements vscode.TreeDataProvider<ProfileTreeNode>, vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<ProfileTreeNode | undefined>();
   readonly onDidChangeTreeData = this.emitter.event;
-  private readonly watchers: vscode.FileSystemWatcher[] = [];
+  private readonly watcher: ProfileFileWatcher;
   private entries: ProfileEntry[] = [];
   private debounce?: ReturnType<typeof setTimeout>;
   constructor(private readonly repository: ProfileRepository, private readonly discovered?: (entries: ProfileEntry[]) => Promise<void> | void) {
-    for (const folder of vscode.workspace.workspaceFolders ?? []) {
-      const glob = vscode.workspace.getConfiguration('turnstage', folder.uri).get('profileGlob', '.vscode/turnstage/profiles/*.turnstage.jsonc');
-      this.watch(vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, glob)));
-    }
-    const userDirectory = this.repository.userProfileDirectory();
-    if (userDirectory) this.watch(vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(userDirectory, '*.turnstage.jsonc')));
+    this.watcher = new ProfileFileWatcher(repository, () => this.scheduleRefresh());
   }
   getTreeItem(element: ProfileTreeNode): vscode.TreeItem { return element; }
   async getChildren(element?: ProfileTreeNode): Promise<ProfileTreeNode[]> {
@@ -62,9 +58,5 @@ export class ProfileTreeProvider implements vscode.TreeDataProvider<ProfileTreeN
   }
   refresh(): void { this.entries = []; this.emitter.fire(undefined); }
   private scheduleRefresh(): void { if (this.debounce) clearTimeout(this.debounce); this.debounce = setTimeout(() => this.refresh(), 150); }
-  private watch(watcher: vscode.FileSystemWatcher): void {
-    this.watchers.push(watcher);
-    for (const event of [watcher.onDidCreate, watcher.onDidChange, watcher.onDidDelete]) event(() => this.scheduleRefresh());
-  }
-  dispose(): void { if (this.debounce) clearTimeout(this.debounce); for (const watcher of this.watchers) watcher.dispose(); this.emitter.dispose(); }
+  dispose(): void { if (this.debounce) clearTimeout(this.debounce); this.watcher.dispose(); this.emitter.dispose(); }
 }
