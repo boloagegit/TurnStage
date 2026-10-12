@@ -15,6 +15,25 @@ describe('localization catalogs', () => {
     }
   });
 
+  it('keeps real line breaks where the English manifest uses them', () => {
+    const english = json('package.nls.json');
+    for (const locale of ['zh-tw', 'ja', 'ko']) {
+      const translated = json(`package.nls.${locale}.json`);
+      for (const [key, value] of Object.entries(english)) {
+        expect(translated[key]?.includes('\\n'), `${locale} ${key}`).toBe(false);
+        expect(translated[key]?.split('\n').length, `${locale} ${key}`).toBe(value.split('\n').length);
+      }
+    }
+  });
+
+  it('declares each Extension Host bundle key once', () => {
+    for (const catalog of ['l10n/bundle.l10n.json', 'l10n/bundle.l10n.zh-tw.json', 'l10n/bundle.l10n.ja.json', 'l10n/bundle.l10n.ko.json']) {
+      const keys = [...readFileSync(resolve(root, catalog), 'utf8').matchAll(/^\s*("(?:[^"\\]|\\.)*")\s*:/gmu)].map((match) => JSON.parse(match[1]!) as string);
+      expect(keys.length, catalog).toBeGreaterThan(0);
+      expect(keys.filter((key, index) => keys.indexOf(key) !== index), catalog).toEqual([]);
+    }
+  });
+
   it('keeps Extension Host bundle keys in parity', () => {
     const english = json('l10n/bundle.l10n.json');
     for (const locale of ['zh-tw', 'ja', 'ko']) {
@@ -48,13 +67,31 @@ describe('localization catalogs', () => {
       'src/webview/configEditors.tsx',
       'src/webview/ConversationDrawer.tsx',
       'src/webview/CaseRunSummary.tsx',
-      'src/webview/liveCaseStatus.tsx'
+      'src/webview/liveCaseStatus.tsx',
+      'src/webview/OperationNoticeToast.tsx'
     ].map((path) => readFileSync(resolve(root, path), 'utf8')).join('\n');
     const catalogSource = readFileSync(resolve(root, 'src/webview/i18n.ts'), 'utf8');
     const usedMessages = new Set([...webviewSources.matchAll(/\bt\(\s*(['"])(.*?)\1/g)].map((match) => match[2]));
     const translatedMessages = new Set([...catalogSource.matchAll(/^\s*(['"])(.*?)\1:\s*(['"])/gm)].map((match) => match[2]));
 
     expect([...usedMessages].filter((message) => !translatedMessages.has(message)).sort()).toEqual([]);
+  });
+
+  it('covers the chat surface in Japanese and Korean', () => {
+    const chatSources = [
+      'src/webview/MobileChatPreview.tsx',
+      'src/webview/ConversationDrawer.tsx',
+      'src/webview/CaseEditorOverlay.tsx',
+      'src/webview/JsonViewer.tsx',
+      'src/webview/ClipboardButton.tsx',
+      'src/webview/OperationNoticeToast.tsx'
+    ].map((path) => readFileSync(resolve(root, path), 'utf8')).join('\n');
+    const usedMessages = new Set([...chatSources.matchAll(/\bt\(\s*(['"])(.*?)\1/g)].map((match) => match[2]));
+    for (const locale of ['ja', 'ko']) {
+      const catalogSource = readFileSync(resolve(root, `src/webview/i18n.${locale}.ts`), 'utf8');
+      const translatedMessages = new Set([...catalogSource.matchAll(/^\s*(['"])(.*?)\1:\s*(['"])/gm)].map((match) => match[2]));
+      expect([...usedMessages].filter((message) => !translatedMessages.has(message)).sort(), locale).toEqual([]);
+    }
   });
 
   it('translates Webview copy, interpolation, and locale-aware numbers', () => {
