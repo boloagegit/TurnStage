@@ -184,6 +184,22 @@ The first command executes cases against their configured endpoints; the
 paths are examples to replace with your workspace's source/evidence paths.
 CLI secrets come only from process environment variables, not `.env` files.
 
+Without profile path arguments, `run` loads
+`.vscode/turnstage/profiles/*.turnstage.jsonc` below `--workspace` (default:
+the current directory); it does not read the `turnstage.profileGlob` setting.
+`--output <path>` writes the report to a new file and is checked before any
+request is sent; an existing file is never overwritten. Configuration problems,
+an empty selection, and a `--max-requests` refusal are explained on stderr
+with workspace paths and line numbers only, never request data or secret
+values. Run `./dist/cli.js --help` for every option.
+
+| Exit code | Meaning |
+| ---: | --- |
+| `0` | Every selected case passed or resisted |
+| `1` | A case failed its checks, regressed against its baseline, or an attack succeeded |
+| `2` | Indeterminate: invalid arguments or configuration, no matching cases, a budget refusal, an existing `--output` file, or a manifest that does not verify |
+| `3` | Infrastructure: a Red Team infrastructure error, a runtime failure, or an unwritable report |
+
 GitHub Copilot's TurnStage tools discover linked cases using prompt-free
 metadata, validate their current digest, preview bounded request cost, and run
 the exact stable Suite and Case IDs. A Copilot-triggered run still requires

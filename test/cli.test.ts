@@ -80,6 +80,57 @@ describe('headless CLI contract', () => {
     expect(result.exitCode).toBe(2);
   });
 
+  it('reports runtime diagnostics on stderr and refuses an existing output path before running', async () => {
+    const stderr: string[] = [];
+    const stdout: string[] = [];
+    const execute = vi.fn(async () => ({ records: [{ id: 'configuration', outcome: 'configuration' }], diagnostics: ['Profile validation failed: p.turnstage.jsonc has 1 error (first at line 3).'] }));
+    const io: CliIo = { writeStdout: (text) => { stdout.push(text); }, writeStderr: (text) => { stderr.push(text); } };
+    await expect(runHeadlessCli(['run'], { execute }, io)).resolves.toBe(2);
+    expect(stderr.join('')).toBe('error: Profile validation failed: p.turnstage.jsonc has 1 error (first at line 3).\n');
+    expect(stdout.join('')).not.toContain('Profile validation failed');
+
+    stderr.length = 0;
+    execute.mockClear();
+    const guarded: CliIo = { ...io, writeFile: vi.fn(), checkOutputPath: (path) => path === 'existing.json' ? 'The output file already exists: existing.json.' : undefined };
+    await expect(runHeadlessCli(['run', '--output', 'existing.json'], { execute }, guarded)).resolves.toBe(2);
+    expect(execute).not.toHaveBeenCalled();
+    expect(stderr.join('')).toContain('already exists');
+  });
+
+  it('explains which profile failed validation and when no cases match', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'turnstage-cli-diagnostics-'));
+    const run = (configFiles: string[], tags: string[] = []) => new NodeCliRuntime('test', directory).execute({
+      command: 'run', configFiles,
+      selectors: { profiles: [], suites: [], cases: [], tags, changedFiles: [] },
+      policy: { failFast: false },
+      impact: { workspaceRoot: directory, includeUnbound: false },
+    });
+    try {
+      await writeFile(join(directory, 'broken.turnstage.jsonc'), '{\n  "version": 1,\n  "id": 42\n}\n');
+      const broken = await run(['broken.turnstage.jsonc']);
+      expect(broken.records).toEqual([{ id: 'configuration', outcome: 'configuration' }]);
+      expect(broken.diagnostics?.[0]).toMatch(/^Profile validation failed: broken\.turnstage\.jsonc has \d+ errors? \(first at line \d+\)/);
+
+      const missing = await run(['missing.turnstage.jsonc']);
+      expect(missing.diagnostics).toEqual(['File not found: missing.turnstage.jsonc']);
+
+      const escaped = await run(['../outside.turnstage.jsonc']);
+      expect(escaped.diagnostics).toEqual(['Path leaves the workspace root: ../outside.turnstage.jsonc']);
+
+      const none = await run([]);
+      expect(none.diagnostics?.[0]).toContain('No TurnStage profiles were found');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('documents the workspace option and exit codes in --help', () => {
+    const help = parseCliArgs(['--help']);
+    expect(help.usage).toContain('--workspace <dir>');
+    expect(help.usage).toContain('verify [--manifest] <provenance.json>');
+    expect(help.usage).toMatch(/Exit codes:\n {2}0 .*\n {2}1 .*\n {2}2 [\s\S]*\n {2}3 /);
+  });
+
   it('verifies a bundle provenance manifest and detects a changed evidence file', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'turnstage-cli-verify-'));
     try {
@@ -204,6 +255,7 @@ describe('headless CLI contract', () => {
       });
 
       expect(result.records).toEqual([{ id: 'selection', outcome: 'policy' }]);
+      expect(result.diagnostics).toEqual(['No ready test cases matched the selected profiles, suites, cases, tags, or changed files.']);
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();

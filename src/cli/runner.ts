@@ -44,6 +44,13 @@ export async function executeHeadlessCli(
     await io.writeStderr(`${errors[0]}\n`);
     return { exitCode: CLI_EXIT_CODES.indeterminate, errors };
   }
+  if (options.outputPath && options.outputPath !== '-' && io.checkOutputPath) {
+    const problem = await io.checkOutputPath(options.outputPath);
+    if (problem) {
+      await io.writeStderr(`error: ${problem}\n`);
+      return { exitCode: CLI_EXIT_CODES.indeterminate, errors: [problem] };
+    }
+  }
   let result: CliExecutionResult;
   let aggregation: CliExitAggregation;
   try {
@@ -66,6 +73,8 @@ export async function executeHeadlessCli(
     await io.writeStderr(`${errors[0]}\n`);
     return { exitCode: CLI_EXIT_CODES.infrastructure, errors };
   }
+
+  if (result.diagnostics?.length) await io.writeStderr(result.diagnostics.map((line) => `error: ${line}\n`).join(''));
 
   let output: string;
   try {
