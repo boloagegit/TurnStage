@@ -1682,6 +1682,8 @@ const zhTw: Record<string, string> = {
   "1 case": "1 個案例",
   "Raw": "原始",
   "1 differs from server": "與伺服器不同 1 處",
+  "Finish or stop the current request before opening test evidence.": "請先完成或停止目前的請求，再開啟測試證據。",
+  "Opened test evidence.": "已開啟測試證據。",
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {

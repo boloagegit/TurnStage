@@ -1551,4 +1551,6 @@ export const ko: Record<string, string> = {
   "Delete field": "필드 삭제",
   "Number": "숫자",
   "Percent": "백분율",
+  "Finish or stop the current request before opening test evidence.": "테스트 증거를 열기 전에 현재 요청을 완료하거나 중지하세요.",
+  "Opened test evidence.": "테스트 증거를 열었습니다.",
 };

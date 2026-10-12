@@ -1551,4 +1551,6 @@ export const ja: Record<string, string> = {
   "Delete field": "フィールドを削除",
   "Number": "数値",
   "Percent": "パーセント",
+  "Finish or stop the current request before opening test evidence.": "テストの証拠を開く前に、現在のリクエストを完了するか停止してください。",
+  "Opened test evidence.": "テストの証拠を開きました。",
 };

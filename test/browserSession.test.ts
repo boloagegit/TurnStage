@@ -50,6 +50,33 @@ describe('BrowserSession', () => {
     expect(states.length).toBeGreaterThan(3);
   });
 
+  it('continues the evidence conversation that is on screen after Open evidence', async () => {
+    const reply = (id: string, text: string) => `event: start\ndata: {"conversationId":"${id}"}\n\nevent: message\ndata: {"text":"${text}"}\n\nevent: done\ndata: {}\n\n`;
+    const sentBodies: string[] = [];
+    let next = reply('test-conversation', 'From the test');
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => { sentBodies.push(String(init?.body)); return new Response(next, { status: 200, headers: { 'content-type': 'text/event-stream' } }); }));
+    const evidenceSession = new BrowserSession(profile, environment, new Map(), () => undefined);
+    await evidenceSession.start();
+    await evidenceSession.send('Test prompt', { kind: 'manual' });
+    const evidence = evidenceSession.current;
+
+    const live = new BrowserSession(profile, environment, new Map(), () => undefined);
+    await live.start();
+    next = reply('exploration', 'Exploring');
+    await live.send('My exploration', { kind: 'manual' });
+
+    expect(live.applyEvidence(evidence)).toBe(true);
+    expect(live.current.snapshot.conversationId).toBe('test-conversation');
+    expect(live.current.snapshot.messages.find((message) => message.role === 'user')?.parts).toEqual([{ type: 'text', text: 'Test prompt' }]);
+
+    next = reply('test-conversation', 'Follow-up');
+    await live.send('Follow-up', { kind: 'manual' });
+    const state = live.current.snapshot;
+    expect(state.messages.filter((message) => message.role === 'user').map((message) => message.parts[0])).toEqual([{ type: 'text', text: 'Test prompt' }, { type: 'text', text: 'Follow-up' }]);
+    expect(new Set(state.rawEvents.map((event) => event.sequence)).size).toBe(state.rawEvents.length);
+    expect(Math.max(...state.rawEvents.map((event) => event.turnIndex ?? 0))).toBe(1);
+  });
+
   it('loads conversation history through the Profile request and restores it in place', async () => {
     const historyProfile: TurnStageProfile = { ...profile, conversations: { history: { request: { method: 'GET', url: '${env.baseUrl}/conversations/${conversation.id}/messages', headers: { authorization: 'Bearer ${secret.token}' } } } } };
     const fetch = vi.fn(async () => new Response(JSON.stringify({ messages: [{ id: 'm1', role: 'user', content: 'Hi' }, { id: 'm2', role: 'assistant', content: 'token-123 never leaks' }] }), { status: 200, headers: { 'content-type': 'application/json' } }));
