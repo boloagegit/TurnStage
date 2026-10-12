@@ -22,6 +22,7 @@ import { webUnsupportedTestFeature } from '../../src/shared/webTestCapabilities'
 import { evaluatePerformance } from '../../src/extension/testing/performanceEvaluator';
 import { parseWebSuiteInWorker, type WebSuite } from './suiteParser';
 import { TestRunControl } from '../../src/shared/testRunControl';
+import { t } from '../../src/webview/i18n';
 
 const WEB_TEST_CONCURRENCY = 4;
 const RUN_LEASE_MS = 120_000;
@@ -58,6 +59,9 @@ export class WebTestController {
   private activeAction?: TestOperationAction;
   private runControl?: TestRunControl;
   private readonly cancellationListeners = new Set<() => void>();
+  /** Evidence written by this page; kept while the page is open even if no recorded run refers to it yet. */
+  private readonly sessionEvidenceIds = new Set<string>();
+  private storageFullReported = false;
   private readonly historyPollTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
@@ -227,6 +231,7 @@ export class WebTestController {
         await this.store.put('runs', { id: `test-batch:${profile.id}:${runId}`, profileId: profile.id, kind: 'test-batch', name: 'Test run', updatedAt: record.finishedAt, value: record });
         await this.store.deleteMany('runs', checkpointIds);
         await this.trimRunHistory(profile.id);
+        await this.pruneEvidence(profile.id);
         await this.postHistory(profile.id);
       } catch (error) {
         historyFailure = error;
@@ -367,10 +372,37 @@ export class WebTestController {
     }
     result = redactKnownSecrets(result, [...secrets.values()]) as ScenarioRunResult;
     const evidenceId = browserUuid();
-    await this.store.put<RetainedEvidence>('evidence', { id: evidenceId, profileId: profile.id, kind: item.scenario.adversarial ? 'adversarial' : 'contract', name: item.scenario.name, updatedAt: Date.now(), value: { scenario: item.scenario, result } });
+    await this.retainEvidence({ id: evidenceId, profileId: profile.id, kind: item.scenario.adversarial ? 'adversarial' : 'contract', name: item.scenario.name, updatedAt: Date.now(), value: { scenario: item.scenario, result } });
     if (result.adversarial) this.upsertAdversarial(adversarialSummary(profile.id, item.scenario, result, evidenceId, item.suiteId));
     else this.upsertAutomation(automationSummary(profile.id, item.scenario, result, evidenceId, item.suiteId));
     return { result, evidenceId };
+  }
+
+  /**
+   * Stores a case's evidence. When browser storage is full, unreferenced evidence is pruned and the write retried
+   * once; if it still fails the result is kept without evidence (shown as expired) instead of aborting the run.
+   */
+  private async retainEvidence(artifact: StoredArtifact<RetainedEvidence>): Promise<void> {
+    this.sessionEvidenceIds.add(artifact.id);
+    try { await this.store.put<RetainedEvidence>('evidence', artifact); return; }
+    catch (error) { if (!isQuotaError(error)) throw error; }
+    await this.pruneEvidence(artifact.profileId).catch(() => undefined);
+    try { await this.store.put<RetainedEvidence>('evidence', artifact); }
+    catch (error) {
+      if (!isQuotaError(error)) throw error;
+      if (!this.storageFullReported) {
+        this.storageFullReported = true;
+        this.post({ type: 'request.error', error: { type: 'WebCapabilityUnavailable', message: t('Browser storage is full, so evidence for some cases was not kept. Their results are still recorded. Clear run history or export evidence to free space.') } });
+      }
+    }
+  }
+
+  /** Deletes stored evidence that no retained run or result from this page session refers to. */
+  private async pruneEvidence(profileId: string): Promise<void> {
+    const runs = await this.store.listByKind<TestRunHistoryRecord>('runs', profileId, 'test-batch');
+    const referenced = new Set([...this.sessionEvidenceIds, ...runs.flatMap((run) => run.value.cases.flatMap((item) => item.evidenceId ? [item.evidenceId] : []))]);
+    const stored = (await this.store.keys('evidence', profileId)).map(String);
+    await this.store.deleteMany('evidence', stored.filter((id) => !referenced.has(id)));
   }
 
   async evidenceResult(evidenceId: string): Promise<RetainedEvidence | undefined> { return (await this.store.get<RetainedEvidence>('evidence', evidenceId))?.value; }
@@ -741,3 +773,7 @@ function localizedRunStatus(status: string, locale: string): string {
   return language ? translated[language][status as keyof typeof translated['zh-TW']] ?? status : status;
 }
 function xml(value: string): string { return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'); }
+
+function isQuotaError(error: unknown): boolean {
+  return error instanceof DOMException ? error.name === 'QuotaExceededError' : error instanceof Error && error.name === 'QuotaExceededError';
+}

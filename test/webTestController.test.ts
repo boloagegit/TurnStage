@@ -116,6 +116,28 @@ describe('WebTestController', () => {
     expect(latestHistory().baselines).toEqual({ contract: generalRun });
   });
 
+  it('records results without evidence when browser storage is full and prunes evidence no run refers to', async () => {
+    const scenarios = Array.from({ length: 2 }, (_, index) => ({ id: `case-${index}`, name: `Case ${index}`, steps: [{ id: 'turn', input: 'Hello' }] }));
+    const profile: TurnStageProfile = { version: 1, id: `quota-${crypto.randomUUID()}`, name: 'Quota', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios } };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('event: done\ndata: {}\n\n', { status: 200 })));
+    const store = new ArtifactStore();
+    await store.put('evidence', { id: 'orphan', profileId: profile.id, kind: 'contract', name: 'Old', updatedAt: 1, value: {} });
+    const put = store.put.bind(store);
+    vi.spyOn(ArtifactStore.prototype, 'put').mockImplementation(async function (this: ArtifactStore, name, artifact) {
+      if (name === 'evidence' && artifact.id !== 'orphan') throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      return put(name, artifact);
+    });
+    const messages: HostPayload[] = [];
+    const controller = new WebTestController(() => profile, () => environment, new Map(), (payload) => messages.push(payload));
+    await controller.run('runContracts');
+    const history = messages.filter((item): item is Extract<HostPayload, { type: 'test.history' }> => item.type === 'test.history').at(-1)!.runs[0]!;
+    expect(history.status).toBe('completed');
+    expect(history.cases.every((item) => item.outcome === 'passed' && item.evidenceAvailable === false)).toBe(true);
+    expect(messages.filter((item) => item.type === 'request.error')).toHaveLength(1);
+    expect(await store.get('evidence', 'orphan')).toBeUndefined();
+  });
+
   it('keeps latest results and exports isolated when profiles reuse a case ID', async () => {
     const scenario = { id: 'shared-id', name: 'Same case ID', steps: [{ id: 'turn', input: 'Hello' }] };
     const base: TurnStageProfile = { version: 1, id: `isolation-a-${crypto.randomUUID()}`, name: 'A', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios: [scenario] } };
