@@ -1560,4 +1560,6 @@ export const ja: Record<string, string> = {
   "No cases have this difference.": "この差分に該当するケースはありません。",
   "Case changed since baseline": "比較元以降にケースが変更されました",
   "Settings changed since baseline": "比較元以降に設定が変更されました",
+  "Changed since last run": "前回の実行後に変更",
+  "Last result before this case was edited: {outcome}, {date}": "このケースを編集する前の最後の結果：{outcome}、{date}",
 };

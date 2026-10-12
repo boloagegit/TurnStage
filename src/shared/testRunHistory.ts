@@ -106,6 +106,12 @@ export function createTestRunHistoryRecord(input: {
   };
 }
 
+/**
+ * Digest of a case definition as recorded in run history. Hosts that know secret values also scrub them first;
+ * a case that embeds a secret then reads as changed, which only prompts a rerun.
+ */
+export function caseDefinitionDigest(scenario: unknown): string { return digestValue(scenario, { redactPayloads: true }); }
+
 export function nonPassingCases(run: TestRunHistoryRecord): TestCaseIdentity[] {
   return run.cases.filter((item) => !['passed', 'resisted'].includes(item.outcome ?? '') || item.completedAttempts < item.requestedAttempts)
     .map(({ profileId, suiteId, scenarioId, kind }) => ({ profileId, suiteId, scenarioId, kind }));
@@ -137,6 +143,31 @@ export function normalizeTestBaselines(value: unknown, runs: readonly TestRunHis
     if (typeof runId === 'string' && runs.some((run) => run.id === runId && run.cases.some((item) => item.kind === kind))) result[kind] = runId;
   }
   return result;
+}
+
+/** Most recent runs kept in history, plus older runs that still hold a baseline or a case's latest result. */
+export const RECENT_TEST_RUNS = 20;
+export const MAX_RETAINED_TEST_RUNS = 60;
+
+/**
+ * Chooses which runs to keep. Rerunning single cases creates one run each, so trimming by recency alone would
+ * drop every other case's latest result after 20 reruns; runs that hold a case's latest result are kept too,
+ * up to a fixed bound. `runs` must be newest first.
+ */
+export function selectRetainedTestRuns(runs: readonly TestRunHistoryRecord[], baselines: TestBaselineIds): TestRunHistoryRecord[] {
+  const keep = new Set(runs.slice(0, RECENT_TEST_RUNS).map((run) => run.id));
+  for (const id of baselineRunIdList(baselines)) keep.add(id);
+  const seen = new Set<string>();
+  for (const run of runs) {
+    let holdsLatest = false;
+    for (const item of run.cases) {
+      if (!item.outcome || seen.has(item.key)) continue;
+      seen.add(item.key);
+      holdsLatest = true;
+    }
+    if (holdsLatest && keep.size < MAX_RETAINED_TEST_RUNS) keep.add(run.id);
+  }
+  return runs.filter((run) => keep.has(run.id));
 }
 
 export function baselineRunIdList(baselines: TestBaselineIds): string[] { return [...new Set(Object.values(baselines).filter((value): value is string => Boolean(value)))]; }

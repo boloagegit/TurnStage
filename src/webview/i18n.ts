@@ -1691,6 +1691,8 @@ const zhTw: Record<string, string> = {
   "No cases have this difference.": "沒有案例符合此差異。",
   "Case changed since baseline": "案例自基準後已變更",
   "Settings changed since baseline": "設定自基準後已變更",
+  "Changed since last run": "上次執行後已變更",
+  "Last result before this case was edited: {outcome}, {date}": "此案例編輯前的最後結果：{outcome}，{date}",
 };
 
 export function setLocale(nextLocale: string, direction: 'ltr' | 'rtl' = 'ltr'): void {

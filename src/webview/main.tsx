@@ -13,14 +13,14 @@ import { dateTimeAttribute, formatDateTime, formatDuration, formatNumber, locali
 import { resolveUiLayout } from './uiConfig';
 import { applySessionDelta } from '../shared/sessionDelta';
 import { testCaseKey, type TestCaseIdentity } from '../shared/testSelection';
-import { compareTestRuns, nonPassingCases, unfinishedCases, type TestBaselineIds, type TestRunComparison, type TestRunHistoryRecord } from '../shared/testRunHistory';
+import { caseDefinitionDigest, compareTestRuns, nonPassingCases, unfinishedCases, type TestBaselineIds, type TestRunComparison, type TestRunHistoryRecord } from '../shared/testRunHistory';
 import { webUnsupportedTestFeature } from '../shared/webTestCapabilities';
 import { useConfirmAction } from './ConfirmAction';
 import { UnifiedTestHistoryCases } from './UnifiedTestHistoryCases';
 import './styles.css';
 import './refresh.css';
 import './vscodeNative.css';
-import { LiveCaseStatusContext, useLiveCaseStatuses, CaseResultContext, latestCaseOutcomes, liveCaseKey, type CaseOutcomeFilter } from './liveCaseStatus';
+import { LiveCaseStatusContext, useLiveCaseStatuses, CaseResultContext, latestCaseOutcomes, liveCaseKey, markStaleOutcomes, type CaseOutcomeFilter } from './liveCaseStatus';
 import { CaseRunSummary } from './CaseRunSummary';
 import { errorNotice, OperationNoticeToast, type OperationNotice } from './OperationNoticeToast';
 import { useRestoreUnsentDraft } from './unsentDraft';
@@ -557,7 +557,12 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   const liveCaseStatuses = useLiveCaseStatuses(testOperation);
   // The case list doubles as the result list: each row shows its last recorded result.
   const [caseOutcomeFilters, setCaseOutcomeFilters] = useState<Record<TestKindFilter, CaseOutcomeFilter>>({ contract: 'all', adversarial: 'all' });
-  const caseOutcomes = useMemo(() => latestCaseOutcomes(visibleHistoryRuns, testKind), [testKind, visibleHistoryRuns]);
+  // Results recorded before a case was edited are shown as changed rather than as the current result.
+  const currentCaseDigests = useMemo(() => new Map<string, string>([
+    ...(profile.tests?.scenarios ?? []).filter((item) => Boolean(item.adversarial) === (testKind === 'adversarial')).map((item) => [liveCaseKey(undefined, item.id), caseDefinitionDigest(item)] as const),
+    ...((testKind === 'adversarial' ? adversarialCaseCatalog : contractCaseCatalog)?.entries ?? []).flatMap((item) => item.definitionDigest ? [[liveCaseKey(item.suiteId, item.scenarioId), item.definitionDigest] as const] : []),
+  ]), [adversarialCaseCatalog, contractCaseCatalog, profile.tests?.scenarios, testKind]);
+  const caseOutcomes = useMemo(() => markStaleOutcomes(latestCaseOutcomes(visibleHistoryRuns, testKind), currentCaseDigests), [currentCaseDigests, testKind, visibleHistoryRuns]);
   const hasCaseHistory = visibleHistoryRuns.length > 0;
   // A result filter only means something while results exist; clearing history returns the list to All.
   const activeOutcomeFilter: CaseOutcomeFilter = hasCaseHistory ? caseOutcomeFilters[testKind] : 'all';
@@ -575,8 +580,8 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   const latestRunForKind = visibleHistoryRuns.reduce<TestRunHistoryRecord | undefined>((latest, run) => !latest || run.startedAt > latest.startedAt ? run : latest, undefined);
   // Rerun what the summary row counts as failed: each current case whose latest result did not pass.
   const failingCases = useMemo<TestCaseIdentity[]>(() => currentCases.filter((item) => {
-    const tone = caseOutcomes.get(liveCaseKey(item.suiteId, item.scenarioId))?.tone;
-    return tone === 'failed' || tone === 'attention';
+    const info = caseOutcomes.get(liveCaseKey(item.suiteId, item.scenarioId));
+    return !info?.stale && (info?.tone === 'failed' || info?.tone === 'attention');
   }).map((item) => ({ profileId: profile.id, scenarioId: item.scenarioId, ...(item.suiteId ? { suiteId: item.suiteId } : {}), kind: testKind })), [caseOutcomes, currentCases, profile.id, testKind]);
   const latestResultAt = useMemo(() => { let at = 0; for (const key of currentCaseKeys) at = Math.max(at, caseOutcomes.get(key)?.at ?? 0); return at || latestRunForKind?.startedAt || 0; }, [caseOutcomes, currentCaseKeys, latestRunForKind?.startedAt]);
   useEffect(() => {

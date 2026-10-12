@@ -27,7 +27,7 @@ describe('last result per case', () => {
 
   it('keeps the newest finished outcome per case and ignores other kinds and unfinished cases', () => {
     const outcomes = latestCaseOutcomes(runs, 'contract');
-    expect(outcomes.get(liveCaseKey(undefined, 'a'))).toEqual({ outcome: 'passed', tone: 'passed', durationMs: 212, at: 2_000 });
+    expect(outcomes.get(liveCaseKey(undefined, 'a'))).toMatchObject({ outcome: 'passed', tone: 'passed', durationMs: 212, at: 2_000 });
     expect(outcomes.get(liveCaseKey(undefined, 'b'))?.at).toBe(1_000);
     expect(outcomes.has(liveCaseKey(undefined, 'c'))).toBe(false);
     expect(outcomes.get(liveCaseKey('suite', 'd'))?.tone).toBe('attention');

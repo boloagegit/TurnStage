@@ -45,7 +45,15 @@ export function useLiveCaseStatuses(operation: TestOperationSnapshot | undefined
 
 export type CaseOutcomeTone = 'passed' | 'failed' | 'attention';
 export type CaseOutcomeFilter = 'all' | 'failed' | 'notRun';
-export interface CaseOutcomeInfo { outcome: TestRunOutcome; tone: CaseOutcomeTone; durationMs?: number; at: number }
+export interface CaseOutcomeInfo {
+  outcome: TestRunOutcome;
+  tone: CaseOutcomeTone;
+  durationMs?: number;
+  at: number;
+  definitionDigest?: string;
+  /** The case was edited after this result, so the result no longer describes the current definition. */
+  stale?: boolean;
+}
 export interface CaseResultState { outcomes: ReadonlyMap<string, CaseOutcomeInfo>; filter: CaseOutcomeFilter; hasHistory: boolean; onFilterChange?: (filter: CaseOutcomeFilter) => void }
 
 const EMPTY_OUTCOMES: ReadonlyMap<string, CaseOutcomeInfo> = new Map();
@@ -70,15 +78,29 @@ export function latestCaseOutcomes(runs: readonly TestRunHistoryRecord[], kind: 
       const key = liveCaseKey(item.suiteId, item.scenarioId);
       const previous = latest.get(key);
       if (previous && previous.at >= run.startedAt) continue;
-      latest.set(key, { outcome: item.outcome, tone: outcomeTone(item.outcome), ...(item.durationMs === undefined ? {} : { durationMs: item.durationMs }), at: run.startedAt });
+      latest.set(key, { outcome: item.outcome, tone: outcomeTone(item.outcome), ...(item.durationMs === undefined ? {} : { durationMs: item.durationMs }), at: run.startedAt, definitionDigest: item.definitionDigest });
     }
   }
   return latest.size ? latest : EMPTY_OUTCOMES;
 }
 
+/** Marks results recorded before the case's current definition; cases without a known digest are left as they are. */
+export function markStaleOutcomes(outcomes: ReadonlyMap<string, CaseOutcomeInfo>, currentDigests: ReadonlyMap<string, string>): ReadonlyMap<string, CaseOutcomeInfo> {
+  let changed = false;
+  const result = new Map(outcomes);
+  for (const [key, info] of outcomes) {
+    const current = currentDigests.get(key);
+    if (!current || !info.definitionDigest || current === info.definitionDigest) continue;
+    result.set(key, { ...info, stale: true });
+    changed = true;
+  }
+  return changed ? result : outcomes;
+}
+
+/** A stale result counts as not run: the current definition has never been executed. */
 export function matchesOutcomeFilter(info: CaseOutcomeInfo | undefined, filter: CaseOutcomeFilter): boolean {
-  if (filter === 'failed') return info !== undefined && info.tone !== 'passed';
-  if (filter === 'notRun') return info === undefined;
+  if (filter === 'failed') return info !== undefined && !info.stale && info.tone !== 'passed';
+  if (filter === 'notRun') return info === undefined || info.stale === true;
   return true;
 }
 
@@ -103,6 +125,9 @@ export function LiveCaseStatusBadge({ suiteId, scenarioId }: { suiteId?: string;
   const last = outcomes.get(key);
   if (!last) return hasHistory ? <span className="live-case-status live-case-status--last live-case-status--not-run"><span className="live-case-status__mark" aria-hidden="true" />{t('Not run')}</span> : null;
   const label = outcomeLabel(last.outcome);
+  if (last.stale) return <span className="live-case-status live-case-status--last live-case-status--stale" title={t('Last result before this case was edited: {outcome}, {date}', { outcome: label, date: formatDateTime(last.at) })}>
+    <span className="live-case-status__mark" aria-hidden="true" />{t('Changed since last run')}
+  </span>;
   return <span className={`live-case-status live-case-status--last live-case-status--${last.tone}`} title={t('Last result: {outcome}, {date}', { outcome: label, date: formatDateTime(last.at) })}>
     <span className="live-case-status__mark" aria-hidden="true" />{label}{last.durationMs !== undefined && <small className="live-case-status__metric">{formatDuration(last.durationMs)}</small>}
   </span>;

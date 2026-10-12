@@ -8,7 +8,8 @@ export interface CaseResultCounts { passed: number; failed: number; attention: n
 export function caseResultCounts(caseKeys: readonly string[], outcomes: ReadonlyMap<string, CaseOutcomeInfo>): CaseResultCounts {
   const counts: CaseResultCounts = { passed: 0, failed: 0, attention: 0, notRun: 0 };
   for (const key of caseKeys) {
-    const tone = outcomes.get(key)?.tone;
+    const info = outcomes.get(key);
+    const tone = info?.stale ? undefined : info?.tone;
     if (tone === 'passed') counts.passed += 1;
     else if (tone === 'failed') counts.failed += 1;
     else if (tone === 'attention') counts.attention += 1;

@@ -2,6 +2,7 @@ import type * as vscode from 'vscode';
 import type { ContractCaseCatalog, LinkedContractCaseSummary } from '../../shared/protocol';
 import type { ScenarioDefinition, TurnStageProfile } from '../../shared/types';
 import { loadContractSuite } from './contractSuiteRepository';
+import { caseDefinitionDigest } from '../../shared/testRunHistory';
 
 /** Load bounded, prompt-free summaries. Full case content is loaded only on selection. */
 export async function loadLinkedContractCaseCatalog(profileUri: vscode.Uri, profile: TurnStageProfile, resolveExternal?: (reference: string) => vscode.Uri | undefined): Promise<ContractCaseCatalog> {
@@ -21,7 +22,7 @@ export async function loadLinkedContractCaseCatalog(profileUri: vscode.Uri, prof
 function summarize(sourcePath: string, suiteId: string, suiteName: string, scenario: ScenarioDefinition): LinkedContractCaseSummary {
   return {
     sourcePath, suiteId, suiteName, scenarioId: scenario.id, scenarioName: scenario.name || scenario.id,
-    tags: (scenario.tags ?? []).slice(0, 20), turns: scenario.steps.length,
+    tags: (scenario.tags ?? []).slice(0, 20), turns: scenario.steps.length, definitionDigest: caseDefinitionDigest(scenario),
     capture: scenario.capture ? structuredClone(scenario.capture) : undefined,
     assertions: (scenario.assertions?.length ?? 0) + scenario.steps.reduce((sum, step) => sum + (step.assertions?.length ?? 0), 0),
     comparison: Boolean(scenario.comparison), performance: Boolean(scenario.performance), faults: Boolean(scenario.faults),
