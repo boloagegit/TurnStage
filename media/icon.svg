@@ -1,30 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="TurnStage">
   <defs>
     <linearGradient id="turnstage-tile" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0b1222"/>
-      <stop offset="1" stop-color="#1a2850"/>
+      <stop stop-color="#0d1526"/>
+      <stop offset="1" stop-color="#1b2a4a"/>
     </linearGradient>
     <radialGradient id="turnstage-light" cx="0" cy="0" r="1" gradientTransform="translate(70 40) rotate(50) scale(210)" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#3a5a8c" stop-opacity="0.5"/>
-      <stop offset="1" stop-color="#0b1222" stop-opacity="0"/>
+      <stop stop-color="#3a5a8c" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#3a5a8c" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="turnstage-turns" x1="12" y1="3" x2="12" y2="21" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#86f4e4"/>
-      <stop offset="0.5" stop-color="#4cc3ff"/>
-      <stop offset="1" stop-color="#8f7cff"/>
+    <linearGradient id="turnstage-bubble" x1="5" y1="3" x2="19" y2="21" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e4ecfa"/>
     </linearGradient>
   </defs>
 
   <rect width="256" height="256" rx="56" fill="url(#turnstage-tile)"/>
   <rect width="256" height="256" rx="56" fill="url(#turnstage-light)"/>
-  <rect x="1.5" y="1.5" width="253" height="253" rx="54.5" fill="none" stroke="#c8d6f0" stroke-opacity="0.14" stroke-width="3"/>
+  <rect x="1.5" y="1.5" width="253" height="253" rx="54.5" fill="none" stroke="#e6ecf8" stroke-opacity="0.13" stroke-width="3"/>
 
-  <!-- The product mark uses the exact Activity Bar path, scaled from its 24px viewBox; the stroke and end nodes are heavier for the filled tile. -->
+  <!-- The product mark uses the exact Activity Bar paths, scaled from its 24px viewBox; the bubble is filled for the tile. -->
   <g transform="translate(26 26) scale(8.5)">
-    <path fill="none" stroke="url(#turnstage-turns)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M17 5.5H8.75a3.25 3.25 0 0 0 0 6.5h6.5a3.25 3.25 0 0 1 0 6.5H7"/>
-    <g fill="url(#turnstage-turns)">
-      <circle cx="17.5" cy="5.5" r="2.4"/>
-      <rect x="4.6" y="16.1" width="4.8" height="4.8" rx="1.1"/>
-    </g>
+    <path fill="url(#turnstage-bubble)" stroke="url(#turnstage-bubble)" stroke-width="1.2" stroke-linejoin="round" d="M7 3.5h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H10.5L6 21v-3.6A4 4 0 0 1 3 13.5v-6a4 4 0 0 1 4-4z"/>
+    <path fill="none" stroke="#2f8cff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M6.5 10.5h3l1.6-3.2 2.4 6.2 1.6-3h2.4"/>
   </g>
 </svg>

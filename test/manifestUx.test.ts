@@ -82,21 +82,26 @@ describe('VS Code contribution UX', () => {
     const icon = readFileSync(resolve(import.meta.dirname, '..', 'media', 'activity.svg'), 'utf8');
     expect(icon).toContain('viewBox="0 0 24 24"');
     expect(icon).toContain('stroke="currentColor"');
-    expect(icon).toContain('fill="currentColor"');
-    expect(icon).toContain('d="M17 5.5H8.75a3.25 3.25 0 0 0 0 6.5h6.5a3.25 3.25 0 0 1 0 6.5H7"');
+    expect(icon).toContain('fill="none"');
+    expect(icon).toContain('d="M7 3.5h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H10.5L6 21v-3.6A4 4 0 0 1 3 13.5v-6a4 4 0 0 1 4-4z"');
     expect(icon).not.toMatch(/#[0-9a-f]{3,8}/iu);
   });
 
-  it('keeps the Marketplace icon and Web favicon on the exact Activity Bar mark path', () => {
+  it('keeps the Marketplace icon and Web favicon on the exact Activity Bar mark paths', () => {
     const activityIcon = readFileSync(resolve(import.meta.dirname, '..', 'media', 'activity.svg'), 'utf8');
     const marketplaceIcon = readFileSync(resolve(import.meta.dirname, '..', 'media', 'icon.svg'), 'utf8');
     const webPage = readFileSync(resolve(import.meta.dirname, '..', 'web', 'index.html'), 'utf8');
-    const markPath = 'M17 5.5H8.75a3.25 3.25 0 0 0 0 6.5h6.5a3.25 3.25 0 0 1 0 6.5H7';
+    const markPaths = [
+      'M7 3.5h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H10.5L6 21v-3.6A4 4 0 0 1 3 13.5v-6a4 4 0 0 1 4-4z',
+      'M6.5 10.5h3l1.6-3.2 2.4 6.2 1.6-3h2.4',
+    ];
 
-    expect(activityIcon).toContain(`d="${markPath}"`);
-    expect(marketplaceIcon).toContain(`d="${markPath}"`);
+    for (const markPath of markPaths) {
+      expect(activityIcon).toContain(`d="${markPath}"`);
+      expect(marketplaceIcon).toContain(`d="${markPath}"`);
+      expect(webPage).toContain(`d='${markPath}'`);
+    }
     expect(marketplaceIcon).toContain('transform="translate(26 26) scale(8.5)"');
-    expect(webPage).toContain(`d='${markPath}'`);
     expect(manifest).toMatchObject({ icon: 'media/icon.png' });
   });
 
