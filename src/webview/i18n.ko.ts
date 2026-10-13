@@ -1,5 +1,13 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Actor': '액터',
+  'Leave empty to allow HTTPS only.': '비워 두면 HTTPS만 허용합니다.',
+  'Host: {host}.': '호스트: {host}.',
+  'Default': '기본값',
+  'Older runs are removed after this count. Leave empty to use the TurnStage run retention setting (20 unless you changed it).': '이 개수를 넘으면 오래된 실행부터 삭제합니다. 비워 두면 TurnStage 실행 보관 설정(바꾸지 않았다면 20)을 사용합니다.',
+  'Older runs are removed after this count. Leave empty for 20.': '이 개수를 넘으면 오래된 실행부터 삭제합니다. 비워 두면 20입니다.',
+  'links: none': '링크: 없음',
+  'No link scheme is allowed, so links will not open': '허용된 링크 스킴이 없어 링크가 열리지 않습니다',
   'This browser always verifies server certificates. The setting applies only when the Profile runs in VS Code.': '브라우저는 항상 서버 인증서를 확인합니다. 이 설정은 VS Code에서 프로필을 실행할 때만 적용됩니다.',
   'Every turn goes to this URL. Method, headers, body, and timeouts are set in Request; a variant below can replace the body and add headers.': '모든 턴은 이 URL로 보냅니다. 메서드, 헤더, 본문, 시간 제한은 \'요청\'에서 설정하며, 아래 변형으로 본문을 바꾸거나 헤더를 추가할 수 있습니다.',
   'Opens HTTP and HTTPS links; allow lists apply in VS Code': 'HTTP와 HTTPS 링크를 엽니다. 허용 목록은 VS Code에서만 적용',

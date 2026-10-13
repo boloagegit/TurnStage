@@ -510,7 +510,7 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
       <p className="sr-only">{t('Bound retries and redirects without replaying partial streamed output.')}</p>
       <div className="settings-form-grid">
         <NumberSettingField label={t('Reconnect attempts')} id="settings-reconnect-attempts" value={request.reconnect?.maxAttempts} placeholder="0" min={0} max={5} hint={t('Retries only before the first stream event.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxAttempts'], value)} />
-        <NumberSettingField label={t('Reconnect base delay (seconds)')} id="settings-reconnect-base-delay" value={request.reconnect?.baseDelayMs} placeholder="0.5" min={0} max={30000} step="any" scale={1000} hint={t('Wait before the first retry.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'baseDelayMs'], value)} />
+        <NumberSettingField label={t('Reconnect base delay (seconds)')} id="settings-reconnect-base-delay" value={request.reconnect?.baseDelayMs} placeholder="0.5" min={0} max={vscodeFeatures ? 30_000 : 10_000} step="any" scale={1000} hint={t('Wait before the first retry.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'baseDelayMs'], value)} />
         <NumberSettingField label={t('Reconnect maximum delay (seconds)')} id="settings-reconnect-max-delay" value={request.reconnect?.maxDelayMs} placeholder="10" min={0} max={120000} step="any" scale={1000} hint={t('Longest wait between retries.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxDelayMs'], value)} />
         <SettingField label={t('Retry HTTP statuses')} id="settings-reconnect-statuses" hint={t('Comma-separated 4xx or 5xx status codes.')}>
           <PatchInput id="settings-reconnect-statuses" value={(request.reconnect?.retryOnStatuses ?? []).join(', ')} placeholder="429, 502, 503, 504" inputMode="numeric" onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'retryOnStatuses'], parseStatusList(value))} />
@@ -651,7 +651,7 @@ function HistoryErrorsSection({ profile, snapshot, patch, vscodeFeatures }: { pr
           <SettingCheckbox id="settings-history-normalized" label={t('Record normalized events')} checked={localRuns?.recordNormalizedEvents ?? true} onChange={(value) => patch(['history', 'localRuns', 'recordNormalizedEvents'], value)} />
           <SettingCheckbox id="settings-history-snapshot" label={t('Record chat snapshot')} checked={localRuns?.recordChatSnapshot ?? true} onChange={(value) => patch(['history', 'localRuns', 'recordChatSnapshot'], value)} />
         </SettingCheckboxGroup>
-        <NumberSettingField label={t('Maximum local runs')} id="settings-history-max-runs" value={localRuns?.maxRuns} placeholder="20" min={1} max={100} hint={t('Older runs are evicted after this count.')} onCommit={(value) => patch(['history', 'localRuns', 'maxRuns'], value)} />
+        <NumberSettingField label={t('Maximum local runs')} id="settings-history-max-runs" value={localRuns?.maxRuns} placeholder={vscodeFeatures ? t('Default') : '20'} min={1} max={100} hint={t(vscodeFeatures ? 'Older runs are removed after this count. Leave empty to use the TurnStage run retention setting (20 unless you changed it).' : 'Older runs are removed after this count. Leave empty for 20.')} onCommit={(value) => patch(['history', 'localRuns', 'maxRuns'], value)} />
         <ListPatchField label={t('Visible metrics')} id="settings-visible-metrics" value={profile.metrics?.enabled ?? []} placeholder="ttft, totalDuration, eventCount" hint={t('Leave empty to show every available metric.')} onCommit={(value) => patch(['metrics', 'enabled'], value)} wide />
         <ListPatchField label={t('Visible message metrics')} id="settings-visible-message-metrics" value={profile.metrics?.messageEnabled ?? []} placeholder="ttft, totalDuration" hint={t('Leave empty to show only TTFT and total duration. Add mapped metric IDs explicitly.')} onCommit={(value) => patch(['metrics', 'messageEnabled'], value)} wide />
       </div>
@@ -693,7 +693,7 @@ function SecuritySection({ profile, snapshot, remoteName, patch, vscodeFeatures 
       <SectionHeading id="security-trust-heading" title={t('Workspace trust')} description={t(hostText('Network requests and privileged actions are owned and checked by the Extension Host.', 'Network requests are sent directly from this browser to the configured endpoint.'))} />
       <div className={`settings-trust-card ${snapshot?.trusted === false ? 'is-restricted' : ''}`} role="status">
         <ProductIcon name={snapshot?.trusted === false ? 'warning' : 'check'} className="settings-trust-icon" />
-        <div><strong>{t(snapshot?.trusted === false ? 'Restricted workspace' : 'Workspace trust is available')}</strong><p>{snapshot?.trusted === false ? t('Request-backed openings and conversation requests are disabled until this workspace is trusted.') : t('Host: {host}. URI and command policies still apply.', { host: remoteName || t(hostText('Local Extension Host', 'This browser')) })}</p></div>
+        <div><strong>{t(snapshot?.trusted === false ? 'Restricted workspace' : 'Workspace trust is available')}</strong><p>{snapshot?.trusted === false ? t('Request-backed openings and conversation requests are disabled until this workspace is trusted.') : t(vscodeFeatures ? 'Host: {host}. URI and command policies still apply.' : 'Host: {host}.', { host: remoteName || t(hostText('Local Extension Host', 'This browser')) })}</p></div>
       </div>
     </section>
 
@@ -701,7 +701,7 @@ function SecuritySection({ profile, snapshot, remoteName, patch, vscodeFeatures 
       <SectionHeading id="security-policy-heading" title={t('Allow lists')} description={t('Use comma-separated exact values. Keep these lists as narrow as the profile needs.')} />
       {!vscodeFeatures && <p className="settings-callout settings-callout-info" role="note">{t('These lists are enforced by the VS Code extension. This browser opens any HTTP or HTTPS link and never runs commands.')}</p>}
       <div className="settings-form-grid">
-        <ListPatchField label={t('Allowed URI schemes')} id="settings-security-schemes" value={security?.allowedUriSchemes ?? []} placeholder="https" hint={t('The runtime defaults to HTTPS when this list is empty.')} onCommit={(value) => patch(['security', 'allowedUriSchemes'], value)} />
+        <ListPatchField label={t('Allowed URI schemes')} id="settings-security-schemes" value={security?.allowedUriSchemes ?? []} placeholder="https" hint={t('Leave empty to allow HTTPS only.')} onCommit={(value) => patch(['security', 'allowedUriSchemes'], value.length ? value : undefined)} />
         <ListPatchField label={t('Allowed domains')} id="settings-security-domains" value={security?.allowedDomains ?? []} placeholder="api.example.com" hint={t('Domains are matched exactly when the list is non-empty.')} onCommit={(value) => patch(['security', 'allowedDomains'], value)} />
         <ListPatchField label={t('Allowed VS Code commands')} id="settings-security-commands" value={security?.allowedCommands ?? []} placeholder="workbench.action.files.openFile" hint={t('Only commands explicitly allowlisted here may be invoked by a profile action.')} onCommit={(value) => patch(['security', 'allowedCommands'], value)} wide />
       </div>
@@ -1857,9 +1857,13 @@ function NumberSettingField({ label, id, value, placeholder, min, max, step = 1,
   useEffect(() => setDraft(shown), [shown]);
   const commit = () => {
     if (consumeRevert(reverting)) return;
-    if (!draft.trim()) { if (value !== undefined) onCommit(undefined); return; }
     const parsed = Number(draft) * scale;
-    if (Number.isFinite(parsed)) onCommit(Math.min(max, Math.max(min, scale === 1 ? parsed : Math.round(parsed))));
+    // Empty, or zero for a setting that must be positive (a timeout), means "not set"; a 0 would otherwise clamp to 1 ms.
+    if (!draft.trim() || min > 0 && Number.isFinite(parsed) && parsed <= 0) { setDraft(''); if (value !== undefined) onCommit(undefined); return; }
+    if (!Number.isFinite(parsed)) { setDraft(shown); return; }
+    const next = Math.min(max, Math.max(min, scale === 1 ? parsed : Math.round(parsed)));
+    setDraft(String(next / scale));
+    onCommit(next);
   };
   return <SettingField label={label} id={id} hint={hint}><input id={id} type="number" min={min / scale} max={max / scale} step={step} value={draft} placeholder={placeholder} inputMode="decimal" onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); event.currentTarget.blur(); } if (event.key === 'Escape') { revertField(event, reverting); setDraft(shown); event.currentTarget.blur(); } }} /></SettingField>;
 }

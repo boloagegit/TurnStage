@@ -7,6 +7,15 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Actor': '使用者',
+  'Environment': '環境',
+  'Leave empty to allow HTTPS only.': '留空表示只允許 HTTPS。',
+  'Host: {host}.': '主機：{host}。',
+  'Default': '預設',
+  'Older runs are removed after this count. Leave empty to use the TurnStage run retention setting (20 unless you changed it).': '超過這個數量就移除最舊的記錄。留空時使用 TurnStage 的執行記錄保留設定（沒改過就是 20）。',
+  'Older runs are removed after this count. Leave empty for 20.': '超過這個數量就移除最舊的記錄。留空時為 20。',
+  'links: none': '連結：全部不允許',
+  'No link scheme is allowed, so links will not open': '沒有允許任何連結協定，所有連結都打不開',
   'This browser always verifies server certificates. The setting applies only when the Profile runs in VS Code.': '瀏覽器一律會驗證伺服器憑證。這個設定只在 VS Code 中執行設定檔時生效。',
   'Every turn goes to this URL. Method, headers, body, and timeouts are set in Request; a variant below can replace the body and add headers.': '每一輪都會送到這個網址。方法、標頭、內容與逾時在「請求」區設定；下面的變體可以替換內容、加上標頭。',
   'Opens HTTP and HTTPS links; allow lists apply in VS Code': '開啟 HTTP 與 HTTPS 連結；允許清單只在 VS Code 套用',

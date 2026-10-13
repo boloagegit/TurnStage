@@ -44,7 +44,8 @@ describe('settings overview', () => {
     const overview = settingsSectionOverview(broken);
     expect(overview.request.attention).toBe('Request URL is missing');
     expect(overview.request.summary).toContain('times out after 120 s');
-    expect(overview['opening-flow'].attention).toBeUndefined();
+    // Profile validation rejects a Profile without variants.
+    expect(overview['opening-flow'].attention).toBe('No request variants');
     expect(overview['stream-mapping'].attention).toBe('No mapping rules');
     const insecure: TurnStageProfile = { ...profile, conversation: { send: { ...profile.conversation.send, tls: { allowInvalidCertificates: true } } } };
     expect(settingsSectionOverview(insecure).request.attention).toBe('Certificate checks are off');
@@ -60,6 +61,18 @@ describe('settings overview', () => {
     expect(settingsSectionOverview({ ...profile, opening: { ...profile.opening!, mode: 'disabled' } })['opening-flow'].summary).toBe('No opening · 1 request variant');
     // The browser ignores the allow lists.
     expect(settingsSectionOverview(profile, undefined, 'web').security.summary).toBe('Opens HTTP and HTTPS links; allow lists apply in VS Code');
+  });
+
+  it('warns when an empty scheme list blocks every link, unlike a missing list', () => {
+    const blocked = settingsSectionOverview({ ...profile, security: { allowedUriSchemes: [] } }).security;
+    expect(blocked.summary).toBe('links: none · any domain · no commands');
+    expect(blocked.attention).toBe('No link scheme is allowed, so links will not open');
+    expect(settingsSectionOverview(profile).security.attention).toBeUndefined();
+  });
+
+  it('counts the message actions Chat actually shows', () => {
+    const overview = settingsSectionOverview({ ...profile, ui: { messageActions: ['message.copy', 'message.copy', 'message.unknown'] } });
+    expect(overview['chat-ui'].summary).toContain('1 message action ·');
   });
 
   it('describes the last response in one line', () => {
@@ -117,6 +130,38 @@ describe('embedded settings navigation', () => {
     const idle = screen.getByRole('spinbutton', { name: 'Idle timeout (seconds)' }) as HTMLInputElement;
     expect(idle.value).toBe('');
     expect(idle.placeholder).toBe('Off');
+  });
+
+  it('treats 0 as "not set" for timeouts instead of storing a 1 ms limit', async () => {
+    const post = vi.fn();
+    const user = userEvent.setup();
+    render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={{ ...profile, conversation: { send: { ...profile.conversation.send, idleTimeoutMs: 30_000 } } }} post={post} />);
+    const idle = screen.getByRole('spinbutton', { name: 'Idle timeout (seconds)' }) as HTMLInputElement;
+    await user.clear(idle);
+    await user.type(idle, '0{Enter}');
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['conversation', 'send', 'idleTimeoutMs'], value: undefined });
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ value: 1 }));
+    expect(idle.value).toBe('');
+  });
+
+  it('shows the stored value after clamping, even when it did not change', async () => {
+    const post = vi.fn();
+    const user = userEvent.setup();
+    render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={{ ...profile, conversation: { send: { ...profile.conversation.send, timeoutMs: 900_000 } } }} post={post} />);
+    const timeout = screen.getByRole('spinbutton', { name: 'Request timeout (seconds)' }) as HTMLInputElement;
+    await user.clear(timeout);
+    await user.type(timeout, '5000{Enter}');
+    expect(timeout.value).toBe('900');
+  });
+
+  it('restores HTTPS-only links when the scheme list is cleared', async () => {
+    const post = vi.fn();
+    const user = userEvent.setup();
+    render(<SettingsWorkspace section="security" onSectionChange={vi.fn()} profile={{ ...profile, security: { allowedUriSchemes: ['https', 'http'] } }} post={post} />);
+    const schemes = screen.getByRole('textbox', { name: 'Allowed URI schemes' });
+    await user.clear(schemes);
+    await user.tab();
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['security', 'allowedUriSchemes'], value: undefined });
   });
 
   it('keeps retries and certificates collapsed until one of them is changed', () => {
@@ -210,7 +255,7 @@ describe('conversation flow editor', () => {
     expect(screen.queryByRole('spinbutton', { name: 'Maximum local runs' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Unexpected stream end policy' })).toBeNull();
     expect(screen.getByText('POST ${env.baseUrl}/chat')).toBeTruthy();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Edit request' }));
+    await userEvent.setup().click(screen.getByRole('link', { name: 'Edit request' }));
     expect(onEditRequest).toHaveBeenCalled();
   });
 });
