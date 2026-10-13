@@ -144,7 +144,7 @@ describe('chat preview conversation tools', () => {
     const divider = screen.getByRole('separator', { name: '' });
     expect(divider.textContent).toBe('Earlier messages loaded from the server · new messages below');
     expect(divider.nextElementSibling?.getAttribute('data-message-id')).toBe('user-1');
-    await user.click(screen.getByRole('button', { name: 'Matches server copy' }));
+    await user.click(screen.getByRole('button', { name: 'Same as server history' }));
     expect(screen.getByRole('tab', { name: 'History check' }).getAttribute('aria-selected')).toBe('true');
   });
 

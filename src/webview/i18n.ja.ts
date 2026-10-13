@@ -1,5 +1,15 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Restart': '再起動',
+  'Screenshot': 'スクリーンショット',
+  'After the opening, each message sends this request': 'オープニングの後、各メッセージはこのリクエストを送信します',
+  'The first matching variant sets its body': '本文は最初に一致したバリアントで決まります',
+  'While a reply streams, it can be stopped': '応答のストリーミング中は停止できます',
+  'Comparing with server history…': 'サーバーの履歴と比較中…',
+  'Same as server history': 'サーバーの履歴と同じ',
+  'Could not compare with server history': 'サーバーの履歴と比較できませんでした',
+  '1 conversation differs from the server': '1 件の会話がサーバーと異なります',
+  '{count} conversations differ from the server': '{count} 件の会話がサーバーと異なります',
   '{count} step': '{count} ステップ',
   '{count} steps': '{count} ステップ',
   '{count} assertion': 'アサーション {count} 件',

@@ -7,6 +7,16 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Restart': '重開',
+  'Screenshot': '截圖',
+  'After the opening, each message sends this request': '開場之後，每則訊息都會送出這個請求',
+  'The first matching variant sets its body': '內容由第一個符合條件的變體決定',
+  'While a reply streams, it can be stopped': '回覆串流中時，可以停止它',
+  'Comparing with server history…': '正在與伺服器記錄比對…',
+  'Same as server history': '與伺服器記錄相同',
+  'Could not compare with server history': '無法與伺服器記錄比對',
+  '1 conversation differs from the server': '1 段對話與伺服器不同',
+  '{count} conversations differ from the server': '{count} 段對話與伺服器不同',
   '{count} step': '{count} 個步驟',
   '{count} steps': '{count} 個步驟',
   '{count} assertion': '{count} 個斷言',

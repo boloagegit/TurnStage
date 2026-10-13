@@ -126,7 +126,7 @@ try {
   const composer = page.getByRole('textbox', { name: /message/iu }).first();
   await composer.fill('Where is my refund?');
   await composer.press('Enter');
-  await page.getByRole('button', { name: 'Matches server copy' }).waitFor();
+  await page.getByRole('button', { name: 'Same as server history' }).waitFor();
   await shot('01-check-matches');
 
   // Turn 2 in rewrite mode reports a difference with a diff.
@@ -136,7 +136,7 @@ try {
   await modeSelect.selectOption({ label: 'Server rewrites saved answer' });
   await composer.fill('And the second step?');
   await composer.press('Enter');
-  const differs = page.getByRole('button', { name: '1 differs from server' });
+  const differs = page.getByRole('button', { name: '1 conversation differs from the server' });
   await differs.waitFor();
   await page.setViewportSize({ width: 420, height: 900 });
   await page.getByRole('tab', { name: 'Chat', exact: true }).click();
@@ -167,7 +167,7 @@ try {
   await modeSelect.selectOption({ label: 'Normal' });
   await composer.fill('A different topic');
   await composer.press('Enter');
-  await page.getByRole('button', { name: 'Matches server copy' }).waitFor();
+  await page.getByRole('button', { name: 'Same as server history' }).waitFor();
   const drawer = page.getByRole('region', { name: 'Conversations' });
   if (!await drawer.isVisible()) await page.getByRole('button', { name: 'Conversations' }).click();
   // Both conversations are titled by the server ("Sample conversation"); the earlier one is not current.

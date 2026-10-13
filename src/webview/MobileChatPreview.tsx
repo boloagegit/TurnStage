@@ -170,6 +170,7 @@ export function MobileChatPreview({
   const [responsiveSize, setResponsiveSize] = useState({ width: viewport.width, height: viewport.height });
   const [fitScale, setFitScale] = useState(1);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
+  const screenshotLabel = t(screenshotMode === 'download' ? capturingScreenshot ? 'Downloading chat screenshot…' : 'Download chat screenshot' : capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot');
   const [capturingVisual, setCapturingVisual] = useState<'baseline' | 'compare'>();
   const [screenshotStatus, setScreenshotStatus] = useState('');
   const [responseDetailId, setResponseDetailId] = useState<string>();
@@ -183,7 +184,7 @@ export function MobileChatPreview({
     messagesRef.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   });
   const historyCheck = historyCheckSummary(conversations);
-  const historyCheckLabel = !historyCheck ? '' : historyCheck.status === 'checking' ? t('Checking server copy…') : historyCheck.status === 'match' ? t('Matches server copy') : historyCheck.status === 'failed' ? t('History check failed') : historyCheck.differences === 1 ? t('1 differs from server') : t('{count} differ from server', { count: formatNumber(historyCheck.differences) });
+  const historyCheckLabel = !historyCheck ? '' : historyCheck.status === 'checking' ? t('Comparing with server history…') : historyCheck.status === 'match' ? t('Same as server history') : historyCheck.status === 'failed' ? t('Could not compare with server history') : historyCheck.differences === 1 ? t('1 conversation differs from the server') : t('{count} conversations differ from the server', { count: formatNumber(historyCheck.differences) });
   const conversationsAvailable = Boolean(conversations && (conversations.enabled || conversations.remote.configured));
   const allSnapshotMessages = snapshot?.messages ?? EMPTY_MESSAGES;
   const [visibleMessageLimit, setVisibleMessageLimit] = useState(DEFAULT_VISIBLE_CHAT_MESSAGES);
@@ -471,9 +472,10 @@ export function MobileChatPreview({
           {historyCheck.status === 'mismatch' && <span className="mobile-chat-preview__history-check-count" aria-hidden="true">{formatNumber(historyCheck.differences)}</span>}
         </button>}
         {conversationsAvailable && <IconButton ref={conversationToggleRef} className="mobile-chat-preview__conversations" icon="comment-discussion" label={t('Conversations')} type="button" aria-expanded={Boolean(conversationDrawer)} aria-controls={conversationDrawer ? conversationDrawerId : undefined} onClick={() => setConversationDrawer((current) => current ? undefined : 'conversations')} />}
-        {snapshot && snapshot.sessionState !== 'notStarted' && <IconButton className="mobile-chat-preview__restart" icon={conversations?.enabled ? 'add' : 'debug-restart'} label={t(conversations?.enabled ? 'New conversation' : 'Restart session')} type="button" disabled={!trusted || active || snapshot.sessionState === 'loadingOpening'} onClick={() => post({ type: 'conversation.new' })} />}
+        {snapshot && snapshot.sessionState !== 'notStarted' && <button className="mobile-chat-preview__restart mobile-chat-preview__labeled-action" aria-label={t(conversations?.enabled ? 'New conversation' : 'Restart session')} title={t(conversations?.enabled ? 'New conversation' : 'Restart session')} type="button" disabled={!trusted || active || snapshot.sessionState === 'loadingOpening'} onClick={() => post({ type: 'conversation.new' })}><ProductIcon name={conversations?.enabled ? 'add' : 'debug-restart'} /><span>{t(conversations?.enabled ? 'New conversation' : 'Restart')}</span></button>}
       </div>
-      <IconButton className="mobile-chat-preview__screenshot" icon="device-camera" label={t(screenshotMode === 'download' ? capturingScreenshot ? 'Downloading chat screenshot…' : 'Download chat screenshot' : capturingScreenshot ? 'Copying chat screenshot…' : 'Copy chat screenshot')} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()} />
+      {/* Icon plus a short label while there is room; the label is part of the full accessible name. */}
+      <button className="mobile-chat-preview__screenshot mobile-chat-preview__labeled-action" aria-label={screenshotLabel} title={screenshotLabel} type="button" disabled={capturingScreenshot} aria-busy={capturingScreenshot} onClick={() => void takeScreenshot()}><ProductIcon name="device-camera" /><span>{t('Screenshot')}</span></button>
       {onConfigure && <IconButton icon="settings-gear" label={t('Configure profile')} type="button" onClick={onConfigure} />}
       <button type="button" className="mobile-chat-preview__capture" disabled={!trusted || active || !snapshot?.messages.some((message) => message.role === 'user')} title={t('Save this conversation as a regression test')} onClick={() => post({ type: 'test.capture', source: { kind: 'conversation' } })}><ProductIcon name="beaker" /><span>{t('Save as test')}</span></button>
       <ToolbarOverflow>
