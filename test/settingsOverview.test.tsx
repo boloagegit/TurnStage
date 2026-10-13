@@ -34,7 +34,7 @@ describe('settings overview', () => {
     expect(overview.request.summary).toBe('POST ${env.baseUrl}/chat · times out after 30 s');
     expect(overview['stream-mapping'].summary).toBe('SSE · 1 mapping rule');
     expect(overview['history-errors'].summary).toBe('Keeps the last 50 runs');
-    expect(overview.security.summary).toBe('Links open only over HTTPS; no commands allowed');
+    expect(overview.security.summary).toBe('links: HTTPS only · any domain · no commands');
     expect(Object.values(overview).some((item) => item.attention)).toBe(false);
   });
 
@@ -47,6 +47,7 @@ describe('settings overview', () => {
     expect(overview['stream-mapping'].attention).toBe('No mapping rules');
     const insecure: TurnStageProfile = { ...profile, conversation: { send: { ...profile.conversation.send, tls: { allowInvalidCertificates: true } } } };
     expect(settingsSectionOverview(insecure).request.attention).toBe('Certificate checks are off');
+    expect(settingsSectionOverview({ ...profile, security: { allowedUriSchemes: ['https', 'http'], allowedDomains: ['a.test'] } }).security.summary).toBe('links: https, http · 1 allowed domain · no commands');
     expect(settingsSectionOverview(profile, snapshot({ eventCount: 4, mappingErrorCount: 2 }))['stream-mapping'].attention).toBe('2 parse or mapping errors in the last response');
   });
 
@@ -54,7 +55,7 @@ describe('settings overview', () => {
     expect(lastResponseHealth(undefined).tone).toBe('idle');
     expect(lastResponseHealth(snapshot({ eventCount: 6 }))).toEqual({ tone: 'ok', text: 'Last response: 6 events, no errors' });
     expect(lastResponseHealth(snapshot({ eventCount: 6, parseErrorCount: 1 })).tone).toBe('warning');
-    expect(lastResponseHealth(snapshot({ eventCount: 3 }, [{ type: 'IdleTimeoutError', message: 'idle' } as SessionSnapshot['errors'][number]])).text).toBe('Last response failed: IdleTimeoutError');
+    expect(lastResponseHealth(snapshot({ eventCount: 3 }, [{ type: 'IdleTimeoutError', message: 'idle' } as SessionSnapshot['errors'][number]])).text).toBe('Last response failed: idle');
   });
 
   it('formats seconds and transports for people', () => {
@@ -117,11 +118,43 @@ describe('embedded settings navigation', () => {
     expect(screen.getByText('Changed from defaults')).toBeTruthy();
   });
 
-  it('owns remote session scope in History and Errors', async () => {
+  it('turns remote conversations on before offering their scope', async () => {
     const post = vi.fn();
-    render(<SettingsWorkspace section="history-errors" onSectionChange={vi.fn()} profile={profile} post={post} />);
-    await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Environment' }));
+    const user = userEvent.setup();
+    const { unmount } = render(<SettingsWorkspace section="history-errors" onSectionChange={vi.fn()} profile={profile} post={post} />);
+    const enabled = screen.getByRole('checkbox', { name: 'Remember remote conversations' }) as HTMLInputElement;
+    expect(enabled.checked).toBe(false);
+    expect(screen.queryByRole('checkbox', { name: 'Environment' })).toBeNull();
+    await user.click(enabled);
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['history', 'remoteSessions'], value: { mode: 'referenceOnly', scope: ['profile'] } });
+    unmount();
+    render(<SettingsWorkspace section="history-errors" onSectionChange={vi.fn()} profile={{ ...profile, history: { remoteSessions: { mode: 'referenceOnly', scope: ['profile'] } } }} post={post} />);
+    await user.click(screen.getByRole('checkbox', { name: 'Environment' }));
     expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['history', 'remoteSessions'], value: { mode: 'referenceOnly', scope: ['profile', 'environment'] } });
+  });
+
+  it('hides remote conversations in the browser, which never stores them', () => {
+    render(<SettingsWorkspace section="history-errors" onSectionChange={vi.fn()} profile={profile} post={vi.fn()} vscodeFeatures={false} />);
+    expect(screen.queryByRole('checkbox', { name: 'Remember remote conversations' })).toBeNull();
+  });
+
+  it('does not collapse Advanced while its last customized value is cleared', () => {
+    const customized: TurnStageProfile = { ...profile, conversation: { send: { ...profile.conversation.send, reconnect: { maxAttempts: 2 } } } };
+    const { rerender } = render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={customized} post={vi.fn()} />);
+    const advanced = () => screen.getByText('Advanced: retries, redirects, and certificates').closest('details')!;
+    expect(advanced().open).toBe(true);
+    rerender(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={{ ...profile, conversation: { send: { ...profile.conversation.send, reconnect: {} } } }} post={vi.fn()} />);
+    expect(advanced().open).toBe(true);
+    expect(screen.getByText('Using defaults')).toBeTruthy();
+  });
+
+  it('moves keyboard focus into a section and back to its overview row', async () => {
+    const user = userEvent.setup();
+    render(<OverviewHarness />);
+    await user.click(screen.getByRole('button', { name: /^Request/u }));
+    expect(document.activeElement?.id).toBe('settings-panel-request');
+    await user.click(screen.getByRole('button', { name: 'All settings' }));
+    expect(document.activeElement?.getAttribute('data-settings-section')).toBe('request');
   });
 });
 

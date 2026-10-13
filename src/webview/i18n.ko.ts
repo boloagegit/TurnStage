@@ -1,5 +1,12 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Remember remote conversations': '원격 대화 기억',
+  'Remember server conversation IDs so a conversation can be reopened later. Only the reference is stored, not the messages.': '서버 대화 ID를 기억해 나중에 같은 대화를 다시 열 수 있습니다. ID만 저장하고 메시지는 저장하지 않습니다.',
+  'Remote conversations': '원격 대화',
+  'any domain': '모든 도메인',
+  'links: HTTPS only': '링크: HTTPS만',
+  'links: {schemes}': '링크: {schemes}',
+  'no commands': '명령 없음',
   'Every turn sends the base body from Request. Add variants only when the first turn and later turns need different bodies.': '모든 턴은 \'요청\'의 기본 본문을 보냅니다. 첫 턴과 이후 턴의 본문이 달라야 할 때만 변형을 추가하세요.',
   '{count} starter prompt': '시작 프롬프트 {count}개',
   '{count} request variant': '요청 변형 {count}개',

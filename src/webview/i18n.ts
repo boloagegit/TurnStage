@@ -7,6 +7,13 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Remember remote conversations': '記住遠端對話',
+  'Remember server conversation IDs so a conversation can be reopened later. Only the reference is stored, not the messages.': '記住伺服器的對話 ID，之後可以重新開啟同一段對話。只保存 ID，不保存訊息內容。',
+  'Remote conversations': '遠端對話',
+  'any domain': '任何網域',
+  'links: HTTPS only': '連結：僅 HTTPS',
+  'links: {schemes}': '連結：{schemes}',
+  'no commands': '不允許命令',
   'Every turn sends the base body from Request. Add variants only when the first turn and later turns need different bodies.': '每一輪都會送出「請求」區的基本內容。只有第一輪和之後的輪次需要不同內容時，才需要新增變體。',
   '{count} starter prompt': '{count} 個起始提示',
   '{count} request variant': '{count} 個請求變體',

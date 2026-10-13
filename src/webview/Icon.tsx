@@ -11,6 +11,7 @@ export type ProductIconName =
   | 'beaker'
   | 'book'
   | 'check'
+  | 'checklist'
   | 'chevron-down'
   | 'chevron-right'
   | 'circle-filled'
@@ -64,6 +65,7 @@ const codicons: Record<ProductIconName, string> = {
   beaker: 'beaker',
   book: 'book',
   check: 'check',
+  checklist: 'checklist',
   'chevron-down': 'chevron-down',
   'chevron-right': 'chevron-right',
   'circle-filled': 'circle-filled',
