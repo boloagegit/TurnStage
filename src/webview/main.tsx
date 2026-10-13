@@ -143,7 +143,7 @@ function App(): React.JSX.Element {
   const [contractCaseCatalog, setContractCaseCatalog] = useState<ContractCaseCatalog>();
   const [addCheckEvent, setAddCheckEvent] = useState<Record<string, unknown>>();
   const [gettingStartedDismissed, setGettingStartedDismissed] = useState(savedState?.gettingStartedDismissed === true);
-  const [configurationOverview, setConfigurationOverview] = useState(savedState?.configurationOverview !== false);
+  const [configurationOverview, setConfigurationOverview] = useState(() => initialConfigurationOverview(savedState));
   // Notice actions run later than the message that created them, so they read the latest catalog.
   const contractCatalogRef = useRef(contractCaseCatalog);
   contractCatalogRef.current = contractCaseCatalog;
@@ -524,6 +524,8 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
   const [testOperation, setTestOperation] = useState<TestOperationSnapshot>();
   const testKind: TestKindFilter = rightPaneMode === 'adversarial' ? 'adversarial' : 'contract';
   const activeTestSection: AutomationSectionId = testKind === 'adversarial' ? redTeamSection === 'cases' ? 'scenarios' : 'results' : testsSection;
+  // The unified body is the element that scrolls; its position is kept per test kind and section.
+  const testScrollKey: ScrollPositionKey = testKind === 'adversarial' ? activeTestSection === 'scenarios' ? 'adversarial.cases' : 'adversarial.results' : activeTestSection === 'scenarios' ? 'tests.scenarios' : 'tests.results';
   const selectTestSection = (section: AutomationSectionId) => {
     if (testKind === 'adversarial') setRedTeamSection(section === 'scenarios' ? 'cases' : 'results');
     else setTestsSection(section);
@@ -747,7 +749,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
       </div>
       {activeTestSection === 'scenarios' && latestRunForKind && <CaseRunSummary kind={testKind} caseKeys={currentCaseKeys} outcomes={caseOutcomes} lastRunAt={latestResultAt} filter={activeOutcomeFilter} onFilterChange={setOutcomeFilter} rerunCount={failingCases.length} rerunDisabled={isTestRunActive(testOperation)} onRerun={() => { if (failingCases.length) post({ type: 'test.runSelection', cases: failingCases }); }} onViewHistory={() => { setSelectedHistoryRunId(latestRunForKind.id); selectTestSection('results'); }} />}
     </div>
-    <div className="unified-test-workspace__body" role="tabpanel" aria-labelledby={`unified-test-${testKind}-${activeTestSection === 'scenarios' ? 'cases' : 'results'}-tab`}>
+    <RestoredScrollBody className="unified-test-workspace__body" role="tabpanel" aria-labelledby={`unified-test-${testKind}-${activeTestSection === 'scenarios' ? 'cases' : 'results'}-tab`} scrollKey={testScrollKey} scrollTop={scrollPositions[testScrollKey]} onScrollTopChange={(value) => onScrollPositionChange(testScrollKey, value)}>
       {activeTestSection === 'results' && <section className="unified-test-history" aria-label={t('Run history')}>
         <div className="unified-test-history__heading"><strong>{t('Run history')}</strong><button type="button" className="danger-subtle" disabled={!visibleHistoryRuns.length || isTestRunActive(testOperation)} onClick={() => confirmHistoryAction({ title: t('Clear run history?'), actionLabel: t('Clear history'), detail: t('This clears the current test type’s run history for this Profile. Its baseline is removed if included. Other test history and evidence remain. This cannot be undone.'), tone: 'danger', onConfirm: () => { setSelectedHistoryRunId(undefined); post({ type: 'test.history.clear', kind: testKind }); } })}>{t('Clear history')}</button></div>
         {!testHistory ? <div className="unified-test-history__loading" aria-busy="true" aria-label={t('Loading run history…')}><span className="ts-skeleton ts-skeleton--text" style={{ width: '60%' }} /><span className="ts-skeleton ts-skeleton--text" style={{ width: '82%' }} /></div> : !visibleHistoryRuns.length ? <p className="unified-test-history__empty">{t('No recorded runs yet.')}</p> : <>
@@ -762,7 +764,7 @@ function TestWorkspace({ profile, snapshot, runs, networkEntries, testResults, a
       </section>}
       {testKind === 'contract' && <AutomationWorkspace unified profile={profile} readOnly={profileReadOnly} automationResults={automationResults} campaignDashboard={campaignDashboard} testOperation={testOperation} trusted={snapshot?.trusted === true} vscodeFeatures={hostKind === 'vscode'} selectedCaseKeys={selectedCaseKeys} onToggleCase={toggleTestCase} onToggleCases={toggleTestCases} post={post} scrollTop={scrollPositions[`tests.${testsSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`tests.${testsSection}`, value)} activeSection={testsSection} onActiveSectionChange={setTestsSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedContractCaseId} onExpandedCaseIdChange={setExpandedContractCaseId} selectedResultKey={selectedAutomationResultKey} onSelectedResultKeyChange={setSelectedAutomationResultKey} linkedCaseCatalog={contractCaseCatalog} linkedCaseEditor={linkedContractCaseEditor} />}
       {testKind === 'adversarial' && <AdversarialWorkspace unified profile={profile} hasConversation={Boolean(snapshot?.messages.some((message) => message.role === 'user'))} readOnly={profileReadOnly} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} activeEvidenceId={activeEvidenceId} timeline={activeEvidence && activeTimeline ? <CausalTimeline timeline={activeTimeline} onOpen={(location) => post({ type: 'test.evidence.open', evidenceId: activeEvidence.evidenceId, location })} /> : undefined} trusted={snapshot?.trusted === true} vscodeFeatures={hostKind === 'vscode'} selectedCaseKeys={selectedCaseKeys} onToggleCase={toggleTestCase} onToggleCases={toggleTestCases} post={post} scrollTop={scrollPositions[`adversarial.${redTeamSection}`]} onScrollTopChange={(value) => onScrollPositionChange(`adversarial.${redTeamSection}`, value)} activeSection={redTeamSection === 'timeline' && activeEvidence ? 'timeline' : activeTestSection === 'scenarios' ? 'cases' : 'results'} onActiveSectionChange={setRedTeamSection} selectedCampaignId={selectedCampaignId} onSelectedCampaignIdChange={setSelectedCampaignId} expandedCaseId={expandedAdversarialCaseId} onExpandedCaseIdChange={setExpandedAdversarialCaseId} linkedCaseCatalog={adversarialCaseCatalog} linkedCaseEditor={linkedAdversarialCaseEditor} caseCollection={adversarialCaseCollection} onCaseCollectionChange={setAdversarialCaseCollection} resultCollection={adversarialResultCollection} onResultCollectionChange={setAdversarialResultCollection} />}
-    </div>
+    </RestoredScrollBody>
     {activeTestSection === 'scenarios' && (selectedForProfile.length > 0 || selectionNotice || (completedRunForCurrentKind && !latestRunForKind)) && <div className="unified-test-workspace__run-actions" role="region" aria-label={t('Selected cases')}>{selectedForProfile.length > 0 && <span className="unified-test-workspace__selection-count">{t(selectedForProfile.length === 1 ? '1 case selected' : '{count} cases selected', { count: formatNumber(selectedForProfile.length) })}</span>}{selectedForProfile.length > 0 && <button type="button" onClick={() => { setSelectedTestCases((current) => new Map([...current].filter(([, item]) => item.profileId !== profile.id || item.kind !== testKind))); setSelectionNotice(undefined); }}>{t('Clear selection')}</button>}{selectedForProfile.length > 0 && editCases && <SelectionEditActions disabled={isTestRunActive(testOperation)} onTag={tagSelectedCases} onDelete={deleteSelectedCases} />}{completedRunForCurrentKind && !latestRunForKind && <button type="button" onClick={() => selectTestSection('results')}>{t('View test results')}</button>}{selectionNotice && <span role="alert">{selectionNotice}</span>}{selectedForProfile.length > 0 && <button type="button" className="primary" disabled={!selectedForProfile.length || isTestRunActive(testOperation)} onClick={() => { if (selectedRunAvailability.unresolved) { setSelectionNotice(t('Some selected cases are no longer available. Refresh the list before running.')); return; } if (selectedRunAvailability.unavailable) { setSelectionNotice(t('Some selected cases need review or are not supported in this app. Open or remove them before running.')); return; } setSelectionNotice(undefined); post({ type: 'test.runSelection', cases: selectedForProfile }); }}>{t('Run selected ({count})', { count: formatNumber(selectedForProfile.length) })}</button>}</div>}
     {historyConfirmation}
   </div></MarkCasesReadyContext.Provider></CaseResultContext.Provider></LiveCaseStatusContext.Provider>;
@@ -844,6 +846,30 @@ export function AppSkeleton({ splitPercent, paneHidden = false }: { splitPercent
  * remounts it (no empty frame, no lost scroll, filters or drafts). While hidden it
  * keeps the last rendered element, so streaming updates do not re-render it.
  */
+/**
+ * A scroll container that returns to its saved position when its key changes, including content that
+ * arrives after mount (linked case catalogs), until the person scrolls it themselves.
+ */
+function RestoredScrollBody({ scrollKey, scrollTop, onScrollTopChange, children, ...props }: React.HTMLAttributes<HTMLDivElement> & { scrollKey: string; scrollTop?: number; onScrollTopChange: (value: number) => void }): React.JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  const savedScrollTop = useRef(scrollTop);
+  savedScrollTop.current = scrollTop;
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const target = Math.max(0, savedScrollTop.current ?? 0);
+    element.scrollTop = target;
+    if (element.scrollTop >= target - 1 || typeof ResizeObserver === 'undefined') return;
+    let settled = false;
+    const observer = new ResizeObserver(() => { if (settled) return; element.scrollTop = target; if (element.scrollTop >= target - 1) stop(); });
+    const stop = () => { settled = true; observer.disconnect(); for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) element.removeEventListener(type, stop); };
+    for (const child of Array.from(element.children)) observer.observe(child);
+    for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) element.addEventListener(type, stop, { passive: true });
+    return stop;
+  }, [scrollKey]);
+  return <div {...props} ref={ref} onScroll={(event) => onScrollTopChange(event.currentTarget.scrollTop)}>{children}</div>;
+}
+
 export function KeepAlivePane({ active, render }: { active: boolean; render: () => React.ReactNode }): React.JSX.Element | null {
   const lastElement = useRef<React.ReactNode>(undefined);
   const visited = useRef(false);
@@ -1887,6 +1913,16 @@ function isInteractionLocked(profile: TurnStageProfile, id: string, active: bool
 }
 
 function componentVisible(profile: TurnStageProfile, name: string): boolean { return profile.ui?.components?.[name]?.visible !== false; }
+
+/**
+ * Configure opens on the overview, except when a saved state from before the overview existed was
+ * showing one section: reopening returns to that section instead of an overview it never saw.
+ */
+export function initialConfigurationOverview(saved: WebviewState | undefined): boolean {
+  if (typeof saved?.configurationOverview === 'boolean') return saved.configurationOverview;
+  const showingConfigure = saved?.rightPaneMode === 'configure' || (saved?.rightPaneMode === undefined && isSettingsSectionId(saved?.section));
+  return !(showingConfigure && (isSettingsSectionId(saved?.configurationSection) || isSettingsSectionId(saved?.section)));
+}
 
 function isSettingsSectionId(value: unknown): value is SettingsSectionId {
   return SETTINGS_SECTIONS.some((section) => section.id === value);

@@ -1,5 +1,9 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  '{count} step': '{count}단계',
+  '{count} steps': '{count}단계',
+  '{count} assertion': '어서션 {count}개',
+  '{count} assertions': '어서션 {count}개',
   'Actor': '액터',
   'Leave empty to allow HTTPS only.': '비워 두면 HTTPS만 허용합니다.',
   'Host: {host}.': '호스트: {host}.',

@@ -1,5 +1,9 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  '{count} step': '{count} ステップ',
+  '{count} steps': '{count} ステップ',
+  '{count} assertion': 'アサーション {count} 件',
+  '{count} assertions': 'アサーション {count} 件',
   'Actor': 'アクター',
   'Leave empty to allow HTTPS only.': '空欄の場合は HTTPS のみ許可します。',
   'Host: {host}.': 'ホスト：{host}。',

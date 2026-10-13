@@ -7,6 +7,10 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  '{count} step': '{count} 個步驟',
+  '{count} steps': '{count} 個步驟',
+  '{count} assertion': '{count} 個斷言',
+  '{count} assertions': '{count} 個斷言',
   'Actor': '使用者',
   'Environment': '環境',
   'Leave empty to allow HTTPS only.': '留空表示只允許 HTTPS。',
