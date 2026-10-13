@@ -7,6 +7,11 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'This browser always verifies server certificates. The setting applies only when the Profile runs in VS Code.': '瀏覽器一律會驗證伺服器憑證。這個設定只在 VS Code 中執行設定檔時生效。',
+  'Every turn goes to this URL. Method, headers, body, and timeouts are set in Request; a variant below can replace the body and add headers.': '每一輪都會送到這個網址。方法、標頭、內容與逾時在「請求」區設定；下面的變體可以替換內容、加上標頭。',
+  'Opens HTTP and HTTPS links; allow lists apply in VS Code': '開啟 HTTP 與 HTTPS 連結；允許清單只在 VS Code 套用',
+  'These lists are enforced by the VS Code extension. This browser opens any HTTP or HTTPS link and never runs commands.': '這些清單由 VS Code 擴充套件執行。在瀏覽器中會開啟任何 HTTP 或 HTTPS 連結，且一律不執行命令。',
+  '{count} more': '還有 {count} 個',
   'Keep separate lists per': '分開保存的依據',
   'Conversations are always kept separate per Profile and workspace.': '對話一律依設定檔和工作區分開保存。',
   'Run history is on, default limit': '執行記錄已開啟，使用預設數量',

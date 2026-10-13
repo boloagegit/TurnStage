@@ -14,7 +14,9 @@ type Post = (message: WebviewPayload) => void;
 
 const methods = ['POST', 'GET', 'PUT', 'PATCH', 'DELETE'] as const;
 const operators = ['equals', 'notEquals', 'exists', 'notExists', 'oneOf', 'contains', 'startsWith', 'endsWith', 'regex'] as const;
-const componentNames = ['opening', 'starters', 'progress', 'toolCalls', 'citations', 'followups', 'responseActions', 'forms', 'diagnostics', 'metrics', 'usage'] as const;
+export const componentNames = ['opening', 'starters', 'progress', 'toolCalls', 'citations', 'followups', 'responseActions', 'forms', 'diagnostics', 'metrics', 'usage'] as const;
+/** Whether Chat shows a response surface; Usage stays hidden unless a Profile turns it on. */
+export function chatComponentVisible(profile: TurnStageProfile, name: string): boolean { return profile.ui?.components?.[name]?.visible ?? name !== 'usage'; }
 const messageActionOptions: Array<{ id: MessageActionId; label: string }> = [
   { id: 'message.copy', label: 'Copy' },
   { id: 'message.retry', label: 'Retry' },
@@ -94,7 +96,7 @@ export function FlowEditor({ profile, post, onEditRequest }: { profile: TurnStag
     <div className="flow-connector" aria-hidden="true"><span>{t('then')}</span></div>
 
     <section className="config-section flow-request-summary" aria-labelledby="request-heading">
-      <div className="section-heading"><div><h3 id="request-heading">{t('Conversation request')}</h3><p>{t('Every turn sends this request. Its URL, method, headers, and timeouts are set in Request.')}</p></div>{onEditRequest && <button type="button" onClick={onEditRequest}>{t('Edit request')}</button>}</div>
+      <div className="section-heading"><div><h3 id="request-heading">{t('Conversation request')}</h3><p>{t('Every turn goes to this URL. Method, headers, body, and timeouts are set in Request; a variant below can replace the body and add headers.')}</p></div>{onEditRequest && <button type="button" onClick={onEditRequest}>{t('Edit request')}</button>}</div>
       <code className="flow-request-summary__line">{profile.conversation.send.method} {profile.conversation.send.url || t('No request URL yet')}</code>
     </section>
 
@@ -384,7 +386,7 @@ export function UiConfigEditor({ profile, post }: { profile: TurnStageProfile; p
       <Field label={t('Indicator speed (ms)')}><PatchNumber aria-label={t('Assistant streaming animation speed')} value={streaming.speedMs} min={400} max={4000} disabled={streaming.indicator === 'none'} onCommit={(value) => post({ type: 'profile.patch', path: ['ui', 'streaming', 'speedMs'], value })} /></Field>
       <Field label={t('Indicator intensity (%)')}><PatchNumber aria-label={t('Assistant streaming intensity')} value={streaming.intensityPercent} min={10} max={100} disabled={streaming.indicator === 'none'} onCommit={(value) => post({ type: 'profile.patch', path: ['ui', 'streaming', 'intensityPercent'], value })} /></Field>
     </div></section>
-    <section className="config-section"><div className="section-heading"><div><h3>{t('Components')}</h3><p>{t('Choose which response surfaces appear in Chat. Usage is hidden unless explicitly enabled.')}</p></div></div><div className="component-grid">{componentNames.map((name) => <Checkbox key={name} label={localizeHumanized(name)} checked={profile.ui?.components?.[name]?.visible ?? name !== 'usage'} onChange={(value) => post({ type: 'profile.patch', path: ['ui', 'components', name, 'visible'], value })} />)}</div></section>
+    <section className="config-section"><div className="section-heading"><div><h3>{t('Components')}</h3><p>{t('Choose which response surfaces appear in Chat. Usage is hidden unless explicitly enabled.')}</p></div></div><div className="component-grid">{componentNames.map((name) => <Checkbox key={name} label={localizeHumanized(name)} checked={chatComponentVisible(profile, name)} onChange={(value) => post({ type: 'profile.patch', path: ['ui', 'components', name, 'visible'], value })} />)}</div></section>
     <MessageActionsEditor profile={profile} post={post} />
     <MessageTagsEditor profile={profile} post={post} />
     <section className="config-section"><div className="section-heading"><div><h3>{t('Active-turn locks')}</h3><p>{t('Comma-separated component or control IDs. Stop should normally remain allowed.')}</p></div></div><div className="form-grid">
