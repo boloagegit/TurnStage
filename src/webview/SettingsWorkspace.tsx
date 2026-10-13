@@ -18,6 +18,7 @@ import { captureNeedsReview, markCaptureReady, MarkCasesReadyContext } from './b
 import { describeAssertion } from './assertionSummary';
 import { hostText } from './hostCopy';
 import { DEFAULT_REQUEST_TIMEOUT_MS, SettingsOverview, transportLabel } from './SettingsOverview';
+import { HeaderEditor } from './HeaderEditor';
 import { remoteSessionScope } from '../shared/remoteSessionScope';
 
 /**
@@ -497,9 +498,10 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
     </section>
 
     <section className="settings-card" aria-labelledby="request-payload-heading">
-      <SectionHeading id="request-payload-heading" title={t('Headers and payload')} description={t('Keep structured values as JSON. Nothing in this editor executes as JavaScript.')} />
+      <SectionHeading id="request-payload-heading" title={t('Headers and payload')} description={t('Headers are edited as rows; the body stays JSON. Nothing in this editor executes as JavaScript.')} />
       <div className="settings-form-grid">
-        <JsonPatchField label={t('Headers (JSON)')} id="settings-request-headers" value={request.headers ?? {}} hint={t('Header values are redacted in previews when they are sensitive.')} onCommit={(value) => patch(['conversation', 'send', 'headers'], value)} />
+        <HeaderEditor id="settings-request-headers" label={t('Headers')} value={request.headers} hint={t('Header values are redacted in previews when they are sensitive.')} onCommit={(value) => patch(['conversation', 'send', 'headers'], value)}
+          jsonEditor={<JsonPatchField label={t('Headers (JSON)')} id="settings-request-headers-json" value={request.headers ?? {}} onCommit={(value) => patch(['conversation', 'send', 'headers'], value)} />} />
         <JsonPatchField label={t('Base body (JSON)')} id="settings-request-body" value={request.body ?? {}} hint={t('A variant body overrides this value when a variant supplies one.')} onCommit={(value) => patch(['conversation', 'send', 'body'], value)} />
       </div>
     </section>

@@ -1,5 +1,17 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Add header': '헤더 추가',
+  'Edit as JSON': 'JSON으로 편집',
+  'Every header needs a name.': '모든 헤더에는 이름이 필요합니다.',
+  'Header {name} appears more than once.': '헤더 {name}이(가) 두 번 이상 있습니다.',
+  'Header {number} name': '헤더 {number} 이름',
+  'Header {number} value': '헤더 {number} 값',
+  'Headers are edited as rows; the body stays JSON. Nothing in this editor executes as JavaScript.': '헤더는 행 단위로 편집하고 본문은 JSON 그대로입니다. 여기서는 JavaScript가 실행되지 않습니다.',
+  'No headers.': '헤더가 없습니다.',
+  'Remove {name}': '{name} 제거',
+  'Stop request headers': '중지 요청 헤더',
+  'This looks like a credential. Use a secret reference such as ${secret.apiKey} so the value stays out of the Profile.': '자격 증명으로 보입니다. 값이 프로필에 남지 않도록 ${secret.apiKey} 같은 비밀 참조를 사용하세요.',
+  'header {number}': '헤더 {number}',
   'Restart': '다시 시작',
   'Screenshot': '스크린샷',
   'After the opening, each message sends this request': '시작 메시지 후, 메시지마다 이 요청을 보냅니다',
