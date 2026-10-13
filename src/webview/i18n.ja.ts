@@ -1,5 +1,14 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Up to {count} values.': '値は {count} 個までです。',
+  'Press Enter or type a comma to add each value.': '値ごとに Enter キーを押すかカンマを入力すると追加されます。',
+  'Press Enter to add each value.': '値ごとに Enter キーを押すと追加されます。',
+  'Leave empty to retry 429, 502, 503, and 504.': '空欄の場合は 429、502、503、504 で再試行します。',
+  '{value} is not a 4xx or 5xx status code.': '{value} は 4xx または 5xx のステータスコードではありません。',
+  'Type a phrase and press Enter': 'フレーズを入力して Enter キー',
+  'Exact normalized event types.': '完全一致する正規化イベントタイプです。',
+  'Context paths that must be known before a remote stop request is sent.': 'リモート停止リクエストを送信する前に判明している必要があるコンテキストパスです。',
+  'Component or control IDs. Stop should normally remain allowed.': 'コンポーネントまたはコントロールの ID です。停止は通常許可したままにしてください。',
   'Action ID': 'アクション ID',
   'Add starter': 'スターターを追加',
   'Button label': 'ボタンのラベル',

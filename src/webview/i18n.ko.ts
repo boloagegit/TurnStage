@@ -1,5 +1,14 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Up to {count} values.': '값은 최대 {count}개입니다.',
+  'Press Enter or type a comma to add each value.': '값마다 Enter 키를 누르거나 쉼표를 입력하면 추가됩니다.',
+  'Press Enter to add each value.': '값마다 Enter 키를 누르면 추가됩니다.',
+  'Leave empty to retry 429, 502, 503, and 504.': '비워 두면 429, 502, 503, 504에서 재시도합니다.',
+  '{value} is not a 4xx or 5xx status code.': '{value}은(는) 4xx 또는 5xx 상태 코드가 아닙니다.',
+  'Type a phrase and press Enter': '문구를 입력하고 Enter',
+  'Exact normalized event types.': '정확히 일치하는 정규화 이벤트 유형입니다.',
+  'Context paths that must be known before a remote stop request is sent.': '원격 중지 요청을 보내기 전에 알고 있어야 하는 컨텍스트 경로입니다.',
+  'Component or control IDs. Stop should normally remain allowed.': '구성 요소 또는 컨트롤 ID입니다. 중지는 보통 허용된 상태로 두어야 합니다.',
   'Action ID': '작업 ID',
   'Add starter': '시작 프롬프트 추가',
   'Button label': '버튼 레이블',

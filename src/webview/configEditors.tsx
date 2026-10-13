@@ -2,6 +2,7 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import type { MappingTestInput, MappingTestResult, WebviewPayload } from '../shared/protocol';
 import { HeaderEditor } from './HeaderEditor';
 import { StarterListEditor } from './StarterListEditor';
+import { TokenListInput } from './TokenListInput';
 import { responseActionIcons, type MappingRule, type MessageTagRule, type OpeningResponseBlockDefinition, type OpeningResponseBlockKind, type OpeningResponseFieldDefinition, type RawStreamEvent, type RequestVariant, type TurnStageProfile } from '../shared/types';
 import { formatNumber, localizeHumanized, t } from './i18n';
 import { IconButton, ProductIcon } from './Icon';
@@ -126,7 +127,7 @@ export function FlowEditor({ profile, post, onEditRequest }: { profile: TurnStag
         <HeaderEditor id="flow-stop-request-headers" label={t('Stop request headers')} disabled={stop?.strategy !== 'abortThenRequest'} value={stopRequest?.headers} onCommit={(value) => patch(['conversation', 'stop', 'request', 'headers'], value)}
           jsonEditor={<JsonPatchEditor ariaLabel={t('Stop request headers JSON')} disabled={stop?.strategy !== 'abortThenRequest'} value={stopRequest?.headers ?? {}} onCommit={(value) => patch(['conversation', 'stop', 'request', 'headers'], value)} />} />
         <Field label={t('Stop request body (JSON)')} wide><JsonPatchEditor ariaLabel={t('Stop request body JSON')} disabled={stop?.strategy !== 'abortThenRequest'} value={stopRequest?.body ?? {}} onCommit={(value) => patch(['conversation', 'stop', 'request', 'body'], value)} /></Field>
-        <Field label={t('Stop context')} hint={t('Comma-separated paths required before sending a remote stop request.')} wide><PatchText aria-label={t('Required stop context')} value={(stop?.requiredContext ?? []).join(', ')} disabled={stop?.strategy !== 'abortThenRequest'} onCommit={(value) => patch(['conversation', 'stop', 'requiredContext'], parseList(value))} /></Field>
+        <Field label={t('Stop context')} hint={t('Context paths that must be known before a remote stop request is sent.')} wide><TokenListInput aria-label={t('Required stop context')} value={stop?.requiredContext ?? []} disabled={stop?.strategy !== 'abortThenRequest'} onCommit={(value) => patch(['conversation', 'stop', 'requiredContext'], value)} /></Field>
         <Field label={t('Partial response')}><div className="stacked-checks"><Checkbox label={t('Preserve partial content')} checked={stop?.preservePartialContent ?? true} onChange={(value) => patch(['conversation', 'stop', 'preservePartialContent'], value)} /><Checkbox label={t('Append a system notice')} checked={stop?.appendSystemNotice ?? true} onChange={(value) => patch(['conversation', 'stop', 'appendSystemNotice'], value)} /></div></Field>
       </div>
     </section>
@@ -367,11 +368,7 @@ function MappingCard({ rule, index, count, post, onMove, onDelete }: { rule: Map
 }
 
 export function UiConfigEditor({ profile, post }: { profile: TurnStageProfile; post: Post }): React.JSX.Element {
-  const [disableText, setDisableText] = useState((profile.ui?.locks?.whileTurnActive?.disable ?? []).join(', '));
-  const [allowText, setAllowText] = useState((profile.ui?.locks?.whileTurnActive?.allow ?? []).join(', '));
   const streaming = resolveStreaming(profile.ui);
-  useEffect(() => setDisableText((profile.ui?.locks?.whileTurnActive?.disable ?? []).join(', ')), [profile.ui?.locks?.whileTurnActive?.disable]);
-  useEffect(() => setAllowText((profile.ui?.locks?.whileTurnActive?.allow ?? []).join(', ')), [profile.ui?.locks?.whileTurnActive?.allow]);
   return <div className="content-page config-page">
     <header className="page-heading"><div><h2>{t('UI configuration')}</h2><p>{t('Shape the chat layout, composer behavior, visibility, and active-turn locks.')}</p></div></header>
     <section className="config-section"><div className="section-heading"><div><h3>{t('Layout & composer')}</h3><p>{t('Changes are reflected in the Chat view immediately.')}</p></div></div><div className="form-grid">
@@ -394,9 +391,9 @@ export function UiConfigEditor({ profile, post }: { profile: TurnStageProfile; p
     <section className="config-section"><div className="section-heading"><div><h3>{t('Components')}</h3><p>{t('Choose which response surfaces appear in Chat. Usage is hidden unless explicitly enabled.')}</p></div></div><div className="component-grid">{componentNames.map((name) => <Checkbox key={name} label={localizeHumanized(name)} checked={chatComponentVisible(profile, name)} onChange={(value) => post({ type: 'profile.patch', path: ['ui', 'components', name, 'visible'], value })} />)}</div></section>
     <MessageActionsEditor profile={profile} post={post} />
     <MessageTagsEditor profile={profile} post={post} />
-    <section className="config-section"><div className="section-heading"><div><h3>{t('Active-turn locks')}</h3><p>{t('Comma-separated component or control IDs. Stop should normally remain allowed.')}</p></div></div><div className="form-grid">
-      <Field label={t('Disable while active')} hint={t('Example: {ids}', { ids: 'composer, model, newConversation' })} wide><input aria-label={t('Components disabled while active')} value={disableText} onChange={(event) => setDisableText(event.target.value)} onBlur={() => post({ type: 'profile.patch', path: ['ui', 'locks', 'whileTurnActive', 'disable'], value: parseList(disableText) })} /></Field>
-      <Field label={t('Allow while active')} hint={t('Example: {ids}', { ids: 'stop, message.copy, inspector.open' })} wide><input aria-label={t('Components allowed while active')} value={allowText} onChange={(event) => setAllowText(event.target.value)} onBlur={() => post({ type: 'profile.patch', path: ['ui', 'locks', 'whileTurnActive', 'allow'], value: parseList(allowText) })} /></Field>
+    <section className="config-section"><div className="section-heading"><div><h3>{t('Active-turn locks')}</h3><p>{t('Component or control IDs. Stop should normally remain allowed.')}</p></div></div><div className="form-grid">
+      <Field label={t('Disable while active')} hint={t('Example: {ids}', { ids: 'composer, model, newConversation' })} wide><TokenListInput aria-label={t('Components disabled while active')} value={profile.ui?.locks?.whileTurnActive?.disable ?? []} onCommit={(value) => post({ type: 'profile.patch', path: ['ui', 'locks', 'whileTurnActive', 'disable'], value })} /></Field>
+      <Field label={t('Allow while active')} hint={t('Example: {ids}', { ids: 'stop, message.copy, inspector.open' })} wide><TokenListInput aria-label={t('Components allowed while active')} value={profile.ui?.locks?.whileTurnActive?.allow ?? []} onCommit={(value) => post({ type: 'profile.patch', path: ['ui', 'locks', 'whileTurnActive', 'allow'], value })} /></Field>
     </div></section>
     <p className="muted">{t('All changes use WorkspaceEdit and participate in VS Code Undo/Redo.')}</p>
   </div>;
@@ -538,7 +535,6 @@ function JsonPatchEditor({ ariaLabel, value, onCommit, disabled = false }: { ari
   </div>;
 }
 function JsonPreview({ value }: { value: unknown }): React.JSX.Element { const text = JSON.stringify(value, null, 2) ?? ''; return <pre className="json sample-json"><code><JsonSyntax text={text} /></code><ClipboardButton text={text} label={t('Copy normalized JSON')} /></pre>; }
-function parseList(value: string): string[] { return [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))]; }
 function formatValue(value: unknown): string { if (value === undefined) return ''; return typeof value === 'string' ? value : JSON.stringify(value); }
 function parseLooseValue(value: string): unknown { if (!value.trim()) return undefined; try { return JSON.parse(value); } catch { return value; } }
 function uniqueRuleId(profile: TurnStageProfile, base: string): string { return uniqueId(profile.stream.mappings.map((rule) => rule.id), base); }

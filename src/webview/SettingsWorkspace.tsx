@@ -19,6 +19,7 @@ import { describeAssertion } from './assertionSummary';
 import { hostText } from './hostCopy';
 import { DEFAULT_REQUEST_TIMEOUT_MS, SettingsOverview, transportLabel } from './SettingsOverview';
 import { HeaderEditor } from './HeaderEditor';
+import { TokenListInput } from './TokenListInput';
 import { remoteSessionScope } from '../shared/remoteSessionScope';
 
 /**
@@ -513,8 +514,8 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
         <NumberSettingField label={t('Reconnect attempts')} id="settings-reconnect-attempts" value={request.reconnect?.maxAttempts} placeholder="0" min={0} max={5} hint={t('Retries only before the first stream event.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxAttempts'], value)} />
         <NumberSettingField label={t('Reconnect base delay (seconds)')} id="settings-reconnect-base-delay" value={request.reconnect?.baseDelayMs} placeholder="0.5" min={0} max={vscodeFeatures ? 30_000 : 10_000} step="any" scale={1000} hint={t('Wait before the first retry.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'baseDelayMs'], value)} />
         <NumberSettingField label={t('Reconnect maximum delay (seconds)')} id="settings-reconnect-max-delay" value={request.reconnect?.maxDelayMs} placeholder="10" min={0} max={120000} step="any" scale={1000} hint={t('Longest wait between retries.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxDelayMs'], value)} />
-        <SettingField label={t('Retry HTTP statuses')} id="settings-reconnect-statuses" hint={t('Comma-separated 4xx or 5xx status codes.')}>
-          <PatchInput id="settings-reconnect-statuses" value={(request.reconnect?.retryOnStatuses ?? []).join(', ')} placeholder="429, 502, 503, 504" inputMode="numeric" onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'retryOnStatuses'], parseStatusList(value))} />
+        <SettingField label={t('Retry HTTP statuses')} id="settings-reconnect-statuses" hint={t('Leave empty to retry 429, 502, 503, and 504.')}>
+          <TokenListInput id="settings-reconnect-statuses" value={(request.reconnect?.retryOnStatuses ?? []).map(String)} placeholder="429, 502, 503, 504" maxItems={20} validate={retryStatusToken} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'retryOnStatuses'], value.length ? value.map(Number) : undefined)} />
         </SettingField>
         <SettingField label={t('Redirect policy')} id="settings-redirect-policy">
           <select id="settings-redirect-policy" value={request.redirectPolicy ?? 'same-origin'} onChange={(event) => patch(['conversation', 'send', 'redirectPolicy'], event.target.value)}>
@@ -1648,7 +1649,7 @@ function ScenarioEditor({ scenario, index, onChange, onDestructiveChange, onDele
     <div className="settings-form-grid scenario-editor__identity">
       <SettingField label={t('Scenario name')} id={`scenario-name-${index}`} wide><PatchInput id={`scenario-name-${index}`} value={scenario.name} onCommit={(value) => onChange({ ...scenario, name: value })} required /></SettingField>
       <SettingField label={t('Description')} id={`scenario-description-${index}`} wide><PatchInput id={`scenario-description-${index}`} value={scenario.description ?? ''} onCommit={(value) => onChange({ ...scenario, description: value || undefined })} multiline rows={2} /></SettingField>
-      {scenario.adversarial && <ListPatchField label={t('Tags')} id={`scenario-tags-${index}`} value={scenario.tags ?? []} placeholder={t('One tag per line')} onCommit={(tags) => onChange({ ...scenario, tags: tags.length ? tags : undefined })} wide />}
+      {scenario.adversarial && <ListPatchField label={t('Tags')} id={`scenario-tags-${index}`} value={scenario.tags ?? []} placeholder="jailbreak, privacy" onCommit={(tags) => onChange({ ...scenario, tags: tags.length ? tags : undefined })} wide />}
     </div>
     <div className="scenario-steps">
       <div className="scenario-steps__heading"><strong>{t('Conversation steps')}</strong><div><button type="button" onClick={addStep}>{t('Add step')}</button>{onDelete && <IconButton type="button" icon="trash" label={t('Delete scenario {name}', { name: scenario.name || scenario.id })} onClick={onDelete} />}</div></div>
@@ -1687,8 +1688,8 @@ function adversarialStabilityText(stability: NonNullable<AdversarialResultSummar
 
 function AdversarialForbidEditor({ idPrefix, value, onChange, additional = false }: { idPrefix: string; value: AdversarialForbidDefinition; onChange: (value: AdversarialForbidDefinition) => void; additional?: boolean }): React.JSX.Element {
   return <fieldset className="adversarial-forbid"><legend>{t(additional ? 'Additional prohibitions for this turn' : 'Prohibited observable effects')}</legend>
-    <ListPatchField label={t('Forbidden content')} id={`${idPrefix}-content`} value={(value.content ?? []).flatMap((rule) => typeof rule === 'string' ? [rule] : [])} placeholder={t('One phrase per line')} hint={t('Literal phrase matching. Regex rules remain available in JSONC.')} onCommit={(content) => onChange({ ...value, content: content.length ? content : undefined })} wide />
-    <ListPatchField label={t('Forbidden normalized events')} id={`${idPrefix}-events`} value={value.events ?? []} placeholder="tool.started" hint={t('Exact normalized event types, one per line.')} onCommit={(events) => onChange({ ...value, events: events.length ? events : undefined })} wide />
+    <ListPatchField label={t('Forbidden content')} id={`${idPrefix}-content`} value={(value.content ?? []).flatMap((rule) => typeof rule === 'string' ? [rule] : [])} placeholder={t('Type a phrase and press Enter')} hint={t('Literal phrase matching. Regex rules remain available in JSONC.')} splitOnComma={false} onCommit={(phrases) => { const content = [...phrases, ...(value.content ?? []).filter((rule) => typeof rule !== 'string')]; onChange({ ...value, content: content.length ? content : undefined }); }} wide />
+    <ListPatchField label={t('Forbidden normalized events')} id={`${idPrefix}-events`} value={value.events ?? []} placeholder="tool.started" hint={t('Exact normalized event types.')} onCommit={(events) => onChange({ ...value, events: events.length ? events : undefined })} wide />
     <div className="adversarial-forbid__checks">
       <SettingCheckbox id={`${idPrefix}-urls`} label={t('Forbid URLs')} checked={Boolean(value.urls)} onChange={(urls) => onChange({ ...value, urls: urls || undefined })} />
       <SettingCheckbox id={`${idPrefix}-ctas`} label={t('Forbid calls to action')} checked={Boolean(value.ctas)} onChange={(ctas) => onChange({ ...value, ctas: ctas || undefined })} />
@@ -1929,17 +1930,12 @@ function JsonPatchField({ label, id, value, hint, rows = 8, onCommit }: { label:
   return <div className="settings-field settings-field-wide"><label htmlFor={id}>{label}</label><div className="settings-field-control"><textarea id={id} className="settings-code-input" rows={rows} value={draft} spellCheck={false} aria-invalid={Boolean(error)} aria-describedby={description ? descriptionId : undefined} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Escape') { revertField(event, reverting); setDraft(source); setError(''); event.currentTarget.blur(); } if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); commit(); event.currentTarget.blur(); } }} /><button type="button" className="settings-apply-action" onClick={commit}>{t('Apply JSON')}</button>{description && <p id={descriptionId} className={error ? 'settings-field-error' : 'settings-field-hint'}>{description}</p>}</div></div>;
 }
 
-function ListPatchField({ label, id, value, placeholder, hint, wide, onCommit }: { label: string; id: string; value: string[]; placeholder: string; hint?: string; wide?: boolean; onCommit: (value: string[]) => void }): React.JSX.Element {
-  return <SettingField label={label} id={id} hint={hint} wide={wide}><ListPatchInput id={id} value={value} placeholder={placeholder} onCommit={onCommit} /></SettingField>;
+function ListPatchField({ label, id, value, placeholder, hint, wide, splitOnComma, onCommit }: { label: string; id: string; value: string[]; placeholder: string; hint?: string; wide?: boolean; splitOnComma?: boolean; onCommit: (value: string[]) => void }): React.JSX.Element {
+  return <SettingField label={label} id={id} hint={hint} wide={wide}><ListPatchInput id={id} value={value} placeholder={placeholder} splitOnComma={splitOnComma} onCommit={onCommit} /></SettingField>;
 }
 
-function ListPatchInput({ id, value, placeholder, onCommit }: { id: string; value: string[]; placeholder: string; onCommit: (value: string[]) => void }): React.JSX.Element {
-  const source = value.join(', ');
-  const [draft, setDraft] = useState(source);
-  const reverting = useRef(false);
-  useEffect(() => setDraft(source), [source]);
-  const commit = () => { if (consumeRevert(reverting)) return; const next = parseList(draft); if (next.join(', ') !== source) onCommit(next); };
-  return <input id={id} value={draft} placeholder={placeholder} autoComplete="off" onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); event.currentTarget.blur(); } if (event.key === 'Escape') { revertField(event, reverting); setDraft(source); event.currentTarget.blur(); } }} />;
+function ListPatchInput({ id, value, placeholder, splitOnComma, onCommit, ...aria }: { id: string; value: string[]; placeholder: string; splitOnComma?: boolean; onCommit: (value: string[]) => void; 'aria-describedby'?: string; 'aria-invalid'?: boolean }): React.JSX.Element {
+  return <TokenListInput id={id} value={value} placeholder={placeholder} splitOnComma={splitOnComma} onCommit={onCommit} {...aria} />;
 }
 
 /**
@@ -1960,10 +1956,6 @@ function stringifyJson(value: unknown): string {
   return result === undefined ? '{}' : result;
 }
 
-function parseList(value: string): string[] {
-  return [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
-}
-
 function toggleValue<T extends string>(values: readonly T[], value: T, checked: boolean): T[] {
   return checked ? [...new Set([...values, value])] : values.filter((item) => item !== value);
 }
@@ -1977,8 +1969,10 @@ function compactPerformance(
   return hasThresholds || hasRegression ? { thresholds: hasThresholds ? thresholds : undefined, regression: hasRegression ? regression : undefined } : undefined;
 }
 
-function parseStatusList(value: string): number[] {
-  return [...new Set(value.split(',').map((item) => Number.parseInt(item.trim(), 10)).filter((status) => Number.isInteger(status) && status >= 400 && status <= 599))].slice(0, 20);
+/** A retry status as typed: a whole 4xx or 5xx code. */
+function retryStatusToken(text: string): { token: string } | { error: string } {
+  const status = /^\d+$/u.test(text) ? Number(text) : Number.NaN;
+  return status >= 400 && status <= 599 ? { token: String(status) } : { error: t('{value} is not a 4xx or 5xx status code.', { value: text }) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
