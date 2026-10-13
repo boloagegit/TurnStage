@@ -274,6 +274,15 @@ describe('BrowserSession', () => {
     expect(noticed.messages[2]?.parts).toEqual([{ type: 'text', text: 'Conversation stopped.' }]);
   });
 
+  it('ends an SSE turn on [DONE] when the Profile leaves the done value out, as the Extension Host does', async () => {
+    const doneProfile: TurnStageProfile = { ...profile, stream: { ...profile.stream, mappings: profile.stream.mappings.filter((mapping) => mapping.id !== 'done') } };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('event: message\ndata: {"text":"Hi"}\n\ndata: [DONE]\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } })));
+    const session = new BrowserSession(doneProfile, environment, new Map(), () => undefined);
+    await session.start();
+    await session.send('Hello', { kind: 'manual' });
+    expect(session.current.snapshot.turnState).toBe('completed');
+  });
+
   it('keeps the conversation when the Profile is edited after a turn', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('event: message\ndata: {"text":"Kept"}\n\nevent: done\ndata: {}\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } })));
     const session = new BrowserSession(profile, environment, new Map(), () => undefined);

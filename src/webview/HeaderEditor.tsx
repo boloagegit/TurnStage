@@ -26,9 +26,14 @@ export function headersFromRows(rows: readonly HeaderRow[]): { headers: Record<s
   return { headers };
 }
 
-/** A credential-like header typed in as plain text instead of a ${secret.name} reference. */
+/**
+ * A credential-like header with any of its value typed in as plain text: what is left after removing
+ * ${secret.name} references and an auth scheme word such as Bearer is a literal credential.
+ */
 export function literalCredential(row: HeaderRow): boolean {
-  return isSensitiveHeaderName(row.name.trim()) && row.value.trim() !== '' && !/\$\{secret\.[A-Za-z0-9_.-]+\}/u.test(row.value);
+  if (!isSensitiveHeaderName(row.name.trim())) return false;
+  const literal = row.value.replace(/\$\{secret\.[A-Za-z0-9_.-]+\}/gu, '').replace(/^\s*(?:Bearer|Basic|Token|Digest|ApiKey|Api-Key)\b/iu, '');
+  return literal.trim() !== '';
 }
 
 /**

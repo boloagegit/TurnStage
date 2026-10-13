@@ -613,7 +613,7 @@ export class BrowserSession {
     raw.turnSequence = network.eventCount + 1;
     network.eventCount += 1;
     metrics.raw(raw);
-    if ((sse?.data ?? rawText) === this.profile.stream.doneValue) {
+    if ((sse?.data ?? rawText) === (this.profile.stream.doneValue ?? '[DONE]')) {
       this.pushRaw(raw);
       this.state.snapshot.turnState = 'completed';
       return false;

@@ -19,6 +19,9 @@ describe('header rows', () => {
     expect(literalCredential({ name: 'X-Api-Key', value: 'abc' })).toBe(true);
     expect(literalCredential({ name: 'Authorization', value: 'Bearer ${secret.token}' })).toBe(false);
     expect(literalCredential({ name: 'Accept', value: 'text/event-stream' })).toBe(false);
+    expect(literalCredential({ name: 'Authorization', value: 'Bearer old-token ${secret.apiKey}' })).toBe(true);
+    expect(literalCredential({ name: 'Authorization', value: 'Basic ${secret.basic}' })).toBe(false);
+    expect(literalCredential({ name: 'Authorization', value: 'Bearer ${env.token}' })).toBe(true);
   });
 });
 
