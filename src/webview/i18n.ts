@@ -7,6 +7,20 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Action ID': '動作 ID',
+  'Add starter': '新增起始提示',
+  'Button label': '按鈕文字',
+  'Buttons shown before the first message. Each one sends its message, puts it in the composer, or runs an action.': '第一則訊息之前顯示的按鈕。每個按鈕會送出它的訊息、把訊息放進輸入框，或執行一個動作。',
+  'Move {name} down': '將 {name} 下移',
+  'Move {name} up': '將 {name} 上移',
+  'No starter prompts. People start by typing their own message.': '沒有起始提示。使用者會自己輸入第一則訊息。',
+  'Put the message in the composer': '把訊息放進輸入框',
+  'Run a response action': '執行回覆動作',
+  'Send the message': '送出訊息',
+  'Starter {number} runs an action; enter its action ID.': '第 {number} 個起始提示會執行動作，請填入動作 ID。',
+  'Starter {number}': '起始提示 {number}',
+  'When clicked': '點下去時',
+  'starter {number}': '第 {number} 個起始提示',
   'Add header': '新增標頭',
   'Edit as JSON': '以 JSON 編輯',
   'Every header needs a name.': '每個標頭都需要名稱。',

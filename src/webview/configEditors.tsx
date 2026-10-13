@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import type { MappingTestInput, MappingTestResult, WebviewPayload } from '../shared/protocol';
 import { HeaderEditor } from './HeaderEditor';
+import { StarterListEditor } from './StarterListEditor';
 import { responseActionIcons, type MappingRule, type MessageTagRule, type OpeningResponseBlockDefinition, type OpeningResponseBlockKind, type OpeningResponseFieldDefinition, type RawStreamEvent, type RequestVariant, type TurnStageProfile } from '../shared/types';
 import { formatNumber, localizeHumanized, t } from './i18n';
 import { IconButton, ProductIcon } from './Icon';
@@ -72,8 +73,9 @@ export function FlowEditor({ profile, post, onEditRequest }: { profile: TurnStag
         <Field label={t('Opening message')} hint={t(openingMode === 'static' ? 'Shown before the first turn.' : 'Used by static opening and configured fallbacks.')} wide>
           <PatchText aria-label={t('Opening message')} value={profile.opening?.message ?? ''} multiline rows={3} disabled={openingMode !== 'static'} onCommit={(value) => patch(['opening', 'message'], value)} />
         </Field>
-        <Field label={t('Starter prompts (JSON)')} hint={t('Configure starter labels, prompts, and send, fill, or action behavior.')} wide>
-          <JsonPatchEditor ariaLabel={t('Starter prompts JSON')} value={profile.opening?.starters ?? []} onCommit={(value) => patch(['opening', 'starters'], value)} />
+        <Field label={t('Starter prompts')} hint={t('Buttons shown before the first message. Each one sends its message, puts it in the composer, or runs an action.')} wide>
+          <StarterListEditor value={profile.opening?.starters ?? []} onCommit={(value) => patch(['opening', 'starters'], value)}
+            jsonEditor={<JsonPatchEditor ariaLabel={t('Starter prompts JSON')} value={profile.opening?.starters ?? []} onCommit={(value) => patch(['opening', 'starters'], value)} />} />
         </Field>
         {openingMode === 'request' && <>
           <Field label={t('Opening request (JSON)')} hint={t('Uses the same request contract as conversation requests, without variants.')} wide>
