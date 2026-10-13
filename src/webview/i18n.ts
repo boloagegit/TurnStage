@@ -7,6 +7,10 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Reset to {value}': '重設為 {value}',
+  'Changed from default': '已改過預設值',
+  'the run retention setting': '執行紀錄保留設定',
+  'Conversation stopped.': '對話已終止。',
   'Up to {count} values.': '最多 {count} 個值。',
   'Press Enter or type a comma to add each value.': '每輸入一個值，按 Enter 或輸入逗號即可加入。',
   'Press Enter to add each value.': '每輸入一個值，按 Enter 即可加入。',

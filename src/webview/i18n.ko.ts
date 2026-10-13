@@ -1,5 +1,9 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Reset to {value}': '{value}(으)로 재설정',
+  'Changed from default': '기본값에서 변경됨',
+  'the run retention setting': '실행 보존 설정',
+  'Conversation stopped.': '대화가 중지되었습니다.',
   'Up to {count} values.': '값은 최대 {count}개입니다.',
   'Press Enter or type a comma to add each value.': '값마다 Enter 키를 누르거나 쉼표를 입력하면 추가됩니다.',
   'Press Enter to add each value.': '값마다 Enter 키를 누르면 추가됩니다.',

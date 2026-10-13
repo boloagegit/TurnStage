@@ -448,3 +448,10 @@
 .starter-editor__field > span { color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); }
 .starter-editor__field:has(textarea) { grid-column: 1 / -1; }
 @container (max-width: 25em) { .starter-editor__item { grid-template-columns: minmax(0, 1fr); } }
+.settings-default-reset { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--ts-space-2); margin: 0; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); }
+.settings-default-reset > span { display: inline-flex; align-items: center; gap: 6px; }
+.settings-default-reset > span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-settings-modifiedItemIndicator, var(--vscode-focusBorder)); }
+.settings-default-reset > button { width: auto; min-height: 24px; padding: 0 2px; border: 0; background: transparent; color: var(--vscode-textLink-foreground); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.settings-default-reset > button:hover { color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); }
+.settings-checkbox-line { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--ts-space-3); }
+@media (forced-colors: active) { .settings-default-reset > span::before { background: CanvasText; forced-color-adjust: none; } .settings-default-reset > button { border: 0; color: LinkText; } }

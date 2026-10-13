@@ -229,6 +229,51 @@ describe('BrowserSession', () => {
     expect(session.current.snapshot.turnState).toBe('aborted');
   });
 
+  it('applies the Profile error policy to a failed turn as the Extension Host does', async () => {
+    const partial = 'event: start\ndata: {"conversationId":"kept-or-not"}\n\nevent: message\ndata: {"text":"Partial"}\n\n';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(partial, { status: 200, headers: { 'content-type': 'text/event-stream' } })));
+    const keep = new BrowserSession(profile, environment, new Map(), () => undefined);
+    await keep.start();
+    await keep.send('Hello', { kind: 'manual' });
+    expect(keep.current.snapshot.turnState).toBe('failed');
+    expect(keep.current.snapshot.conversationId).toBe('kept-or-not');
+    expect(keep.current.snapshot.messages.at(-1)?.parts.map((part) => part.type)).toEqual(['text', 'error']);
+
+    const strict = new BrowserSession({ ...profile, errorPolicy: { preservePartialContent: false, keepConversationId: false } }, environment, new Map(), () => undefined);
+    await strict.start();
+    await strict.send('Hello', { kind: 'manual' });
+    expect(strict.current.snapshot.conversationId).toBeUndefined();
+    expect(strict.current.snapshot.messages.at(-1)?.parts.map((part) => part.type)).toEqual(['error']);
+  });
+
+  it('adds the stop notice and drops partial output only when the stop policy asks for it', async () => {
+    const stream = (init?: RequestInit) => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('event: message\ndata: {"text":"Partial"}\n\n'));
+        init?.signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')), { once: true });
+      },
+    }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => stream(init)));
+    const run = async (stop: NonNullable<TurnStageProfile['conversation']['stop']> | undefined) => {
+      const session = new BrowserSession({ ...profile, conversation: { ...profile.conversation, stop } }, environment, new Map(), () => undefined);
+      await session.start();
+      const running = session.send('Hello', { kind: 'manual' });
+      await vi.waitFor(() => expect(session.current.snapshot.messages.at(-1)?.parts).toContainEqual({ type: 'text', text: 'Partial' }));
+      await session.abort();
+      await running;
+      return session.current.snapshot;
+    };
+    const plain = await run(undefined);
+    expect(plain.turnState).toBe('aborted');
+    expect(plain.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(plain.messages.at(-1)?.parts).toContainEqual({ type: 'text', text: 'Partial' });
+
+    const noticed = await run({ strategy: 'abortOnly', appendSystemNotice: true, preservePartialContent: false });
+    expect(noticed.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'system']);
+    expect(noticed.messages[1]?.parts).toEqual([]);
+    expect(noticed.messages[2]?.parts).toEqual([{ type: 'text', text: 'Conversation stopped.' }]);
+  });
+
   it('keeps the conversation when the Profile is edited after a turn', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('event: message\ndata: {"text":"Kept"}\n\nevent: done\ndata: {}\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } })));
     const session = new BrowserSession(profile, environment, new Map(), () => undefined);
