@@ -7,7 +7,7 @@ import type { SessionSnapshot, TurnStageProfile } from '../src/shared/types';
 import { FlowEditor } from '../src/webview/configEditors';
 import { lastResponseHealth, secondsText, settingsSectionOverview, transportLabel } from '../src/webview/SettingsOverview';
 import { SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
-import { normalizeWebviewState } from '../src/webview/main';
+import { initialConfigurationOverview, normalizeWebviewState } from '../src/webview/main';
 
 afterEach(cleanup);
 
@@ -261,6 +261,18 @@ describe('conversation flow editor', () => {
 });
 
 describe('settings state', () => {
+  it('opens new states on the overview but returns older states to the section they showed', () => {
+    expect(initialConfigurationOverview(undefined)).toBe(true);
+    expect(initialConfigurationOverview({ version: 7 })).toBe(true);
+    expect(initialConfigurationOverview({ version: 7, configurationOverview: false })).toBe(false);
+    expect(initialConfigurationOverview({ version: 7, configurationOverview: true, rightPaneMode: 'configure', configurationSection: 'request' })).toBe(true);
+    // Saved before the overview existed while showing Request.
+    expect(initialConfigurationOverview({ version: 7, rightPaneMode: 'configure', configurationSection: 'request' })).toBe(false);
+    expect(initialConfigurationOverview({ version: 7, section: 'security' })).toBe(false);
+    // A section remembered while another pane was showing still starts on the overview.
+    expect(initialConfigurationOverview({ version: 7, rightPaneMode: 'debug', configurationSection: 'request' })).toBe(true);
+  });
+
   it('restores the overview choice and a dismissed getting started guide', () => {
     expect(normalizeWebviewState({ version: 4, configurationOverview: false, gettingStartedDismissed: true })).toMatchObject({ configurationOverview: false, gettingStartedDismissed: true });
     const fresh = normalizeWebviewState({ version: 4 });
