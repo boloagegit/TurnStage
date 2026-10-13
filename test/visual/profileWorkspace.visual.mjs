@@ -33,51 +33,18 @@ const address = server.address();
 assert.ok(address && typeof address === 'object');
 const browser = await chromium.launch(executablePath ? { headless: true, executablePath } : { headless: true });
 
+/** General test result rows sit behind "Show checks", which is per-mount view state; open it when it is closed. */
+async function showResultChecks(page) {
+  const toggle = page.locator('#automation-results').getByRole('button', { name: /^Show checks/ });
+  if (await toggle.isVisible()) await toggle.click();
+}
+
 /** Configure opens on the settings overview; open a section from there, or switch with the picker inside a section. */
 async function openSettingsSection(page, section) {
   const overviewRow = page.locator(`.settings-overview [data-settings-section="${section}"]`);
   if (await overviewRow.isVisible()) await overviewRow.click();
   else await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption(section);
   await page.locator(`#settings-panel-${section}`).waitFor();
-}
-
-async function assertRedTeamTabVisual(navigation, label) {
-  const border = await navigation.evaluate((element) => {
-    const nav = element.getBoundingClientRect();
-    const panel = element.closest('.red-team-panel')?.getBoundingClientRect();
-    const primaryTabs = element.closest('.debug-pane')?.querySelector('.right-pane-tabs')?.getBoundingClientRect();
-    return { topWidth: getComputedStyle(element).borderTopWidth, gap: primaryTabs ? nav.top - primaryTabs.bottom : undefined, left: nav.left, right: nav.right, panelLeft: panel?.left, panelRight: panel?.right };
-  });
-  assert.equal(border.topWidth, '0px', `${label}: the sub-tabs must not double the primary divider`);
-  assert.ok(border.gap !== undefined && border.gap >= 0 && border.gap <= 2, `${label}: primary and sub-tabs must touch without an empty band; received ${border.gap}px`);
-  assert.ok(Math.abs(border.left - border.panelLeft) <= 1 && Math.abs(border.right - border.panelRight) <= 1, `${label}: the sub-tabs must span the full panel`);
-  const selected = navigation.getByRole('tab', { selected: true });
-  await selected.hover();
-  const style = await selected.evaluate((element) => {
-    const navigationElement = element.closest('.red-team-section-nav');
-    const computed = getComputedStyle(element);
-    const probe = document.createElement('span');
-    probe.style.backgroundColor = 'var(--vscode-list-inactiveSelectionBackground)';
-    document.body.append(probe);
-    const selectedSurface = getComputedStyle(probe).backgroundColor;
-    probe.remove();
-    return {
-      appearance: computed.appearance,
-      backgroundColor: computed.backgroundColor,
-      backgroundImage: computed.backgroundImage,
-      borderBottomWidth: computed.borderBottomWidth,
-      fontWeight: computed.fontWeight,
-      boxShadow: computed.boxShadow,
-      selectedSurface,
-      navigationBackgroundColor: navigationElement ? getComputedStyle(navigationElement).backgroundColor : '',
-    };
-  });
-  assert.equal(style.appearance, 'none', `${label}: Red Team tabs must opt out of native button painting`);
-  assert.equal(style.backgroundColor, style.selectedSurface, `${label}: the selected and hovered Red Team tab must use the complete selected surface`);
-  assert.equal(style.backgroundImage, 'none', `${label}: the selected Red Team tab must not paint a background image`);
-  assert.equal(style.boxShadow, 'none', `${label}: the selected Red Team tab must not paint a selection block through a shadow`);
-  assert.equal(style.borderBottomWidth, '0px', `${label}: the selected Red Team tab must not use a one-sided colored underline`);
-  assert.ok(Number(style.fontWeight) >= 600, `${label}: the selected Red Team tab must retain a non-color cue`);
 }
 
 async function assertInlineInset(child, container, expected, label) {
@@ -155,10 +122,11 @@ try {
   });
   const url = `http://127.0.0.1:${address.port}/test/visual/profileWorkspaceHarness.html`;
   const waitForProfile = async () => {
-    try { await page.locator('.mobile-chat-preview__app-header strong').waitFor(); }
+    // Hydrated once the Chat header exists; narrow layouts may be showing the side pane instead of Chat.
+    try { await page.locator('.mobile-chat-preview__app-header strong').waitFor({ state: 'attached' }); }
     catch (error) { throw new Error(`Profile Webview did not hydrate. Page errors: ${pageErrors.join(' | ') || 'none'}`, { cause: error }); }
     assert.equal(await page.getByText('Loading profile…').count(), 0, 'The recreated Webview must not remain on Loading profile…');
-    assert.equal(await page.locator('.mobile-chat-preview__app-header strong').innerText(), 'Slow SSE Visual Proof');
+    assert.equal((await page.locator('.mobile-chat-preview__app-header strong').textContent())?.trim(), 'Slow SSE Visual Proof');
     assert.equal(await page.locator('.profile-identity').count(), 0, 'The duplicated full-width Profile identity row must stay removed');
   };
 
@@ -455,7 +423,7 @@ try {
   const tlsWarning = page.getByRole('alert').filter({ hasText: 'Certificate verification is disabled for this Profile.' });
   await tlsWarning.waitFor();
   assert.ok((await tlsWarning.innerText()).includes('can be intercepted'), 'Unsafe TLS access must keep its interception warning visible');
-  await page.locator('#request-resilience-heading').locator('xpath=ancestor::section[1]').screenshot({ path: resolve(artifactDirectory, 'request-tls-warning-dark.png') });
+  await page.locator('#request-resilience-heading').locator('xpath=ancestor::details[1]').screenshot({ path: resolve(artifactDirectory, 'request-tls-warning-dark.png') });
   await tlsBypass.click();
   await page.waitForFunction(() => (document.getElementById('settings-request-allow-invalid-certificates'))?.checked === false);
   await openSettingsSection(page, 'scenario-tests');
@@ -508,7 +476,7 @@ try {
   await automationReview.getByRole('button', { name: 'Next test result' }).click();
   await page.waitForFunction(() => document.querySelector('.evidence-review select')?.value === 'visual-contract-evidence-2');
   assert.equal(await automationResultSelector.inputValue(), 'visual-contract-evidence-2', 'Next result must switch the selected automation evidence without paging the table');
-  assert.equal(await automationReview.getByText(/4 passed · 0 failed/).count(), 1, 'The shared top review summary must update with the selected test result');
+  assert.equal(await automationReview.getByText(/4 checks passed · 0 failed/).count(), 1, 'The shared top review summary must update with the selected test result');
   const reviewAlignment = await automationReview.evaluate((element) => {
     const actions = element.querySelector('.evidence-review__heading-actions');
     if (!actions) return null;
@@ -544,10 +512,12 @@ try {
   await page.getByRole('tab', { name: 'General tests', exact: true }).click();
   await page.getByRole('tablist', { name: 'Test sections' }).waitFor();
   await automationNavigation.getByRole('tab', { name: /Cases/ }).click();
-  assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 1, 'Scenario execution must live beside the authored contracts');
+  // Cases run one at a time from their row, or together after selecting them; there is no separate Run all button.
+  assert.equal(await page.getByRole('button', { name: 'Run case Slow stream contract' }).count(), 1, 'Scenario execution must live beside the authored contracts');
+  assert.equal(await page.getByRole('checkbox', { name: /^Select all ready cases/ }).count() + await page.getByRole('button', { name: /^Select all ready cases/ }).count(), 1, 'Cases must offer selecting every ready case to run them together');
   await page.getByText('Linked multi-turn contract', { exact: true }).waitFor();
   assert.equal(await page.locator('.automation-scenario-row').count(), 2, 'Inline and linked non-adversarial conversation contracts belong in Tests');
-  assert.equal(await page.getByText('Linked regression', { exact: true }).count(), 1, 'A linked contract must identify its source suite without exposing its prompt');
+  assert.equal(await page.getByText(/^Linked regression · /).count(), 1, 'A linked contract must identify its source suite without exposing its prompt');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-cases-list-dark.png') });
   await page.getByRole('button', { name: 'Delete case Linked multi-turn contract from source file' }).click();
   const linkedContractConfirmation = page.getByRole('alertdialog', { name: 'Delete case Linked multi-turn contract from source file?' });
@@ -586,29 +556,15 @@ try {
   await page.screenshot({ path: resolve(artifactDirectory, 'automation-linked-scenario-dark.png') });
   await page.getByRole('button', { name: 'Close editor' }).click();
   await page.getByRole('tab', { name: 'Red Team' }).click();
-  await page.getByRole('tablist', { name: 'Red Team sections' }).waitFor();
-  const redTeamNavigation = page.getByRole('tablist', { name: 'Red Team sections' });
-  assert.deepEqual(await redTeamNavigation.getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('aria-label')?.split(':')[0])), ['Cases', 'Results', 'Campaigns', 'Timeline'], 'Red Team must put Cases before Results, followed by Campaigns and Timeline');
-  assert.ok((await redTeamNavigation.innerText()).includes('Campaigns') && (await redTeamNavigation.innerText()).includes('Timeline'), 'Red Team landmarks must use recognizable section names');
-  await assertRedTeamTabVisual(redTeamNavigation, 'Dark theme');
+  // Red Team shares the unified Cases/Results tabs with General tests. Campaigns has had no entry in the
+  // right pane since 0.28.0 (navigation to it lands on Cases), so its cards are no longer checked here;
+  // Timeline opens in place from a result's "Review timeline" action and is checked below.
+  await page.getByRole('tablist', { name: 'Test sections' }).waitFor();
+  const redTeamNavigation = page.getByRole('tablist', { name: 'Test sections' });
+  assert.deepEqual(await redTeamNavigation.getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.textContent.trim())), ['Cases', 'Results'], 'Red Team must put Cases before Results');
+  await assertInlineInset(redTeamNavigation, page.locator('.right-pane-panel'), 16, 'Red Team section tabs');
   await redTeamNavigation.screenshot({ path: resolve(artifactDirectory, 'red-team-section-navigation-dark.png') });
-  await redTeamNavigation.getByRole('tab', { name: /Campaigns:/ }).click();
-  const campaignCard = page.locator('.campaign-card').filter({ hasText: 'Release safety' });
-  await campaignCard.scrollIntoViewIfNeeded();
-  assert.equal(await page.getByRole('heading', { name: 'Test campaigns' }).count(), 1, 'Scenario configuration must expose bounded test campaigns');
-  assert.equal(await campaignCard.getByText('Completed', { exact: true }).count(), 1, 'Campaign status must be visible without opening a detail page');
-  assert.equal(await campaignCard.getByRole('spinbutton', { name: 'Concurrent cases' }).inputValue(), '2', 'Campaigns must expose their bounded case-level concurrency in the GUI');
-  assert.equal(await campaignCard.getByText('Concurrency 2 / 8', { exact: true }).count(), 1, 'Campaign history must show the concurrency used by the run');
-  assert.equal(await campaignCard.getByText('1 regression', { exact: true }).count(), 1, 'Campaign baseline regressions must be visible at a glance');
-  assert.equal(await campaignCard.getByText(/Resisted.*Attack succeeded/i).count(), 1, 'Campaign regression must explain the baseline-to-current transition');
-  assert.equal(await campaignCard.getByRole('button', { name: 'Preview plan' }).count(), 1, 'Campaign preview must remain distinct from execution');
-  assert.equal(await campaignCard.getByRole('button', { name: 'Run', exact: true }).count(), 1, 'Campaign execution must expose one clear primary action');
-  await campaignCard.getByText('More', { exact: true }).click();
-  assert.equal(await campaignCard.getByRole('button', { name: 'Export results JSONL' }).count(), 1, 'Campaign history must expose bulk machine-readable export');
-  assert.equal(await campaignCard.getByRole('button', { name: 'Summarize with Copilot' }).count(), 1, 'Copilot analysis must stay a distinct advisory action');
-  assert.equal(await campaignCard.evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Campaign controls must not overflow the settings pane');
-  await campaignCard.screenshot({ path: resolve(artifactDirectory, 'campaign-regression-dark.png') });
-  await redTeamNavigation.getByRole('tab', { name: /Results:/ }).click();
+  await redTeamNavigation.getByRole('tab', { name: 'Results' }).click();
   await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run', type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 100, completedCases: 24, totalAttempts: 125, completedAttempts: 31, maxConcurrency: 3, activeCaseNames: ['Prompt boundary', 'Tool policy'] } } } })));
   const activeTestRun = page.locator('.test-operation-status--running');
   await activeTestRun.waitFor();
@@ -618,11 +574,18 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Running all…' }).count(), 0, 'Results must stay focused on review and rerun actions');
   assert.equal(await page.getByRole('button', { name: 'Stop test run' }).locator('.codicon-debug-stop').count(), 1, 'An active Red Team run must expose a distinct stop action');
   await activeTestRun.screenshot({ path: resolve(artifactDirectory, 'adversarial-run-active-dark.png') });
-  await redTeamNavigation.getByRole('tab', { name: /Cases:/ }).click();
-  assert.equal(await page.getByRole('button', { name: 'Running all…' }).isDisabled(), true, 'Cases must own the disabled Run all action while a run is active');
+  await redTeamNavigation.getByRole('tab', { name: 'Cases' }).click();
+  // While a run is active, starting another one from Cases is blocked; Pause and Stop stay available.
+  assert.equal(await page.getByRole('button', { name: /^Select all ready cases/ }).isDisabled(), true, 'Cases must not start another selection while a run is active');
+  assert.equal(await page.getByRole('button', { name: 'Run case Known two-turn probe' }).isDisabled(), true, 'Single-case runs must wait for the active run');
+  assert.equal(await page.getByRole('button', { name: 'Stop test run' }).count(), 1, 'An active run must stay stoppable from Cases');
   await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run-complete', type: 'test.operation', operation: { action: 'runAll', state: 'completed' } } })));
-  await page.getByRole('button', { name: 'Run all' }).click();
-  assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'test.runAll'))).type, 'test.runAll', 'Cases must own the primary Run all action');
+  // Running every case is select-all followed by Run selected.
+  await page.getByRole('button', { name: /^Select all ready cases/ }).click();
+  await page.getByRole('region', { name: 'Selected cases' }).getByRole('button', { name: /^Run selected \(/ }).click();
+  const runSelection = await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'test.runSelection'));
+  assert.ok(runSelection && runSelection.cases.length > 1, 'Cases must run every selected ready case together');
+  await page.getByRole('region', { name: 'Selected cases' }).getByRole('button', { name: 'Clear selection' }).click();
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-cases-dark.png') });
   await page.getByRole('button', { name: 'Delete case Linked case 1 from source file' }).click();
   const linkedRedTeamConfirmation = page.getByRole('alertdialog', { name: 'Delete case Linked case 1 from source file?' });
@@ -644,8 +607,11 @@ try {
   await page.screenshot({ path: resolve(artifactDirectory, 'confirm-unlink-suite-dark.png') });
   await unlinkConfirmation.getByRole('button', { name: 'Cancel' }).click();
   assert.equal(await page.getByRole('button', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' }).count(), 1, 'Cancel must keep the suite linked');
-  assert.equal(await page.locator('button:visible', { hasText: 'Link suite' }).count(), 1, 'Bulk source linking must use one visible format-neutral action');
-  await page.locator('.adversarial-linked-suites').screenshot({ path: resolve(artifactDirectory, 'linked-adversarial-csv-dark.png') });
+  // Linking a suite is one format-neutral action in the case file menu. General tests stay mounted
+  // beside Red Team, so these lookups are scoped to the Red Team workspace.
+  const redTeamWorkspace = page.locator('.red-team-workspace:not(.automation-workspace)');
+  assert.equal(await redTeamWorkspace.locator('.adversarial-case-file-menu button').filter({ hasText: /^Link suite$/ }).count(), 1, 'Bulk source linking must use one format-neutral action');
+  await redTeamWorkspace.locator('.adversarial-linked-suites').screenshot({ path: resolve(artifactDirectory, 'linked-adversarial-csv-dark.png') });
   await page.getByText('31 of 31 cases', { exact: true }).waitFor();
   const adversarialCaseList = page.locator('.adversarial-case-list');
   assert.equal(await adversarialCaseList.locator('.adversarial-case-item').count(), 25, 'The unified catalog must mount only the first page for a large case list');
@@ -679,17 +645,6 @@ try {
   await page.getByRole('button', { name: 'Close editor' }).click();
   await page.locator('.adversarial-case-collection').screenshot({ path: resolve(artifactDirectory, 'adversarial-case-catalog-search-dark.png') });
   await page.getByRole('searchbox', { name: 'Search cases' }).fill('');
-  const runningPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await runningPage.goto(`${url}?section=scenario-tests&campaignStatus=running`);
-  await runningPage.getByRole('tab', { name: 'Red Team' }).click();
-  await runningPage.getByRole('tab', { name: /Campaigns:/ }).click();
-  const runningCampaign = runningPage.locator('.campaign-card').filter({ hasText: 'Release safety' });
-  await runningCampaign.waitFor();
-  assert.equal(await runningCampaign.getByText('Running', { exact: true }).count(), 1, 'A running campaign must expose its current state');
-  assert.equal(await runningCampaign.getByRole('button', { name: 'Run', exact: true }).isDisabled(), true, 'A running campaign must prevent duplicate execution');
-  assert.equal(await runningCampaign.getByRole('button', { name: 'Cancel run' }).count(), 1, 'A running campaign must expose a distinct cancellation action');
-  await runningCampaign.screenshot({ path: resolve(artifactDirectory, 'campaign-running-dark.png') });
-  await runningPage.close();
   assert.equal(await page.locator('.adversarial-case-list').count(), 1, 'Red Team must present cases in a compact list');
   await page.locator('.adversarial-case-item__main').first().click();
   await page.locator('.adversarial-case-editor').waitFor();
@@ -699,13 +654,13 @@ try {
   assert.equal(await page.getByRole('checkbox', { name: 'Stop remaining turns after an attack succeeds' }).isChecked(), true, 'Turn-level stopping must remain distinct from repetition fail-fast');
   assert.equal(await page.getByRole('checkbox', { name: 'Stop remaining repetitions after an attack succeeds (incomplete sample)' }).isChecked(), false, 'Repetition fail-fast must remain explicit and off unless configured');
   await page.getByRole('spinbutton', { name: 'Repetitions', exact: true }).scrollIntoViewIfNeeded();
-  const settingsMainScroll = await page.locator('.settings-main').evaluate((element) => ({ scrollLeft: element.scrollLeft, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }));
+  const settingsMainScroll = await page.locator('.red-team-workspace:not(.automation-workspace) .settings-main').evaluate((element) => ({ scrollLeft: element.scrollLeft, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }));
   assert.equal(settingsMainScroll.scrollLeft, 0, `Focusing the case editor must not horizontally shift the settings pane: ${JSON.stringify(settingsMainScroll)}`);
   await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-repetitions-dark.png') });
   await page.getByRole('button', { name: 'Close editor' }).click();
-  await redTeamNavigation.getByRole('tab', { name: /Results:/ }).click();
-  assert.equal(await page.getByRole('heading', { name: 'Latest adversarial results' }).count(), 1, 'Scenario configuration must expose the compact latest-result list');
-  const adversarialResults = page.locator('.adversarial-result-table');
+  await redTeamNavigation.getByRole('tab', { name: 'Results' }).click();
+  assert.equal(await page.locator('#adversarial-results-heading').innerText(), 'Evidence from this session', 'Red Team results must open on the compact latest-result list');
+  const adversarialResults = page.locator('.adversarial-result-table:not(.automation-result-table)');
   assert.equal(await adversarialResults.getByText('Attack succeeded', { exact: true }).count(), 1, 'Latest results must distinguish an attack from resistance');
   assert.equal(await adversarialResults.getByText('3/5 resisted · 5 attempts', { exact: true }).count(), 1, 'Latest results must expose the repeated-run sample at a glance');
   assert.equal(await adversarialResults.getByText('Unstable result', { exact: true }).count(), 1, 'Latest results must expose whether repeated outcomes are stable');
@@ -738,7 +693,10 @@ try {
   assert.equal(await exportNotice.getByRole('button', { name: 'Open' }).count(), 1, 'Export completion must offer a direct open action');
   assert.equal(await exportNotice.getByRole('button', { name: 'Reveal in file explorer' }).count(), 1, 'Export completion must offer a reveal action');
   assert.equal(await exportNotice.getByRole('button', { name: 'Copy path' }).count(), 1, 'Export completion must offer a copy-path action');
-  assert.equal(await exportNotice.evaluate((element) => getComputedStyle(element).position), 'relative', 'Operation feedback must reserve layout space instead of overlaying controls');
+  // Notices float as a toast below the pane tabs; they must never cover the tabs themselves.
+  const noticeTop = await exportNotice.evaluate((element) => element.getBoundingClientRect().top);
+  const paneTabsBottom = await page.locator('.right-pane-heading').evaluate((element) => element.getBoundingClientRect().bottom);
+  assert.ok(noticeTop >= paneTabsBottom - 1, `Operation feedback must not cover the pane tabs: notice top ${noticeTop}, tabs bottom ${paneTabsBottom}`);
   await page.screenshot({ path: resolve(artifactDirectory, 'export-actions-dark.png'), fullPage: true });
   await exportNotice.getByRole('button', { name: 'Dismiss notification' }).click();
   const attackResult = adversarialResults.getByRole('row').filter({ hasText: 'Known two-turn probe' });
@@ -756,7 +714,7 @@ try {
   const narrowTimelineEntryHeights = await adversarialTimeline.locator('.causal-timeline__entry').evaluateAll((entries) => entries.map((entry) => entry.getBoundingClientRect().height));
   assert.ok(narrowTimelineEntryHeights.every((height) => height >= 42 && height < 100), `Narrow timeline entries must remain compact and scannable: ${JSON.stringify(narrowTimelineEntryHeights)}`);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await redTeamNavigation.getByRole('tab', { name: /Results:/ }).click();
+  await redTeamNavigation.getByRole('tab', { name: 'Results' }).click();
   await adversarialResults.getByRole('button', { name: 'Open evidence' }).first().click();
   await page.getByRole('tab', { name: 'Debug' }).waitFor();
   await page.waitForFunction(() => document.querySelector('#right-pane-debug-tab')?.getAttribute('aria-selected') === 'true');
@@ -955,12 +913,14 @@ try {
   await assertInlineInset(page.locator('.settings-editor-frame .config-section').first(), page.locator('.right-pane-panel'), 16, 'Opening and Flow nested editor');
   const openingTypeScale = await page.evaluate(() => ({
     family: getComputedStyle(document.querySelector('.settings-workspace')).fontFamily,
-    heading: Number.parseFloat(getComputedStyle(document.querySelector('.settings-panel-heading h1')).fontSize),
+    // Embedded sections keep their h1 for screen readers only; the nested editor heading is the first visible level.
+    sectionHeading: document.querySelector('#settings-panel-opening-flow h1')?.textContent ?? '',
     nested: Number.parseFloat(getComputedStyle(document.querySelector('.settings-editor-frame .page-heading h2')).fontSize),
     body: Number.parseFloat(getComputedStyle(document.querySelector('.settings-editor-frame .config-section')).fontSize),
   }));
   assert.ok(openingTypeScale.family.length > 0, 'Settings must inherit the host font family');
-  assert.ok(openingTypeScale.heading > openingTypeScale.nested && openingTypeScale.nested >= openingTypeScale.body, `Settings type levels must descend from page to nested editor to body; received ${JSON.stringify(openingTypeScale)}`);
+  assert.equal(openingTypeScale.sectionHeading, 'Opening & Flow', 'Each embedded section keeps one named h1 for assistive technology');
+  assert.ok(openingTypeScale.nested > openingTypeScale.body, `Settings type levels must descend from the nested editor heading to body; received ${JSON.stringify(openingTypeScale)}`);
   const openingBlocks = page.locator('.mobile-chat-preview__opening-block');
   assert.equal(await openingBlocks.count(), 4, 'Opening must render choices, fields, meter, and status from one canonical block list');
   assert.equal(await page.getByRole('progressbar', { name: 'Usage' }).getAttribute('value'), '48', 'Opening meter must expose the provider quota value');
@@ -999,7 +959,8 @@ try {
   await page.goto(`${url}?rightPane=adversarial&section=test`);
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'Saved Webview state must restore the last right-panel tab');
-  assert.equal(await page.getByRole('heading', { name: 'Latest adversarial results' }).count(), 1, 'Restored Red Team state must render its result workspace without a host section override');
+  const restoredRedTeamSections = page.getByRole('tablist', { name: 'Test sections' });
+  assert.equal(await restoredRedTeamSections.getByRole('tab', { name: 'Cases' }).getAttribute('aria-selected'), 'true', 'Restored Red Team state must render its workspace, opening on Cases, without a host section override');
   await page.screenshot({ path: resolve(artifactDirectory, 'rehydrated-red-team-tab.png'), fullPage: true });
 
   await page.goto(`${url}?persistState=1&preset=chat-with-metrics`);
@@ -1013,22 +974,27 @@ try {
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'Runs' }).getAttribute('aria-selected'), 'true', 'A saved inspector tab must win over the Profile initial Metrics tab after Webview recreation');
   await page.getByRole('tab', { name: 'General tests', exact: true }).click();
+  // Result rows sit on Results behind the "Show checks" disclosure.
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Results' }).click();
+  await page.locator('#automation-results').getByRole('button', { name: /^Show checks/ }).click();
   await page.getByRole('button', { name: 'Select test result Steady response contract' }).click();
   await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').selectedAutomationResultKey === 'visual-contract-evidence-2');
   await page.getByRole('tab', { name: 'Debug' }).click();
   await page.getByRole('tab', { name: 'General tests', exact: true }).click();
+  await showResultChecks(page);
   assert.equal(await page.getByRole('button', { name: 'Select test result Steady response contract' }).getAttribute('aria-pressed'), 'true', 'The selected test result must survive switching away from Tests');
   await page.reload();
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'General tests', exact: true }).getAttribute('aria-selected'), 'true', 'The saved Tests workspace must survive Webview recreation');
+  await showResultChecks(page);
   assert.equal(await page.getByRole('button', { name: 'Select test result Steady response contract' }).getAttribute('aria-pressed'), 'true', 'The selected test result must survive Webview recreation');
   await page.setViewportSize({ width: 1000, height: 600 });
   await page.getByRole('tab', { name: 'Red Team' }).click();
-  await page.getByRole('tab', { name: /Cases:/ }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Cases' }).click();
   const adversarialList = page.locator('.adversarial-case-list');
   await adversarialList.locator('.adversarial-case-item__main').first().click();
   await page.getByRole('button', { name: 'Close editor', exact: true }).waitFor();
-  const appliedRedTeamScroll = await page.locator('.red-team-workspace .settings-main').evaluate((element) => { element.scrollTop = Math.min(560, element.scrollHeight - element.clientHeight); element.dispatchEvent(new globalThis.Event('scroll', { bubbles: true })); return element.scrollTop; });
+  const appliedRedTeamScroll = await page.locator('.unified-test-workspace__body:visible').evaluate((element) => { element.scrollTop = Math.min(560, element.scrollHeight - element.clientHeight); element.dispatchEvent(new globalThis.Event('scroll', { bubbles: true })); return element.scrollTop; });
   assert.ok(appliedRedTeamScroll > 0, 'The representative Red Team viewport must have a real reading position to restore');
   await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').rightPaneMode === 'adversarial');
   await page.waitForFunction(() => Boolean(JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').expandedAdversarialCaseId));
@@ -1037,9 +1003,9 @@ try {
   await page.reload();
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'The saved right-panel mode must survive recreation');
-  assert.equal(await page.getByRole('tab', { name: /Cases:/ }).getAttribute('aria-selected'), 'true', 'The saved Red Team sub-tab must survive recreation');
+  assert.equal(await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Cases' }).getAttribute('aria-selected'), 'true', 'The saved Red Team sub-tab must survive recreation');
   assert.equal(await page.getByRole('dialog').count(), 1, 'The selected adversarial case editor must survive recreation');
-  const restoredRedTeamScroll = await page.locator('.red-team-workspace .settings-main').evaluate((element) => element.scrollTop);
+  const restoredRedTeamScroll = await page.locator('.unified-test-workspace__body:visible').evaluate((element) => element.scrollTop);
   assert.ok(restoredRedTeamScroll > 0 && restoredRedTeamScroll <= savedRedTeamScroll, 'The Red Team reading position must remain in the case list after its responsive reflow');
 
   await page.goto(url);
@@ -1069,9 +1035,12 @@ try {
   await page.screenshot({ path: resolve(artifactDirectory, 'narrow-test-case-dark.png') });
   await page.getByRole('button', { name: 'Close editor' }).click();
   await page.getByRole('tab', { name: 'Red Team' }).click();
-  const narrowRedTeamNavigation = page.getByRole('tablist', { name: 'Red Team sections' });
-  assert.equal((await narrowRedTeamNavigation.evaluate((navigation) => getComputedStyle(navigation).gridTemplateColumns)).trim().split(/\s+/).length, 2, 'Narrow Red Team sub-tabs must use two columns');
-  await assertRedTeamTabVisual(narrowRedTeamNavigation, 'Narrow Red Team');
+  const narrowRedTeamNavigation = page.getByRole('tablist', { name: 'Test sections' });
+  const narrowRedTeamTabs = await narrowRedTeamNavigation.evaluate((navigation) => {
+    const pane = navigation.closest('.debug-pane').getBoundingClientRect();
+    return [...navigation.querySelectorAll('[role="tab"]')].map((tab) => { const bounds = tab.getBoundingClientRect(); return bounds.left >= pane.left - 1 && bounds.right <= pane.right + 1 && bounds.width > 0; });
+  });
+  assert.deepEqual(narrowRedTeamTabs, [true, true], 'Narrow Red Team section tabs must both stay fully visible');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'narrow-red-team-tabs-dark.png') });
 
   await page.setViewportSize({ width: 320, height: 900 });
@@ -1080,7 +1049,7 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, 'Extra-narrow layout must not overflow horizontally');
   assert.equal(await page.getByRole('region', { name: 'Responsive chat preview' }).count(), 1, 'Extra-narrow workspace keeps the Chat surface available');
   await page.getByRole('tab', { name: 'Red Team' }).click();
-  await page.getByRole('tablist', { name: 'Red Team sections' }).getByRole('tab', { name: /Cases/ }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Cases' }).click();
   await page.locator('.adversarial-case-item__main').first().click();
   await page.getByRole('dialog').waitFor();
   await page.locator('.case-editor-dialog .scenario-editor').waitFor();
@@ -1164,9 +1133,11 @@ try {
   await openSettingsSection(page, 'request');
   await page.getByRole('heading', { name: 'Connection Doctor' }).waitFor();
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-light.png') });
+  const lightRequestAdvanced = page.locator('#settings-panel-request details.settings-advanced').filter({ hasText: 'Advanced: retries, redirects, and certificates' });
+  if (await lightRequestAdvanced.getAttribute('open') === null) await lightRequestAdvanced.locator('summary').click();
   await page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' }).click();
   await page.getByRole('alert').filter({ hasText: 'Certificate verification is disabled for this Profile.' }).waitFor();
-  const lightTlsCard = page.locator('#request-resilience-heading').locator('xpath=ancestor::section[1]');
+  const lightTlsCard = page.locator('#request-resilience-heading').locator('xpath=ancestor::details[1]');
   await lightTlsCard.screenshot({ path: resolve(artifactDirectory, 'request-tls-warning-light.png') });
 
   await page.emulateMedia({ forcedColors: 'active' });
@@ -1176,9 +1147,9 @@ try {
   await page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' }).click();
 
   await page.getByRole('tab', { name: 'General tests', exact: true }).click();
-  await page.getByRole('tab', { name: /Results/ }).click();
-  await page.getByRole('heading', { name: 'Latest test results' }).waitFor();
-  await assertRedTeamTabVisual(page.getByRole('tablist', { name: 'Test sections' }), 'Automation light theme');
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Results' }).click();
+  await page.getByRole('heading', { name: 'Evidence from this session' }).waitFor();
+  await showResultChecks(page);
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-light.png') });
   await page.locator('.automation-result-table').getByRole('button', { name: 'Open evidence' }).first().click();
   await page.getByRole('region', { name: 'Review test result' }).waitFor();
@@ -1189,15 +1160,13 @@ try {
   await page.getByRole('region', { name: 'Review test result' }).getByRole('button', { name: 'Close evidence review' }).click();
 
   await page.getByRole('tab', { name: 'Red Team' }).click();
-  await page.getByRole('tab', { name: /Results:/ }).click();
-  await page.getByRole('heading', { name: 'Latest adversarial results' }).waitFor();
-  const lightAdversarialResults = page.locator('.adversarial-result-table');
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Results' }).click();
+  await page.locator('#adversarial-results-heading', { hasText: 'Evidence from this session' }).waitFor();
+  const lightAdversarialResults = page.locator('.adversarial-result-table:not(.automation-result-table)');
   await lightAdversarialResults.scrollIntoViewIfNeeded();
-  await assertRedTeamTabVisual(page.getByRole('tablist', { name: 'Red Team sections' }), 'Light theme');
   await assertAdversarialResultLayout(lightAdversarialResults, 'Light theme');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-results-light.png') });
   await page.emulateMedia({ forcedColors: 'active' });
-  await assertRedTeamTabVisual(page.getByRole('tablist', { name: 'Red Team sections' }), 'High contrast theme');
   await assertAdversarialResultLayout(lightAdversarialResults, 'High contrast theme');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-results-high-contrast.png') });
   await page.emulateMedia({ forcedColors: 'none' });
@@ -1246,7 +1215,7 @@ try {
   assert.equal(zoomScreenshot.readUInt32BE(16), zoomViewport.width * 2, '200% evidence PNG must retain the doubled physical width');
   assert.equal(zoomScreenshot.readUInt32BE(20), zoomViewport.height * 2, '200% evidence PNG must retain the doubled physical height');
 
-  const emptyPage = await browser.newPage({ viewport: { width: 960, height: 640 } });
+  const emptyPage = await browser.newPage({ viewport: { width: 1100, height: 640 } }) // wider than the 1024px narrow layout, so Debug sits beside Chat;
   await emptyPage.goto(url);
   await emptyPage.locator('.mobile-chat-preview__app-header strong').waitFor();
   assert.equal(await emptyPage.getByRole('tab', { name: 'Network' }).getAttribute('aria-selected'), 'true', 'A fresh Webview must open Debug on Network');
@@ -1275,7 +1244,7 @@ try {
   await emptyPage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'events-empty-compact-dark.png') });
   await emptyPage.close();
 
-  const startPage = await browser.newPage({ viewport: { width: 960, height: 640 } });
+  const startPage = await browser.newPage({ viewport: { width: 1100, height: 640 } }) // wider than the 1024px narrow layout, so Debug sits beside Chat;
   await startPage.goto(`${url}?openingBlocks=true`);
   await startPage.locator('.mobile-chat-preview__app-header strong').waitFor();
   await startPage.evaluate(() => {
@@ -1304,7 +1273,7 @@ try {
   const narrowSessionStartFits = await sessionStart.evaluate((section) => section.scrollWidth <= section.clientWidth + 1);
   assert.equal(narrowSessionStartFits, true, 'Narrow session startup row must not overflow horizontally');
   await startPage.locator('.mobile-chat-preview__device').screenshot({ path: resolve(artifactDirectory, 'session-start-compact-narrow-dark.png') });
-  await startPage.setViewportSize({ width: 960, height: 640 });
+  await startPage.setViewportSize({ width: 1100, height: 640 });
   await startPage.evaluate(() => {
     const harness = globalThis.__turnstageHarness;
     const snapshot = { ...harness.snapshot };
@@ -1328,12 +1297,14 @@ try {
   await capturePage.goto(`${url}?capturedDraft=true`);
   await capturePage.getByRole('tab', { name: 'General tests', exact: true }).click();
   await capturePage.getByRole('tab', { name: /Cases/ }).click();
-  const capturedDraft = capturePage.getByRole('button', { name: 'Captured release probe', exact: true });
+  const capturedDraft = capturePage.getByRole('button', { name: /^Captured release probe\. Review this case before selecting it/ });
   await capturedDraft.waitFor();
-  assert.equal(await capturePage.getByRole('button', { name: 'Review scenario Captured release probe before running' }).isDisabled(), true, 'Captured drafts must not be executable before review');
+  // A draft stays out of batch selection until it is reviewed, but can be tried once on its own.
+  assert.equal(await capturePage.getByRole('button', { name: 'Select all ready cases (3 of 4)' }).count(), 1, 'Captured drafts must stay out of batch runs before review');
+  assert.equal(await capturePage.getByRole('button', { name: 'Try draft Captured release probe once' }).isEnabled(), true, 'A captured draft can be tried once before review');
   await capturedDraft.click();
   await capturePage.getByRole('button', { name: 'Mark ready' }).waitFor();
-  assert.equal(await capturePage.getByText('Needs review', { exact: true }).count(), 1, 'Captured drafts must have a visible review status');
+  assert.equal(await capturePage.getByText('Review required', { exact: true }).count(), 1, 'Captured drafts must have a visible review status');
   await capturePage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'captured-test-review-dark.png') });
   await capturePage.setViewportSize({ width: 520, height: 720 });
   const capturedReviewCallout = capturePage.locator('.capture-review-callout');
@@ -1352,20 +1323,20 @@ try {
     const main = row.querySelector('.automation-scenario-row__main').getBoundingClientRect();
     const title = row.querySelector('.automation-scenario-row__main strong').getBoundingClientRect();
     const id = row.querySelector('.automation-scenario-row__main code').getBoundingClientRect();
-    const source = row.querySelector('.adversarial-case-source').getBoundingClientRect();
-    const details = row.querySelector('.case-row-meta').getBoundingClientRect();
-    return { width: main.width, titleBottom: title.bottom, idBottom: id.bottom, sourceTop: source.top, sourceLeft: source.left, sourceRight: source.right, detailsTop: details.top, mainLeft: main.left, mainRight: main.right };
+    // The source suite now leads the one-line meta ("Suite · 1 step · 1 assertion").
+    const meta = row.querySelector('.case-row-meta').getBoundingClientRect();
+    return { width: main.width, titleBottom: title.bottom, idBottom: id.bottom, sourceTop: meta.top, sourceLeft: meta.left, sourceRight: meta.right, mainLeft: main.left, mainRight: main.right };
   });
   assert.ok(capturedListLayout.width < 250, `The regression must exercise a narrow right pane: ${JSON.stringify(capturedListLayout)}`);
-  assert.ok(capturedListLayout.sourceTop >= capturedListLayout.idBottom - 1 && capturedListLayout.detailsTop >= capturedListLayout.sourceTop, `A long captured-case source must follow the title and ID without overlap: ${JSON.stringify(capturedListLayout)}`);
+  assert.ok(capturedListLayout.sourceTop >= capturedListLayout.idBottom - 1, `A long captured-case source must follow the title and ID without overlap: ${JSON.stringify(capturedListLayout)}`);
   assert.ok(capturedListLayout.sourceLeft >= capturedListLayout.mainLeft - 1 && capturedListLayout.sourceRight <= capturedListLayout.mainRight + 1, `A long source label must stay inside the case button: ${JSON.stringify(capturedListLayout)}`);
   await capturedListPage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'captured-test-list-narrow-dark.png') });
   await capturedListPage.close();
 
   for (const localeCase of [
-    { locale: 'zh-TW', tabs: ['除錯', '測試', '紅隊測試', '設定'], results: '最新測試結果', review: '檢視測試結果', openEvidence: '開啟證據', cases: '測試案例', contracts: '測試案例', removedGroup: '測試組合', artifact: 'automation-results-zh-tw-dark.png' },
-    { locale: 'ja-JP', tabs: ['デバッグ', 'テスト', 'レッドチーム', '設定'], results: '最新のテスト結果', review: 'テスト結果を確認', openEvidence: '証拠を開く', cases: 'ケース', contracts: 'テストケース', removedGroup: 'テストグループ', artifact: 'automation-results-ja-dark.png' },
-    { locale: 'ko-KR', tabs: ['디버그', '테스트', '레드 팀', '설정'], results: '최신 테스트 결과', review: '테스트 결과 검토', openEvidence: '증거 열기', cases: '케이스', contracts: '테스트 케이스', removedGroup: '테스트 그룹', artifact: 'automation-results-ko-dark.png' },
+    { locale: 'zh-TW', tabs: ['除錯', '一般測試', '紅隊測試', '設定'], resultsTab: '測試結果', showChecks: '顯示檢查明細', results: '本次工作階段的證據', review: '檢視測試結果', openEvidence: '開啟證據', cases: '測試案例', contracts: '測試案例', removedGroup: '測試組合', artifact: 'automation-results-zh-tw-dark.png' },
+    { locale: 'ja-JP', tabs: ['デバッグ', '通常テスト', 'レッドチーム', '設定'], resultsTab: '結果', showChecks: 'チェックを表示', results: 'このセッションの証拠', review: 'テスト結果を確認', openEvidence: '証拠を開く', cases: 'ケース', contracts: 'テストケース', removedGroup: 'テストグループ', artifact: 'automation-results-ja-dark.png' },
+    { locale: 'ko-KR', tabs: ['디버그', '일반 테스트', '레드 팀', '설정'], resultsTab: '결과', showChecks: '검사 표시', results: '이 세션의 증거', review: '테스트 결과 검토', openEvidence: '증거 열기', cases: '케이스', contracts: '테스트 케이스', removedGroup: '테스트 그룹', artifact: 'automation-results-ko-dark.png' },
   ]) {
     const localePage = await browser.newPage({ viewport: { width: 720, height: 900 } });
     await localePage.goto(`${url}?locale=${encodeURIComponent(localeCase.locale)}`);
@@ -1374,11 +1345,14 @@ try {
     for (const label of localeCase.tabs) assert.equal(await localeTabs.getByRole('tab', { name: label, exact: true }).count(), 1, `${localeCase.locale}: expected translated primary tab ${label}`);
     assert.equal(await localeTabs.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, `${localeCase.locale}: primary right-pane tabs must fit without horizontal scrolling at 720px`);
     await localeTabs.getByRole('tab', { name: localeCase.tabs[1], exact: true }).click();
+    const localizedSections = localePage.getByRole('tablist', { name: localeCase.locale === 'zh-TW' ? '測試區段' : localeCase.locale === 'ja-JP' ? 'テストセクション' : '테스트 섹션' });
+    await localizedSections.getByRole('tab', { name: localeCase.resultsTab, exact: true }).click();
     await localePage.getByRole('heading', { name: localeCase.results }).waitFor();
+    await localePage.locator('#automation-results').getByRole('button', { name: new RegExp(`^${localeCase.showChecks}`) }).click();
     await localePage.locator('.automation-result-table').getByRole('button', { name: localeCase.openEvidence }).first().click();
     await localePage.getByRole('combobox', { name: localeCase.review }).waitFor();
     assert.equal(await localePage.getByRole('combobox', { name: localeCase.review }).count(), 1, `${localeCase.locale}: the top result selector must be translated`);
-    assert.equal(await localePage.getByText('Latest test results', { exact: true }).count(), 0, `${localeCase.locale}: the Results heading must not fall back to English`);
+    assert.equal(await localePage.getByText('Evidence from this session', { exact: true }).count(), 0, `${localeCase.locale}: the Results heading must not fall back to English`);
     await localePage.screenshot({ path: resolve(artifactDirectory, localeCase.artifact), fullPage: true });
     await localePage.locator('.evidence-review__heading-actions .codicon-close').locator('xpath=..').click();
     await localeTabs.getByRole('tab', { name: localeCase.tabs[1], exact: true }).click();
