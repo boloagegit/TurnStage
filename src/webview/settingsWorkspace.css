@@ -413,8 +413,9 @@
 .settings-overview__list button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .settings-overview__list button > .product-icon { color: var(--vscode-descriptionForeground); }
 .settings-overview__text { display: grid; gap: 2px; min-width: 0; }.settings-overview__text strong { font-weight: 600; }
-.settings-overview__text > span { overflow: hidden; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); text-overflow: ellipsis; white-space: nowrap; }
-.settings-overview__text > .settings-overview__attention { display: flex; align-items: center; gap: var(--ts-space-1); color: var(--vscode-editorWarning-foreground); white-space: normal; }
+/* Summaries wrap instead of truncating, so long URLs stay readable at 200% zoom and in narrow panes. */
+.settings-overview__text > span { color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); overflow-wrap: anywhere; }
+.settings-overview__text > .settings-overview__attention { display: flex; align-items: center; gap: var(--ts-space-1); color: var(--vscode-editorWarning-foreground); }
 /* Advanced settings: closed while they hold defaults, open once something in them was changed. */
 .settings-advanced > summary { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--ts-space-2); min-height: var(--ts-control-height); cursor: pointer; font-weight: 600; }
 .settings-advanced[open] > summary { margin-bottom: var(--ts-space-3); }
