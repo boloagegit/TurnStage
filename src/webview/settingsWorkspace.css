@@ -20,7 +20,8 @@
 .settings-subtitle code, .settings-section-count code { font-family: var(--vscode-editor-font-family); }
 .settings-header-actions, .settings-actions { display: flex; align-items: center; gap: var(--ts-space-1); }.settings-header-actions button { min-height: var(--ts-control-height); }
 .profile-edit-status { max-width: 11em; overflow: hidden; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); text-overflow: ellipsis; white-space: nowrap; }.profile-edit-status.is-dirty { color: var(--vscode-editorWarning-foreground); }.profile-edit-status.has-issues { color: var(--vscode-errorForeground); }
-.settings-section-picker { flex: 1 1 auto; min-width: 0; max-width: 18em; }
+.settings-section-picker { display: flex; flex: 1 1 auto; align-items: center; gap: var(--ts-space-1); min-width: 0; max-width: 20em; }.settings-section-picker > label { flex: 1 1 auto; min-width: 0; }.settings-section-picker > .icon-button { flex: none; margin-inline-start: calc(-1 * var(--ts-space-1)); }
+.settings-overview-title { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; font-size: var(--ts-type-section); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .settings-section-picker select { border-color: var(--vscode-dropdown-border, var(--vscode-input-border, transparent)); background: var(--vscode-dropdown-background, var(--vscode-input-background)); color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); }
 .settings-section-picker option { background: var(--vscode-dropdown-listBackground, var(--vscode-dropdown-background, var(--vscode-input-background))); color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); }
 .settings-main { min-height: 0; overflow-x: clip; overflow-y: auto; overflow-anchor: none; }
@@ -50,8 +51,9 @@
 .settings-code-input, .settings-preview pre { font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size, 1em); }.settings-field-control { display: grid; gap: var(--ts-space-1); }.settings-apply-action { justify-self: start; }
 .settings-checkbox-group { min-width: 0; margin: 0; padding: 0; border: 0; }.settings-checkbox-group > p { margin: 2px 0 var(--ts-space-2); color: var(--vscode-descriptionForeground); font-size: .846em; }.settings-checkbox-group > div { display: grid; gap: var(--ts-space-1); }
 .settings-checkbox { display: flex; align-items: center; gap: calc(var(--ts-space-1) + 3px); min-height: var(--ts-control-height); }.settings-checkbox input { width: 1.23em; min-height: 1.23em; margin: 0; }
-.settings-status-grid, .settings-request-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.75em, 1fr)); gap: 1px; margin-top: var(--ts-space-3); margin-inline: calc(-1 * (var(--ts-space-2) + 2px)); clip-path: inset(0 calc(var(--ts-space-2) + 2px)); /* cell text lands on the content edge; the dividers stop at it */ background: var(--vscode-editorWidget-border); }
-.settings-status-item { display: grid; gap: 2px; min-width: 0; padding: var(--ts-space-2) calc(var(--ts-space-2) + 2px); background: var(--vscode-editor-background); }.settings-status-item span { color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); }.settings-status-item strong { overflow: hidden; font-family: var(--vscode-editor-font-family); font-size: .846em; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }.settings-status-item.is-warning strong { color: var(--vscode-editorWarning-foreground); }
+/* Each cell draws its own right and bottom divider, so a short last row leaves blank space instead of a filled cell. */
+.settings-status-grid, .settings-request-meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.75em, 1fr)); margin-top: var(--ts-space-3); margin-inline: calc(-1 * (var(--ts-space-2) + 2px)); clip-path: inset(0 calc(var(--ts-space-2) + 2px)); /* cell text lands on the content edge; the dividers stop at it */ border-top: 1px solid var(--vscode-editorWidget-border); }
+.settings-status-item { display: grid; gap: 2px; min-width: 0; padding: var(--ts-space-2) calc(var(--ts-space-2) + 2px); border-right: 1px solid var(--vscode-editorWidget-border); border-bottom: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-editor-background); }.settings-status-item span { color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); }.settings-status-item strong { overflow: hidden; font-family: var(--vscode-editor-font-family); font-size: .846em; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }.settings-status-item.is-warning strong { color: var(--vscode-editorWarning-foreground); }
 .settings-controls-summary, .settings-history-note { margin-top: 12px; padding: 8px 10px; border: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-textBlockQuote-background); }
 .settings-controls-summary > div, .settings-history-note { display: flex; justify-content: space-between; gap: 12px; }.settings-controls-summary ul { margin: 8px 0 0; padding: 0; list-style: none; }.settings-controls-summary li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-top: 1px solid var(--vscode-editorWidget-border); }.settings-controls-summary code { font-family: var(--vscode-editor-font-family); color: var(--vscode-descriptionForeground); }
 .settings-footnote { margin-top: 14px; }.settings-inline-action { justify-self: start; margin-top: 6px; border: 0; padding-inline: 0; color: var(--vscode-textLink-foreground); background: transparent; }
@@ -397,3 +399,26 @@
 .settings-empty__more { flex: 1 1 100%; order: 2; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-small); }
 .settings-empty__more > summary { width: fit-content; cursor: pointer; }
 .settings-empty__more > p { max-width: 60ch; margin: var(--ts-space-1) 0 0; line-height: 1.5; }
+
+/* Settings overview: what every section is set to, before opening one. */
+.settings-overview { display: grid; gap: var(--ts-space-3); padding: var(--ts-space-3) 0 calc(var(--ts-space-5) + var(--ts-space-3)); }
+.settings-health { display: grid; gap: var(--ts-space-1); margin: 0 var(--ts-pane-inline); padding: var(--ts-space-2) var(--ts-space-3); border: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-textBlockQuote-background, var(--vscode-editorWidget-background)); }
+.settings-health__row { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--ts-space-2); margin: 0; min-width: 0; }.settings-health__row > span { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }.settings-health__row > .product-icon { flex: none; }
+.settings-health__row.is-ok > .product-icon { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }.settings-health__row.is-warning > .product-icon { color: var(--vscode-editorWarning-foreground); }.settings-health__row.is-idle > .product-icon { color: var(--vscode-descriptionForeground); }
+.settings-health__row .settings-inline-action { margin-top: 0; }
+.settings-overview__list { margin: 0; padding: 0; border-top: 1px solid var(--vscode-editorWidget-border); list-style: none; }
+.settings-overview__list li { border-bottom: 1px solid var(--vscode-editorWidget-border); }
+.settings-overview__list button { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--ts-space-2); width: 100%; min-height: calc(var(--ts-control-height) * 2); padding: var(--ts-space-2) var(--ts-space-2) var(--ts-space-2) var(--ts-pane-inline); border: 0; border-radius: 0; color: var(--vscode-foreground); background: transparent; text-align: start; }
+.settings-overview__list button:hover { background: var(--vscode-list-hoverBackground); }
+.settings-overview__list button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.settings-overview__list button > .product-icon { color: var(--vscode-descriptionForeground); }
+.settings-overview__text { display: grid; gap: 2px; min-width: 0; }.settings-overview__text strong { font-weight: 600; }
+.settings-overview__text > span { overflow: hidden; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); text-overflow: ellipsis; white-space: nowrap; }
+.settings-overview__text > .settings-overview__attention { display: flex; align-items: center; gap: var(--ts-space-1); color: var(--vscode-editorWarning-foreground); white-space: normal; }
+/* Advanced settings: closed while they hold defaults, open once something in them was changed. */
+.settings-advanced > summary { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--ts-space-2); min-height: var(--ts-control-height); cursor: pointer; font-weight: 600; }
+.settings-advanced[open] > summary { margin-bottom: var(--ts-space-3); }
+.settings-advanced__state { color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); font-weight: 400; }
+.settings-advanced--inline { margin-top: var(--ts-space-4); padding-top: var(--ts-space-3); border-top: 1px dashed var(--vscode-editorWidget-border); }
+.flow-request-summary__line { display: block; padding: var(--ts-space-2); border: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-textBlockQuote-background, var(--vscode-editorWidget-background)); font-family: var(--vscode-editor-font-family); overflow-wrap: anywhere; }
+.flow-request-summary .section-heading > button { flex: none; align-self: flex-start; white-space: nowrap; }

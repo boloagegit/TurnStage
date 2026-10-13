@@ -1,0 +1,148 @@
+// @vitest-environment jsdom
+import React, { useState } from 'react';
+import { cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SessionSnapshot, TurnStageProfile } from '../src/shared/types';
+import { FlowEditor } from '../src/webview/configEditors';
+import { lastResponseHealth, secondsText, settingsSectionOverview, transportLabel } from '../src/webview/SettingsOverview';
+import { SettingsWorkspace, type SettingsSectionId } from '../src/webview/SettingsWorkspace';
+import { normalizeWebviewState } from '../src/webview/main';
+
+afterEach(cleanup);
+
+const profile: TurnStageProfile = {
+  version: 1,
+  id: 'overview',
+  name: 'Overview profile',
+  environment: 'local',
+  opening: { mode: 'static', message: 'Hi', starters: [{ id: 's1', label: 'One', prompt: 'One', behavior: 'send' }] },
+  conversation: { send: { method: 'POST', url: '${env.baseUrl}/chat', timeoutMs: 30_000, variants: [{ id: 'first-turn', body: {} }] } },
+  stream: { transport: 'sse', mappings: [{ id: 'text', match: { event: 'message' }, emit: { type: 'content.text.delta' } }] },
+  history: { localRuns: { maxRuns: 50 } },
+};
+
+function snapshot(metrics: Partial<SessionSnapshot['metrics']>, errors: SessionSnapshot['errors'] = []): SessionSnapshot {
+  return { metrics: { eventCount: 0, parseErrorCount: 0, mappingErrorCount: 0, ...metrics }, errors } as unknown as SessionSnapshot;
+}
+
+describe('settings overview', () => {
+  it('summarizes what every section is set to now', () => {
+    const overview = settingsSectionOverview(profile);
+    expect(overview.general.summary).toBe('Overview profile · environment local');
+    expect(overview['opening-flow'].summary).toBe('Static opening · 1 starter prompt · 1 request variant');
+    expect(overview.request.summary).toBe('POST ${env.baseUrl}/chat · times out after 30 s');
+    expect(overview['stream-mapping'].summary).toBe('SSE · 1 mapping rule');
+    expect(overview['history-errors'].summary).toBe('Keeps the last 50 runs');
+    expect(overview.security.summary).toBe('Links open only over HTTPS; no commands allowed');
+    expect(Object.values(overview).some((item) => item.attention)).toBe(false);
+  });
+
+  it('flags sections that will stop or weaken a run', () => {
+    const broken: TurnStageProfile = { ...profile, conversation: { send: { method: 'POST', url: ' ' } }, stream: { transport: 'ndjson', mappings: [] } };
+    const overview = settingsSectionOverview(broken);
+    expect(overview.request.attention).toBe('Request URL is missing');
+    expect(overview.request.summary).toContain('times out after 120 s');
+    expect(overview['opening-flow'].attention).toBeUndefined();
+    expect(overview['stream-mapping'].attention).toBe('No mapping rules');
+    const insecure: TurnStageProfile = { ...profile, conversation: { send: { ...profile.conversation.send, tls: { allowInvalidCertificates: true } } } };
+    expect(settingsSectionOverview(insecure).request.attention).toBe('Certificate checks are off');
+    expect(settingsSectionOverview(profile, snapshot({ eventCount: 4, mappingErrorCount: 2 }))['stream-mapping'].attention).toBe('2 parse or mapping errors in the last response');
+  });
+
+  it('describes the last response in one line', () => {
+    expect(lastResponseHealth(undefined).tone).toBe('idle');
+    expect(lastResponseHealth(snapshot({ eventCount: 6 }))).toEqual({ tone: 'ok', text: 'Last response: 6 events, no errors' });
+    expect(lastResponseHealth(snapshot({ eventCount: 6, parseErrorCount: 1 })).tone).toBe('warning');
+    expect(lastResponseHealth(snapshot({ eventCount: 3 }, [{ type: 'IdleTimeoutError', message: 'idle' } as SessionSnapshot['errors'][number]])).text).toBe('Last response failed: IdleTimeoutError');
+  });
+
+  it('formats seconds and transports for people', () => {
+    expect(secondsText(120_000)).toBe('120');
+    expect(secondsText(500)).toBe('0.5');
+    expect(transportLabel('sse')).toBe('SSE');
+    expect(transportLabel('ndjson')).toBe('NDJSON');
+    expect(transportLabel('text-stream')).toBe('Text stream');
+  });
+});
+
+function OverviewHarness({ post = vi.fn() }: { post?: (message: unknown) => void }): React.JSX.Element {
+  const [section, setSection] = useState<SettingsSectionId>('general');
+  const [overview, setOverview] = useState(true);
+  return <SettingsWorkspace embedded section={section} onSectionChange={setSection} overview={overview} onOverviewChange={setOverview} profile={profile} post={post} />;
+}
+
+describe('embedded settings navigation', () => {
+  it('opens a section from the overview and returns to it', async () => {
+    const user = userEvent.setup();
+    render(<OverviewHarness />);
+    const nav = screen.getByRole('navigation', { name: 'Profile configuration sections' });
+    expect(within(nav).getByRole('button', { name: /Request.*times out after 30 s/u })).toBeTruthy();
+    await user.click(within(nav).getByRole('button', { name: /^Security/u }));
+    expect(screen.getByRole('heading', { level: 1, name: 'Security' })).toBeTruthy();
+    expect((screen.getByRole('combobox', { name: 'Profile configuration sections' }) as HTMLSelectElement).value).toBe('security');
+    await user.click(screen.getByRole('button', { name: 'All settings' }));
+    expect(screen.getByRole('navigation', { name: 'Profile configuration sections' })).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: 'Profile configuration sections' })).toBeNull();
+  });
+
+  it('validates the Profile from the header', async () => {
+    const post = vi.fn();
+    render(<OverviewHarness post={post} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Validate profile' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.validate' });
+  });
+
+  it('edits request timeouts in seconds and stores milliseconds', async () => {
+    const post = vi.fn();
+    const user = userEvent.setup();
+    render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={profile} post={post} />);
+    const timeout = screen.getByRole('spinbutton', { name: 'Request timeout (seconds)' }) as HTMLInputElement;
+    expect(timeout.value).toBe('30');
+    await user.clear(timeout);
+    await user.type(timeout, '2.5{Enter}');
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['conversation', 'send', 'timeoutMs'], value: 2500 });
+    const idle = screen.getByRole('spinbutton', { name: 'Idle timeout (seconds)' }) as HTMLInputElement;
+    expect(idle.value).toBe('');
+    expect(idle.placeholder).toBe('Off');
+  });
+
+  it('keeps retries and certificates collapsed until one of them is changed', () => {
+    const { unmount } = render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={profile} post={vi.fn()} />);
+    const advanced = screen.getByText('Advanced: retries, redirects, and certificates').closest('details')!;
+    expect(advanced.open).toBe(false);
+    unmount();
+    render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={{ ...profile, conversation: { send: { ...profile.conversation.send, reconnect: { maxAttempts: 2 } } } }} post={vi.fn()} />);
+    expect(screen.getByText('Advanced: retries, redirects, and certificates').closest('details')!.open).toBe(true);
+    expect(screen.getByText('Changed from defaults')).toBeTruthy();
+  });
+
+  it('owns remote session scope in History and Errors', async () => {
+    const post = vi.fn();
+    render(<SettingsWorkspace section="history-errors" onSectionChange={vi.fn()} profile={profile} post={post} />);
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Environment' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['history', 'remoteSessions'], value: { mode: 'referenceOnly', scope: ['profile', 'environment'] } });
+  });
+});
+
+describe('conversation flow editor', () => {
+  it('shows the request once and links to where it is edited', async () => {
+    const onEditRequest = vi.fn();
+    render(<FlowEditor profile={profile} post={vi.fn()} onEditRequest={onEditRequest} />);
+    expect(screen.queryByRole('textbox', { name: 'Conversation request URL' })).toBeNull();
+    expect(screen.queryByRole('spinbutton', { name: 'Maximum local runs' })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Unexpected stream end policy' })).toBeNull();
+    expect(screen.getByText('POST ${env.baseUrl}/chat')).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Edit request' }));
+    expect(onEditRequest).toHaveBeenCalled();
+  });
+});
+
+describe('settings state', () => {
+  it('restores the overview choice and a dismissed getting started guide', () => {
+    expect(normalizeWebviewState({ version: 4, configurationOverview: false, gettingStartedDismissed: true })).toMatchObject({ configurationOverview: false, gettingStartedDismissed: true });
+    const fresh = normalizeWebviewState({ version: 4 });
+    expect(fresh?.configurationOverview).toBeUndefined();
+    expect(fresh?.gettingStartedDismissed).toBeUndefined();
+  });
+});

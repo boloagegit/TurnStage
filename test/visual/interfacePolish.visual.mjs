@@ -61,6 +61,8 @@ async function visitPanels(page, prefix) {
     await capture(page, `${prefix}-red-team-${tabName.toLowerCase()}`);
   }
   await page.getByRole('tab', { name: 'Configure', exact: true }).click();
+  await capture(page, `${prefix}-settings-overview`);
+  await page.getByRole('navigation', { name: 'Profile configuration sections' }).getByRole('button', { name: /^General/u }).click();
   const picker = page.getByRole('combobox', { name: 'Profile configuration sections' });
   for (const section of settings) {
     await picker.selectOption(section);

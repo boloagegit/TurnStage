@@ -31,13 +31,11 @@ type VariantKey = 'first-turn' | 'continuation' | 'other';
  * keeps the text document authoritative while making the most important
  * runtime branches visible to a person debugging a backend.
  */
-export function FlowEditor({ profile, post }: { profile: TurnStageProfile; post: Post }): React.JSX.Element {
+export function FlowEditor({ profile, post, onEditRequest }: { profile: TurnStageProfile; post: Post; onEditRequest?: () => void }): React.JSX.Element {
   const openingMode = profile.opening?.mode ?? 'disabled';
   const variants = profile.conversation.send.variants ?? [];
   const stop = profile.conversation.stop;
   const stopRequest = stop?.request;
-  const localRuns = profile.history?.localRuns;
-  const errorPolicy = profile.errorPolicy;
 
   const patch = (path: Array<string | number>, value: unknown) => post({ type: 'profile.patch', path, value });
   const updateVariants = (next: RequestVariant[]) => patch(['conversation', 'send', 'variants'], next);
@@ -58,7 +56,7 @@ export function FlowEditor({ profile, post }: { profile: TurnStageProfile; post:
   const removeVariant = (index: number) => updateVariants(variants.filter((_, itemIndex) => itemIndex !== index));
 
   return <div className="content-page config-page">
-    <header className="page-heading"><div><h2>{t('Conversation flow')}</h2><p>{t('Configure opening, request variants, stop behavior, recovery, and local run retention.')}</p></div><button onClick={() => post({ type: 'profile.validate' })}>{t('Validate profile')}</button></header>
+    <header className="page-heading"><div><h2>{t('Conversation flow')}</h2><p>{t('What happens before the first turn, which request body each turn sends, and how Stop behaves.')}</p></div></header>
 
     <section className="config-section" aria-labelledby="opening-heading">
       <div className="section-heading"><div><h3 id="opening-heading">{t('Opening')}</h3><p>{t('Static content never makes a network request. Request mode starts once when the Profile opens, then requires an explicit retry after a failure.')}</p></div></div>
@@ -95,12 +93,9 @@ export function FlowEditor({ profile, post }: { profile: TurnStageProfile; post:
 
     <div className="flow-connector" aria-hidden="true"><span>{t('then')}</span></div>
 
-    <section className="config-section" aria-labelledby="request-heading">
-      <div className="section-heading"><div><h3 id="request-heading">{t('Conversation request')}</h3><p>{t('The base endpoint is shared by first-turn and continuation variants.')}</p></div></div>
-      <div className="form-grid">
-        <Field label={t('HTTP method')}><select aria-label={t('Conversation request method')} value={profile.conversation.send.method} onChange={(event) => patch(['conversation', 'send', 'method'], event.target.value)}>{methods.map((method) => <option key={method}>{method}</option>)}</select></Field>
-        <Field label={t('Request URL')} hint={t(hostText('Template values such as ${env.baseUrl} are resolved in the Extension Host.', 'Template values such as ${env.baseUrl} are resolved in this browser.'))} wide error={!profile.conversation.send.url.trim() ? t('A request URL is required.') : undefined}><PatchText aria-label={t('Conversation request URL')} value={profile.conversation.send.url} required spellCheck={false} onCommit={(value) => patch(['conversation', 'send', 'url'], value)} /></Field>
-      </div>
+    <section className="config-section flow-request-summary" aria-labelledby="request-heading">
+      <div className="section-heading"><div><h3 id="request-heading">{t('Conversation request')}</h3><p>{t('Every turn sends this request. Its URL, method, headers, and timeouts are set in Request.')}</p></div>{onEditRequest && <button type="button" onClick={onEditRequest}>{t('Edit request')}</button>}</div>
+      <code className="flow-request-summary__line">{profile.conversation.send.method} {profile.conversation.send.url || t('No request URL yet')}</code>
     </section>
 
     <div className="flow-connector" aria-hidden="true"><span>{t('choose a variant')}</span></div>
@@ -108,7 +103,7 @@ export function FlowEditor({ profile, post }: { profile: TurnStageProfile; post:
     <section className="config-section variant-section" aria-labelledby="variants-heading">
       <div className="section-heading"><div><h3 id="variants-heading">{t('First turn & continuation')}</h3><p>{t('Variants are selected in declaration order using structured conditions. Bodies accept JSON and template references such as')} <code>{'{$value: "input.text"}'}</code>.</p></div></div>
       <div className="variant-toolbar"><span>{variants.length === 1 ? t('{count} configured variant', { count: formatNumber(variants.length) }) : t('{count} configured variants', { count: formatNumber(variants.length) })}</span><div className="actions"><button onClick={() => addVariant('first-turn')}>{t('Add first turn')}</button><button onClick={() => addVariant('continuation')}>{t('Add continuation')}</button></div></div>
-      {variants.length ? <div className="variant-list">{variants.map((variant, index) => <VariantCard key={`${variant.id}-${index}`} index={index} variant={variant} post={post} onDelete={removeVariant} />)}</div> : <div className="empty-state"><strong>{t('No request variants')}</strong><p>{t('Add a first-turn or continuation variant before sending a request.')}</p><div className="actions"><button className="primary" onClick={() => addVariant('first-turn')}>{t('Add first turn')}</button><button onClick={() => addVariant('continuation')}>{t('Add continuation')}</button></div></div>}
+      {variants.length ? <div className="variant-list">{variants.map((variant, index) => <VariantCard key={`${variant.id}-${index}`} index={index} variant={variant} post={post} onDelete={removeVariant} />)}</div> : <div className="empty-state"><strong>{t('No request variants')}</strong><p>{t('Every turn sends the base body from Request. Add variants only when the first turn and later turns need different bodies.')}</p><div className="actions"><button className="primary" onClick={() => addVariant('first-turn')}>{t('Add first turn')}</button><button onClick={() => addVariant('continuation')}>{t('Add continuation')}</button></div></div>}
     </section>
 
     <div className="flow-connector" aria-hidden="true"><span>{t('while streaming')}</span></div>
@@ -129,41 +124,6 @@ export function FlowEditor({ profile, post }: { profile: TurnStageProfile; post:
         <Field label={t('Partial response')}><div className="stacked-checks"><Checkbox label={t('Preserve partial content')} checked={stop?.preservePartialContent ?? true} onChange={(value) => patch(['conversation', 'stop', 'preservePartialContent'], value)} /><Checkbox label={t('Append a system notice')} checked={stop?.appendSystemNotice ?? true} onChange={(value) => patch(['conversation', 'stop', 'appendSystemNotice'], value)} /></div></Field>
       </div>
     </section>
-
-    <section className="config-section" aria-labelledby="error-policy-heading">
-      <div className="section-heading"><div><h3 id="error-policy-heading">{t('Error policy')}</h3><p>{t('Choose whether an unexpected end is a failure and how partial/error content remains visible.')}</p></div></div>
-      <div className="form-grid">
-        <Field label={t('Unexpected stream end')}><select aria-label={t('Unexpected stream end policy')} value={profile.stream.unexpectedEndPolicy ?? 'fail'} onChange={(event) => patch(['stream', 'unexpectedEndPolicy'], event.target.value)}><option value="fail">{t('Fail the turn')}</option><option value="completeWithWarning">{t('Complete with warning')}</option></select></Field>
-        <Field label={t('Error handling')}><div className="stacked-checks"><Checkbox label={t('Preserve partial content')} checked={errorPolicy?.preservePartialContent ?? true} onChange={(value) => patch(['errorPolicy', 'preservePartialContent'], value)} /><Checkbox label={t('Show an error part')} checked={errorPolicy?.showErrorPart ?? true} onChange={(value) => patch(['errorPolicy', 'showErrorPart'], value)} /><Checkbox label={t('Keep conversation ID')} checked={errorPolicy?.keepConversationId ?? true} onChange={(value) => patch(['errorPolicy', 'keepConversationId'], value)} /><Checkbox label={t('Allow continuation after error')} checked={errorPolicy?.allowContinuation ?? true} onChange={(value) => patch(['errorPolicy', 'allowContinuation'], value)} /><Checkbox label={t('Release all locks')} checked={errorPolicy?.releaseAllLocks ?? true} onChange={(value) => patch(['errorPolicy', 'releaseAllLocks'], value)} /></div></Field>
-      </div>
-    </section>
-
-    <section className="config-section" aria-labelledby="new-conversation-heading">
-      <div className="section-heading"><div><h3 id="new-conversation-heading">{t('New Conversation')}</h3><p>{t('Reset clears messages, IDs, turn metrics, and interaction context, preserves configured controls, then runs this opening behavior.')}</p></div></div>
-      <div className="form-grid">
-        <Field label={t('Opening behavior after reset')} hint={t("This maps to the profile's opening.mode so the text editor and Visual Editor stay in sync.")}><select aria-label={t('New conversation opening behavior')} value={openingMode} onChange={(event) => patch(['opening', 'mode'], event.target.value)}><option value="static">{t('Show static opening')}</option><option value="request">{t('Run opening request')}</option><option value="disabled">{t('No opening')}</option></select></Field>
-        <div className="flow-note"><strong>{t('Preserved controls')}</strong><p>{t('Actor, model, and environment values remain selected; New Conversation is unavailable while a turn is active.')}</p></div>
-      </div>
-    </section>
-
-    <section className="config-section" aria-labelledby="history-heading">
-      <div className="section-heading"><div><h3 id="history-heading">{t('History')}</h3><p>{t('Local runs are stored by the Extension Host and can be replayed without sending another network request.')}</p></div></div>
-      <div className="form-grid">
-        <Field label={t('Local runs')}><div className="stacked-checks"><Checkbox label={t('Enable local run history')} checked={localRuns?.enabled ?? true} onChange={(value) => patch(['history', 'localRuns', 'enabled'], value)} /><Checkbox label={t('Record raw events')} checked={localRuns?.recordRawEvents ?? true} onChange={(value) => patch(['history', 'localRuns', 'recordRawEvents'], value)} /><Checkbox label={t('Record normalized events')} checked={localRuns?.recordNormalizedEvents ?? true} onChange={(value) => patch(['history', 'localRuns', 'recordNormalizedEvents'], value)} /><Checkbox label={t('Record chat snapshot')} checked={localRuns?.recordChatSnapshot ?? true} onChange={(value) => patch(['history', 'localRuns', 'recordChatSnapshot'], value)} /></div></Field>
-        <Field label={t('Maximum local runs')} hint={t('Older runs are evicted after this count.')}><input aria-label={t('Maximum local runs')} type="number" min={1} max={100} value={localRuns?.maxRuns ?? 20} onChange={(event) => patch(['history', 'localRuns', 'maxRuns'], clampInteger(event.target.value, 1, 100, 20))} /></Field>
-        <Field label={t('Remote session scope')} hint={t('Choose which profile values identify a reusable remote conversation reference.')} wide>
-          <div className="stacked-checks">
-            {(['profile', 'actor', 'environment'] as const).map((scope) => <Checkbox key={scope} label={localizeHumanized(scope)} checked={(profile.history?.remoteSessions?.scope ?? ['profile']).includes(scope)} onChange={(checked) => {
-              const current = profile.history?.remoteSessions?.scope ?? ['profile'];
-              const next = checked ? [...new Set([...current, scope])] : current.filter((item) => item !== scope);
-              patch(['history', 'remoteSessions'], { mode: 'referenceOnly', scope: next });
-            }} />)}
-          </div>
-        </Field>
-      </div>
-    </section>
-
-    <p className="muted">{t('All changes use WorkspaceEdit and participate in VS Code Undo/Redo. Comments and surrounding JSONC formatting are preserved where the parser can make a local edit.')}</p>
   </div>;
 }
 
@@ -576,6 +536,5 @@ function formatValue(value: unknown): string { if (value === undefined) return '
 function parseLooseValue(value: string): unknown { if (!value.trim()) return undefined; try { return JSON.parse(value); } catch { return value; } }
 function uniqueRuleId(profile: TurnStageProfile, base: string): string { return uniqueId(profile.stream.mappings.map((rule) => rule.id), base); }
 function uniqueId(ids: string[], base: string): string { const used = new Set(ids); let id = base; let suffix = 2; while (used.has(id)) id = `${base}-${suffix++}`; return id; }
-function clampInteger(value: string, min: number, max: number, fallback: number): number { const parsed = Number.parseInt(value, 10); return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback; }
 function inferEmitType(event: string | undefined, data: Record<string, unknown>): string { if (event === 'done') return 'stream.completed'; if (event === 'error') return 'stream.failed'; if (event === 'start') return 'conversation.started'; if ('text' in data) return 'content.text.delta'; return 'diagnostic.updated'; }
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }

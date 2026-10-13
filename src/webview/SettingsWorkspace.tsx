@@ -17,6 +17,7 @@ import { LiveCaseStatusBadge, useCaseOutcomeFilter } from './liveCaseStatus';
 import { captureNeedsReview, markCaptureReady, MarkCasesReadyContext } from './bulkCaseEdits';
 import { describeAssertion } from './assertionSummary';
 import { hostText } from './hostCopy';
+import { DEFAULT_REQUEST_TIMEOUT_MS, SettingsOverview, transportLabel } from './SettingsOverview';
 
 /**
  * Keep this callback local to the workspace so it can also be used by hosts
@@ -147,6 +148,9 @@ export interface SettingsWorkspaceProps {
   /** The section selected by the host tree/editor. */
   section: SettingsSectionId;
   onSectionChange: (section: SettingsSectionId) => void;
+  /** Embedded only: show the section overview instead of one section. Omit to always show a section. */
+  overview?: boolean;
+  onOverviewChange?: (overview: boolean) => void;
   /** Use the compact, single-pane layout beside the Chat preview. */
   embedded?: boolean;
   /** Section-scoped scroll checkpoint restored when VS Code recreates the Webview. */
@@ -204,6 +208,8 @@ export function SettingsWorkspace({
   diagnostics = [],
   section,
   onSectionChange,
+  overview: overviewRequested = false,
+  onOverviewChange,
   embedded = false,
   scrollStateKey = section,
   scrollTop,
@@ -217,17 +223,24 @@ export function SettingsWorkspace({
   const patch = (path: PatchPath, value: unknown) => post({ type: 'profile.patch', path, value });
 
   const active = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0];
+  const overview = embedded && overviewRequested && Boolean(onOverviewChange);
+  const openSection = (next: SettingsSectionId) => { onSectionChange(next); onOverviewChange?.(false); };
   const sectionTitleId = `profile-configuration-section-title-${active.id}`;
   const sectionDescriptionId = `profile-configuration-section-description-${active.id}`;
   return <div className={`settings-workspace ${embedded ? 'settings-workspace--embedded' : ''}`}>
     <header className={`settings-header ${embedded ? 'settings-header--embedded' : ''}`} role="group" aria-label={t('Profile configuration toolbar')}>
-      {embedded
-        ? <label className="settings-section-picker">
-          <span className="sr-only">{t('Profile configuration sections')}</span>
-          <select value={active.id} aria-label={t('Profile configuration sections')} onChange={(event) => onSectionChange(event.target.value as SettingsSectionId)}>
-            {SETTINGS_SECTIONS.map((item) => <option key={item.id} value={item.id}>{t(item.label)}</option>)}
-          </select>
-        </label>
+      {overview
+        ? <h1 className="settings-overview-title">{t('All settings')}</h1>
+        : embedded
+        ? <div className="settings-section-picker">
+          {onOverviewChange && <IconButton type="button" icon="arrow-left" label={t('All settings')} onClick={() => onOverviewChange(true)} />}
+          <label>
+            <span className="sr-only">{t('Profile configuration sections')}</span>
+            <select value={active.id} aria-label={t('Profile configuration sections')} onChange={(event) => onSectionChange(event.target.value as SettingsSectionId)}>
+              {SETTINGS_SECTIONS.map((item) => <option key={item.id} value={item.id}>{t(item.label)}</option>)}
+            </select>
+          </label>
+        </div>
         : <div className="settings-title-block">
           <p id="profile-configuration-title" className="settings-surface-title">{t('Profile Configuration')}</p>
           <p className="settings-subtitle"><span>{profile.name || t('Untitled profile')}</span><span aria-hidden="true">·</span><code>{profile.id}</code><span aria-hidden="true">·</span><span>{profile.environment || t('No environment selected')}</span></p>
@@ -235,13 +248,14 @@ export function SettingsWorkspace({
       <div className="settings-header-actions" role="group" aria-label={t('Profile configuration actions')}>
         <span className={`profile-edit-status ${profileDirty ? 'is-dirty' : diagnostics.length ? 'has-issues' : ''}`} role="status">{readOnly ? t('Read-only') : profileDirty ? t('Unsaved changes') : diagnostics.length ? t('{count} issues', { count: formatNumber(diagnostics.length) }) : t('Saved')}</span>
         {diagnostics.length > 0 && <IconButton icon="warning" label={t('Show first issue')} type="button" onClick={() => post({ type: 'profile.openFirstIssue' })} />}
+        <IconButton icon="check" label={t('Validate profile')} type="button" onClick={() => post({ type: 'profile.validate' })} />
         <IconButton icon="save" label={t('Save Profile')} type="button" disabled={readOnly || !profileDirty} onClick={() => post({ type: 'profile.save' })} />
         <IconButton icon="file-code" label={t(vscodeFeatures ? 'Open JSONC' : 'View JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
       </div>
     </header>
 
     <div ref={scrollRef} className="settings-main" id="settings-content" onScroll={(event) => onScrollTopChange?.(event.currentTarget.scrollTop)}>
-      <div className="settings-content-layout">
+      {overview ? <SettingsOverview sections={SETTINGS_SECTIONS} profile={profile} snapshot={snapshot} diagnosticsCount={diagnostics.length} onOpen={openSection} onShowFirstIssue={() => post({ type: 'profile.openFirstIssue' })} /> : <div className="settings-content-layout">
         {!embedded && <nav className="settings-section-nav" aria-label={t('Profile configuration sections')}>
           <div className="settings-section-nav-list">
             {SETTINGS_SECTIONS.map((item) => <button key={item.id} type="button" className={active.id === item.id ? 'is-active' : ''} aria-current={active.id === item.id ? 'page' : undefined} onClick={() => onSectionChange(item.id)}>{t(item.label)}</button>)}
@@ -264,7 +278,7 @@ export function SettingsWorkspace({
           {readOnly && <ReadOnlyNotice post={post} />}
           <fieldset className="settings-editable-region" disabled={readOnly}>
           {active.id === 'general' && <GeneralSection profile={profile} snapshot={snapshot} post={post} patch={patch} vscodeFeatures={vscodeFeatures} environmentIds={environmentIds} />}
-          {active.id === 'opening-flow' && <OpeningFlowSection profile={profile} post={post} />}
+          {active.id === 'opening-flow' && <OpeningFlowSection profile={profile} post={post} onOpenSection={openSection} />}
           {active.id === 'request' && <RequestSection profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} connectionResult={connectionResult} post={post} patch={patch} vscodeFeatures={vscodeFeatures} />}
           {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
           {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
@@ -273,7 +287,7 @@ export function SettingsWorkspace({
           {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} />}
           </fieldset>
         </section>
-      </div>
+      </div>}
     </div>
   </div>;
 }
@@ -396,12 +410,6 @@ function GeneralSection({ profile, snapshot, post, patch, vscodeFeatures, enviro
         <SettingField label={t('Display name')} id="settings-profile-name" hint={t('Shown at the top of this profile configuration.')}>
           <PatchInput id="settings-profile-name" value={profile.name} onCommit={(value) => patch(['name'], value)} required autoComplete="off" />
         </SettingField>
-        <SettingField label={t('Profile ID')} id="settings-profile-id" hint={t('The ID is stable and is used for local run storage.')}>
-          <input id="settings-profile-id" value={profile.id} readOnly aria-readonly="true" />
-        </SettingField>
-        <SettingField label={t('Description')} id="settings-profile-description" hint={t('Optional context for teammates and future runs.')} wide>
-          <PatchInput id="settings-profile-description" value={profile.description ?? ''} onCommit={(value) => patch(['description'], value || undefined)} multiline rows={3} />
-        </SettingField>
         <SettingField label={t('Environment ID')} id="settings-profile-environment" hint={t(hostText('The environment is resolved by the Extension Host when a run starts.', 'The environment is resolved in this browser when a request is sent.'))}>
           {environmentIds.length
             ? <select id="settings-profile-environment" value={profile.environment ?? ''} onChange={(event) => patch(['environment'], event.target.value || undefined)}>
@@ -411,10 +419,21 @@ function GeneralSection({ profile, snapshot, post, patch, vscodeFeatures, enviro
             </select>
             : <PatchInput id="settings-profile-environment" value={profile.environment ?? ''} onCommit={(value) => patch(['environment'], value || undefined)} autoComplete="off" placeholder="local" />}
         </SettingField>
-        <SettingField label={t('Schema version')} id="settings-profile-version" hint={t('Schema migrations are handled by TurnStage.')}>
-          <input id="settings-profile-version" value={String(profile.version)} readOnly aria-readonly="true" />
+        <SettingField label={t('Description')} id="settings-profile-description" hint={t('Optional context for teammates and future runs.')} wide>
+          <PatchInput id="settings-profile-description" value={profile.description ?? ''} onCommit={(value) => patch(['description'], value || undefined)} multiline rows={3} />
         </SettingField>
       </div>
+      <details className="settings-advanced settings-advanced--inline">
+        <summary><span>{t('Advanced: identifiers')}</span><span className="settings-advanced__state">{t('Read-only')}</span></summary>
+        <div className="settings-form-grid">
+          <SettingField label={t('Profile ID')} id="settings-profile-id" hint={t('The ID is stable and is used for local run storage.')}>
+            <input id="settings-profile-id" value={profile.id} readOnly aria-readonly="true" />
+          </SettingField>
+          <SettingField label={t('Schema version')} id="settings-profile-version" hint={t('Schema migrations are handled by TurnStage.')}>
+            <input id="settings-profile-version" value={String(profile.version)} readOnly aria-readonly="true" />
+          </SettingField>
+        </div>
+      </details>
     </section>
 
     <section className="settings-card" aria-labelledby="general-context-heading">
@@ -435,9 +454,9 @@ function GeneralSection({ profile, snapshot, post, patch, vscodeFeatures, enviro
   </div>;
 }
 
-function OpeningFlowSection({ profile, post }: { profile: TurnStageProfile; post: SettingsWorkspacePost }): React.JSX.Element {
+function OpeningFlowSection({ profile, post, onOpenSection }: { profile: TurnStageProfile; post: SettingsWorkspacePost; onOpenSection: (section: SettingsSectionId) => void }): React.JSX.Element {
   return <div className="settings-editor-frame">
-    <FlowEditor profile={profile} post={post} />
+    <FlowEditor profile={profile} post={post} onEditRequest={() => onOpenSection('request')} />
   </div>;
 }
 
@@ -446,7 +465,55 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
   const preview = isRecord(requestPreview) ? requestPreview : undefined;
   const previewUrl = typeof preview?.url === 'string' ? preview.url : request.url;
   const loopback = isLoopbackUrl(previewUrl);
+  const resilienceCustomized = request.reconnect !== undefined || request.redirectPolicy !== undefined || request.maxRedirects !== undefined || request.tls?.allowInvalidCertificates === true;
   return <div className="settings-section-stack">
+    <section className="settings-card" aria-labelledby="request-definition-heading">
+      <SectionHeading id="request-definition-heading" title={t('Conversation request')} description={t(hostText('The endpoint is shared by first-turn and continuation variants. Templates are resolved in the Extension Host.', 'The endpoint is shared by first-turn and continuation variants. Templates are resolved in this browser.'))} />
+      <div className="settings-form-grid">
+        <SettingField label={t('HTTP method')} id="settings-request-method">
+          <select id="settings-request-method" value={request.method} onChange={(event) => patch(['conversation', 'send', 'method'], event.target.value)}>
+            {['POST', 'GET', 'PUT', 'PATCH', 'DELETE'].map((method) => <option key={method} value={method}>{method}</option>)}
+          </select>
+        </SettingField>
+        <SettingField label={t('Request URL')} id="settings-request-url" hint={t('Use ${env.baseUrl} and other profile context values where appropriate.')} error={!request.url.trim() ? t('A request URL is required.') : undefined} wide>
+          <PatchInput id="settings-request-url" value={request.url} onCommit={(value) => patch(['conversation', 'send', 'url'], value)} required spellCheck={false} autoComplete="url" />
+        </SettingField>
+        <NumberSettingField label={t('Request timeout (seconds)')} id="settings-request-timeout" value={request.timeoutMs} placeholder={String(DEFAULT_REQUEST_TIMEOUT_MS / 1000)} min={1} max={900000} step="any" scale={1000} hint={t('The whole request stops after this long. Leave empty for {seconds} seconds.', { seconds: formatNumber(DEFAULT_REQUEST_TIMEOUT_MS / 1000) })} onCommit={(value) => patch(['conversation', 'send', 'timeoutMs'], value)} />
+        <NumberSettingField label={t('Idle timeout (seconds)')} id="settings-request-idle-timeout" value={request.idleTimeoutMs} placeholder={t('Off')} min={1} max={900000} step="any" scale={1000} hint={t('Stop when the stream sends nothing for this long. Leave empty for no limit.')} onCommit={(value) => patch(['conversation', 'send', 'idleTimeoutMs'], value)} />
+      </div>
+    </section>
+
+    <section className="settings-card" aria-labelledby="request-payload-heading">
+      <SectionHeading id="request-payload-heading" title={t('Headers and payload')} description={t('Keep structured values as JSON. Nothing in this editor executes as JavaScript.')} />
+      <div className="settings-form-grid">
+        <JsonPatchField label={t('Headers (JSON)')} id="settings-request-headers" value={request.headers ?? {}} hint={t('Header values are redacted in previews when they are sensitive.')} onCommit={(value) => patch(['conversation', 'send', 'headers'], value)} />
+        <JsonPatchField label={t('Base body (JSON)')} id="settings-request-body" value={request.body ?? {}} hint={t('A variant body overrides this value when a variant supplies one.')} onCommit={(value) => patch(['conversation', 'send', 'body'], value)} />
+      </div>
+    </section>
+
+    <details className="settings-card settings-advanced" open={resilienceCustomized || undefined}>
+      <summary><span id="request-resilience-heading">{t('Advanced: retries, redirects, and certificates')}</span><span className="settings-advanced__state">{resilienceCustomized ? t('Changed from defaults') : t('Using defaults')}</span></summary>
+      <p className="sr-only">{t('Bound retries and redirects without replaying partial streamed output.')}</p>
+      <div className="settings-form-grid">
+        <NumberSettingField label={t('Reconnect attempts')} id="settings-reconnect-attempts" value={request.reconnect?.maxAttempts} placeholder="0" min={0} max={5} hint={t('Retries only before the first stream event.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxAttempts'], value)} />
+        <NumberSettingField label={t('Reconnect base delay (seconds)')} id="settings-reconnect-base-delay" value={request.reconnect?.baseDelayMs} placeholder="0.5" min={0} max={30000} step="any" scale={1000} hint={t('Wait before the first retry.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'baseDelayMs'], value)} />
+        <NumberSettingField label={t('Reconnect maximum delay (seconds)')} id="settings-reconnect-max-delay" value={request.reconnect?.maxDelayMs} placeholder="10" min={0} max={120000} step="any" scale={1000} hint={t('Longest wait between retries.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxDelayMs'], value)} />
+        <SettingField label={t('Retry HTTP statuses')} id="settings-reconnect-statuses" hint={t('Comma-separated 4xx or 5xx status codes.')}>
+          <PatchInput id="settings-reconnect-statuses" value={(request.reconnect?.retryOnStatuses ?? []).join(', ')} placeholder="429, 502, 503, 504" inputMode="numeric" onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'retryOnStatuses'], parseStatusList(value))} />
+        </SettingField>
+        <SettingField label={t('Redirect policy')} id="settings-redirect-policy">
+          <select id="settings-redirect-policy" value={request.redirectPolicy ?? 'same-origin'} onChange={(event) => patch(['conversation', 'send', 'redirectPolicy'], event.target.value)}>
+            <option value="same-origin">{t('Same origin only')}</option><option value="follow">{t('Follow redirects')}</option><option value="error">{t('Reject redirects')}</option>
+          </select>
+        </SettingField>
+        <NumberSettingField label={t('Maximum redirects')} id="settings-max-redirects" value={request.maxRedirects} placeholder="5" min={0} max={10} onCommit={(value) => patch(['conversation', 'send', 'maxRedirects'], value)} />
+      </div>
+      <SettingCheckboxGroup legend={t('TLS certificate verification')} hint={t('Keep certificate verification enabled unless a development or company endpoint cannot use a trusted certificate chain.') }>
+        <SettingCheckbox id="settings-request-allow-invalid-certificates" label={t('Allow invalid server certificates for this request')} checked={request.tls?.allowInvalidCertificates === true} onChange={(checked) => patch(['conversation', 'send', 'tls'], checked ? { allowInvalidCertificates: true } : undefined)} />
+      </SettingCheckboxGroup>
+      {request.tls?.allowInvalidCertificates === true && <p className="settings-callout settings-callout-warning" role="alert"><strong>{t('Certificate verification is disabled for this Profile.')}</strong> {t('TurnStage will accept an untrusted or mismatched server certificate only for this request. Credentials and response content can be intercepted. System-managed PAC proxy routes are rejected because they cannot be preserved safely.')}</p>}
+    </details>
+
     <section className="settings-card connection-doctor" aria-labelledby="connection-doctor-heading">
       <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="connection-doctor-heading">{t('Connection Doctor')}</h2><p className="settings-card-description">{t('Analyze the latest bounded HTTP, stream, mapping, timing, and terminal evidence. Response content and secrets are never copied into the result.')}</p></div><button type="button" disabled={!snapshot} onClick={() => post({ type: 'connection.analyze' })}>{t('Analyze latest response')}</button></div>
       {!connectionResult ? <><p className="settings-empty">{t(snapshot ? 'Run a request, then analyze its latest connection evidence.' : 'Start the profile before analyzing connection evidence.')}</p><button type="button" className="settings-inline-action" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'output.open' })}>{t('Open diagnostic output')}</button></> : <>
@@ -464,51 +531,6 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
         <ul className="connection-doctor__findings">{connectionResult.findings.map((finding) => <li className={`is-${finding.severity}`} key={finding.id}><ProductIcon name={finding.severity === 'error' || finding.severity === 'warning' ? 'warning' : 'info'} /><div><strong>{t(localizeHumanized(finding.id))}</strong><span>{t(finding.message)}</span></div></li>)}</ul>
         <div className="connection-doctor__actions"><button type="button" className="settings-inline-action" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'output.open' })}>{t('Open diagnostic output')}</button>{!connectionResult.safe && <button type="button" className="settings-inline-action" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'copilot.profileDoctor' })}>{t('Ask Copilot to diagnose this configuration')}</button>}</div>
       </>}
-    </section>
-    <section className="settings-card" aria-labelledby="request-definition-heading">
-      <SectionHeading id="request-definition-heading" title={t('Conversation request')} description={t(hostText('The endpoint is shared by first-turn and continuation variants. Templates are resolved in the Extension Host.', 'The endpoint is shared by first-turn and continuation variants. Templates are resolved in this browser.'))} />
-      <div className="settings-form-grid">
-        <SettingField label={t('HTTP method')} id="settings-request-method">
-          <select id="settings-request-method" value={request.method} onChange={(event) => patch(['conversation', 'send', 'method'], event.target.value)}>
-            {['POST', 'GET', 'PUT', 'PATCH', 'DELETE'].map((method) => <option key={method} value={method}>{method}</option>)}
-          </select>
-        </SettingField>
-        <SettingField label={t('Request URL')} id="settings-request-url" hint={t('Use ${env.baseUrl} and other profile context values where appropriate.')} error={!request.url.trim() ? t('A request URL is required.') : undefined} wide>
-          <PatchInput id="settings-request-url" value={request.url} onCommit={(value) => patch(['conversation', 'send', 'url'], value)} required spellCheck={false} autoComplete="url" />
-        </SettingField>
-        <NumberSettingField label={t('Request timeout')} id="settings-request-timeout" value={request.timeoutMs} placeholder="120000" min={1} max={900000} hint={t('Milliseconds before the request is aborted.')} onCommit={(value) => patch(['conversation', 'send', 'timeoutMs'], value)} />
-        <NumberSettingField label={t('Idle timeout')} id="settings-request-idle-timeout" value={request.idleTimeoutMs} placeholder="30000" min={1} max={900000} hint={t('Milliseconds without a stream event.')} onCommit={(value) => patch(['conversation', 'send', 'idleTimeoutMs'], value)} />
-      </div>
-    </section>
-
-    <section className="settings-card" aria-labelledby="request-resilience-heading">
-      <SectionHeading id="request-resilience-heading" title={t('Network resilience')} description={t('Bound retries and redirects without replaying partial streamed output.')} />
-      <div className="settings-form-grid">
-        <NumberSettingField label={t('Reconnect attempts')} id="settings-reconnect-attempts" value={request.reconnect?.maxAttempts} placeholder="0" min={0} max={5} hint={t('Retries only before the first stream event.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxAttempts'], value)} />
-        <NumberSettingField label={t('Reconnect base delay')} id="settings-reconnect-base-delay" value={request.reconnect?.baseDelayMs} placeholder="500" min={0} max={30000} hint={t('Initial backoff in milliseconds.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'baseDelayMs'], value)} />
-        <NumberSettingField label={t('Reconnect maximum delay')} id="settings-reconnect-max-delay" value={request.reconnect?.maxDelayMs} placeholder="10000" min={0} max={120000} hint={t('Maximum backoff in milliseconds.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxDelayMs'], value)} />
-        <SettingField label={t('Retry HTTP statuses')} id="settings-reconnect-statuses" hint={t('Comma-separated 4xx or 5xx status codes.')}>
-          <PatchInput id="settings-reconnect-statuses" value={(request.reconnect?.retryOnStatuses ?? []).join(', ')} placeholder="429, 502, 503, 504" inputMode="numeric" onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'retryOnStatuses'], parseStatusList(value))} />
-        </SettingField>
-        <SettingField label={t('Redirect policy')} id="settings-redirect-policy">
-          <select id="settings-redirect-policy" value={request.redirectPolicy ?? 'same-origin'} onChange={(event) => patch(['conversation', 'send', 'redirectPolicy'], event.target.value)}>
-            <option value="same-origin">{t('Same origin only')}</option><option value="follow">{t('Follow redirects')}</option><option value="error">{t('Reject redirects')}</option>
-          </select>
-        </SettingField>
-        <NumberSettingField label={t('Maximum redirects')} id="settings-max-redirects" value={request.maxRedirects} placeholder="5" min={0} max={10} onCommit={(value) => patch(['conversation', 'send', 'maxRedirects'], value)} />
-      </div>
-      <SettingCheckboxGroup legend={t('TLS certificate verification')} hint={t('Keep certificate verification enabled unless a development or company endpoint cannot use a trusted certificate chain.') }>
-        <SettingCheckbox id="settings-request-allow-invalid-certificates" label={t('Allow invalid server certificates for this request')} checked={request.tls?.allowInvalidCertificates === true} onChange={(checked) => patch(['conversation', 'send', 'tls'], checked ? { allowInvalidCertificates: true } : undefined)} />
-      </SettingCheckboxGroup>
-      {request.tls?.allowInvalidCertificates === true && <p className="settings-callout settings-callout-warning" role="alert"><strong>{t('Certificate verification is disabled for this Profile.')}</strong> {t('TurnStage will accept an untrusted or mismatched server certificate only for this request. Credentials and response content can be intercepted. System-managed PAC proxy routes are rejected because they cannot be preserved safely.')}</p>}
-    </section>
-
-    <section className="settings-card" aria-labelledby="request-payload-heading">
-      <SectionHeading id="request-payload-heading" title={t('Headers and payload')} description={t('Keep structured values as JSON. Nothing in this editor executes as JavaScript.')} />
-      <div className="settings-form-grid">
-        <JsonPatchField label={t('Headers (JSON)')} id="settings-request-headers" value={request.headers ?? {}} hint={t('Header values are redacted in previews when they are sensitive.')} onCommit={(value) => patch(['conversation', 'send', 'headers'], value)} />
-        <JsonPatchField label={t('Base body (JSON)')} id="settings-request-body" value={request.body ?? {}} hint={t('A variant body overrides this value when a variant supplies one.')} onCommit={(value) => patch(['conversation', 'send', 'body'], value)} />
-      </div>
     </section>
 
     <section className="settings-card" aria-labelledby="request-preview-heading">
@@ -554,25 +576,31 @@ function networkPathFindingText(finding: NetworkPathFinding): string {
 
 function StreamMappingSection({ profile, snapshot, mappingTestResult, post, patch }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; mappingTestResult?: MappingTestResult; post: SettingsWorkspacePost; patch: (path: PatchPath, value: unknown) => void }): React.JSX.Element {
   const stream = profile.stream;
+  const framingCustomized = stream.dataFormat !== undefined && stream.dataFormat !== 'json' || stream.doneValue !== undefined && stream.doneValue !== '[DONE]';
   return <div className="settings-section-stack">
     <section className="settings-card" aria-labelledby="stream-settings-heading">
       <SectionHeading id="stream-settings-heading" title={t('Stream transport')} description={t('Choose the framing used by the response and the policy for an unexpected end.')} />
       <div className="settings-form-grid">
         <SettingField label={t('Transport')} id="settings-stream-transport" hint={t('Fixture is useful for deterministic replay without a network request.')}>
           <select id="settings-stream-transport" value={stream.transport} onChange={(event) => patch(['stream', 'transport'], event.target.value)}>
-            {['sse', 'ndjson', 'json', 'text-stream', 'fixture'].map((transport) => <option key={transport} value={transport}>{localizeHumanized(transport)}</option>)}
+            {['sse', 'ndjson', 'json', 'text-stream', 'fixture'].map((transport) => <option key={transport} value={transport}>{transportLabel(transport)}</option>)}
           </select>
-        </SettingField>
-        <SettingField label={t('Data format')} id="settings-stream-data-format">
-          <select id="settings-stream-data-format" value={stream.dataFormat ?? 'json'} onChange={(event) => patch(['stream', 'dataFormat'], event.target.value)}><option value="json">JSON</option><option value="text">{t('Text')}</option></select>
-        </SettingField>
-        <SettingField label={t('Done value')} id="settings-stream-done-value" hint={t('SSE and text transports stop mapping when this value is received.')}>
-          <PatchInput id="settings-stream-done-value" value={stream.doneValue ?? '[DONE]'} onCommit={(value) => patch(['stream', 'doneValue'], value || undefined)} spellCheck={false} />
         </SettingField>
         <SettingField label={t('Unexpected stream end')} id="settings-stream-end-policy" hint={t('Whether an incomplete response should fail the turn.')}>
           <select id="settings-stream-end-policy" value={stream.unexpectedEndPolicy ?? 'fail'} onChange={(event) => patch(['stream', 'unexpectedEndPolicy'], event.target.value)}><option value="fail">{t('Fail the turn')}</option><option value="completeWithWarning">{t('Complete with warning')}</option></select>
         </SettingField>
       </div>
+      <details className="settings-advanced settings-advanced--inline" open={framingCustomized || undefined}>
+        <summary><span>{t('Advanced: data format and end marker')}</span><span className="settings-advanced__state">{framingCustomized ? t('Changed from defaults') : t('Using defaults')}</span></summary>
+        <div className="settings-form-grid">
+          <SettingField label={t('Data format')} id="settings-stream-data-format">
+            <select id="settings-stream-data-format" value={stream.dataFormat ?? 'json'} onChange={(event) => patch(['stream', 'dataFormat'], event.target.value)}><option value="json">JSON</option><option value="text">{t('Text')}</option></select>
+          </SettingField>
+          <SettingField label={t('Done value')} id="settings-stream-done-value" hint={t('SSE and text transports stop mapping when this value is received.')}>
+            <PatchInput id="settings-stream-done-value" value={stream.doneValue ?? '[DONE]'} onCommit={(value) => patch(['stream', 'doneValue'], value || undefined)} spellCheck={false} />
+          </SettingField>
+        </div>
+      </details>
       <div className="settings-status-grid settings-stream-metrics">
         <StatusItem label={t('Raw events')} value={formatNumber(snapshot?.metrics.eventCount ?? 0)} />
         <StatusItem label={t('Parse errors')} value={formatNumber(snapshot?.metrics.parseErrorCount ?? 0)} tone={snapshot?.metrics.parseErrorCount ? 'warning' : 'default'} />
@@ -610,7 +638,12 @@ function HistoryErrorsSection({ profile, snapshot, patch }: { profile: TurnStage
         <ListPatchField label={t('Visible metrics')} id="settings-visible-metrics" value={profile.metrics?.enabled ?? []} placeholder="ttft, totalDuration, eventCount" hint={t('Leave empty to show every available metric.')} onCommit={(value) => patch(['metrics', 'enabled'], value)} wide />
         <ListPatchField label={t('Visible message metrics')} id="settings-visible-message-metrics" value={profile.metrics?.messageEnabled ?? []} placeholder="ttft, totalDuration" hint={t('Leave empty to show only TTFT and total duration. Add mapped metric IDs explicitly.')} onCommit={(value) => patch(['metrics', 'messageEnabled'], value)} wide />
       </div>
-      <div className="settings-history-note"><strong>{t('Remote sessions')}</strong><span>{t(profile.history?.remoteSessions?.mode === 'referenceOnly' ? 'Reference-only history is enabled.' : 'No remote session history is configured.')}</span></div>
+      <SettingCheckboxGroup legend={t('Remote session scope')} hint={t('Choose which profile values identify a reusable remote conversation reference.')}>
+        {(['profile', 'actor', 'environment'] as const).map((scope) => <SettingCheckbox key={scope} id={`settings-remote-session-${scope}`} label={localizeHumanized(scope)} checked={(profile.history?.remoteSessions?.scope ?? ['profile']).includes(scope)} onChange={(checked) => {
+          const current = profile.history?.remoteSessions?.scope ?? ['profile'];
+          patch(['history', 'remoteSessions'], { mode: 'referenceOnly', scope: checked ? [...new Set([...current, scope])] : current.filter((item) => item !== scope) });
+        }} />)}
+      </SettingCheckboxGroup>
     </section>
 
     <section className="settings-card" aria-labelledby="error-policy-heading">
@@ -1789,17 +1822,23 @@ function SettingField({ label, id, hint, error, wide, children }: { label: strin
   return <div className={`settings-field ${wide ? 'settings-field-wide' : ''}`}><label htmlFor={id}>{label}</label>{React.isValidElement(children) ? React.cloneElement(children, { 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined } as Record<string, unknown>) : children}{(hint || error) && <p id={descriptionId} className={error ? 'settings-field-error' : 'settings-field-hint'}>{error || hint}</p>}</div>;
 }
 
-function NumberSettingField({ label, id, value, placeholder, min, max, step = 1, hint, onCommit }: { label: string; id: string; value?: number; placeholder: string; min: number; max: number; step?: number; hint?: string; onCommit: (value: number | undefined) => void }): React.JSX.Element {
-  const [draft, setDraft] = useState(value === undefined ? '' : String(value));
+/**
+ * A bounded number setting. `scale` shows a stored unit in a friendlier one: a
+ * millisecond value with scale 1000 is edited in seconds and stored as an
+ * integer number of milliseconds. `min` and `max` are in the stored unit.
+ */
+function NumberSettingField({ label, id, value, placeholder, min, max, step = 1, scale = 1, hint, onCommit }: { label: string; id: string; value?: number; placeholder: string; min: number; max: number; step?: number | 'any'; scale?: number; hint?: string; onCommit: (value: number | undefined) => void }): React.JSX.Element {
+  const shown = value === undefined ? '' : String(value / scale);
+  const [draft, setDraft] = useState(shown);
   const reverting = useRef(false);
-  useEffect(() => setDraft(value === undefined ? '' : String(value)), [value]);
+  useEffect(() => setDraft(shown), [shown]);
   const commit = () => {
     if (consumeRevert(reverting)) return;
     if (!draft.trim()) { if (value !== undefined) onCommit(undefined); return; }
-    const parsed = Number(draft);
-    if (Number.isFinite(parsed)) onCommit(Math.min(max, Math.max(min, parsed)));
+    const parsed = Number(draft) * scale;
+    if (Number.isFinite(parsed)) onCommit(Math.min(max, Math.max(min, scale === 1 ? parsed : Math.round(parsed))));
   };
-  return <SettingField label={label} id={id} hint={hint}><input id={id} type="number" min={min} max={max} step={step} value={draft} placeholder={placeholder} inputMode="decimal" onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); event.currentTarget.blur(); } if (event.key === 'Escape') { revertField(event, reverting); setDraft(value === undefined ? '' : String(value)); event.currentTarget.blur(); } }} /></SettingField>;
+  return <SettingField label={label} id={id} hint={hint}><input id={id} type="number" min={min / scale} max={max / scale} step={step} value={draft} placeholder={placeholder} inputMode="decimal" onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); event.currentTarget.blur(); } if (event.key === 'Escape') { revertField(event, reverting); setDraft(shown); event.currentTarget.blur(); } }} /></SettingField>;
 }
 
 function OptionalNumberInput({ id, label, shortLabel, value, max, disabled, onCommit }: { id: string; label: string; shortLabel: string; value?: number; max: number; disabled?: boolean; onCommit: (value: number | undefined) => void }): React.JSX.Element {
