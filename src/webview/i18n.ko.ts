@@ -1,5 +1,10 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'This browser always verifies server certificates. The setting applies only when the Profile runs in VS Code.': '브라우저는 항상 서버 인증서를 확인합니다. 이 설정은 VS Code에서 프로필을 실행할 때만 적용됩니다.',
+  'Every turn goes to this URL. Method, headers, body, and timeouts are set in Request; a variant below can replace the body and add headers.': '모든 턴은 이 URL로 보냅니다. 메서드, 헤더, 본문, 시간 제한은 \'요청\'에서 설정하며, 아래 변형으로 본문을 바꾸거나 헤더를 추가할 수 있습니다.',
+  'Opens HTTP and HTTPS links; allow lists apply in VS Code': 'HTTP와 HTTPS 링크를 엽니다. 허용 목록은 VS Code에서만 적용',
+  'These lists are enforced by the VS Code extension. This browser opens any HTTP or HTTPS link and never runs commands.': '이 목록은 VS Code 확장에서 적용됩니다. 이 브라우저는 모든 HTTP 또는 HTTPS 링크를 열고 명령은 실행하지 않습니다.',
+  '{count} more': '{count}개 더',
   'Keep separate lists per': '목록을 나누는 기준',
   'Conversations are always kept separate per Profile and workspace.': '대화는 항상 프로필과 작업 영역별로 따로 저장됩니다.',
   'Run history is on, default limit': '실행 기록 켜짐, 기본 개수',

@@ -1,5 +1,10 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'This browser always verifies server certificates. The setting applies only when the Profile runs in VS Code.': 'ブラウザーは常にサーバー証明書を検証します。この設定はプロファイルを VS Code で実行する場合にのみ有効です。',
+  'Every turn goes to this URL. Method, headers, body, and timeouts are set in Request; a variant below can replace the body and add headers.': '各ターンはこの URL に送信されます。メソッド、ヘッダー、本文、タイムアウトは「リクエスト」で設定し、下のバリアントで本文の置き換えやヘッダーの追加ができます。',
+  'Opens HTTP and HTTPS links; allow lists apply in VS Code': 'HTTP と HTTPS のリンクを開きます。許可リストは VS Code でのみ適用',
+  'These lists are enforced by the VS Code extension. This browser opens any HTTP or HTTPS link and never runs commands.': 'これらのリストは VS Code 拡張機能で適用されます。このブラウザーは HTTP または HTTPS のリンクをすべて開き、コマンドは実行しません。',
+  '{count} more': 'ほか {count} 件',
   'Keep separate lists per': 'リストを分ける基準',
   'Conversations are always kept separate per Profile and workspace.': '会話は常にプロファイルとワークスペースごとに分けて保存されます。',
   'Run history is on, default limit': '実行履歴はオン、既定の件数',

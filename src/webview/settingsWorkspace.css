@@ -424,3 +424,4 @@
 .flow-request-summary .section-heading > button { flex: none; align-self: flex-start; white-space: nowrap; }
 .settings-checkbox-group--nested { margin: var(--ts-space-2) 0 0 calc(1.23em + var(--ts-space-1) + 3px); }
 .settings-form-grid + .settings-checkbox-group { margin-top: var(--ts-space-4); }
+.settings-health__issues { display: grid; gap: 2px; margin: 0; padding: 0 0 0 calc(16px + var(--ts-space-2)); color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); list-style: none; overflow-wrap: anywhere; }

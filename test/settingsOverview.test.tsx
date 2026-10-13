@@ -48,8 +48,18 @@ describe('settings overview', () => {
     expect(overview['stream-mapping'].attention).toBe('No mapping rules');
     const insecure: TurnStageProfile = { ...profile, conversation: { send: { ...profile.conversation.send, tls: { allowInvalidCertificates: true } } } };
     expect(settingsSectionOverview(insecure).request.attention).toBe('Certificate checks are off');
+    expect(settingsSectionOverview(insecure, undefined, 'web').request.attention).toBeUndefined();
     expect(settingsSectionOverview({ ...profile, security: { allowedUriSchemes: ['https', 'http'], allowedDomains: ['a.test'] } }).security.summary).toBe('links: https, http · 1 allowed domain · no commands');
     expect(settingsSectionOverview(profile, snapshot({ eventCount: 4, mappingErrorCount: 2 }))['stream-mapping'].attention).toBe('2 parse or mapping errors in the last response');
+  });
+
+  it('describes what Chat and the host actually do, not just what the Profile spells out', () => {
+    // Usage is hidden by default, so a Profile without UI settings still hides one surface.
+    expect(settingsSectionOverview(profile)['chat-ui'].summary).toBe('Default message actions · 1 component hidden');
+    // Starter prompts appear only with a static opening.
+    expect(settingsSectionOverview({ ...profile, opening: { ...profile.opening!, mode: 'disabled' } })['opening-flow'].summary).toBe('No opening · 1 request variant');
+    // The browser ignores the allow lists.
+    expect(settingsSectionOverview(profile, undefined, 'web').security.summary).toBe('Opens HTTP and HTTPS links; allow lists apply in VS Code');
   });
 
   it('describes the last response in one line', () => {
@@ -117,6 +127,31 @@ describe('embedded settings navigation', () => {
     render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={{ ...profile, conversation: { send: { ...profile.conversation.send, reconnect: { maxAttempts: 2 } } } }} post={vi.fn()} />);
     expect(screen.getByText('Advanced: retries, redirects, and certificates').closest('details')!.open).toBe(true);
     expect(screen.getByText('Changed from defaults')).toBeTruthy();
+  });
+
+  it('treats values written out at their defaults as defaults', () => {
+    render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={{ ...profile, conversation: { send: { ...profile.conversation.send, reconnect: { maxAttempts: 0, baseDelayMs: 500, maxDelayMs: 10_000 }, redirectPolicy: 'same-origin', maxRedirects: 5 } } }} post={vi.fn()} />);
+    expect(screen.getByText('Advanced: retries, redirects, and certificates').closest('details')!.open).toBe(false);
+    expect(screen.getByText('Using defaults')).toBeTruthy();
+  });
+
+  it('lists Profile issues in the browser instead of offering a jump it cannot make', () => {
+    const diagnostics = [{ severity: 'error' as const, message: 'conversation.send.url is required.', offset: 0, length: 1 }];
+    render(<SettingsWorkspace embedded section="general" onSectionChange={vi.fn()} overview onOverviewChange={vi.fn()} profile={profile} post={vi.fn()} diagnostics={diagnostics} vscodeFeatures={false} />);
+    expect(screen.getByText('1 Profile issue')).toBeTruthy();
+    expect(screen.getByText('conversation.send.url is required.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show first issue' })).toBeNull();
+  });
+
+  it('does not warn about intercepted traffic in the browser, which always verifies certificates', () => {
+    render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={{ ...profile, conversation: { send: { ...profile.conversation.send, tls: { allowInvalidCertificates: true } } } }} post={vi.fn()} vscodeFeatures={false} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('note').textContent).toContain('always verifies server certificates');
+  });
+
+  it('says on the browser that the allow lists are enforced only in VS Code', () => {
+    render(<SettingsWorkspace section="security" onSectionChange={vi.fn()} profile={profile} post={vi.fn()} vscodeFeatures={false} />);
+    expect(screen.getByRole('note').textContent).toContain('enforced by the VS Code extension');
   });
 
   it('turns remote conversations on before offering their scope', async () => {

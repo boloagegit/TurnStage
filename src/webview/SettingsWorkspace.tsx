@@ -257,7 +257,7 @@ export function SettingsWorkspace({
         </div>}
       <div className="settings-header-actions" role="group" aria-label={t('Profile configuration actions')}>
         <span className={`profile-edit-status ${profileDirty ? 'is-dirty' : diagnostics.length ? 'has-issues' : ''}`} role="status">{readOnly ? t('Read-only') : profileDirty ? t('Unsaved changes') : diagnostics.length ? t('{count} issues', { count: formatNumber(diagnostics.length) }) : t('Saved')}</span>
-        {diagnostics.length > 0 && <IconButton icon="warning" label={t('Show first issue')} type="button" onClick={() => post({ type: 'profile.openFirstIssue' })} />}
+        {diagnostics.length > 0 && vscodeFeatures && <IconButton icon="warning" label={t('Show first issue')} type="button" onClick={() => post({ type: 'profile.openFirstIssue' })} />}
         <IconButton icon="checklist" label={t('Validate profile')} type="button" onClick={() => post({ type: 'profile.validate' })} />
         <IconButton icon="save" label={t('Save Profile')} type="button" disabled={readOnly || !profileDirty} onClick={() => post({ type: 'profile.save' })} />
         <IconButton icon="file-code" label={t(vscodeFeatures ? 'Open JSONC' : 'View JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
@@ -265,7 +265,7 @@ export function SettingsWorkspace({
     </header>
 
     <div ref={scrollRef} className="settings-main" id="settings-content" onScroll={(event) => onScrollTopChange?.(event.currentTarget.scrollTop)}>
-      {overview ? <SettingsOverview sections={SETTINGS_SECTIONS} profile={profile} snapshot={snapshot} diagnosticsCount={diagnostics.length} onOpen={openSection} onShowFirstIssue={() => post({ type: 'profile.openFirstIssue' })} /> : <div className="settings-content-layout">
+      {overview ? <SettingsOverview sections={SETTINGS_SECTIONS} profile={profile} snapshot={snapshot} diagnostics={diagnostics} host={vscodeFeatures ? 'vscode' : 'web'} onOpen={openSection} onShowFirstIssue={vscodeFeatures ? () => post({ type: 'profile.openFirstIssue' }) : undefined} /> : <div className="settings-content-layout">
         {!embedded && <nav className="settings-section-nav" aria-label={t('Profile configuration sections')}>
           <div className="settings-section-nav-list">
             {SETTINGS_SECTIONS.map((item) => <button key={item.id} type="button" className={active.id === item.id ? 'is-active' : ''} aria-current={active.id === item.id ? 'page' : undefined} onClick={() => onSectionChange(item.id)}>{t(item.label)}</button>)}
@@ -294,7 +294,7 @@ export function SettingsWorkspace({
           {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
           {active.id === 'scenario-tests' && <ScenarioTestsSection view="contracts" automationSection="settings" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} vscodeFeatures={vscodeFeatures} />}
           {active.id === 'history-errors' && <HistoryErrorsSection profile={profile} snapshot={snapshot} patch={patch} vscodeFeatures={vscodeFeatures} />}
-          {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} />}
+          {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} vscodeFeatures={vscodeFeatures} />}
           </fieldset>
         </section>
       </div>}
@@ -475,8 +475,9 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
   const preview = isRecord(requestPreview) ? requestPreview : undefined;
   const previewUrl = typeof preview?.url === 'string' ? preview.url : request.url;
   const loopback = isLoopbackUrl(previewUrl);
-  const resilienceCustomized = request.reconnect?.maxAttempts !== undefined || request.reconnect?.baseDelayMs !== undefined || request.reconnect?.maxDelayMs !== undefined || Boolean(request.reconnect?.retryOnStatuses?.length)
-    || request.redirectPolicy !== undefined || request.maxRedirects !== undefined || request.tls?.allowInvalidCertificates === true;
+  // Compared with the transport defaults (0 attempts, 500 ms, 10 s, same-origin, 5 redirects), not with whether a key is present.
+  const resilienceCustomized = (request.reconnect?.maxAttempts ?? 0) !== 0 || (request.reconnect?.baseDelayMs ?? 500) !== 500 || (request.reconnect?.maxDelayMs ?? 10_000) !== 10_000 || Boolean(request.reconnect?.retryOnStatuses?.length)
+    || (request.redirectPolicy ?? 'same-origin') !== 'same-origin' || (request.maxRedirects ?? 5) !== 5 || request.tls?.allowInvalidCertificates === true;
   // Open once on arrival when something is customized; never close under the person who is editing it.
   const [resilienceOpen] = useState(resilienceCustomized);
   return <div className="settings-section-stack">
@@ -524,7 +525,8 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
       <SettingCheckboxGroup legend={t('TLS certificate verification')} hint={t('Keep certificate verification enabled unless a development or company endpoint cannot use a trusted certificate chain.') }>
         <SettingCheckbox id="settings-request-allow-invalid-certificates" label={t('Allow invalid server certificates for this request')} checked={request.tls?.allowInvalidCertificates === true} onChange={(checked) => patch(['conversation', 'send', 'tls'], checked ? { allowInvalidCertificates: true } : undefined)} />
       </SettingCheckboxGroup>
-      {request.tls?.allowInvalidCertificates === true && <p className="settings-callout settings-callout-warning" role="alert"><strong>{t('Certificate verification is disabled for this Profile.')}</strong> {t('TurnStage will accept an untrusted or mismatched server certificate only for this request. Credentials and response content can be intercepted. System-managed PAC proxy routes are rejected because they cannot be preserved safely.')}</p>}
+      {request.tls?.allowInvalidCertificates === true && !vscodeFeatures && <p className="settings-callout settings-callout-info" role="note">{t('This browser always verifies server certificates. The setting applies only when the Profile runs in VS Code.')}</p>}
+      {request.tls?.allowInvalidCertificates === true && vscodeFeatures && <p className="settings-callout settings-callout-warning" role="alert"><strong>{t('Certificate verification is disabled for this Profile.')}</strong> {t('TurnStage will accept an untrusted or mismatched server certificate only for this request. Credentials and response content can be intercepted. System-managed PAC proxy routes are rejected because they cannot be preserved safely.')}</p>}
     </details>
 
     <section className="settings-card connection-doctor" aria-labelledby="connection-doctor-heading">
@@ -684,7 +686,7 @@ function HistoryErrorsSection({ profile, snapshot, patch, vscodeFeatures }: { pr
   </div>;
 }
 
-function SecuritySection({ profile, snapshot, remoteName, patch }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; remoteName?: string; patch: (path: PatchPath, value: unknown) => void }): React.JSX.Element {
+function SecuritySection({ profile, snapshot, remoteName, patch, vscodeFeatures }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; remoteName?: string; patch: (path: PatchPath, value: unknown) => void; vscodeFeatures: boolean }): React.JSX.Element {
   const security = profile.security;
   return <div className="settings-section-stack">
     <section className="settings-card" aria-labelledby="security-trust-heading">
@@ -697,6 +699,7 @@ function SecuritySection({ profile, snapshot, remoteName, patch }: { profile: Tu
 
     <section className="settings-card" aria-labelledby="security-policy-heading">
       <SectionHeading id="security-policy-heading" title={t('Allow lists')} description={t('Use comma-separated exact values. Keep these lists as narrow as the profile needs.')} />
+      {!vscodeFeatures && <p className="settings-callout settings-callout-info" role="note">{t('These lists are enforced by the VS Code extension. This browser opens any HTTP or HTTPS link and never runs commands.')}</p>}
       <div className="settings-form-grid">
         <ListPatchField label={t('Allowed URI schemes')} id="settings-security-schemes" value={security?.allowedUriSchemes ?? []} placeholder="https" hint={t('The runtime defaults to HTTPS when this list is empty.')} onCommit={(value) => patch(['security', 'allowedUriSchemes'], value)} />
         <ListPatchField label={t('Allowed domains')} id="settings-security-domains" value={security?.allowedDomains ?? []} placeholder="api.example.com" hint={t('Domains are matched exactly when the list is non-empty.')} onCommit={(value) => patch(['security', 'allowedDomains'], value)} />

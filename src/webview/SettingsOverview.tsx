@@ -1,6 +1,7 @@
 import React from 'react';
 import type { SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { ProductIcon } from './Icon';
+import { componentNames, chatComponentVisible } from './configEditors';
 import { formatNumber, t } from './i18n';
 
 /** Conversation requests time out after this long when the Profile does not set timeoutMs. */
@@ -29,11 +30,12 @@ export interface SettingsSectionOverview {
  * A one-line, current-value summary for each settings section, so the overview
  * answers "what is this Profile set to?" without opening every section.
  */
-export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: SessionSnapshot): Record<string, SettingsSectionOverview> {
+export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: SessionSnapshot, host: 'vscode' | 'web' = 'vscode'): Record<string, SettingsSectionOverview> {
   const send = profile.conversation.send;
   const variants = send.variants?.length ?? 0;
-  const starters = profile.opening?.starters?.length ?? 0;
   const openingMode = profile.opening?.mode ?? 'disabled';
+  // Configured starter prompts appear only with a static opening; a request opening brings its own.
+  const starters = openingMode === 'static' ? profile.opening?.starters?.length ?? 0 : undefined;
   const mappings = profile.stream.mappings.length;
   const mappingProblems = (snapshot?.metrics.parseErrorCount ?? 0) + (snapshot?.metrics.mappingErrorCount ?? 0);
   const localRuns = profile.history?.localRuns;
@@ -41,7 +43,7 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
   const schemes = profile.security?.allowedUriSchemes ?? [];
   const domains = profile.security?.allowedDomains?.length ?? 0;
   const commands = profile.security?.allowedCommands?.length ?? 0;
-  const hiddenComponents = Object.values(profile.ui?.components ?? {}).filter((component) => component.visible === false).length;
+  const hiddenComponents = componentNames.filter((name) => !chatComponentVisible(profile, name)).length;
   const actions = profile.ui?.messageActions?.length;
   const inlineCases = profile.tests?.scenarios?.length ?? 0;
   const suites = (profile.tests?.contractSuites?.length ?? 0) + (profile.tests?.adversarialSuites?.length ?? 0);
@@ -52,11 +54,12 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
   return {
     general: { summary: [profile.name || t('Untitled profile'), profile.environment ? t('environment {id}', { id: profile.environment }) : t('default environment')].join(' · ') },
     'opening-flow': {
-      summary: [openingText, t(starters === 1 ? '{count} starter prompt' : '{count} starter prompts', { count: formatNumber(starters) }), t(variants === 1 ? '{count} request variant' : '{count} request variants', { count: formatNumber(variants) })].join(' · '),
+      summary: [openingText, starters === undefined ? undefined : t(starters === 1 ? '{count} starter prompt' : '{count} starter prompts', { count: formatNumber(starters) }), t(variants === 1 ? '{count} request variant' : '{count} request variants', { count: formatNumber(variants) })].filter(Boolean).join(' · '),
     },
     request: {
       summary: [`${send.method} ${send.url || '—'}`, t('times out after {seconds} s', { seconds: secondsText(timeout) })].join(' · '),
-      attention: !send.url.trim() ? t('Request URL is missing') : send.tls?.allowInvalidCertificates ? t('Certificate checks are off') : undefined,
+      // The browser always verifies certificates, so the VS Code-only opt-out is not a risk there.
+      attention: !send.url.trim() ? t('Request URL is missing') : send.tls?.allowInvalidCertificates && host === 'vscode' ? t('Certificate checks are off') : undefined,
     },
     'stream-mapping': {
       summary: [transportLabel(profile.stream.transport), t(mappings === 1 ? '{count} mapping rule' : '{count} mapping rules', { count: formatNumber(mappings) })].join(' · '),
@@ -79,7 +82,8 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
       // Without maxRuns the host decides how many runs it keeps (VS Code reads a user setting), so no number is promised here.
       summary: localRuns?.enabled === false ? t('Run history is off') : maxRuns === undefined ? t('Run history is on, default limit') : t(maxRuns === 1 ? 'Keeps the last {count} run' : 'Keeps the last {count} runs', { count: formatNumber(maxRuns) }),
     },
-    security: {
+    // The browser opens any HTTP or HTTPS citation and runs no commands; these lists are enforced by the VS Code extension only.
+    security: host === 'web' ? { summary: t('Opens HTTP and HTTPS links; allow lists apply in VS Code') } : {
       summary: [
         schemes.length ? t('links: {schemes}', { schemes: schemes.join(', ') }) : t('links: HTTPS only'),
         domains ? t(domains === 1 ? '{count} allowed domain' : '{count} allowed domains', { count: formatNumber(domains) }) : t('any domain'),
@@ -98,23 +102,30 @@ export function lastResponseHealth(snapshot?: SessionSnapshot): { tone: 'ok' | '
   return { tone: 'ok', text: t('Last response: {events} events, no errors', { events: formatNumber(snapshot.metrics.eventCount) }) };
 }
 
-export function SettingsOverview<Section extends string>({ sections, profile, snapshot, diagnosticsCount, onOpen, onShowFirstIssue }: {
+export function SettingsOverview<Section extends string>({ sections, profile, snapshot, diagnostics, host, onOpen, onShowFirstIssue }: {
   sections: ReadonlyArray<{ id: Section; label: string }>;
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
-  diagnosticsCount: number;
+  diagnostics: ReadonlyArray<{ severity: 'error' | 'warning'; message: string }>;
+  host: 'vscode' | 'web';
   onOpen: (section: Section) => void;
-  onShowFirstIssue: () => void;
+  /** Jump to the first issue in the Profile text; only VS Code can place the cursor there. */
+  onShowFirstIssue?: () => void;
 }): React.JSX.Element {
-  const overview = settingsSectionOverview(profile, snapshot);
+  const overview = settingsSectionOverview(profile, snapshot, host);
+  const diagnosticsCount = diagnostics.length;
   const health = lastResponseHealth(snapshot);
   return <div className="settings-overview">
     <section className="settings-health" aria-label={t('Profile health')}>
       <p className={`settings-health__row is-${diagnosticsCount ? 'warning' : 'ok'}`}>
         <ProductIcon name={diagnosticsCount ? 'warning' : 'check'} />
         <span>{diagnosticsCount ? t(diagnosticsCount === 1 ? '{count} Profile issue' : '{count} Profile issues', { count: formatNumber(diagnosticsCount) }) : t('No Profile issues')}</span>
-        {diagnosticsCount > 0 && <button type="button" className="settings-inline-action" onClick={onShowFirstIssue}>{t('Show first issue')}</button>}
+        {diagnosticsCount > 0 && onShowFirstIssue && <button type="button" className="settings-inline-action" onClick={onShowFirstIssue}>{t('Show first issue')}</button>}
       </p>
+      {diagnosticsCount > 0 && <ul className="settings-health__issues">
+        {diagnostics.slice(0, 3).map((issue, index) => <li key={`${index}-${issue.message}`}>{issue.message}</li>)}
+        {diagnosticsCount > 3 && <li>{t('{count} more', { count: formatNumber(diagnosticsCount - 3) })}</li>}
+      </ul>}
       <p className={`settings-health__row is-${health.tone}`}>
         <ProductIcon name={health.tone === 'warning' ? 'warning' : health.tone === 'ok' ? 'check' : 'info'} />
         <span>{health.text}</span>
