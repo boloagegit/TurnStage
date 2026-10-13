@@ -38,6 +38,7 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
   const mappingProblems = (snapshot?.metrics.parseErrorCount ?? 0) + (snapshot?.metrics.mappingErrorCount ?? 0);
   const localRuns = profile.history?.localRuns;
   const maxRuns = localRuns?.maxRuns ?? 20;
+  const schemes = profile.security?.allowedUriSchemes ?? [];
   const domains = profile.security?.allowedDomains?.length ?? 0;
   const commands = profile.security?.allowedCommands?.length ?? 0;
   const hiddenComponents = Object.values(profile.ui?.components ?? {}).filter((component) => component.visible === false).length;
@@ -78,9 +79,11 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
       summary: localRuns?.enabled === false ? t('Run history is off') : t(maxRuns === 1 ? 'Keeps the last {count} run' : 'Keeps the last {count} runs', { count: formatNumber(maxRuns) }),
     },
     security: {
-      summary: domains || commands
-        ? [t(domains === 1 ? '{count} allowed domain' : '{count} allowed domains', { count: formatNumber(domains) }), t(commands === 1 ? '{count} allowed command' : '{count} allowed commands', { count: formatNumber(commands) })].join(' · ')
-        : t('Links open only over HTTPS; no commands allowed'),
+      summary: [
+        schemes.length ? t('links: {schemes}', { schemes: schemes.join(', ') }) : t('links: HTTPS only'),
+        domains ? t(domains === 1 ? '{count} allowed domain' : '{count} allowed domains', { count: formatNumber(domains) }) : t('any domain'),
+        commands ? t(commands === 1 ? '{count} allowed command' : '{count} allowed commands', { count: formatNumber(commands) }) : t('no commands'),
+      ].join(' · '),
     },
   };
 }
@@ -89,7 +92,7 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
 export function lastResponseHealth(snapshot?: SessionSnapshot): { tone: 'ok' | 'warning' | 'idle'; text: string } {
   if (!snapshot || !snapshot.metrics.eventCount && !snapshot.errors.length) return { tone: 'idle', text: t('No response yet. Send a message to check the connection.') };
   const problems = snapshot.metrics.parseErrorCount + snapshot.metrics.mappingErrorCount;
-  if (snapshot.errors.length) return { tone: 'warning', text: t('Last response failed: {error}', { error: snapshot.errors[snapshot.errors.length - 1]!.type }) };
+  if (snapshot.errors.length) return { tone: 'warning', text: t('Last response failed: {error}', { error: snapshot.errors[snapshot.errors.length - 1]!.message }) };
   if (problems) return { tone: 'warning', text: t('Last response: {events} events, {problems} parse or mapping errors', { events: formatNumber(snapshot.metrics.eventCount), problems: formatNumber(problems) }) };
   return { tone: 'ok', text: t('Last response: {events} events, no errors', { events: formatNumber(snapshot.metrics.eventCount) }) };
 }
@@ -121,7 +124,7 @@ export function SettingsOverview<Section extends string>({ sections, profile, sn
         {sections.map((section) => {
           const item = overview[section.id];
           return <li key={section.id}>
-            <button type="button" onClick={() => onOpen(section.id)}>
+            <button type="button" data-settings-section={section.id} onClick={() => onOpen(section.id)}>
               <span className="settings-overview__text">
                 <strong>{t(section.label)}</strong>
                 <span>{item?.summary}</span>

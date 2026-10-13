@@ -1,5 +1,12 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Remember remote conversations': 'リモートの会話を記憶する',
+  'Remember server conversation IDs so a conversation can be reopened later. Only the reference is stored, not the messages.': 'サーバーの会話 ID を記憶し、後で同じ会話を開き直せるようにします。保存するのは ID だけで、メッセージは保存しません。',
+  'Remote conversations': 'リモートの会話',
+  'any domain': 'すべてのドメイン',
+  'links: HTTPS only': 'リンク：HTTPS のみ',
+  'links: {schemes}': 'リンク：{schemes}',
+  'no commands': 'コマンドなし',
   'Every turn sends the base body from Request. Add variants only when the first turn and later turns need different bodies.': '各ターンは「リクエスト」の基本本文を送信します。最初のターンと以降のターンで本文を変える場合だけバリアントを追加してください。',
   '{count} starter prompt': 'スタータープロンプト {count} 件',
   '{count} request variant': 'リクエストバリアント {count} 件',

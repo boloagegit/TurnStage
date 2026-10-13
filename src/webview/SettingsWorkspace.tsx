@@ -224,7 +224,16 @@ export function SettingsWorkspace({
 
   const active = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0];
   const overview = embedded && overviewRequested && Boolean(onOverviewChange);
-  const openSection = (next: SettingsSectionId) => { onSectionChange(next); onOverviewChange?.(false); };
+  // Keyboard focus follows the view: into the opened section, then back to that section's row in the overview.
+  const pendingFocus = useRef<'panel' | 'overview-row' | undefined>(undefined);
+  const openSection = (next: SettingsSectionId) => { pendingFocus.current = 'panel'; onSectionChange(next); onOverviewChange?.(false); };
+  const showOverview = () => { pendingFocus.current = 'overview-row'; onOverviewChange?.(true); };
+  useEffect(() => {
+    const target = pendingFocus.current;
+    pendingFocus.current = undefined;
+    if (target === 'panel') document.getElementById(`settings-panel-${active.id}`)?.focus();
+    else if (target === 'overview-row') document.querySelector<HTMLElement>(`[data-settings-section="${active.id}"]`)?.focus();
+  }, [overview, active.id]);
   const sectionTitleId = `profile-configuration-section-title-${active.id}`;
   const sectionDescriptionId = `profile-configuration-section-description-${active.id}`;
   return <div className={`settings-workspace ${embedded ? 'settings-workspace--embedded' : ''}`}>
@@ -233,7 +242,7 @@ export function SettingsWorkspace({
         ? <h1 className="settings-overview-title">{t('All settings')}</h1>
         : embedded
         ? <div className="settings-section-picker">
-          {onOverviewChange && <IconButton type="button" icon="arrow-left" label={t('All settings')} onClick={() => onOverviewChange(true)} />}
+          {onOverviewChange && <IconButton type="button" icon="arrow-left" label={t('All settings')} onClick={showOverview} />}
           <label>
             <span className="sr-only">{t('Profile configuration sections')}</span>
             <select value={active.id} aria-label={t('Profile configuration sections')} onChange={(event) => onSectionChange(event.target.value as SettingsSectionId)}>
@@ -248,7 +257,7 @@ export function SettingsWorkspace({
       <div className="settings-header-actions" role="group" aria-label={t('Profile configuration actions')}>
         <span className={`profile-edit-status ${profileDirty ? 'is-dirty' : diagnostics.length ? 'has-issues' : ''}`} role="status">{readOnly ? t('Read-only') : profileDirty ? t('Unsaved changes') : diagnostics.length ? t('{count} issues', { count: formatNumber(diagnostics.length) }) : t('Saved')}</span>
         {diagnostics.length > 0 && <IconButton icon="warning" label={t('Show first issue')} type="button" onClick={() => post({ type: 'profile.openFirstIssue' })} />}
-        <IconButton icon="check" label={t('Validate profile')} type="button" onClick={() => post({ type: 'profile.validate' })} />
+        <IconButton icon="checklist" label={t('Validate profile')} type="button" onClick={() => post({ type: 'profile.validate' })} />
         <IconButton icon="save" label={t('Save Profile')} type="button" disabled={readOnly || !profileDirty} onClick={() => post({ type: 'profile.save' })} />
         <IconButton icon="file-code" label={t(vscodeFeatures ? 'Open JSONC' : 'View JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
       </div>
@@ -283,7 +292,7 @@ export function SettingsWorkspace({
           {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
           {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
           {active.id === 'scenario-tests' && <ScenarioTestsSection view="contracts" automationSection="settings" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} vscodeFeatures={vscodeFeatures} />}
-          {active.id === 'history-errors' && <HistoryErrorsSection profile={profile} snapshot={snapshot} patch={patch} />}
+          {active.id === 'history-errors' && <HistoryErrorsSection profile={profile} snapshot={snapshot} patch={patch} vscodeFeatures={vscodeFeatures} />}
           {active.id === 'security' && <SecuritySection profile={profile} snapshot={snapshot} remoteName={remoteName} patch={patch} />}
           </fieldset>
         </section>
@@ -465,7 +474,10 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
   const preview = isRecord(requestPreview) ? requestPreview : undefined;
   const previewUrl = typeof preview?.url === 'string' ? preview.url : request.url;
   const loopback = isLoopbackUrl(previewUrl);
-  const resilienceCustomized = request.reconnect !== undefined || request.redirectPolicy !== undefined || request.maxRedirects !== undefined || request.tls?.allowInvalidCertificates === true;
+  const resilienceCustomized = request.reconnect?.maxAttempts !== undefined || request.reconnect?.baseDelayMs !== undefined || request.reconnect?.maxDelayMs !== undefined || Boolean(request.reconnect?.retryOnStatuses?.length)
+    || request.redirectPolicy !== undefined || request.maxRedirects !== undefined || request.tls?.allowInvalidCertificates === true;
+  // Open once on arrival when something is customized; never close under the person who is editing it.
+  const [resilienceOpen] = useState(resilienceCustomized);
   return <div className="settings-section-stack">
     <section className="settings-card" aria-labelledby="request-definition-heading">
       <SectionHeading id="request-definition-heading" title={t('Conversation request')} description={t(hostText('The endpoint is shared by first-turn and continuation variants. Templates are resolved in the Extension Host.', 'The endpoint is shared by first-turn and continuation variants. Templates are resolved in this browser.'))} />
@@ -491,7 +503,7 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
       </div>
     </section>
 
-    <details className="settings-card settings-advanced" open={resilienceCustomized || undefined}>
+    <details className="settings-card settings-advanced" open={resilienceOpen || undefined}>
       <summary><span id="request-resilience-heading">{t('Advanced: retries, redirects, and certificates')}</span><span className="settings-advanced__state">{resilienceCustomized ? t('Changed from defaults') : t('Using defaults')}</span></summary>
       <p className="sr-only">{t('Bound retries and redirects without replaying partial streamed output.')}</p>
       <div className="settings-form-grid">
@@ -577,6 +589,7 @@ function networkPathFindingText(finding: NetworkPathFinding): string {
 function StreamMappingSection({ profile, snapshot, mappingTestResult, post, patch }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; mappingTestResult?: MappingTestResult; post: SettingsWorkspacePost; patch: (path: PatchPath, value: unknown) => void }): React.JSX.Element {
   const stream = profile.stream;
   const framingCustomized = stream.dataFormat !== undefined && stream.dataFormat !== 'json' || stream.doneValue !== undefined && stream.doneValue !== '[DONE]';
+  const [framingOpen] = useState(framingCustomized);
   return <div className="settings-section-stack">
     <section className="settings-card" aria-labelledby="stream-settings-heading">
       <SectionHeading id="stream-settings-heading" title={t('Stream transport')} description={t('Choose the framing used by the response and the policy for an unexpected end.')} />
@@ -590,7 +603,7 @@ function StreamMappingSection({ profile, snapshot, mappingTestResult, post, patc
           <select id="settings-stream-end-policy" value={stream.unexpectedEndPolicy ?? 'fail'} onChange={(event) => patch(['stream', 'unexpectedEndPolicy'], event.target.value)}><option value="fail">{t('Fail the turn')}</option><option value="completeWithWarning">{t('Complete with warning')}</option></select>
         </SettingField>
       </div>
-      <details className="settings-advanced settings-advanced--inline" open={framingCustomized || undefined}>
+      <details className="settings-advanced settings-advanced--inline" open={framingOpen || undefined}>
         <summary><span>{t('Advanced: data format and end marker')}</span><span className="settings-advanced__state">{framingCustomized ? t('Changed from defaults') : t('Using defaults')}</span></summary>
         <div className="settings-form-grid">
           <SettingField label={t('Data format')} id="settings-stream-data-format">
@@ -621,8 +634,9 @@ function ChatUiSection({ profile, post }: { profile: TurnStageProfile; post: Set
   </div>;
 }
 
-function HistoryErrorsSection({ profile, snapshot, patch }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; patch: (path: PatchPath, value: unknown) => void }): React.JSX.Element {
+function HistoryErrorsSection({ profile, snapshot, patch, vscodeFeatures }: { profile: TurnStageProfile; snapshot?: SessionSnapshot; patch: (path: PatchPath, value: unknown) => void; vscodeFeatures: boolean }): React.JSX.Element {
   const localRuns = profile.history?.localRuns;
+  const remoteSessions = profile.history?.remoteSessions;
   const errorPolicy = profile.errorPolicy;
   return <div className="settings-section-stack">
     <section className="settings-card" aria-labelledby="history-settings-heading">
@@ -638,12 +652,17 @@ function HistoryErrorsSection({ profile, snapshot, patch }: { profile: TurnStage
         <ListPatchField label={t('Visible metrics')} id="settings-visible-metrics" value={profile.metrics?.enabled ?? []} placeholder="ttft, totalDuration, eventCount" hint={t('Leave empty to show every available metric.')} onCommit={(value) => patch(['metrics', 'enabled'], value)} wide />
         <ListPatchField label={t('Visible message metrics')} id="settings-visible-message-metrics" value={profile.metrics?.messageEnabled ?? []} placeholder="ttft, totalDuration" hint={t('Leave empty to show only TTFT and total duration. Add mapped metric IDs explicitly.')} onCommit={(value) => patch(['metrics', 'messageEnabled'], value)} wide />
       </div>
-      <SettingCheckboxGroup legend={t('Remote session scope')} hint={t('Choose which profile values identify a reusable remote conversation reference.')}>
-        {(['profile', 'actor', 'environment'] as const).map((scope) => <SettingCheckbox key={scope} id={`settings-remote-session-${scope}`} label={localizeHumanized(scope)} checked={(profile.history?.remoteSessions?.scope ?? ['profile']).includes(scope)} onChange={(checked) => {
-          const current = profile.history?.remoteSessions?.scope ?? ['profile'];
-          patch(['history', 'remoteSessions'], { mode: 'referenceOnly', scope: checked ? [...new Set([...current, scope])] : current.filter((item) => item !== scope) });
-        }} />)}
-      </SettingCheckboxGroup>
+      {vscodeFeatures && <SettingCheckboxGroup legend={t('Remote conversations')} hint={t('Remember server conversation IDs so a conversation can be reopened later. Only the reference is stored, not the messages.')}>
+        <SettingCheckbox id="settings-remote-sessions-enabled" label={t('Remember remote conversations')} checked={remoteSessions?.mode === 'referenceOnly'} onChange={(checked) => patch(['history', 'remoteSessions'], checked ? { mode: 'referenceOnly', scope: remoteSessions?.scope ?? ['profile'] } : undefined)} />
+        {remoteSessions?.mode === 'referenceOnly' && <fieldset className="settings-checkbox-group settings-checkbox-group--nested">
+          <legend>{t('Remote session scope')}</legend>
+          <p>{t('Choose which profile values identify a reusable remote conversation reference.')}</p>
+          <div>{(['profile', 'actor', 'environment'] as const).map((scope) => <SettingCheckbox key={scope} id={`settings-remote-session-${scope}`} label={localizeHumanized(scope)} checked={(remoteSessions.scope ?? ['profile']).includes(scope)} onChange={(checked) => {
+            const current = remoteSessions.scope ?? ['profile'];
+            patch(['history', 'remoteSessions'], { mode: 'referenceOnly', scope: checked ? [...new Set([...current, scope])] : current.filter((item) => item !== scope) });
+          }} />)}</div>
+        </fieldset>}
+      </SettingCheckboxGroup>}
     </section>
 
     <section className="settings-card" aria-labelledby="error-policy-heading">
