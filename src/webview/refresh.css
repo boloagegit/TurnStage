@@ -167,7 +167,8 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
 
 /* Narrow panes: keep every workspace tab visible; counts give way first. */
 @container (max-width: 460px) {
-  .right-pane-heading { padding-inline: var(--ts-pane-inline) var(--ts-space-1); }
+  /* Every tab must fit before the content edge does: the 16px pane edge is given back at this width. */
+  .right-pane-heading { padding-inline: var(--ts-space-1); }
   .right-pane-tabs { min-width: 0; padding: 2px; }
   .right-pane-tabs button { padding-inline: 6px; }
   .right-pane-tab-count { display: none; }
@@ -394,8 +395,8 @@ body.vscode-high-contrast-light .mini-tabs[role='tablist'] button[aria-selected=
   .right-pane-tabs button { padding-inline: 3px; font-size: var(--ts-type-label); }
   .right-pane-tabs .right-pane-tab__icon { display: inline-block; }
   .right-pane-tab--chat .right-pane-tab__label { display: none; }
-  /* Icon-only, so keep the WCAG 2.5.8 minimum target. */
-  .right-pane-tab--chat { min-width: 28px; justify-content: flex-start; }
+  /* Icon-only, so keep the WCAG 2.5.8 minimum 24px target. */
+  .right-pane-tab--chat { min-width: 24px; justify-content: flex-start; }
 }
 /* Flaky: the case flipped between passing and failing on the same definition. Text, not color, carries it. */
 .live-case-status__flaky { margin-inline-start: var(--ts-space-1); padding: 0 4px; border: 1px dashed currentColor; border-radius: 3px; color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground)); font-size: 0.86em; font-weight: 600; line-height: 1.4; white-space: nowrap; }
