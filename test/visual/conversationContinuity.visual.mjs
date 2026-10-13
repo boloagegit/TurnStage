@@ -221,6 +221,7 @@ try {
 
   // A nonzero Configure scroll position survives visits to all three other panes.
   await page.getByRole('tab', { name: 'Configure', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Profile configuration sections' }).getByRole('button', { name: /^Opening & Flow/u }).click();
   const settings = page.locator('#settings-content');
   const scrollTop = await settings.evaluate((element) => { element.scrollTop = element.scrollHeight; element.dispatchEvent(new Event('scroll', { bubbles: true })); return element.scrollTop; });
   assert.ok(scrollTop > 0, 'the scroll regression needs overflowing settings content');

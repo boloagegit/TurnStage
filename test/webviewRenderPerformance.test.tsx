@@ -157,13 +157,13 @@ describe('editing safeguards', () => {
 
   it('reverts a Profile Editor flow field with Escape without committing the typed value', async () => {
     const post = vi.fn();
-    render(<FlowEditor profile={profile} post={post} />);
+    render(<FlowEditor profile={{ ...profile, opening: { mode: 'static', message: 'Hello' } }} post={post} />);
     const user = userEvent.setup();
-    const field = screen.getByRole('textbox', { name: 'Conversation request URL' }) as HTMLInputElement;
+    const field = screen.getByRole('textbox', { name: 'Opening message' }) as HTMLTextAreaElement;
     await user.clear(field);
-    await user.type(field, 'https://discarded.test');
+    await user.type(field, 'Discarded opening');
     await user.keyboard('{Escape}');
-    expect(field.value).toBe('https://example.test');
+    expect(field.value).toBe('Hello');
     expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'profile.patch' }));
   });
 

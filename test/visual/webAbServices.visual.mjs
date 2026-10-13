@@ -149,6 +149,7 @@ try {
   await importCsv(page, await readFile(resolve(output, 'red-team-sample.csv')), 'red-team-sample.csv');
   await page.getByRole('button', { name: 'Run case Sample multi-turn case' }).waitFor();
   await page.getByRole('tab', { name: 'Configure' }).click();
+  await page.getByRole('navigation', { name: 'Profile configuration sections' }).getByRole('button', { name: /^General/u }).click();
   report.typography.settings = await typographySnapshot(page);
   await page.screenshot({ path: resolve(output, 'settings-typography.png'), fullPage: true });
   for (const [screen, snapshot] of Object.entries(report.typography)) assert.deepEqual(snapshot.tiny, [], `${screen} contains text below 10px`);
