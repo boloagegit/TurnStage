@@ -258,7 +258,6 @@ export function SettingsWorkspace({
       <div className="settings-header-actions" role="group" aria-label={t('Profile configuration actions')}>
         <span className={`profile-edit-status ${profileDirty ? 'is-dirty' : diagnostics.length ? 'has-issues' : ''}`} role="status">{readOnly ? t('Read-only') : profileDirty ? t('Unsaved changes') : diagnostics.length ? t('{count} issues', { count: formatNumber(diagnostics.length) }) : t('Saved')}</span>
         {diagnostics.length > 0 && vscodeFeatures && <IconButton icon="warning" label={t('Show first issue')} type="button" onClick={() => post({ type: 'profile.openFirstIssue' })} />}
-        <IconButton icon="checklist" label={t('Validate profile')} type="button" onClick={() => post({ type: 'profile.validate' })} />
         <IconButton icon="save" label={t('Save Profile')} type="button" disabled={readOnly || !profileDirty} onClick={() => post({ type: 'profile.save' })} />
         <IconButton icon="file-code" label={t(vscodeFeatures ? 'Open JSONC' : 'View JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
       </div>

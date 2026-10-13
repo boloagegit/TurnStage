@@ -111,11 +111,11 @@ describe('embedded settings navigation', () => {
     expect(screen.queryByRole('combobox', { name: 'Profile configuration sections' })).toBeNull();
   });
 
-  it('validates the Profile from the header', async () => {
-    const post = vi.fn();
-    render(<OverviewHarness post={post} />);
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Validate profile' }));
-    expect(post).toHaveBeenCalledWith({ type: 'profile.validate' });
+  it('relies on automatic validation instead of a manual Validate action', () => {
+    // Both hosts revalidate after every edit; the overview health line reports the result.
+    render(<OverviewHarness />);
+    expect(screen.queryByRole('button', { name: 'Validate profile' })).toBeNull();
+    expect(screen.getByText('No Profile issues')).toBeTruthy();
   });
 
   it('edits request timeouts in seconds and stores milliseconds', async () => {
