@@ -22,6 +22,9 @@ import { HeaderEditor } from './HeaderEditor';
 import { TokenListInput } from './TokenListInput';
 import { remoteSessionScope } from '../shared/remoteSessionScope';
 
+/** Statuses both hosts retry when the Profile lists none. */
+const DEFAULT_RETRY_STATUSES = [429, 502, 503, 504] as const;
+
 /**
  * Keep this callback local to the workspace so it can also be used by hosts
  * that add the protocol envelope outside of the React tree.
@@ -493,8 +496,8 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
         <SettingField label={t('Request URL')} id="settings-request-url" hint={t('Use ${env.baseUrl} and other profile context values where appropriate.')} error={!request.url.trim() ? t('A request URL is required.') : undefined} wide>
           <PatchInput id="settings-request-url" value={request.url} onCommit={(value) => patch(['conversation', 'send', 'url'], value)} required spellCheck={false} autoComplete="url" />
         </SettingField>
-        <NumberSettingField label={t('Request timeout (seconds)')} id="settings-request-timeout" value={request.timeoutMs} placeholder={String(DEFAULT_REQUEST_TIMEOUT_MS / 1000)} min={1} max={900000} step="any" scale={1000} hint={t('The whole request stops after this long. Leave empty for {seconds} seconds.', { seconds: formatNumber(DEFAULT_REQUEST_TIMEOUT_MS / 1000) })} onCommit={(value) => patch(['conversation', 'send', 'timeoutMs'], value)} />
-        <NumberSettingField label={t('Idle timeout (seconds)')} id="settings-request-idle-timeout" value={request.idleTimeoutMs} placeholder={t('Off')} min={1} max={900000} step="any" scale={1000} hint={t('Stop when the stream sends nothing for this long. Leave empty for no limit.')} onCommit={(value) => patch(['conversation', 'send', 'idleTimeoutMs'], value)} />
+        <NumberSettingField label={t('Request timeout (seconds)')} id="settings-request-timeout" value={request.timeoutMs} placeholder={String(DEFAULT_REQUEST_TIMEOUT_MS / 1000)} defaultValue={DEFAULT_REQUEST_TIMEOUT_MS} defaultText={formatNumber(DEFAULT_REQUEST_TIMEOUT_MS / 1000)} min={1} max={900000} step="any" scale={1000} hint={t('The whole request stops after this long. Leave empty for {seconds} seconds.', { seconds: formatNumber(DEFAULT_REQUEST_TIMEOUT_MS / 1000) })} onCommit={(value) => patch(['conversation', 'send', 'timeoutMs'], value)} />
+        <NumberSettingField label={t('Idle timeout (seconds)')} id="settings-request-idle-timeout" value={request.idleTimeoutMs} placeholder={t('Off')} defaultText={t('Off')} min={1} max={900000} step="any" scale={1000} hint={t('Stop when the stream sends nothing for this long. Leave empty for no limit.')} onCommit={(value) => patch(['conversation', 'send', 'idleTimeoutMs'], value)} />
       </div>
     </section>
 
@@ -511,21 +514,21 @@ function RequestSection({ profile, snapshot, requestPreview, remoteName, connect
       <summary><span id="request-resilience-heading">{t('Advanced: retries, redirects, and certificates')}</span><span className="settings-advanced__state">{resilienceCustomized ? t('Changed from defaults') : t('Using defaults')}</span></summary>
       <p className="sr-only">{t('Bound retries and redirects without replaying partial streamed output.')}</p>
       <div className="settings-form-grid">
-        <NumberSettingField label={t('Reconnect attempts')} id="settings-reconnect-attempts" value={request.reconnect?.maxAttempts} placeholder="0" min={0} max={5} hint={t('Retries only before the first stream event.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxAttempts'], value)} />
-        <NumberSettingField label={t('Reconnect base delay (seconds)')} id="settings-reconnect-base-delay" value={request.reconnect?.baseDelayMs} placeholder="0.5" min={0} max={vscodeFeatures ? 30_000 : 10_000} step="any" scale={1000} hint={t('Wait before the first retry.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'baseDelayMs'], value)} />
-        <NumberSettingField label={t('Reconnect maximum delay (seconds)')} id="settings-reconnect-max-delay" value={request.reconnect?.maxDelayMs} placeholder="10" min={0} max={120000} step="any" scale={1000} hint={t('Longest wait between retries.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxDelayMs'], value)} />
-        <SettingField label={t('Retry HTTP statuses')} id="settings-reconnect-statuses" hint={t('Leave empty to retry 429, 502, 503, and 504.')}>
+        <NumberSettingField label={t('Reconnect attempts')} id="settings-reconnect-attempts" value={request.reconnect?.maxAttempts} placeholder="0" defaultValue={0} defaultText={formatNumber(0)} min={0} max={5} hint={t('Retries only before the first stream event.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxAttempts'], value)} />
+        <NumberSettingField label={t('Reconnect base delay (seconds)')} id="settings-reconnect-base-delay" value={request.reconnect?.baseDelayMs} placeholder="0.5" defaultValue={500} defaultText={formatNumber(0.5)} min={0} max={vscodeFeatures ? 30_000 : 10_000} step="any" scale={1000} hint={t('Wait before the first retry.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'baseDelayMs'], value)} />
+        <NumberSettingField label={t('Reconnect maximum delay (seconds)')} id="settings-reconnect-max-delay" value={request.reconnect?.maxDelayMs} placeholder="10" defaultValue={10_000} defaultText={formatNumber(10)} min={0} max={120000} step="any" scale={1000} hint={t('Longest wait between retries.')} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'maxDelayMs'], value)} />
+        <SettingField label={t('Retry HTTP statuses')} id="settings-reconnect-statuses" hint={t('Leave empty to retry 429, 502, 503, and 504.')} reset={{ changed: Boolean(request.reconnect?.retryOnStatuses?.length) && request.reconnect?.retryOnStatuses?.join(',') !== DEFAULT_RETRY_STATUSES.join(','), defaultText: DEFAULT_RETRY_STATUSES.join(', '), onReset: () => patch(['conversation', 'send', 'reconnect', 'retryOnStatuses'], undefined) }}>
           <TokenListInput id="settings-reconnect-statuses" value={(request.reconnect?.retryOnStatuses ?? []).map(String)} placeholder="429, 502, 503, 504" maxItems={20} validate={retryStatusToken} onCommit={(value) => patch(['conversation', 'send', 'reconnect', 'retryOnStatuses'], value.length ? value.map(Number) : undefined)} />
         </SettingField>
-        <SettingField label={t('Redirect policy')} id="settings-redirect-policy">
+        <SettingField label={t('Redirect policy')} id="settings-redirect-policy" reset={{ changed: (request.redirectPolicy ?? 'same-origin') !== 'same-origin', defaultText: t('Same origin only'), onReset: () => patch(['conversation', 'send', 'redirectPolicy'], undefined) }}>
           <select id="settings-redirect-policy" value={request.redirectPolicy ?? 'same-origin'} onChange={(event) => patch(['conversation', 'send', 'redirectPolicy'], event.target.value)}>
             <option value="same-origin">{t('Same origin only')}</option><option value="follow">{t('Follow redirects')}</option><option value="error">{t('Reject redirects')}</option>
           </select>
         </SettingField>
-        <NumberSettingField label={t('Maximum redirects')} id="settings-max-redirects" value={request.maxRedirects} placeholder="5" min={0} max={10} onCommit={(value) => patch(['conversation', 'send', 'maxRedirects'], value)} />
+        <NumberSettingField label={t('Maximum redirects')} id="settings-max-redirects" value={request.maxRedirects} placeholder="5" defaultValue={5} defaultText={formatNumber(5)} min={0} max={10} onCommit={(value) => patch(['conversation', 'send', 'maxRedirects'], value)} />
       </div>
       <SettingCheckboxGroup legend={t('TLS certificate verification')} hint={t('Keep certificate verification enabled unless a development or company endpoint cannot use a trusted certificate chain.') }>
-        <SettingCheckbox id="settings-request-allow-invalid-certificates" label={t('Allow invalid server certificates for this request')} checked={request.tls?.allowInvalidCertificates === true} onChange={(checked) => patch(['conversation', 'send', 'tls'], checked ? { allowInvalidCertificates: true } : undefined)} />
+        <SettingCheckbox id="settings-request-allow-invalid-certificates" label={t('Allow invalid server certificates for this request')} checked={request.tls?.allowInvalidCertificates === true} reset={{ changed: request.tls?.allowInvalidCertificates === true, defaultText: t('Off'), onReset: () => patch(['conversation', 'send', 'tls'], undefined) }} onChange={(checked) => patch(['conversation', 'send', 'tls'], checked ? { allowInvalidCertificates: true } : undefined)} />
       </SettingCheckboxGroup>
       {request.tls?.allowInvalidCertificates === true && !vscodeFeatures && <p className="settings-callout settings-callout-info" role="note">{t('This browser always verifies server certificates. The setting applies only when the Profile runs in VS Code.')}</p>}
       {request.tls?.allowInvalidCertificates === true && vscodeFeatures && <p className="settings-callout settings-callout-warning" role="alert"><strong>{t('Certificate verification is disabled for this Profile.')}</strong> {t('TurnStage will accept an untrusted or mismatched server certificate only for this request. Credentials and response content can be intercepted. System-managed PAC proxy routes are rejected because they cannot be preserved safely.')}</p>}
@@ -604,17 +607,17 @@ function StreamMappingSection({ profile, snapshot, mappingTestResult, post, patc
             {['sse', 'ndjson', 'json', 'text-stream', 'fixture'].map((transport) => <option key={transport} value={transport}>{transportLabel(transport)}</option>)}
           </select>
         </SettingField>
-        <SettingField label={t('Unexpected stream end')} id="settings-stream-end-policy" hint={t('Whether an incomplete response should fail the turn.')}>
+        <SettingField label={t('Unexpected stream end')} id="settings-stream-end-policy" hint={t('Whether an incomplete response should fail the turn.')} reset={{ changed: (stream.unexpectedEndPolicy ?? 'fail') !== 'fail', defaultText: t('Fail the turn'), onReset: () => patch(['stream', 'unexpectedEndPolicy'], undefined) }}>
           <select id="settings-stream-end-policy" value={stream.unexpectedEndPolicy ?? 'fail'} onChange={(event) => patch(['stream', 'unexpectedEndPolicy'], event.target.value)}><option value="fail">{t('Fail the turn')}</option><option value="completeWithWarning">{t('Complete with warning')}</option></select>
         </SettingField>
       </div>
       <details className="settings-advanced settings-advanced--inline" open={framingOpen || undefined}>
         <summary><span>{t('Advanced: data format and end marker')}</span><span className="settings-advanced__state">{framingCustomized ? t('Changed from defaults') : t('Using defaults')}</span></summary>
         <div className="settings-form-grid">
-          <SettingField label={t('Data format')} id="settings-stream-data-format">
+          <SettingField label={t('Data format')} id="settings-stream-data-format" reset={{ changed: (stream.dataFormat ?? 'json') !== 'json', defaultText: 'JSON', onReset: () => patch(['stream', 'dataFormat'], undefined) }}>
             <select id="settings-stream-data-format" value={stream.dataFormat ?? 'json'} onChange={(event) => patch(['stream', 'dataFormat'], event.target.value)}><option value="json">JSON</option><option value="text">{t('Text')}</option></select>
           </SettingField>
-          <SettingField label={t('Done value')} id="settings-stream-done-value" hint={t('SSE and text transports stop mapping when this value is received.')}>
+          <SettingField label={t('Done value')} id="settings-stream-done-value" hint={t('SSE and text transports stop mapping when this value is received.')} reset={{ changed: (stream.doneValue ?? '[DONE]') !== '[DONE]', defaultText: '[DONE]', onReset: () => patch(['stream', 'doneValue'], undefined) }}>
             <PatchInput id="settings-stream-done-value" value={stream.doneValue ?? '[DONE]'} onCommit={(value) => patch(['stream', 'doneValue'], value || undefined)} spellCheck={false} />
           </SettingField>
         </div>
@@ -648,12 +651,12 @@ function HistoryErrorsSection({ profile, snapshot, patch, vscodeFeatures }: { pr
       <SectionHeading id="history-settings-heading" title={t('Local run history')} description={t(hostText('Runs are stored by the Extension Host and can be replayed without sending another request.', 'Runs are stored in this browser and can be replayed without sending another request.'))} />
       <div className="settings-form-grid">
         <SettingCheckboxGroup legend={t('Capture')} hint={t('Disable individual records when a profile should stay lightweight.')}>
-          <SettingCheckbox id="settings-history-enabled" label={t('Enable local run history')} checked={localRuns?.enabled ?? true} onChange={(value) => patch(['history', 'localRuns', 'enabled'], value)} />
-          <SettingCheckbox id="settings-history-raw" label={t('Record raw events')} checked={localRuns?.recordRawEvents ?? true} onChange={(value) => patch(['history', 'localRuns', 'recordRawEvents'], value)} />
-          <SettingCheckbox id="settings-history-normalized" label={t('Record normalized events')} checked={localRuns?.recordNormalizedEvents ?? true} onChange={(value) => patch(['history', 'localRuns', 'recordNormalizedEvents'], value)} />
-          <SettingCheckbox id="settings-history-snapshot" label={t('Record chat snapshot')} checked={localRuns?.recordChatSnapshot ?? true} onChange={(value) => patch(['history', 'localRuns', 'recordChatSnapshot'], value)} />
+          <SettingCheckbox id="settings-history-enabled" label={t('Enable local run history')} checked={localRuns?.enabled ?? true} reset={onByDefault(localRuns?.enabled, () => patch(['history', 'localRuns', 'enabled'], undefined))} onChange={(value) => patch(['history', 'localRuns', 'enabled'], value)} />
+          <SettingCheckbox id="settings-history-raw" label={t('Record raw events')} checked={localRuns?.recordRawEvents ?? true} reset={onByDefault(localRuns?.recordRawEvents, () => patch(['history', 'localRuns', 'recordRawEvents'], undefined))} onChange={(value) => patch(['history', 'localRuns', 'recordRawEvents'], value)} />
+          <SettingCheckbox id="settings-history-normalized" label={t('Record normalized events')} checked={localRuns?.recordNormalizedEvents ?? true} reset={onByDefault(localRuns?.recordNormalizedEvents, () => patch(['history', 'localRuns', 'recordNormalizedEvents'], undefined))} onChange={(value) => patch(['history', 'localRuns', 'recordNormalizedEvents'], value)} />
+          <SettingCheckbox id="settings-history-snapshot" label={t('Record chat snapshot')} checked={localRuns?.recordChatSnapshot ?? true} reset={onByDefault(localRuns?.recordChatSnapshot, () => patch(['history', 'localRuns', 'recordChatSnapshot'], undefined))} onChange={(value) => patch(['history', 'localRuns', 'recordChatSnapshot'], value)} />
         </SettingCheckboxGroup>
-        <NumberSettingField label={t('Maximum local runs')} id="settings-history-max-runs" value={localRuns?.maxRuns} placeholder={vscodeFeatures ? t('Default') : '20'} min={1} max={100} hint={t(vscodeFeatures ? 'Older runs are removed after this count. Leave empty to use the TurnStage run retention setting (20 unless you changed it).' : 'Older runs are removed after this count. Leave empty for 20.')} onCommit={(value) => patch(['history', 'localRuns', 'maxRuns'], value)} />
+        <NumberSettingField label={t('Maximum local runs')} id="settings-history-max-runs" value={localRuns?.maxRuns} placeholder={vscodeFeatures ? t('Default') : '20'} defaultValue={vscodeFeatures ? undefined : 20} defaultText={vscodeFeatures ? t('the run retention setting') : formatNumber(20)} min={1} max={100} hint={t(vscodeFeatures ? 'Older runs are removed after this count. Leave empty to use the TurnStage run retention setting (20 unless you changed it).' : 'Older runs are removed after this count. Leave empty for 20.')} onCommit={(value) => patch(['history', 'localRuns', 'maxRuns'], value)} />
         <ListPatchField label={t('Visible metrics')} id="settings-visible-metrics" value={profile.metrics?.enabled ?? []} placeholder="ttft, totalDuration, eventCount" hint={t('Leave empty to show every available metric.')} onCommit={(value) => patch(['metrics', 'enabled'], value)} wide />
         <ListPatchField label={t('Visible message metrics')} id="settings-visible-message-metrics" value={profile.metrics?.messageEnabled ?? []} placeholder="ttft, totalDuration" hint={t('Leave empty to show only TTFT and total duration. Add mapped metric IDs explicitly.')} onCommit={(value) => patch(['metrics', 'messageEnabled'], value)} wide />
       </div>
@@ -673,11 +676,10 @@ function HistoryErrorsSection({ profile, snapshot, patch, vscodeFeatures }: { pr
     <section className="settings-card" aria-labelledby="error-policy-heading">
       <SectionHeading id="error-policy-heading" title={t('Error handling')} description={t('Keep useful partial output visible while making failures explicit.')} />
       <SettingCheckboxGroup legend={t('After an error')}>
-        <SettingCheckbox id="settings-error-partial" label={t('Preserve partial content')} checked={errorPolicy?.preservePartialContent ?? true} onChange={(value) => patch(['errorPolicy', 'preservePartialContent'], value)} />
-        <SettingCheckbox id="settings-error-part" label={t('Show an error part')} checked={errorPolicy?.showErrorPart ?? true} onChange={(value) => patch(['errorPolicy', 'showErrorPart'], value)} />
-        <SettingCheckbox id="settings-error-conversation" label={t('Keep conversation ID')} checked={errorPolicy?.keepConversationId ?? true} onChange={(value) => patch(['errorPolicy', 'keepConversationId'], value)} />
-        <SettingCheckbox id="settings-error-continuation" label={t('Allow continuation after error')} checked={errorPolicy?.allowContinuation ?? true} onChange={(value) => patch(['errorPolicy', 'allowContinuation'], value)} />
-        <SettingCheckbox id="settings-error-locks" label={t('Release all locks')} checked={errorPolicy?.releaseAllLocks ?? true} onChange={(value) => patch(['errorPolicy', 'releaseAllLocks'], value)} />
+        <SettingCheckbox id="settings-error-partial" label={t('Preserve partial content')} checked={errorPolicy?.preservePartialContent ?? true} reset={onByDefault(errorPolicy?.preservePartialContent, () => patch(['errorPolicy', 'preservePartialContent'], undefined))} onChange={(value) => patch(['errorPolicy', 'preservePartialContent'], value)} />
+        <SettingCheckbox id="settings-error-part" label={t('Show an error part')} checked={errorPolicy?.showErrorPart ?? true} reset={onByDefault(errorPolicy?.showErrorPart, () => patch(['errorPolicy', 'showErrorPart'], undefined))} onChange={(value) => patch(['errorPolicy', 'showErrorPart'], value)} />
+        <SettingCheckbox id="settings-error-conversation" label={t('Keep conversation ID')} checked={errorPolicy?.keepConversationId ?? true} reset={onByDefault(errorPolicy?.keepConversationId, () => patch(['errorPolicy', 'keepConversationId'], undefined))} onChange={(value) => patch(['errorPolicy', 'keepConversationId'], value)} />
+        <SettingCheckbox id="settings-error-continuation" label={t('Allow continuation after error')} checked={errorPolicy?.allowContinuation ?? true} reset={onByDefault(errorPolicy?.allowContinuation, () => patch(['errorPolicy', 'allowContinuation'], undefined))} onChange={(value) => patch(['errorPolicy', 'allowContinuation'], value)} />
       </SettingCheckboxGroup>
     </section>
 
@@ -1841,10 +1843,20 @@ function SectionHeading({ id, title, description }: { id: string; title: string;
   return <div className="settings-card-heading"><div><h2 id={id}>{title}</h2><p className="sr-only">{description}</p></div></div>;
 }
 
-function SettingField({ label, id, hint, error, wide, children }: { label: string; id: string; hint?: string; error?: string; wide?: boolean; children: React.ReactNode }): React.JSX.Element {
+/** What a setting falls back to when the Profile leaves it out, offered as a reset while the Profile says otherwise. */
+interface DefaultReset { changed: boolean; defaultText: string; onReset: () => void }
+
+function ResetToDefault({ id, label, reset }: { id: string; label: string; reset?: DefaultReset }): React.JSX.Element | null {
+  if (!reset?.changed) return null;
+  const text = t('Reset to {value}', { value: reset.defaultText });
+  // The button leaves once the reset is saved; keep focus on the setting it reset.
+  return <p className="settings-default-reset"><span>{t('Changed from default')}</span><button type="button" aria-label={`${text}, ${label}`} onClick={() => { reset.onReset(); document.getElementById(id)?.focus(); }}>{text}</button></p>;
+}
+
+function SettingField({ label, id, hint, error, wide, reset, children }: { label: string; id: string; hint?: string; error?: string; wide?: boolean; reset?: DefaultReset; children: React.ReactNode }): React.JSX.Element {
   const descriptionId = useId();
   const describedBy = hint || error ? descriptionId : undefined;
-  return <div className={`settings-field ${wide ? 'settings-field-wide' : ''}`}><label htmlFor={id}>{label}</label>{React.isValidElement(children) ? React.cloneElement(children, { 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined } as Record<string, unknown>) : children}{(hint || error) && <p id={descriptionId} className={error ? 'settings-field-error' : 'settings-field-hint'}>{error || hint}</p>}</div>;
+  return <div className={`settings-field ${wide ? 'settings-field-wide' : ''}`}><label htmlFor={id}>{label}</label>{React.isValidElement(children) ? React.cloneElement(children, { 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined } as Record<string, unknown>) : children}<ResetToDefault id={id} label={label} reset={reset} />{(hint || error) && <p id={descriptionId} className={error ? 'settings-field-error' : 'settings-field-hint'}>{error || hint}</p>}</div>;
 }
 
 /**
@@ -1852,7 +1864,7 @@ function SettingField({ label, id, hint, error, wide, children }: { label: strin
  * millisecond value with scale 1000 is edited in seconds and stored as an
  * integer number of milliseconds. `min` and `max` are in the stored unit.
  */
-function NumberSettingField({ label, id, value, placeholder, min, max, step = 1, scale = 1, hint, onCommit }: { label: string; id: string; value?: number; placeholder: string; min: number; max: number; step?: number | 'any'; scale?: number; hint?: string; onCommit: (value: number | undefined) => void }): React.JSX.Element {
+function NumberSettingField({ label, id, value, placeholder, min, max, step = 1, scale = 1, hint, defaultValue, defaultText, onCommit }: { label: string; id: string; value?: number; placeholder: string; min: number; max: number; step?: number | 'any'; scale?: number; hint?: string; /** The runtime value when unset, in the stored unit; leave out when unset means "off". */ defaultValue?: number; /** Shown in the reset action; without it the field offers no reset. */ defaultText?: string; onCommit: (value: number | undefined) => void }): React.JSX.Element {
   const shown = value === undefined ? '' : String(value / scale);
   const [draft, setDraft] = useState(shown);
   const reverting = useRef(false);
@@ -1867,7 +1879,8 @@ function NumberSettingField({ label, id, value, placeholder, min, max, step = 1,
     setDraft(String(next / scale));
     onCommit(next);
   };
-  return <SettingField label={label} id={id} hint={hint}><input id={id} type="number" min={min / scale} max={max / scale} step={step} value={draft} placeholder={placeholder} inputMode="decimal" onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); event.currentTarget.blur(); } if (event.key === 'Escape') { revertField(event, reverting); setDraft(shown); event.currentTarget.blur(); } }} /></SettingField>;
+  const reset = defaultText === undefined ? undefined : { changed: value !== undefined && value !== defaultValue, defaultText, onReset: () => { setDraft(''); onCommit(undefined); } };
+  return <SettingField label={label} id={id} hint={hint} reset={reset}><input id={id} type="number" min={min / scale} max={max / scale} step={step} value={draft} placeholder={placeholder} inputMode="decimal" onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); event.currentTarget.blur(); } if (event.key === 'Escape') { revertField(event, reverting); setDraft(shown); event.currentTarget.blur(); } }} /></SettingField>;
 }
 
 function OptionalNumberInput({ id, label, shortLabel, value, max, disabled, onCommit }: { id: string; label: string; shortLabel: string; value?: number; max: number; disabled?: boolean; onCommit: (value: number | undefined) => void }): React.JSX.Element {
@@ -1889,8 +1902,14 @@ function SettingCheckboxGroup({ legend, hint, children }: { legend: string; hint
   return <fieldset className="settings-checkbox-group" aria-describedby={hint ? hintId : undefined}><legend>{legend}</legend>{hint && <p id={hintId}>{hint}</p>}<div>{children}</div></fieldset>;
 }
 
-function SettingCheckbox({ id, label, checked, onChange }: { id: string; label: string; checked: boolean; onChange: (checked: boolean) => void }): React.JSX.Element {
-  return <label className="settings-checkbox" htmlFor={id}><input id={id} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>;
+function SettingCheckbox({ id, label, checked, reset, onChange }: { id: string; label: string; checked: boolean; reset?: DefaultReset; onChange: (checked: boolean) => void }): React.JSX.Element {
+  const box = <label className="settings-checkbox" htmlFor={id}><input id={id} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>;
+  return reset ? <div className="settings-checkbox-line">{box}<ResetToDefault id={id} label={label} reset={reset} /></div> : box;
+}
+
+/** A Profile flag that is on unless set to false: changed when the Profile turns it off. */
+function onByDefault(value: boolean | undefined, onReset: () => void): DefaultReset {
+  return { changed: value === false, defaultText: t('On'), onReset };
 }
 
 function PatchInput({ id, value, onCommit, multiline = false, rows = 3, ...props }: { id: string; value: string; onCommit: (value: string) => void; multiline?: boolean; rows?: number; disabled?: boolean; readOnly?: boolean; placeholder?: string; required?: boolean; spellCheck?: boolean; autoComplete?: string; type?: React.HTMLInputTypeAttribute; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'] }): React.JSX.Element {

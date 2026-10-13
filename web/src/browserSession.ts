@@ -13,6 +13,7 @@ import { fetchWithRedirectPolicy } from '../../src/extension/transport/fetchPoli
 import { ReplayEngine, type ReplaySpeed } from '../../src/extension/replay/replayEngine';
 import { redactHeaders, redactKnownSecrets } from '../../src/shared/redaction';
 import { browserUuid } from './browserCrypto';
+import { t } from '../../src/webview/i18n';
 
 const MAX_OPENING_RESPONSE_BYTES = 1024 * 1024;
 const MAX_CONVERSATION_RESPONSE_BYTES = 4 * 1024 * 1024;
@@ -516,7 +517,9 @@ export class BrowserSession {
       network.state = 'completed';
       network.completedAt = Date.now();
       network.timing.total = network.completedAt - startedAt;
-      this.finishAssistant(this.state.snapshot.turnState === 'completed' ? 'completed' : 'failed');
+      // A stream.aborted event ends the turn as aborted; the narrowing above does not see the reducer's change.
+      const ended = this.state.snapshot.turnState as SessionSnapshot['turnState'];
+      this.finishAssistant(ended === 'completed' ? 'completed' : ended === 'aborted' ? 'aborted' : 'failed');
     } catch (error) {
       if (generation !== this.generation) return;
       if ((error as DOMException)?.name === 'AbortError' && !timeoutKind) this.state.snapshot.turnState = 'aborted';
@@ -777,17 +780,28 @@ export class BrowserSession {
     this.networkPreviews.clear();
   }
 
+  /** Ends the streaming reply the way the Extension Host does: partial output, error part, stop notice, conversation ID. */
   private finishAssistant(status: 'completed' | 'failed' | 'aborted'): void {
-    const message = [...this.state.snapshot.messages].reverse().find((item) => item.role === 'assistant' && (item.status === 'pending' || item.status === 'streaming'));
+    const snapshot = this.state.snapshot;
+    if (status === 'failed' && this.profile.errorPolicy?.keepConversationId === false) snapshot.conversationId = undefined;
+    const message = [...snapshot.messages].reverse().find((item) => item.role === 'assistant' && (item.status === 'pending' || item.status === 'streaming'));
     if (!message) return;
+    const preservePartial = status === 'aborted'
+      ? this.profile.conversation.stop?.preservePartialContent ?? this.profile.errorPolicy?.preservePartialContent !== false
+      : this.profile.errorPolicy?.preservePartialContent !== false;
+    if (status !== 'completed' && !preservePartial) message.parts = [];
     message.status = status;
     message.completedAt = Date.now();
     for (const part of message.parts) {
       if ((part.type === 'progress' || part.type === 'tool-call') && ['running', 'pending'].includes(String(part.status))) part.status = status;
     }
     if (status === 'failed' && this.profile.errorPolicy?.showErrorPart !== false) {
-      const error = this.state.snapshot.errors.at(-1);
+      const error = snapshot.errors.at(-1);
       if (error) message.parts.push({ type: 'error', text: error.message });
+    }
+    if (status === 'aborted' && !snapshot.replay && this.profile.conversation.stop?.appendSystemNotice) {
+      const now = Date.now();
+      snapshot.messages.push({ id: `system-${browserUuid()}`, role: 'system', status: 'completed', createdAt: now, completedAt: now, parts: [{ type: 'text', text: t('Conversation stopped.') }], citations: [], actions: [], followups: [] });
     }
   }
 

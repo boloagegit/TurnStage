@@ -1,5 +1,9 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Reset to {value}': '{value} に戻す',
+  'Changed from default': '既定値から変更済み',
+  'the run retention setting': '実行の保持設定',
+  'Conversation stopped.': '会話を停止しました。',
   'Up to {count} values.': '値は {count} 個までです。',
   'Press Enter or type a comma to add each value.': '値ごとに Enter キーを押すかカンマを入力すると追加されます。',
   'Press Enter to add each value.': '値ごとに Enter キーを押すと追加されます。',

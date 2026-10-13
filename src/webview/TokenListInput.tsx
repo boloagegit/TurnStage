@@ -31,14 +31,18 @@ export function TokenListInput({ id, value, placeholder, disabled = false, split
   const reverting = useRef(false);
   const instructionsId = useId();
   const errorId = useId();
-  // Follow saved changes unless someone is typing here, as the header and starter editors do.
+  // The list as last saved from here or received; edits since then are what a saved change must not overwrite.
+  const settled = useRef(source);
+  const pending = draft !== '' || JSON.stringify(tokens) !== settled.current;
+  // Follow saved changes (a reset, undo, a JSON edit) unless someone has unsaved edits here.
   useEffect(() => {
-    if (rootRef.current?.contains(document.activeElement)) return;
+    if (pending && rootRef.current?.contains(document.activeElement)) return;
+    settled.current = source;
     setTokens([...value]);
     setDraft('');
     setError('');
   }, [source]);
-  const commit = (next: readonly string[]) => { if (JSON.stringify(next) !== source) onCommit([...next]); };
+  const commit = (next: readonly string[]) => { settled.current = JSON.stringify(next); if (settled.current !== source) onCommit([...next]); };
   /** Adds typed values to `base`; returns the new list, or undefined when one was rejected. */
   const add = (base: readonly string[], typed: readonly string[]): string[] | undefined => {
     const next = [...base];

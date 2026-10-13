@@ -64,6 +64,7 @@
   --vscode-disabledForeground: #8f8678;
   --vscode-icon-foreground: #b7c6d2;
   --vscode-focusBorder: var(--ts-focus);
+  --vscode-settings-modifiedItemIndicator: var(--ts-focus);
   --vscode-widget-border: var(--ts-border);
   --vscode-widget-shadow: var(--ts-shadow);
   --vscode-editor-background: var(--ts-canvas);

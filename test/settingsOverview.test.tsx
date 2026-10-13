@@ -179,6 +179,33 @@ describe('embedded settings navigation', () => {
     expect(post).toHaveBeenLastCalledWith({ type: 'profile.patch', path: ['conversation', 'send', 'reconnect', 'retryOnStatuses'], value: undefined });
   });
 
+  it('marks settings that differ from the runtime default and resets them in one click', async () => {
+    const post = vi.fn();
+    const user = userEvent.setup();
+    render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={{ ...profile, conversation: { send: { ...profile.conversation.send, redirectPolicy: 'same-origin', maxRedirects: 2 } } }} post={post} />);
+    const timeout = screen.getByRole('spinbutton', { name: 'Request timeout (seconds)' });
+    await user.click(screen.getByRole('button', { name: 'Reset to 120, Request timeout (seconds)' }));
+    expect(post).toHaveBeenLastCalledWith({ type: 'profile.patch', path: ['conversation', 'send', 'timeoutMs'], value: undefined });
+    expect(document.activeElement).toBe(timeout);
+    expect((timeout as HTMLInputElement).value).toBe('');
+    await user.click(screen.getByRole('button', { name: 'Reset to 5, Maximum redirects' }));
+    expect(post).toHaveBeenLastCalledWith({ type: 'profile.patch', path: ['conversation', 'send', 'maxRedirects'], value: undefined });
+    // Spelled out but equal to the default, or left out: nothing to reset.
+    expect(screen.queryByRole('button', { name: /Redirect policy$/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Idle timeout/ })).toBeNull();
+  });
+
+  it('offers a reset for error-handling flags only when the Profile turns one off', async () => {
+    const post = vi.fn();
+    const user = userEvent.setup();
+    render(<SettingsWorkspace section="history-errors" onSectionChange={vi.fn()} profile={{ ...profile, errorPolicy: { showErrorPart: false, keepConversationId: true } }} post={post} vscodeFeatures={false} />);
+    expect(screen.getAllByText('Changed from default')).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: 'Reset to On, Show an error part' }));
+    expect(post).toHaveBeenLastCalledWith({ type: 'profile.patch', path: ['errorPolicy', 'showErrorPart'], value: undefined });
+    expect(screen.getByRole('button', { name: 'Reset to 20, Maximum local runs' })).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: 'Release all locks' })).toBeNull();
+  });
+
   it('keeps retries and certificates collapsed until one of them is changed', () => {
     const { unmount } = render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={profile} post={vi.fn()} />);
     const advanced = screen.getByText('Advanced: retries, redirects, and certificates').closest('details')!;
