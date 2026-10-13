@@ -1690,7 +1690,7 @@ function adversarialStabilityText(stability: NonNullable<AdversarialResultSummar
 
 function AdversarialForbidEditor({ idPrefix, value, onChange, additional = false }: { idPrefix: string; value: AdversarialForbidDefinition; onChange: (value: AdversarialForbidDefinition) => void; additional?: boolean }): React.JSX.Element {
   return <fieldset className="adversarial-forbid"><legend>{t(additional ? 'Additional prohibitions for this turn' : 'Prohibited observable effects')}</legend>
-    <ListPatchField label={t('Forbidden content')} id={`${idPrefix}-content`} value={(value.content ?? []).flatMap((rule) => typeof rule === 'string' ? [rule] : [])} placeholder={t('Type a phrase and press Enter')} hint={t('Literal phrase matching. Regex rules remain available in JSONC.')} splitOnComma={false} onCommit={(phrases) => { const content = [...phrases, ...(value.content ?? []).filter((rule) => typeof rule !== 'string')]; onChange({ ...value, content: content.length ? content : undefined }); }} wide />
+    <ListPatchField label={t('Forbidden content')} id={`${idPrefix}-content`} value={(value.content ?? []).flatMap((rule) => typeof rule === 'string' ? [rule] : [])} placeholder={t('Type a phrase and press Enter')} hint={t('Literal phrase matching. Regex rules remain available in JSONC.')} splitOnComma={false} onCommit={(phrases) => { const content = mergeContentPhrases(value.content, phrases); onChange({ ...value, content: content.length ? content : undefined }); }} wide />
     <ListPatchField label={t('Forbidden normalized events')} id={`${idPrefix}-events`} value={value.events ?? []} placeholder="tool.started" hint={t('Exact normalized event types.')} onCommit={(events) => onChange({ ...value, events: events.length ? events : undefined })} wide />
     <div className="adversarial-forbid__checks">
       <SettingCheckbox id={`${idPrefix}-urls`} label={t('Forbid URLs')} checked={Boolean(value.urls)} onChange={(urls) => onChange({ ...value, urls: urls || undefined })} />
@@ -1986,6 +1986,20 @@ function compactPerformance(
   const hasThresholds = Boolean(thresholds && Object.keys(thresholds).length);
   const hasRegression = Boolean(regression && Object.keys(regression).length);
   return hasThresholds || hasRegression ? { thresholds: hasThresholds ? thresholds : undefined, regression: hasRegression ? regression : undefined } : undefined;
+}
+
+/**
+ * Edited phrases back into the forbidden-content list. Phrases take the string slots in order, so regex
+ * rules keep their positions (and the content-N IDs derived from them); extra phrases go at the end.
+ */
+export function mergeContentPhrases(content: AdversarialForbidDefinition['content'], phrases: readonly string[]): NonNullable<AdversarialForbidDefinition['content']> {
+  const next: NonNullable<AdversarialForbidDefinition['content']> = [];
+  let used = 0;
+  for (const rule of content ?? []) {
+    if (typeof rule !== 'string') next.push(rule);
+    else if (used < phrases.length) next.push(phrases[used++]!);
+  }
+  return [...next, ...phrases.slice(used)];
 }
 
 /** A retry status as typed: a whole 4xx or 5xx code. */
