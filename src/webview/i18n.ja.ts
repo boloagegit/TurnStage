@@ -1,5 +1,9 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Keep separate lists per': 'リストを分ける基準',
+  'Conversations are always kept separate per Profile and workspace.': '会話は常にプロファイルとワークスペースごとに分けて保存されます。',
+  'Run history is on, default limit': '実行履歴はオン、既定の件数',
+  'Latest error: {error}': '直近のエラー：{error}',
   'Remember remote conversations': 'リモートの会話を記憶する',
   'Remember server conversation IDs so a conversation can be reopened later. Only the reference is stored, not the messages.': 'サーバーの会話 ID を記憶し、後で同じ会話を開き直せるようにします。保存するのは ID だけで、メッセージは保存しません。',
   'Remote conversations': 'リモートの会話',

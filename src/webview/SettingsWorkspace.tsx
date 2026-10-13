@@ -18,6 +18,7 @@ import { captureNeedsReview, markCaptureReady, MarkCasesReadyContext } from './b
 import { describeAssertion } from './assertionSummary';
 import { hostText } from './hostCopy';
 import { DEFAULT_REQUEST_TIMEOUT_MS, SettingsOverview, transportLabel } from './SettingsOverview';
+import { remoteSessionScope } from '../shared/remoteSessionScope';
 
 /**
  * Keep this callback local to the workspace so it can also be used by hosts
@@ -288,8 +289,8 @@ export function SettingsWorkspace({
           <fieldset className="settings-editable-region" disabled={readOnly}>
           {active.id === 'general' && <GeneralSection profile={profile} snapshot={snapshot} post={post} patch={patch} vscodeFeatures={vscodeFeatures} environmentIds={environmentIds} />}
           {active.id === 'opening-flow' && <OpeningFlowSection profile={profile} post={post} onOpenSection={openSection} />}
-          {active.id === 'request' && <RequestSection profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} connectionResult={connectionResult} post={post} patch={patch} vscodeFeatures={vscodeFeatures} />}
-          {active.id === 'stream-mapping' && <StreamMappingSection profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
+          {active.id === 'request' && <RequestSection key={profile.id} profile={profile} snapshot={snapshot} requestPreview={requestPreview} remoteName={remoteName} connectionResult={connectionResult} post={post} patch={patch} vscodeFeatures={vscodeFeatures} />}
+          {active.id === 'stream-mapping' && <StreamMappingSection key={profile.id} profile={profile} snapshot={snapshot} mappingTestResult={mappingTestResult} post={post} patch={patch} />}
           {active.id === 'chat-ui' && <ChatUiSection profile={profile} post={post} />}
           {active.id === 'scenario-tests' && <ScenarioTestsSection view="contracts" automationSection="settings" profile={profile} patch={patch} post={post} testResults={testResults} campaignDashboard={campaignDashboard} testOperation={testOperation} vscodeFeatures={vscodeFeatures} />}
           {active.id === 'history-errors' && <HistoryErrorsSection profile={profile} snapshot={snapshot} patch={patch} vscodeFeatures={vscodeFeatures} />}
@@ -653,12 +654,12 @@ function HistoryErrorsSection({ profile, snapshot, patch, vscodeFeatures }: { pr
         <ListPatchField label={t('Visible message metrics')} id="settings-visible-message-metrics" value={profile.metrics?.messageEnabled ?? []} placeholder="ttft, totalDuration" hint={t('Leave empty to show only TTFT and total duration. Add mapped metric IDs explicitly.')} onCommit={(value) => patch(['metrics', 'messageEnabled'], value)} wide />
       </div>
       {vscodeFeatures && <SettingCheckboxGroup legend={t('Remote conversations')} hint={t('Remember server conversation IDs so a conversation can be reopened later. Only the reference is stored, not the messages.')}>
-        <SettingCheckbox id="settings-remote-sessions-enabled" label={t('Remember remote conversations')} checked={remoteSessions?.mode === 'referenceOnly'} onChange={(checked) => patch(['history', 'remoteSessions'], checked ? { mode: 'referenceOnly', scope: remoteSessions?.scope ?? ['profile'] } : undefined)} />
+        <SettingCheckbox id="settings-remote-sessions-enabled" label={t('Remember remote conversations')} checked={remoteSessions?.mode === 'referenceOnly'} onChange={(checked) => patch(['history', 'remoteSessions'], checked ? { mode: 'referenceOnly', ...(remoteSessions?.scope ? { scope: remoteSessions.scope } : {}) } : undefined)} />
         {remoteSessions?.mode === 'referenceOnly' && <fieldset className="settings-checkbox-group settings-checkbox-group--nested">
-          <legend>{t('Remote session scope')}</legend>
-          <p>{t('Choose which profile values identify a reusable remote conversation reference.')}</p>
-          <div>{(['profile', 'actor', 'environment'] as const).map((scope) => <SettingCheckbox key={scope} id={`settings-remote-session-${scope}`} label={localizeHumanized(scope)} checked={(remoteSessions.scope ?? ['profile']).includes(scope)} onChange={(checked) => {
-            const current = remoteSessions.scope ?? ['profile'];
+          <legend>{t('Keep separate lists per')}</legend>
+          <p>{t('Conversations are always kept separate per Profile and workspace.')}</p>
+          <div>{(['actor', 'environment'] as const).map((scope) => <SettingCheckbox key={scope} id={`settings-remote-session-${scope}`} label={localizeHumanized(scope)} checked={remoteSessionScope(remoteSessions).includes(scope)} onChange={(checked) => {
+            const current = remoteSessionScope(remoteSessions);
             patch(['history', 'remoteSessions'], { mode: 'referenceOnly', scope: checked ? [...new Set([...current, scope])] : current.filter((item) => item !== scope) });
           }} />)}</div>
         </fieldset>}

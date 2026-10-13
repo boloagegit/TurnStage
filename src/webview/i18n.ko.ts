@@ -1,5 +1,9 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Keep separate lists per': '목록을 나누는 기준',
+  'Conversations are always kept separate per Profile and workspace.': '대화는 항상 프로필과 작업 영역별로 따로 저장됩니다.',
+  'Run history is on, default limit': '실행 기록 켜짐, 기본 개수',
+  'Latest error: {error}': '최근 오류: {error}',
   'Remember remote conversations': '원격 대화 기억',
   'Remember server conversation IDs so a conversation can be reopened later. Only the reference is stored, not the messages.': '서버 대화 ID를 기억해 나중에 같은 대화를 다시 열 수 있습니다. ID만 저장하고 메시지는 저장하지 않습니다.',
   'Remote conversations': '원격 대화',

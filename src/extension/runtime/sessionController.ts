@@ -26,6 +26,7 @@ import type { RequestAuthorizationPurpose } from '../security/requestAuthorizati
 import { ConversationManager, type ConversationStorage } from '../../shared/conversationHistory';
 import type { ConversationDirectory } from '../../shared/types';
 import { promptBeforeReply } from '../../shared/retryPrompt';
+import { remoteSessionScope } from '../../shared/remoteSessionScope';
 
 const MAX_NETWORK_ENTRIES = 50;
 const MAX_NETWORK_RESPONSE_PREVIEW_CHARS = 64 * 1024;
@@ -235,7 +236,7 @@ export class SessionController implements vscode.Disposable {
       if (value === undefined) await this.context.secrets.delete(this.secretControlKey(id));
       else await this.context.secrets.store(this.secretControlKey(id), JSON.stringify(persisted));
     }
-    if (id === 'actor' && this.profile.history?.remoteSessions?.scope?.includes('actor')) this.snapshot.remoteSessions = this.remoteSessionRepository.list(this.remoteSessionKey());
+    if (id === 'actor' && this.profile.history?.remoteSessions?.mode === 'referenceOnly' && remoteSessionScope(this.profile.history.remoteSessions).includes('actor')) this.snapshot.remoteSessions = this.remoteSessionRepository.list(this.remoteSessionKey());
     this.changed();
   }
 
@@ -825,7 +826,7 @@ export class SessionController implements vscode.Disposable {
   private globalControlKey(id: string): string { return `turnstage.control.global.${this.profile.id}.${id}`; }
   private secretControlKey(id: string): string { return `turnstage.control.secret.${this.profile.id}.${id}`; }
   private remoteSessionKey(): string {
-    const workspace = vscode.workspace.getWorkspaceFolder(this.profileUri)?.uri.toString() ?? 'no-workspace'; const scope = this.profile.history?.remoteSessions?.scope ?? ['profile', 'actor', 'environment']; const parts = [workspace, this.profile.id];
+    const workspace = vscode.workspace.getWorkspaceFolder(this.profileUri)?.uri.toString() ?? 'no-workspace'; const scope = remoteSessionScope(this.profile.history?.remoteSessions); const parts = [workspace, this.profile.id];
     if (scope.includes('actor')) parts.push(this.isSecretControl('actor') ? 'no-actor' : typeof this.controls.actor === 'string' ? this.controls.actor : 'no-actor');
     if (scope.includes('environment')) parts.push(this.environment.id);
     return `turnstage.remoteSessions.${parts.map((part) => encodeURIComponent(part)).join('.')}`;
