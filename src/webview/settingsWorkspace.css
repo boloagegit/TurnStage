@@ -438,3 +438,13 @@
 .header-editor__json > summary { width: max-content; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: var(--ts-type-caption); }
 .header-editor__json[open] > summary { margin-bottom: var(--ts-space-2); }
 @container (max-width: 25em) { .header-editor__row { grid-template-columns: minmax(0, 1fr) auto; } .header-editor__row > input:nth-child(2) { grid-column: 1; } .header-editor__row > .icon-button { grid-row: 1 / span 2; grid-column: 2; } }
+/* Starter prompt cards: what the button says, what it sends, and what clicking it does. */
+.starter-editor { display: grid; gap: var(--ts-space-2); min-width: 0; }
+.starter-editor__list { display: grid; gap: var(--ts-space-2); margin: 0; padding: 0; list-style: none; }
+.starter-editor__item { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ts-space-2); min-width: 0; padding: var(--ts-space-2) var(--ts-space-3) var(--ts-space-3); border: 1px solid var(--vscode-editorWidget-border); }
+.starter-editor__heading { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: var(--ts-space-2); }
+.starter-editor__tools { display: inline-flex; gap: 2px; }
+.starter-editor__field { display: grid; gap: 2px; min-width: 0; }
+.starter-editor__field > span { color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); }
+.starter-editor__field:has(textarea) { grid-column: 1 / -1; }
+@container (max-width: 25em) { .starter-editor__item { grid-template-columns: minmax(0, 1fr); } }
