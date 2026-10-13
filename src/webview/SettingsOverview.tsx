@@ -37,7 +37,7 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
   const mappings = profile.stream.mappings.length;
   const mappingProblems = (snapshot?.metrics.parseErrorCount ?? 0) + (snapshot?.metrics.mappingErrorCount ?? 0);
   const localRuns = profile.history?.localRuns;
-  const maxRuns = localRuns?.maxRuns ?? 20;
+  const maxRuns = localRuns?.maxRuns;
   const schemes = profile.security?.allowedUriSchemes ?? [];
   const domains = profile.security?.allowedDomains?.length ?? 0;
   const commands = profile.security?.allowedCommands?.length ?? 0;
@@ -76,7 +76,8 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
       ].filter(Boolean).join(' · '),
     },
     'history-errors': {
-      summary: localRuns?.enabled === false ? t('Run history is off') : t(maxRuns === 1 ? 'Keeps the last {count} run' : 'Keeps the last {count} runs', { count: formatNumber(maxRuns) }),
+      // Without maxRuns the host decides how many runs it keeps (VS Code reads a user setting), so no number is promised here.
+      summary: localRuns?.enabled === false ? t('Run history is off') : maxRuns === undefined ? t('Run history is on, default limit') : t(maxRuns === 1 ? 'Keeps the last {count} run' : 'Keeps the last {count} runs', { count: formatNumber(maxRuns) }),
     },
     security: {
       summary: [
@@ -92,7 +93,7 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
 export function lastResponseHealth(snapshot?: SessionSnapshot): { tone: 'ok' | 'warning' | 'idle'; text: string } {
   if (!snapshot || !snapshot.metrics.eventCount && !snapshot.errors.length) return { tone: 'idle', text: t('No response yet. Send a message to check the connection.') };
   const problems = snapshot.metrics.parseErrorCount + snapshot.metrics.mappingErrorCount;
-  if (snapshot.errors.length) return { tone: 'warning', text: t('Last response failed: {error}', { error: snapshot.errors[snapshot.errors.length - 1]!.message }) };
+  if (snapshot.errors.length) return { tone: 'warning', text: t('Latest error: {error}', { error: snapshot.errors[snapshot.errors.length - 1]!.message }) };
   if (problems) return { tone: 'warning', text: t('Last response: {events} events, {problems} parse or mapping errors', { events: formatNumber(snapshot.metrics.eventCount), problems: formatNumber(problems) }) };
   return { tone: 'ok', text: t('Last response: {events} events, no errors', { events: formatNumber(snapshot.metrics.eventCount) }) };
 }

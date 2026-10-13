@@ -7,6 +7,10 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Keep separate lists per': '分開保存的依據',
+  'Conversations are always kept separate per Profile and workspace.': '對話一律依設定檔和工作區分開保存。',
+  'Run history is on, default limit': '執行記錄已開啟，使用預設數量',
+  'Latest error: {error}': '最近的錯誤：{error}',
   'Remember remote conversations': '記住遠端對話',
   'Remember server conversation IDs so a conversation can be reopened later. Only the reference is stored, not the messages.': '記住伺服器的對話 ID，之後可以重新開啟同一段對話。只保存 ID，不保存訊息內容。',
   'Remote conversations': '遠端對話',

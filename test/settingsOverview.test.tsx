@@ -34,6 +34,7 @@ describe('settings overview', () => {
     expect(overview.request.summary).toBe('POST ${env.baseUrl}/chat · times out after 30 s');
     expect(overview['stream-mapping'].summary).toBe('SSE · 1 mapping rule');
     expect(overview['history-errors'].summary).toBe('Keeps the last 50 runs');
+    expect(settingsSectionOverview({ ...profile, history: {} })['history-errors'].summary).toBe('Run history is on, default limit');
     expect(overview.security.summary).toBe('links: HTTPS only · any domain · no commands');
     expect(Object.values(overview).some((item) => item.attention)).toBe(false);
   });
@@ -55,7 +56,7 @@ describe('settings overview', () => {
     expect(lastResponseHealth(undefined).tone).toBe('idle');
     expect(lastResponseHealth(snapshot({ eventCount: 6 }))).toEqual({ tone: 'ok', text: 'Last response: 6 events, no errors' });
     expect(lastResponseHealth(snapshot({ eventCount: 6, parseErrorCount: 1 })).tone).toBe('warning');
-    expect(lastResponseHealth(snapshot({ eventCount: 3 }, [{ type: 'IdleTimeoutError', message: 'idle' } as SessionSnapshot['errors'][number]])).text).toBe('Last response failed: idle');
+    expect(lastResponseHealth(snapshot({ eventCount: 3 }, [{ type: 'IdleTimeoutError', message: 'idle' } as SessionSnapshot['errors'][number]])).text).toBe('Latest error: idle');
   });
 
   it('formats seconds and transports for people', () => {
@@ -126,8 +127,16 @@ describe('embedded settings navigation', () => {
     expect(enabled.checked).toBe(false);
     expect(screen.queryByRole('checkbox', { name: 'Environment' })).toBeNull();
     await user.click(enabled);
-    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['history', 'remoteSessions'], value: { mode: 'referenceOnly', scope: ['profile'] } });
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['history', 'remoteSessions'], value: { mode: 'referenceOnly' } });
     unmount();
+    // Without a scope the runtime separates by actor and environment too, so both start checked; Profile is not a choice.
+    const { unmount: unmountDefault } = render(<SettingsWorkspace section="history-errors" onSectionChange={vi.fn()} profile={{ ...profile, history: { remoteSessions: { mode: 'referenceOnly' } } }} post={post} />);
+    expect((screen.getByRole('checkbox', { name: 'Actor' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: 'Environment' }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByRole('checkbox', { name: 'Profile' })).toBeNull();
+    await user.click(screen.getByRole('checkbox', { name: 'Actor' }));
+    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['history', 'remoteSessions'], value: { mode: 'referenceOnly', scope: ['profile', 'environment'] } });
+    unmountDefault();
     render(<SettingsWorkspace section="history-errors" onSectionChange={vi.fn()} profile={{ ...profile, history: { remoteSessions: { mode: 'referenceOnly', scope: ['profile'] } } }} post={post} />);
     await user.click(screen.getByRole('checkbox', { name: 'Environment' }));
     expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['history', 'remoteSessions'], value: { mode: 'referenceOnly', scope: ['profile', 'environment'] } });
