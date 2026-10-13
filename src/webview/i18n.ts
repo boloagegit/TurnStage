@@ -7,6 +7,15 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Up to {count} values.': '最多 {count} 個值。',
+  'Press Enter or type a comma to add each value.': '每輸入一個值，按 Enter 或輸入逗號即可加入。',
+  'Press Enter to add each value.': '每輸入一個值，按 Enter 即可加入。',
+  'Leave empty to retry 429, 502, 503, and 504.': '留空時會重試 429、502、503 和 504。',
+  '{value} is not a 4xx or 5xx status code.': '{value} 不是 4xx 或 5xx 狀態碼。',
+  'Type a phrase and press Enter': '輸入一段文字後按 Enter',
+  'Exact normalized event types.': '完全相符的正規化事件類型。',
+  'Context paths that must be known before a remote stop request is sent.': '送出遠端停止請求前必須已知的內容路徑。',
+  'Component or control IDs. Stop should normally remain allowed.': '元件或控制項 ID。停止通常應保持允許。',
   'Action ID': '動作 ID',
   'Add starter': '新增起始提示',
   'Button label': '按鈕文字',

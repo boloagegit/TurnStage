@@ -158,10 +158,25 @@ describe('embedded settings navigation', () => {
     const post = vi.fn();
     const user = userEvent.setup();
     render(<SettingsWorkspace section="security" onSectionChange={vi.fn()} profile={{ ...profile, security: { allowedUriSchemes: ['https', 'http'] } }} post={post} />);
-    const schemes = screen.getByRole('textbox', { name: 'Allowed URI schemes' });
-    await user.clear(schemes);
-    await user.tab();
-    expect(post).toHaveBeenCalledWith({ type: 'profile.patch', path: ['security', 'allowedUriSchemes'], value: undefined });
+    await user.click(screen.getByRole('button', { name: 'Remove https' }));
+    await user.click(screen.getByRole('button', { name: 'Remove http' }));
+    expect(post).toHaveBeenLastCalledWith({ type: 'profile.patch', path: ['security', 'allowedUriSchemes'], value: undefined });
+  });
+
+  it('saves retry statuses as numbers, rejects non-error codes, and clears the list back to the default', async () => {
+    const post = vi.fn();
+    const user = userEvent.setup();
+    render(<SettingsWorkspace section="request" onSectionChange={vi.fn()} profile={{ ...profile, conversation: { send: { ...profile.conversation.send, reconnect: { retryOnStatuses: [503] } } } }} post={post} />);
+    const statuses = screen.getByRole('textbox', { name: 'Retry HTTP statuses' });
+    await user.type(statuses, '200{Enter}');
+    expect(screen.getByRole('alert').textContent).toBe('200 is not a 4xx or 5xx status code.');
+    expect(post).not.toHaveBeenCalled();
+    await user.clear(statuses);
+    await user.type(statuses, '429{Enter}');
+    expect(post).toHaveBeenLastCalledWith({ type: 'profile.patch', path: ['conversation', 'send', 'reconnect', 'retryOnStatuses'], value: [503, 429] });
+    await user.click(screen.getByRole('button', { name: 'Remove 503' }));
+    await user.click(screen.getByRole('button', { name: 'Remove 429' }));
+    expect(post).toHaveBeenLastCalledWith({ type: 'profile.patch', path: ['conversation', 'send', 'reconnect', 'retryOnStatuses'], value: undefined });
   });
 
   it('keeps retries and certificates collapsed until one of them is changed', () => {
