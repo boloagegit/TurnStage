@@ -1,5 +1,13 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Actor': 'アクター',
+  'Leave empty to allow HTTPS only.': '空欄の場合は HTTPS のみ許可します。',
+  'Host: {host}.': 'ホスト：{host}。',
+  'Default': '既定',
+  'Older runs are removed after this count. Leave empty to use the TurnStage run retention setting (20 unless you changed it).': 'この件数を超えると古い実行から削除します。空欄の場合は TurnStage の実行保持設定（変更していなければ 20）を使います。',
+  'Older runs are removed after this count. Leave empty for 20.': 'この件数を超えると古い実行から削除します。空欄の場合は 20 です。',
+  'links: none': 'リンク：なし',
+  'No link scheme is allowed, so links will not open': '許可されたリンクのスキームがないため、リンクは開きません',
   'This browser always verifies server certificates. The setting applies only when the Profile runs in VS Code.': 'ブラウザーは常にサーバー証明書を検証します。この設定はプロファイルを VS Code で実行する場合にのみ有効です。',
   'Every turn goes to this URL. Method, headers, body, and timeouts are set in Request; a variant below can replace the body and add headers.': '各ターンはこの URL に送信されます。メソッド、ヘッダー、本文、タイムアウトは「リクエスト」で設定し、下のバリアントで本文の置き換えやヘッダーの追加ができます。',
   'Opens HTTP and HTTPS links; allow lists apply in VS Code': 'HTTP と HTTPS のリンクを開きます。許可リストは VS Code でのみ適用',

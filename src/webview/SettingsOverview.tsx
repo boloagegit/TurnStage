@@ -3,6 +3,7 @@ import type { SessionSnapshot, TurnStageProfile } from '../shared/types';
 import { ProductIcon } from './Icon';
 import { componentNames, chatComponentVisible } from './configEditors';
 import { formatNumber, t } from './i18n';
+import { resolveMessageActions } from './uiConfig';
 
 /** Conversation requests time out after this long when the Profile does not set timeoutMs. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
@@ -40,11 +41,12 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
   const mappingProblems = (snapshot?.metrics.parseErrorCount ?? 0) + (snapshot?.metrics.mappingErrorCount ?? 0);
   const localRuns = profile.history?.localRuns;
   const maxRuns = localRuns?.maxRuns;
-  const schemes = profile.security?.allowedUriSchemes ?? [];
+  const schemes = profile.security?.allowedUriSchemes;
   const domains = profile.security?.allowedDomains?.length ?? 0;
   const commands = profile.security?.allowedCommands?.length ?? 0;
   const hiddenComponents = componentNames.filter((name) => !chatComponentVisible(profile, name)).length;
-  const actions = profile.ui?.messageActions?.length;
+  // Count what Chat shows for a reply: duplicates and unknown IDs are dropped.
+  const actions = profile.ui?.messageActions === undefined ? undefined : resolveMessageActions(profile, 'assistant', true).length;
   const inlineCases = profile.tests?.scenarios?.length ?? 0;
   const suites = (profile.tests?.contractSuites?.length ?? 0) + (profile.tests?.adversarialSuites?.length ?? 0);
   const reportFormats = profile.tests?.reporting?.formats ?? [];
@@ -55,6 +57,8 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
     general: { summary: [profile.name || t('Untitled profile'), profile.environment ? t('environment {id}', { id: profile.environment }) : t('default environment')].join(' · ') },
     'opening-flow': {
       summary: [openingText, starters === undefined ? undefined : t(starters === 1 ? '{count} starter prompt' : '{count} starter prompts', { count: formatNumber(starters) }), t(variants === 1 ? '{count} request variant' : '{count} request variants', { count: formatNumber(variants) })].filter(Boolean).join(' · '),
+      // Profile validation requires at least one variant.
+      attention: variants === 0 ? t('No request variants') : undefined,
     },
     request: {
       summary: [`${send.method} ${send.url || '—'}`, t('times out after {seconds} s', { seconds: secondsText(timeout) })].join(' · '),
@@ -85,10 +89,12 @@ export function settingsSectionOverview(profile: TurnStageProfile, snapshot?: Se
     // The browser opens any HTTP or HTTPS citation and runs no commands; these lists are enforced by the VS Code extension only.
     security: host === 'web' ? { summary: t('Opens HTTP and HTTPS links; allow lists apply in VS Code') } : {
       summary: [
-        schemes.length ? t('links: {schemes}', { schemes: schemes.join(', ') }) : t('links: HTTPS only'),
+        // A missing list means HTTPS only; a present but empty list matches no scheme.
+        schemes === undefined ? t('links: HTTPS only') : schemes.length ? t('links: {schemes}', { schemes: schemes.join(', ') }) : t('links: none'),
         domains ? t(domains === 1 ? '{count} allowed domain' : '{count} allowed domains', { count: formatNumber(domains) }) : t('any domain'),
         commands ? t(commands === 1 ? '{count} allowed command' : '{count} allowed commands', { count: formatNumber(commands) }) : t('no commands'),
       ].join(' · '),
+      attention: schemes?.length === 0 ? t('No link scheme is allowed, so links will not open') : undefined,
     },
   };
 }

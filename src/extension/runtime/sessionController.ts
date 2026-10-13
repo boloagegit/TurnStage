@@ -236,7 +236,7 @@ export class SessionController implements vscode.Disposable {
       if (value === undefined) await this.context.secrets.delete(this.secretControlKey(id));
       else await this.context.secrets.store(this.secretControlKey(id), JSON.stringify(persisted));
     }
-    if (id === 'actor' && this.profile.history?.remoteSessions?.mode === 'referenceOnly' && remoteSessionScope(this.profile.history.remoteSessions).includes('actor')) this.snapshot.remoteSessions = this.remoteSessionRepository.list(this.remoteSessionKey());
+    if (id === 'actor' && this.profile.history?.remoteSessions?.mode === 'referenceOnly' && remoteSessionScope(this.profile.history.remoteSessions).includes('actor')) this.snapshot.remoteSessions = this.publicRemoteSessions(this.remoteSessionRepository.list(this.remoteSessionKey()));
     this.changed();
   }
 
