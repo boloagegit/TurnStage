@@ -93,14 +93,14 @@ export function FlowEditor({ profile, post, onEditRequest }: { profile: TurnStag
       </div>
     </section>
 
-    <div className="flow-connector" aria-hidden="true"><span>{t('then')}</span></div>
+    <div className="flow-connector" aria-hidden="true"><span>{t('After the opening, each message sends this request')}</span></div>
 
     <section className="config-section flow-request-summary" aria-labelledby="request-heading">
       <div className="section-heading"><div><h3 id="request-heading">{t('Conversation request')}</h3><p>{t('Every turn goes to this URL. Method, headers, body, and timeouts are set in Request; a variant below can replace the body and add headers.')}</p></div>{onEditRequest && <a className="flow-request-summary__edit" href="#settings-panel-request" onClick={(event) => { event.preventDefault(); onEditRequest(); }}>{t('Edit request')}</a>}</div>
       <code className="flow-request-summary__line">{profile.conversation.send.method} {profile.conversation.send.url || t('No request URL yet')}</code>
     </section>
 
-    <div className="flow-connector" aria-hidden="true"><span>{t('choose a variant')}</span></div>
+    <div className="flow-connector" aria-hidden="true"><span>{t('The first matching variant sets its body')}</span></div>
 
     <section className="config-section variant-section" aria-labelledby="variants-heading">
       <div className="section-heading"><div><h3 id="variants-heading">{t('First turn & continuation')}</h3><p>{t('Variants are selected in declaration order using structured conditions. Bodies accept JSON and template references such as')} <code>{'{$value: "input.text"}'}</code>.</p></div></div>
@@ -108,7 +108,7 @@ export function FlowEditor({ profile, post, onEditRequest }: { profile: TurnStag
       {variants.length ? <div className="variant-list">{variants.map((variant, index) => <VariantCard key={`${variant.id}-${index}`} index={index} variant={variant} post={post} onDelete={removeVariant} />)}</div> : <div className="empty-state"><strong>{t('No request variants')}</strong><p>{t('Add a first-turn or continuation variant before sending a request.')}</p><div className="actions"><button className="primary" onClick={() => addVariant('first-turn')}>{t('Add first turn')}</button><button onClick={() => addVariant('continuation')}>{t('Add continuation')}</button></div></div>}
     </section>
 
-    <div className="flow-connector" aria-hidden="true"><span>{t('while streaming')}</span></div>
+    <div className="flow-connector" aria-hidden="true"><span>{t('While a reply streams, it can be stopped')}</span></div>
 
     <section className="config-section" aria-labelledby="stop-heading">
       <div className="section-heading"><div><h3 id="stop-heading">{t('Stop')}</h3><p>{t('Stop always aborts locally. An optional request can notify the remote service when context is available.')}</p></div></div>

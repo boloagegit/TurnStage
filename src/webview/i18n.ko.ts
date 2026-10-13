@@ -1,5 +1,15 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Restart': '다시 시작',
+  'Screenshot': '스크린샷',
+  'After the opening, each message sends this request': '시작 메시지 후, 메시지마다 이 요청을 보냅니다',
+  'The first matching variant sets its body': '본문은 처음 일치하는 변형이 정합니다',
+  'While a reply streams, it can be stopped': '응답이 스트리밍되는 동안 중지할 수 있습니다',
+  'Comparing with server history…': '서버 기록과 비교하는 중…',
+  'Same as server history': '서버 기록과 같음',
+  'Could not compare with server history': '서버 기록과 비교할 수 없음',
+  '1 conversation differs from the server': '대화 1개가 서버와 다름',
+  '{count} conversations differ from the server': '대화 {count}개가 서버와 다름',
   '{count} step': '{count}단계',
   '{count} steps': '{count}단계',
   '{count} assertion': '어서션 {count}개',
