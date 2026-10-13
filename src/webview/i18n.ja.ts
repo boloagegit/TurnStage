@@ -1,5 +1,17 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Add header': 'ヘッダーを追加',
+  'Edit as JSON': 'JSON で編集',
+  'Every header needs a name.': 'すべてのヘッダーに名前が必要です。',
+  'Header {name} appears more than once.': 'ヘッダー {name} が複数あります。',
+  'Header {number} name': 'ヘッダー {number} の名前',
+  'Header {number} value': 'ヘッダー {number} の値',
+  'Headers are edited as rows; the body stays JSON. Nothing in this editor executes as JavaScript.': 'ヘッダーは行ごとに編集し、本文は JSON のままです。ここで JavaScript は実行されません。',
+  'No headers.': 'ヘッダーはありません。',
+  'Remove {name}': '{name} を削除',
+  'Stop request headers': '停止リクエストのヘッダー',
+  'This looks like a credential. Use a secret reference such as ${secret.apiKey} so the value stays out of the Profile.': '認証情報のようです。値をプロファイルに残さないよう、${secret.apiKey} のようなシークレット参照を使ってください。',
+  'header {number}': 'ヘッダー {number}',
   'Restart': '再起動',
   'Screenshot': 'スクリーンショット',
   'After the opening, each message sends this request': 'オープニングの後、各メッセージはこのリクエストを送信します',

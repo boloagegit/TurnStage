@@ -426,3 +426,15 @@
 .settings-checkbox-group--nested { margin: var(--ts-space-2) 0 0 calc(1.23em + var(--ts-space-1) + 3px); }
 .settings-form-grid + .settings-checkbox-group { margin-top: var(--ts-space-4); }
 .settings-health__issues { display: grid; gap: 2px; margin: 0; padding: 0 0 0 calc(16px + var(--ts-space-2)); color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); list-style: none; overflow-wrap: anywhere; }
+/* Header rows: name and value side by side, a remove action at the end, warnings under their row. */
+.header-editor { display: grid; gap: var(--ts-space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
+.header-editor > legend { margin-bottom: var(--ts-space-1); padding: 0; font-weight: 600; }
+.header-editor__rows { display: grid; gap: var(--ts-space-1); min-width: 0; }
+.header-editor__row { display: grid; grid-template-columns: minmax(7em, 2fr) minmax(0, 3fr) auto; align-items: center; gap: var(--ts-space-1); min-width: 0; }
+.header-editor__row > input { min-width: 0; font-family: var(--vscode-editor-font-family); }
+.header-editor__warning { grid-column: 1 / -1; margin: 0; color: var(--vscode-editorWarning-foreground); font-size: var(--ts-type-caption); }
+.header-editor__empty { margin: 0; color: var(--vscode-descriptionForeground); }
+.header-editor__actions { display: flex; gap: var(--ts-space-1); }
+.header-editor__json > summary { width: max-content; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: var(--ts-type-caption); }
+.header-editor__json[open] > summary { margin-bottom: var(--ts-space-2); }
+@container (max-width: 25em) { .header-editor__row { grid-template-columns: minmax(0, 1fr) auto; } .header-editor__row > input:nth-child(2) { grid-column: 1; } .header-editor__row > .icon-button { grid-row: 1 / span 2; grid-column: 2; } }

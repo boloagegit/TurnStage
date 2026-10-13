@@ -7,6 +7,18 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Add header': '新增標頭',
+  'Edit as JSON': '以 JSON 編輯',
+  'Every header needs a name.': '每個標頭都需要名稱。',
+  'Header {name} appears more than once.': '標頭 {name} 出現不只一次。',
+  'Header {number} name': '第 {number} 個標頭的名稱',
+  'Header {number} value': '第 {number} 個標頭的值',
+  'Headers are edited as rows; the body stays JSON. Nothing in this editor executes as JavaScript.': '標頭一列一個編輯，內容仍是 JSON。這裡的內容都不會當成 JavaScript 執行。',
+  'No headers.': '沒有標頭。',
+  'Remove {name}': '移除 {name}',
+  'Stop request headers': '停止請求的標頭',
+  'This looks like a credential. Use a secret reference such as ${secret.apiKey} so the value stays out of the Profile.': '這看起來是憑證。請改用 ${secret.apiKey} 這類密鑰參照，避免把值存進設定檔。',
+  'header {number}': '第 {number} 個標頭',
   'Restart': '重開',
   'Screenshot': '截圖',
   'After the opening, each message sends this request': '開場之後，每則訊息都會送出這個請求',
