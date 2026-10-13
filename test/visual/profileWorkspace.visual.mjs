@@ -33,6 +33,14 @@ const address = server.address();
 assert.ok(address && typeof address === 'object');
 const browser = await chromium.launch(executablePath ? { headless: true, executablePath } : { headless: true });
 
+/** Configure opens on the settings overview; open a section from there, or switch with the picker inside a section. */
+async function openSettingsSection(page, section) {
+  const overviewRow = page.locator(`.settings-overview [data-settings-section="${section}"]`);
+  if (await overviewRow.isVisible()) await overviewRow.click();
+  else await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption(section);
+  await page.locator(`#settings-panel-${section}`).waitFor();
+}
+
 async function assertRedTeamTabVisual(navigation, label) {
   const border = await navigation.evaluate((element) => {
     const nav = element.getBoundingClientRect();
@@ -178,12 +186,12 @@ try {
   assert.equal(await sessionTools.getByRole('button', { name: 'Restart session' }).locator('.codicon-debug-restart').count(), 1, 'Restart session must use the specific VS Code restart Codicon');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Debug is the default right-panel mode');
   assert.equal(await page.getByRole('tab', { name: 'Network' }).getAttribute('aria-selected'), 'true', 'Network is the default Debug view for a new Webview state');
-  assert.equal(await page.getByRole('tab', { name: 'Tests', exact: true }).getAttribute('aria-selected'), 'false', 'Tests remains directly available beside Debug');
+  assert.equal(await page.getByRole('tab', { name: 'General tests', exact: true }).getAttribute('aria-selected'), 'false', 'Tests remains directly available beside Debug');
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'false', 'Red Team remains directly available beside Tests');
   assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'false', 'Configure remains directly available beside Debug');
   await page.getByRole('tab', { name: 'Debug' }).focus();
   await page.keyboard.press('ArrowRight');
-  assert.equal(await page.getByRole('tab', { name: 'Tests', exact: true }).getAttribute('aria-selected'), 'true', 'Right Arrow switches to Tests');
+  assert.equal(await page.getByRole('tab', { name: 'General tests', exact: true }).getAttribute('aria-selected'), 'true', 'Right Arrow switches to Tests');
   await page.keyboard.press('ArrowRight');
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'A second Right Arrow switches to Red Team');
   await page.keyboard.press('ArrowRight');
@@ -191,7 +199,7 @@ try {
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Red Team');
   await page.keyboard.press('ArrowLeft');
-  assert.equal(await page.getByRole('tab', { name: 'Tests', exact: true }).getAttribute('aria-selected'), 'true', 'A second Left Arrow switches back to Tests');
+  assert.equal(await page.getByRole('tab', { name: 'General tests', exact: true }).getAttribute('aria-selected'), 'true', 'A second Left Arrow switches back to Tests');
   await page.keyboard.press('ArrowLeft');
   assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Debug');
   await page.screenshot({ path: resolve(artifactDirectory, 'wide-dark.png'), fullPage: true });
@@ -347,7 +355,7 @@ try {
   await receipt.getByRole('button', { name: 'Close CTA details' }).click();
   assert.equal(await ctaControls.locator('.mobile-chat-preview__action-receipt').count(), 0, 'CTA receipt must be dismissible');
   await ctaPage.getByRole('tab', { name: 'Configure' }).click();
-  await ctaPage.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('stream-mapping');
+  await openSettingsSection(ctaPage, 'stream-mapping');
   const iconSelect = ctaPage.getByRole('combobox', { name: 'CTA icon' });
   await iconSelect.waitFor();
   await iconSelect.scrollIntoViewIfNeeded();
@@ -408,19 +416,24 @@ try {
   await assertInlineInset(page.locator('.error-list details').first(), page.locator('.right-pane-panel'), 16, 'Errors list');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'debug-tabs-populated-dark.png') });
   await page.getByRole('tab', { name: 'Configure' }).click();
+  // Configure opens on the overview: one row per section, no picker until a section is open.
+  await page.getByRole('heading', { level: 1, name: 'All settings' }).waitFor();
+  assert.equal(await page.locator('.settings-overview [data-settings-section]').count(), 8, 'The settings overview lists every section');
+  assert.equal(await page.getByRole('combobox', { name: 'Profile configuration sections' }).count(), 0, 'The overview replaces the section picker');
+  await openSettingsSection(page, 'general');
   await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
   assert.equal(await page.locator('.preview-pane').count(), 1, 'Opening Configure must keep the Chat preview mounted');
-  assert.equal(await page.locator('.settings-workspace--embedded').count(), 1, 'Configure uses the compact right-pane settings layout');
-  assert.equal(await page.getByRole('navigation', { name: 'Profile configuration sections' }).count(), 0, 'Embedded Configure must not add another navigation rail');
-  assert.equal(await page.getByRole('combobox', { name: 'Profile configuration sections' }).inputValue(), 'general', 'Embedded Configure uses one compact section picker');
-  await assertInlineInset(page.locator('.settings-panel-heading'), page.locator('.right-pane-panel'), 16, 'Configure heading');
+  assert.equal(await page.locator('.settings-workspace--embedded:not(.settings-workspace--evaluation)').count(), 1, 'Configure uses the compact right-pane settings layout');
+  assert.equal(await page.getByRole('navigation', { name: 'Profile configuration sections' }).count(), 0, 'An open section must not add another navigation rail');
+  assert.equal(await page.getByRole('combobox', { name: 'Profile configuration sections' }).inputValue(), 'general', 'An open section uses one compact section picker');
+  await assertInlineInset(page.locator('#settings-panel-general .settings-card-heading').first(), page.locator('.right-pane-panel'), 16, 'Configure heading');
   assert.equal(await page.locator('[data-message-id="assistant-1"][data-selected="true"]').count(), 0, 'Configure must hide Debug message selection styling');
   await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-dirty', type: 'profile.editState', dirty: true } })));
   await page.getByText('Unsaved changes', { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Save Profile' }).isEnabled(), true, 'Configure must expose pushed dirty state and an explicit save action without polling');
   await page.screenshot({ path: resolve(artifactDirectory, 'profile-config-right-pane-dark.png'), fullPage: true });
   await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-saved', type: 'profile.editState', dirty: false } })));
-  await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('request');
+  await openSettingsSection(page, 'request');
   await page.getByRole('heading', { level: 1, name: 'Request' }).waitFor();
   await page.getByRole('heading', { name: 'Connection Doctor' }).waitFor();
   assert.equal(await page.getByText('Connection needs attention', { exact: true }).count(), 1, 'Connection Doctor must expose a clear fail-closed status');
@@ -430,6 +443,10 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Open diagnostic output' }).count(), 1, 'Connection Doctor must provide direct access to correlated Output evidence');
   assert.equal(await page.getByRole('button', { name: 'Ask Copilot to diagnose this configuration' }).count(), 1, 'Connection Doctor must expose an explicit Copilot handoff only when attention is required');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-dark.png') });
+  // Certificates live under a closed Advanced disclosure while every value in it is a default.
+  const requestAdvanced = page.locator('#settings-panel-request details.settings-advanced').filter({ hasText: 'Advanced: retries, redirects, and certificates' });
+  assert.equal(await requestAdvanced.getAttribute('open'), null, 'Advanced request settings start closed while they hold defaults');
+  await requestAdvanced.locator('summary').click();
   const tlsBypass = page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' });
   await tlsBypass.scrollIntoViewIfNeeded();
   assert.equal(await tlsBypass.isChecked(), false, 'Invalid-certificate access must default to off');
@@ -441,7 +458,7 @@ try {
   await page.locator('#request-resilience-heading').locator('xpath=ancestor::section[1]').screenshot({ path: resolve(artifactDirectory, 'request-tls-warning-dark.png') });
   await tlsBypass.click();
   await page.waitForFunction(() => (document.getElementById('settings-request-allow-invalid-certificates'))?.checked === false);
-  await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('scenario-tests');
+  await openSettingsSection(page, 'scenario-tests');
   await page.getByRole('heading', { level: 1, name: 'Test settings' }).waitFor();
   assert.equal(await page.locator('.scenario-editor').count(), 0, 'Configure must keep executable conversation contracts in Tests');
   assert.equal(await page.getByRole('heading', { name: 'CI reports' }).count(), 1, 'Scenario configuration must expose CI report settings');
@@ -454,14 +471,18 @@ try {
   assert.equal(await page.getByLabel('Evaluation guidance').inputValue(), 'The response directly addresses the requested task without unrelated content.', 'Quality criteria must expose concrete evaluation guidance');
   await page.locator('.quality-rubric-editor').screenshot({ path: resolve(artifactDirectory, 'advisory-quality-rubric-dark.png') });
   await page.screenshot({ path: resolve(artifactDirectory, 'scenario-contract-settings-dark.png'), fullPage: true });
-  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
   await page.getByRole('tablist', { name: 'Test sections' }).waitFor();
   const automationNavigation = page.getByRole('tablist', { name: 'Test sections' });
-  assert.deepEqual(await automationNavigation.getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('aria-label')?.split(':')[0])), ['Cases', 'Results'], 'Tests must place Cases before Results and keep groups out of the primary tabs');
-  await assertInlineInset(automationNavigation, page.locator('.right-pane-panel'), 0, 'Tests section tabs');
-  await assertRedTeamTabVisual(automationNavigation, 'Automation dark theme');
-  assert.equal(await page.getByRole('heading', { name: 'Latest test results' }).count(), 1, 'Tests opens on functional automation results');
+  assert.deepEqual(await automationNavigation.getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => (tab.getAttribute('aria-label') ?? tab.textContent ?? '').split(':')[0].trim())), ['Cases', 'Results'], 'Tests must place Cases before Results and keep groups out of the primary tabs');
+  // General tests share one content edge with the rest of the pane and open on Cases; Results is one tab away.
+  await assertInlineInset(automationNavigation, page.locator('.right-pane-panel'), 16, 'Tests section tabs');
+  assert.equal(await automationNavigation.getByRole('tab', { name: 'Cases' }).getAttribute('aria-selected'), 'true', 'General tests open on their cases');
+  await automationNavigation.getByRole('tab', { name: 'Results' }).click();
+  await page.getByRole('heading', { name: 'Evidence from this session' }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 0, 'Results must remain an inspection surface, not the main execution surface');
+  // Per-check evidence is collapsed behind one disclosure so the run summary stays first.
+  await page.locator('#automation-results').getByRole('button', { name: /^Show checks/ }).click();
   assert.equal(await page.locator('.automation-result-table tbody > tr').count(), 2, 'Automation results must remain distinct from adversarial outcomes');
   assert.equal(await page.getByRole('region', { name: 'Review test result' }).count(), 0, 'Tests must not duplicate the result navigator inside the tab');
   const exportTestResults = page.locator('#automation-results summary[aria-label="Export test results"]');
@@ -520,7 +541,7 @@ try {
   await page.screenshot({ path: resolve(artifactDirectory, 'automation-results-narrow-dark.png'), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 900 });
   await automationReview.getByRole('button', { name: 'Close evidence review' }).click();
-  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
   await page.getByRole('tablist', { name: 'Test sections' }).waitFor();
   await automationNavigation.getByRole('tab', { name: /Cases/ }).click();
   assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 1, 'Scenario execution must live beside the authored contracts');
@@ -772,7 +793,7 @@ try {
   await page.locator('.evidence-review').waitFor({ state: 'hidden' });
   assert.equal(await page.locator('#right-pane-debug-tab').getAttribute('aria-selected'), 'true', 'Closing Evidence Review must preserve the current Debug context');
   await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-closed-dark.png'), fullPage: true });
-  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
   await page.getByRole('tab', { name: /Cases/ }).click();
   if ((await page.getByRole('button', { name: 'Slow stream contract', exact: true }).getAttribute('aria-expanded')) !== 'true') await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
   await page.locator('.scenario-advanced').filter({ hasText: 'Compare & performance' }).scrollIntoViewIfNeeded();
@@ -781,7 +802,7 @@ try {
   await page.screenshot({ path: resolve(artifactDirectory, 'scenario-comparison-performance-dark.png') });
   await page.getByRole('button', { name: 'Close editor' }).click();
   await page.getByRole('tab', { name: 'Configure' }).click();
-  await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('general');
+  await openSettingsSection(page, 'general');
   await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
   const displayName = page.getByLabel('Display name');
   await displayName.fill('GUI Edited Profile');
@@ -991,15 +1012,15 @@ try {
   await page.reload();
   await waitForProfile();
   assert.equal(await page.getByRole('tab', { name: 'Runs' }).getAttribute('aria-selected'), 'true', 'A saved inspector tab must win over the Profile initial Metrics tab after Webview recreation');
-  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
   await page.getByRole('button', { name: 'Select test result Steady response contract' }).click();
   await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').selectedAutomationResultKey === 'visual-contract-evidence-2');
   await page.getByRole('tab', { name: 'Debug' }).click();
-  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
   assert.equal(await page.getByRole('button', { name: 'Select test result Steady response contract' }).getAttribute('aria-pressed'), 'true', 'The selected test result must survive switching away from Tests');
   await page.reload();
   await waitForProfile();
-  assert.equal(await page.getByRole('tab', { name: 'Tests', exact: true }).getAttribute('aria-selected'), 'true', 'The saved Tests workspace must survive Webview recreation');
+  assert.equal(await page.getByRole('tab', { name: 'General tests', exact: true }).getAttribute('aria-selected'), 'true', 'The saved Tests workspace must survive Webview recreation');
   assert.equal(await page.getByRole('button', { name: 'Select test result Steady response contract' }).getAttribute('aria-pressed'), 'true', 'The selected test result must survive Webview recreation');
   await page.setViewportSize({ width: 1000, height: 600 });
   await page.getByRole('tab', { name: 'Red Team' }).click();
@@ -1033,7 +1054,7 @@ try {
   await page.setViewportSize({ width: 1292, height: 900 });
   await page.goto(`${url}?split=72`);
   await waitForProfile();
-  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
   await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: /Cases/ }).click();
   await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
   const narrowAssertions = await page.locator('.scenario-editor').evaluate((editor) => ({
@@ -1140,7 +1161,7 @@ try {
   await page.getByRole('tabpanel', { name: 'Payload' }).screenshot({ path: resolve(artifactDirectory, 'network-payload-json-light.png') });
 
   await page.getByRole('tab', { name: 'Configure' }).click();
-  await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption('request');
+  await openSettingsSection(page, 'request');
   await page.getByRole('heading', { name: 'Connection Doctor' }).waitFor();
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-light.png') });
   await page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' }).click();
@@ -1154,7 +1175,7 @@ try {
   await page.emulateMedia({ forcedColors: 'none' });
   await page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' }).click();
 
-  await page.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
   await page.getByRole('tab', { name: /Results/ }).click();
   await page.getByRole('heading', { name: 'Latest test results' }).waitFor();
   await assertRedTeamTabVisual(page.getByRole('tablist', { name: 'Test sections' }), 'Automation light theme');
@@ -1305,7 +1326,7 @@ try {
 
   const capturePage = await browser.newPage({ viewport: { width: 960, height: 720 } });
   await capturePage.goto(`${url}?capturedDraft=true`);
-  await capturePage.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await capturePage.getByRole('tab', { name: 'General tests', exact: true }).click();
   await capturePage.getByRole('tab', { name: /Cases/ }).click();
   const capturedDraft = capturePage.getByRole('button', { name: 'Captured release probe', exact: true });
   await capturedDraft.waitFor();
@@ -1323,7 +1344,7 @@ try {
 
   const capturedListPage = await browser.newPage({ viewport: { width: 1292, height: 720 } });
   await capturedListPage.goto(`${url}?capturedDraft=true&split=72`);
-  await capturedListPage.getByRole('tab', { name: 'Tests', exact: true }).click();
+  await capturedListPage.getByRole('tab', { name: 'General tests', exact: true }).click();
   await capturedListPage.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: /Cases/ }).click();
   const longCapturedRow = capturedListPage.locator('.automation-scenario-row').filter({ has: capturedListPage.getByRole('button', { name: 'Please search for relevant material and cite it', exact: true }) });
   await longCapturedRow.waitFor();
