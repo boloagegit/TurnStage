@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.37.0
+
+### Settings
+- Configure opens on an overview. It has one line per section saying what that section is set to now, warnings such as a missing request URL or broken mappings, and a health line for Profile issues and the latest error. Each setting now lives in exactly one section. Request and reconnect timings are edited in seconds. Rarely changed options sit under Advanced disclosures, which open automatically when they hold non-default values.
+- Request, stop-request, and variant headers are edited as name/value rows. A credential typed as plain text, even next to a `${secret.name}` reference, shows a warning. Opening starter prompts are edited as reorderable cards; an action starter picks from the actions a starter can run, which are start a new conversation and clear the conversation. List settings (metrics, allow lists, tags, campaign selectors, forbidden content and events, ignore paths, stop context, active-turn locks, retry statuses) use removable chips. Each of these editors keeps an **Edit as JSON** fallback.
+- Settings that differ from the runtime default say so and offer a one-click reset that removes the override. The defaults shown are the ones VS Code and Web both apply.
+- When Profile errors block requests, the banner now lists each error with its Profile path and a **Go to** button. The button opens the settings section that fixes the error, or the General tests or Red Team pane for test-case errors. Each section lists its own issues at the top, and **Show first issue** works in Web.
+- Every settings statement now matches what each host does. Web says it ignores the allow lists, opens only HTTP and HTTPS links, and always verifies certificates. Clearing allowed URI schemes restores HTTPS-only instead of blocking every link. Typing 0 in a timeout clears it. The manual Validate action is gone, because both hosts revalidate after every edit.
+- The Environment ID setting lists the environments the host can resolve.
+- Web now honors the error-handling and stop options it exposes: preserving partial content, keeping the conversation ID, and the stop notice. It also ends an SSE stream on `[DONE]` when the Profile leaves the done value out. The Release all locks checkbox, which neither host used, is removed.
+
+### Tests and Red Team
+- **Save as test** is in the chat toolbar and on each reply, where it captures only the turns up to that reply. Captured cases record the non-secret session controls they ran with and carry checks taken from what the conversation did: event order, tools called, a non-empty reply, and no parse or mapping errors. The save notice offers **Review now**, and a draft can be tried once before it is marked ready.
+- On a Web preset, the first capture creates an editable copy instead of a case that can never run.
+- Select several cases to add a tag, delete them, or mark drafts ready in one step. Linked suites are saved against the revision that was loaded, so a file changed elsewhere is reported instead of overwritten.
+- From an inspected event you can **Add as check** to a General case.
+- A case edited after its last run shows **Changed since last run**. History keeps every case's latest result and baselines, up to 60 runs. Cases that flip between passing and failing are marked **Flaky**. **Compare with baseline** shows one case's two runs side by side.
+- General tests and Red Team keep separate baselines. Run history lists the cases that need a decision first and adds outcome filters. Profile edits to the name, description, UI, or history no longer mark results as settings-changed.
+- Stopping a Web run mid-case leaves the case unfinished instead of failed.
+- The Debug pane guides the first test: send a message, save it as a test, and run it. An empty Red Team list offers ways to create or link cases.
+
+### Chat, Debug, and Web
+- Editing a Profile keeps the conversation on screen. An edit made during a streaming turn first stops it through the Profile's stop request.
+- Retry resends the prompt behind the reply it was clicked on. **Open evidence** in Web continues the shown conversation.
+- Network requests can be copied as cURL with credentials redacted. A Timing view shows where request time went, and Web can create a sanitized Profile from a pasted cURL command, with credentials kept in its memory-only secret store.
+- Web prunes test evidence that no retained run uses. When browser storage is full, Web keeps the run going instead of aborting it.
+- Status messages, metric names, and units use plain language. A test-case error no longer blocks chat. Panes share one content edge, and keyboard, 200% zoom, and narrow-pane layouts are improved.
+- Japanese and Korean translations now cover the Webview and the Extension Host.
+
+### VS Code and CLI
+- New, imported, and cURL-created Profiles are written to the `turnstage.profileGlob` folder. Exports on remote workspaces open in the editor. Save dialogs start in the workspace folder. Errors are always shown, even after **Do not show again**.
+- The CLI explains configuration failures, refuses to overwrite an existing `--output` file, and documents its exit codes.
+
+### Compatibility
+- Profiles may add `message.saveAsTest` to `ui.messageActions`; existing Profiles are unchanged and still valid. Saved run history, a single earlier baseline, and existing settings are read as before, so no migration is needed.
+- Host-to-Webview messages gained optional fields: `profile.validation` diagnostics may carry `scope` and `path`, `test.capture` accepts `throughMessageId`, and `test.history` carries per-type `baselines` instead of `baselineRunId`.
+
 ## 0.36.1
 
 - New TurnStage icon: a white chat bubble with a blue signal trace on a dark navy tile. It replaces the framed branch mark in the Extensions list, Marketplace, Copilot Chat, the Activity Bar, and the TurnStage Web favicon, and stays readable at small sizes in light and dark themes.
