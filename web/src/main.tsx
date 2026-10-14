@@ -333,7 +333,7 @@ function diagnostics(raw: string): ProfileSourceDiagnostic[] {
   if (parsed.errors.length) return parsed.errors.map((error) => ({ code: 'jsonc.syntax', severity: 'error', message: `Invalid JSONC (${error.error})`, offset: error.offset, length: error.length, path: [] }));
   if (!parsed.profile) return [{ code: 'jsonc.root', severity: 'error', message: 'The profile root must be an object.', offset: 0, length: 1, path: [] }];
   const availableEnvironments = environments.flatMap((item) => { const environment = parseEnvironment(item.raw); return environment ? [environment] : []; });
-  const semantic = validator.validate(parsed.profile, parsed.tree, availableEnvironments).map((issue) => ({ ...issue, code: 'profile.semantic', path: [] }));
+  const semantic = validator.validate(parsed.profile, parsed.tree, availableEnvironments).map((issue) => ({ ...issue, code: 'profile.semantic' }));
   return withIssueScope(raw, [...schemaDiagnostics(parsed.profile, parsed.tree, preferences.locale), ...semantic, ...webCompatibilityDiagnostics(parsed.profile, parsed.tree, availableEnvironments, preferences.locale)]);
 }
 
