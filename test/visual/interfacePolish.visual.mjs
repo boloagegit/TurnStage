@@ -44,11 +44,24 @@ async function capture(page, name) {
   screenshots.push(name);
 }
 
+/** Each Network row's duration must sit above its bar on the shared time scale, never under it. */
+async function assertNetworkTimeCells(page, prefix) {
+  const cells = await page.locator('.network-row .network-time').evaluateAll((elements) => elements.map((cell) => {
+    const value = cell.querySelector('.network-time__value')?.getBoundingClientRect();
+    const bar = cell.querySelector('.network-waterfall')?.getBoundingClientRect();
+    return { text: cell.textContent, valueBottom: value?.bottom, barTop: bar?.top };
+  }));
+  // The Web page has sent no requests; the VS Code harness supplies timed rows.
+  if (prefix === 'vsix') assert.ok(cells.some((cell) => cell.barTop !== undefined), `${prefix}: Network rows must show their span on the time scale`);
+  assert.deepEqual(cells.filter((cell) => cell.barTop !== undefined && (cell.valueBottom === undefined || cell.barTop < cell.valueBottom)), [], `${prefix}: the time-scale bar must sit below the duration, not across it`);
+}
+
 async function visitPanels(page, prefix) {
   await page.getByRole('tab', { name: 'Debug', exact: true }).click();
   for (const tabName of ['Network', 'Raw Events', 'Normalized Events', 'Metrics', 'Errors', 'Runs']) {
     await page.getByRole('tablist', { name: 'Evidence views' }).getByRole('tab', { name: new RegExp(`^${tabName}(?: \\(|$)`, 'u') }).click();
     await capture(page, `${prefix}-debug-${tabName.toLowerCase().replaceAll(' ', '-')}`);
+    if (tabName === 'Network') await assertNetworkTimeCells(page, prefix);
   }
   await page.getByRole('tab', { name: 'General tests', exact: true }).click();
   for (const tabName of ['Cases', 'Results']) {

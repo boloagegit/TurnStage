@@ -210,13 +210,6 @@ try {
   assert.ok(!networkHeaders.includes('local-debug-token') && networkHeaders.includes('••••••••'), 'Header view must mask Authorization and response cookies');
   assert.ok(networkHeaders.includes('4bf92f3577b34da6a3ce929d0e0e4736') && networkHeaders.includes('visual-request-2'), 'Header view must expose bounded trace and request correlation identifiers');
   await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'network-timeout-dark.png') });
-  const timeCells = await page.locator('.network-row .network-time').evaluateAll((cells) => cells.map((cell) => {
-    const value = cell.querySelector('.network-time__value')?.getBoundingClientRect();
-    const bar = cell.querySelector('.network-waterfall')?.getBoundingClientRect();
-    return { text: cell.textContent, valueBottom: value?.bottom, barTop: bar?.top };
-  }));
-  assert.ok(timeCells.some((cell) => cell.barTop !== undefined), 'Network rows must show their span on the time scale');
-  assert.deepEqual(timeCells.filter((cell) => cell.barTop !== undefined && cell.valueBottom !== undefined && cell.barTop < cell.valueBottom), [], 'The time-scale bar must sit below the duration, not across it');
   const latestUserMessage = page.locator('.mobile-chat-preview__message--user').filter({ hasText: 'Verify themed streaming layout' });
   await latestUserMessage.getByRole('button', { name: 'Inspect request' }).click();
   assert.equal(await page.getByRole('tab', { name: 'Network' }).getAttribute('aria-selected'), 'true', 'Inspect request must route a user message to Network');
