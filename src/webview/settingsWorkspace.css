@@ -455,3 +455,8 @@
 .settings-default-reset > button:hover { color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); }
 .settings-checkbox-line { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--ts-space-3); }
 @media (forced-colors: active) { .settings-default-reset > span::before { background: CanvasText; forced-color-adjust: none; } .settings-default-reset > button { border: 0; color: LinkText; } }
+.settings-callout-error { border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); }
+.settings-section-issues { display: grid; gap: var(--ts-space-1); margin-bottom: var(--ts-space-3); }
+.settings-section-issues > strong { color: var(--vscode-errorForeground); }
+.settings-callout-warning.settings-section-issues > strong { color: var(--vscode-editorWarning-foreground); }
+.settings-overview__attention.is-issue { color: var(--vscode-errorForeground); }

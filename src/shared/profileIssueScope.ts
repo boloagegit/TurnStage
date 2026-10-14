@@ -1,4 +1,4 @@
-import { getLocation } from 'jsonc-parser';
+import { findNodeAtOffset, getLocation, getNodePath, parseTree } from 'jsonc-parser';
 
 /** Where a Profile issue lives. Test-case issues only stop the affected cases, not the chat session. */
 export type ProfileIssueScope = 'tests';
@@ -12,7 +12,22 @@ export function blocksSession(issue: { severity: 'error' | 'warning'; scope?: Pr
   return issue.severity === 'error' && issue.scope !== 'tests';
 }
 
-/** Annotates validation issues with their scope so hosts and the banner can tell test-case issues apart. */
-export function withIssueScope<T extends { offset: number }>(text: string, issues: readonly T[]): Array<T & { scope?: ProfileIssueScope }> {
-  return issues.map((issue) => { const scope = profileIssueScope(text, issue.offset); return scope ? { ...issue, scope } : issue; });
+/** The JSON path of the Profile value an issue points at, so the UI can say where it is and open that setting. */
+export function profileIssuePath(root: ReturnType<typeof parseTree>, offset: number): Array<string | number> {
+  const node = root ? findNodeAtOffset(root, offset, true) : undefined;
+  // A property key resolves to its property node; report the value's path either way.
+  return node ? getNodePath(node.type === 'property' ? node.children?.[1] ?? node : node).slice(0, 32) : [];
+}
+
+/**
+ * Annotates validation issues with their scope, so hosts and the banner can tell test-case issues apart, and
+ * with the path of the value they point at. A path an issue already names is kept.
+ */
+export function withIssueScope<T extends { offset: number; path?: Array<string | number> }>(text: string, issues: readonly T[]): Array<T & { scope?: ProfileIssueScope; path: Array<string | number> }> {
+  const root = parseTree(text);
+  return issues.map((issue) => {
+    const scope = profileIssueScope(text, issue.offset);
+    const path = issue.path?.length ? issue.path.slice(0, 32) : profileIssuePath(root, issue.offset);
+    return { ...issue, path, ...(scope ? { scope } : {}) };
+  });
 }

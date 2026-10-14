@@ -28,9 +28,9 @@ describe('starter rows', () => {
     ] });
   });
 
-  it('requires an action ID for action starters', () => {
-    expect(startersFromRows([{ id: 'a', label: 'Open docs', prompt: 'docs', behavior: 'action', actionId: ' ' }]).error).toBe('Starter 1 runs an action; enter its action ID.');
-    expect(startersFromRows([{ id: 'a', label: 'Open docs', prompt: 'docs', behavior: 'action', actionId: 'open-docs' }]).starters?.[0]).toEqual({ id: 'a', label: 'Open docs', prompt: 'docs', behavior: 'action', actionId: 'open-docs' });
+  it('requires an action for action starters', () => {
+    expect(startersFromRows([{ id: 'a', label: 'Start over', prompt: 'docs', behavior: 'action', actionId: ' ' }]).error).toBe('Starter 1 runs an action; choose which one.');
+    expect(startersFromRows([{ id: 'a', label: 'Start over', prompt: 'docs', behavior: 'action', actionId: 'conversation.new' }]).starters?.[0]).toEqual({ id: 'a', label: 'Start over', prompt: 'docs', behavior: 'action', actionId: 'conversation.new' });
   });
 });
 
@@ -60,15 +60,20 @@ describe('StarterListEditor', () => {
     expect(onCommit).toHaveBeenLastCalledWith([starters[1]]);
   });
 
-  it('asks for an action ID before saving an action starter', async () => {
+  it('offers only actions a starter can run and saves the choice at once', async () => {
     const user = userEvent.setup();
     const onCommit = renderEditor();
     await user.selectOptions(screen.getAllByRole('combobox', { name: 'When clicked' })[0]!, 'action');
-    expect(screen.getByRole('alert').textContent).toBe('Starter 1 runs an action; enter its action ID.');
-    expect(onCommit).not.toHaveBeenCalled();
-    await user.type(screen.getByRole('textbox', { name: 'Action ID' }), 'open-docs');
-    await user.click(screen.getByRole('button', { name: 'Outside' }));
-    expect(onCommit).toHaveBeenCalledWith([{ ...starters[0], behavior: 'action', actionId: 'open-docs' }, starters[1]]);
+    expect(onCommit).toHaveBeenLastCalledWith([{ ...starters[0], behavior: 'action', actionId: 'conversation.new' }, starters[1]]);
+    const action = screen.getByRole('combobox', { name: 'Action' });
+    expect([...(action as HTMLSelectElement).options].map((option) => option.value)).toEqual(['conversation.new', 'conversation.clear']);
+    await user.selectOptions(action, 'conversation.clear');
+    expect(onCommit).toHaveBeenLastCalledWith([{ ...starters[0], behavior: 'action', actionId: 'conversation.clear' }, starters[1]]);
+  });
+
+  it('keeps an action ID written in JSON as an option', () => {
+    render(<StarterListEditor value={[{ id: 'x', label: 'X', prompt: 'X', behavior: 'action', actionId: 'custom.thing' }]} onCommit={vi.fn()} jsonEditor={null} />);
+    expect((screen.getByRole('combobox', { name: 'Action' }) as HTMLSelectElement).value).toBe('custom.thing');
   });
 
   it('adds an empty starter with focus on its label and saves nothing until it has text', async () => {

@@ -405,3 +405,13 @@ body.vscode-high-contrast .json-token, body.vscode-high-contrast-light .json-tok
 .selection-tag-form input { width: 100%; min-width: 0; }
 /* Long notices wrap: keep the icon its own size and beside the first line instead of under the text. */
 .operation-status > .product-icon { flex: none; align-self: flex-start; margin-block-start: 0.2em; }
+/* Profile issues: what is wrong, then where it is and how to get there. */
+.profile-issue-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.profile-issue-list__item { display: grid; gap: 1px; min-width: 0; }
+.profile-issue-list__message { overflow-wrap: anywhere; }
+.profile-issue-list__where { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--ts-space-2); color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); }
+.profile-issue-list__where code { overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family); }
+.profile-issue-list__more { color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); }
+.validation-banner > p { margin: 0; }
+.validation-banner__issues { margin-top: var(--ts-space-1); padding-inline-start: var(--ts-space-3); border-inline-start: 2px solid var(--vscode-notificationsErrorIcon-foreground, var(--vscode-errorForeground)); }
+.validation-banner--tests .validation-banner__issues { border-inline-start-color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-editorWarning-foreground)); }

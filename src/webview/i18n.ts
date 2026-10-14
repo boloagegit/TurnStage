@@ -7,6 +7,21 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Go to {section}': '前往{section}',
+  'Go to {section}: {message}': '前往{section}：{message}',
+  '{count} error to fix': '{count} 個錯誤待修正',
+  '{count} errors to fix': '{count} 個錯誤待修正',
+  '{count} warning': '{count} 個警告',
+  '{count} warnings': '{count} 個警告',
+  '{count} error to fix in this section': '這一區有 {count} 個錯誤待修正',
+  '{count} errors to fix in this section': '這一區有 {count} 個錯誤待修正',
+  '{count} warning in this section': '這一區有 {count} 個警告',
+  '{count} warnings in this section': '這一區有 {count} 個警告',
+  'Errors and warnings from the latest response. Profile issues are listed at the top of the section they belong to.': '最近一次回應的錯誤與警告。設定檔本身的問題會列在所屬區塊的最上方。',
+  'Choose an action': '選擇動作',
+  'Start a new conversation': '開始新對話',
+  'Clear the conversation': '清除對話',
+  'Starter {number} runs an action; choose which one.': '起始提示 {number} 會執行動作，請選擇要執行哪一個。',
   'Reset to {value}': '重設為 {value}',
   'Changed from default': '已改過預設值',
   'the run retention setting': '執行紀錄保留設定',

@@ -32,6 +32,7 @@ import { CaseRunSummary } from './CaseRunSummary';
 import { errorNotice, OperationNoticeToast, type OperationNotice } from './OperationNoticeToast';
 import { useRestoreUnsentDraft } from './unsentDraft';
 import { blocksSession, type ProfileIssueScope } from '../shared/profileIssueScope';
+import { ProfileIssueList } from './ProfileIssueList';
 
 declare function acquireVsCodeApi<T = unknown>(): { postMessage(message: unknown): void; getState(): T | undefined; setState(state: T): void };
 export type EventMappingFilter = 'all' | 'matched' | 'unmatched';
@@ -155,7 +156,7 @@ function App(): React.JSX.Element {
   const [activeTimeline, setActiveTimeline] = useState<{ evidenceId: string; timeline: EvidenceTimelineSummary }>();
   const [connectionResult, setConnectionResult] = useState<ConnectionDoctorSummary>();
   const [conversations, setConversations] = useState<ConversationDirectory>();
-  const [profile, setProfile] = useState<TurnStageProfile>(); const [snapshot, setSnapshot] = useState<SessionSnapshot>(); const [runs, setRuns] = useState<LocalRunSummary[]>([]); const [requestPreview, setRequestPreview] = useState<unknown>(); const [networkEntries, setNetworkEntries] = useState<NetworkExchange[]>([]); const [diagnostics, setDiagnostics] = useState<Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number ; scope?: ProfileIssueScope }>>([]); const [profileDirty, setProfileDirty] = useState(false); const [profileReadOnly, setProfileReadOnly] = useState(false); const [environmentIds, setEnvironmentIds] = useState<string[]>([]); const [hostKind, setHostKind] = useState<'vscode' | 'web'>('vscode'); const [notice, setNotice] = useState<OperationNotice>(''); const [mappingTestResult, setMappingTestResult] = useState<MappingTestResult>(); const [remoteName, setRemoteName] = useState<string>(); const [, setLocaleVersion] = useState(0);
+  const [profile, setProfile] = useState<TurnStageProfile>(); const [snapshot, setSnapshot] = useState<SessionSnapshot>(); const [runs, setRuns] = useState<LocalRunSummary[]>([]); const [requestPreview, setRequestPreview] = useState<unknown>(); const [networkEntries, setNetworkEntries] = useState<NetworkExchange[]>([]); const [diagnostics, setDiagnostics] = useState<Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number ; scope?: ProfileIssueScope; path?: Array<string | number> }>>([]); const [profileDirty, setProfileDirty] = useState(false); const [profileReadOnly, setProfileReadOnly] = useState(false); const [environmentIds, setEnvironmentIds] = useState<string[]>([]); const [hostKind, setHostKind] = useState<'vscode' | 'web'>('vscode'); const [notice, setNotice] = useState<OperationNotice>(''); const [mappingTestResult, setMappingTestResult] = useState<MappingTestResult>(); const [remoteName, setRemoteName] = useState<string>(); const [, setLocaleVersion] = useState(0);
   useEffect(() => { setSelectedTestCases(new Map()); }, [profile?.id]);
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
   const finishCaseEdits = (queue: CaseEditQueue) => {
@@ -365,6 +366,8 @@ function App(): React.JSX.Element {
     setSelectedMessageId(message?.id);
   };
   const blockingIssues = diagnostics.filter(blocksSession);
+  /** Opens the settings section that edits a Profile value, as the banner's Go to does. */
+  const openSettingsSection = (section: SettingsSectionId) => { setRightPaneMode('configure'); setNarrowView('pane'); setConfigurationSection(section); setConfigurationOverview(false); focusAfterRender(() => document.getElementById(`settings-panel-${section}`)?.focus()); };
   const testIssues = diagnostics.filter((issue) => issue.severity === 'error' && issue.scope === 'tests');
   if (!profile && diagnostics[0]) return <main className="empty"><h1>TurnStage</h1><p>{diagnostics[0].message}</p><button onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></main>;
   if (!profile) return <AppSkeleton splitPercent={splitPercent} />;
@@ -381,8 +384,8 @@ function App(): React.JSX.Element {
   return <main className="app">
     <a className="skip" href="#main-panel">{t('Skip to content')}</a>
     {snapshot?.trusted === false && <div className="trust-banner" role="status"><strong>{t('Restricted mode.')}</strong> {t('This workspace is not trusted. Network requests are disabled; fixture replay remains available.')}</div>}
-    {blockingIssues.length > 0 ? <div className="validation-banner" role="alert"><strong>{t(blockingIssues.length === 1 ? '{count} configuration error.' : '{count} configuration errors.', { count: formatNumber(blockingIssues.length) })}</strong> {t('Requests are blocked until errors are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></div>
-      : testIssues.length > 0 && <div className="validation-banner validation-banner--tests" role="status"><strong>{t(testIssues.length === 1 ? '{count} test case issue.' : '{count} test case issues.', { count: formatNumber(testIssues.length) })}</strong> {t('Chat still works; affected cases cannot run until they are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></div>}
+    {blockingIssues.length > 0 ? <div className="validation-banner" role="alert"><p><strong>{t(blockingIssues.length === 1 ? '{count} configuration error.' : '{count} configuration errors.', { count: formatNumber(blockingIssues.length) })}</strong> {t('Requests are blocked until errors are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></p><ProfileIssueList className="validation-banner__issues" issues={blockingIssues} limit={3} disabled={isInteractionLocked(profile, 'configuration.open', active)} onGoTo={openSettingsSection} /></div>
+      : testIssues.length > 0 && <div className="validation-banner validation-banner--tests" role="status"><p><strong>{t(testIssues.length === 1 ? '{count} test case issue.' : '{count} test case issues.', { count: formatNumber(testIssues.length) })}</strong> {t('Chat still works; affected cases cannot run until they are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></p><ProfileIssueList className="validation-banner__issues" issues={testIssues} limit={3} /></div>}
     <section id="main-panel" tabIndex={-1} className="panel" aria-label={t('Test')}>
       <OperationNoticeToast notice={notice} onDismiss={dismissNotice} post={post} />
       <TestWorkspace
