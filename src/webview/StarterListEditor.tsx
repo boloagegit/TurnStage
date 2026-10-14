@@ -3,6 +3,15 @@ import type { Starter } from '../shared/types';
 import { IconButton } from './Icon';
 import { formatNumber, t } from './i18n';
 
+/**
+ * Actions a starter can run before any reply exists. Both hosts run these without a source message; every other
+ * action needs one, and the Profile validator rejects IDs it does not know.
+ */
+const STARTER_ACTIONS = [
+  { id: 'conversation.new', label: 'Start a new conversation' },
+  { id: 'conversation.clear', label: 'Clear the conversation' },
+] as const;
+
 export interface StarterRow { id: string; label: string; prompt: string; behavior: Starter['behavior']; actionId: string }
 
 /** The editable shape of each configured starter; a plain string is a sendable prompt, as at runtime. */
@@ -29,7 +38,7 @@ export function startersFromRows(rows: readonly StarterRow[]): { starters: Start
     const label = row.label.trim();
     const prompt = row.prompt.trim();
     if (!label && !prompt) continue;
-    if (row.behavior === 'action' && !row.actionId.trim()) return { error: t('Starter {number} runs an action; enter its action ID.', { number: formatNumber(index + 1) }) };
+    if (row.behavior === 'action' && !row.actionId.trim()) return { error: t('Starter {number} runs an action; choose which one.', { number: formatNumber(index + 1) }) };
     let id = row.id.trim() || slug(label || prompt) || `starter-${index + 1}`;
     for (let suffix = 2; used.has(id); suffix += 1) id = `${row.id.trim() || slug(label || prompt) || `starter-${index + 1}`}-${suffix}`;
     used.add(id);
@@ -98,13 +107,19 @@ export function StarterListEditor({ value, onCommit, jsonEditor }: { value: unkn
           <label className="starter-editor__field"><span>{t('Button label')}</span><input value={row.label} autoComplete="off" onChange={(event) => update(index, { label: event.target.value })} onKeyDown={keys} /></label>
           <label className="starter-editor__field"><span>{t('Message')}</span><textarea rows={2} value={row.prompt} onChange={(event) => update(index, { prompt: event.target.value })} onKeyDown={keys} /></label>
           <label className="starter-editor__field"><span>{t('When clicked')}</span>
-            <select value={row.behavior} onChange={(event) => update(index, { behavior: event.target.value as Starter['behavior'] }, true)}>
+            <select value={row.behavior} onChange={(event) => { const behavior = event.target.value as Starter['behavior']; update(index, { behavior, ...(behavior === 'action' && !row.actionId ? { actionId: STARTER_ACTIONS[0].id } : {}) }, true); }}>
               <option value="send">{t('Send the message')}</option>
               <option value="fill">{t('Put the message in the composer')}</option>
               <option value="action">{t('Run a response action')}</option>
             </select>
           </label>
-          {row.behavior === 'action' && <label className="starter-editor__field"><span>{t('Action ID')}</span><input value={row.actionId} spellCheck={false} autoComplete="off" onChange={(event) => update(index, { actionId: event.target.value })} onKeyDown={keys} /></label>}
+          {row.behavior === 'action' && <label className="starter-editor__field"><span>{t('Action')}</span>
+            <select value={row.actionId} onChange={(event) => update(index, { actionId: event.target.value }, true)}>
+              {!row.actionId && <option value="">{t('Choose an action')}</option>}
+              {STARTER_ACTIONS.map((action) => <option key={action.id} value={action.id}>{t(action.label)}</option>)}
+              {row.actionId && !STARTER_ACTIONS.some((action) => action.id === row.actionId) && <option value={row.actionId}>{row.actionId}</option>}
+            </select>
+          </label>}
         </li>;
       })}
     </ol>

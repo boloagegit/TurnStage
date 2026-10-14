@@ -195,6 +195,20 @@ describe('embedded settings navigation', () => {
     expect(screen.queryByRole('button', { name: /Idle timeout/ })).toBeNull();
   });
 
+  it('shows each Profile error where it is fixed and opens that section from the overview', async () => {
+    const onSectionChange = vi.fn();
+    const diagnostics = [{ severity: 'error' as const, message: 'Unknown starter action id: open-docs.', offset: 10, length: 2, path: ['opening', 'starters'] }];
+    const { unmount } = render(<SettingsWorkspace embedded section="general" onSectionChange={onSectionChange} overview onOverviewChange={vi.fn()} profile={profile} post={vi.fn()} diagnostics={diagnostics} vscodeFeatures={false} />);
+    expect(screen.getByText('1 error to fix')).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Go to Opening & Flow: Unknown starter action id: open-docs.' }));
+    expect(onSectionChange).toHaveBeenCalledWith('opening-flow');
+    unmount();
+    render(<SettingsWorkspace section="opening-flow" onSectionChange={vi.fn()} profile={profile} post={vi.fn()} diagnostics={diagnostics} vscodeFeatures={false} />);
+    const note = screen.getByText('1 error to fix in this section').closest('.settings-section-issues')!;
+    expect(note.textContent).toContain('Unknown starter action id: open-docs.');
+    expect(note.textContent).toContain('opening.starters');
+  });
+
   it('offers a reset for error-handling flags only when the Profile turns one off', async () => {
     const post = vi.fn();
     const user = userEvent.setup();
@@ -222,12 +236,16 @@ describe('embedded settings navigation', () => {
     expect(screen.getByText('Using defaults')).toBeTruthy();
   });
 
-  it('lists Profile issues in the browser instead of offering a jump it cannot make', () => {
-    const diagnostics = [{ severity: 'error' as const, message: 'conversation.send.url is required.', offset: 0, length: 1 }];
-    render(<SettingsWorkspace embedded section="general" onSectionChange={vi.fn()} overview onOverviewChange={vi.fn()} profile={profile} post={vi.fn()} diagnostics={diagnostics} vscodeFeatures={false} />);
+  it('in the browser, shows the first issue by opening the section that fixes it', async () => {
+    const onSectionChange = vi.fn();
+    const post = vi.fn();
+    const diagnostics = [{ severity: 'error' as const, message: 'A request URL is required.', offset: 0, length: 1, path: ['conversation', 'send', 'url'] }];
+    render(<SettingsWorkspace embedded section="general" onSectionChange={onSectionChange} overview onOverviewChange={vi.fn()} profile={profile} post={post} diagnostics={diagnostics} vscodeFeatures={false} />);
     expect(screen.getByText('1 Profile issue')).toBeTruthy();
-    expect(screen.getByText('conversation.send.url is required.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Show first issue' })).toBeNull();
+    expect(screen.getByText('A request URL is required.')).toBeTruthy();
+    await userEvent.setup().click(screen.getAllByRole('button', { name: 'Show first issue' })[0]!);
+    expect(onSectionChange).toHaveBeenCalledWith('request');
+    expect(post).not.toHaveBeenCalledWith({ type: 'profile.openFirstIssue' });
   });
 
   it('does not warn about intercepted traffic in the browser, which always verifies certificates', () => {

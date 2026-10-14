@@ -20,6 +20,8 @@ import { hostText } from './hostCopy';
 import { DEFAULT_REQUEST_TIMEOUT_MS, SettingsOverview, transportLabel } from './SettingsOverview';
 import { HeaderEditor } from './HeaderEditor';
 import { TokenListInput } from './TokenListInput';
+import { ProfileIssueList } from './ProfileIssueList';
+import { issueSection, type LocatedIssue } from './profileIssueLocation';
 import { remoteSessionScope } from '../shared/remoteSessionScope';
 
 /** Statuses both hosts retry when the Profile lists none. */
@@ -150,7 +152,7 @@ export interface SettingsWorkspaceProps {
   campaignDashboard?: CampaignDashboardV1;
   testOperation?: TestOperationSnapshot;
   profileDirty?: boolean;
-  diagnostics?: Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number }>;
+  diagnostics?: Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number; path?: Array<string | number> }>;
   /** The section selected by the host tree/editor. */
   section: SettingsSectionId;
   onSectionChange: (section: SettingsSectionId) => void;
@@ -261,15 +263,16 @@ export function SettingsWorkspace({
           <p className="settings-subtitle"><span>{profile.name || t('Untitled profile')}</span><span aria-hidden="true">·</span><code>{profile.id}</code><span aria-hidden="true">·</span><span>{profile.environment || t('No environment selected')}</span></p>
         </div>}
       <div className="settings-header-actions" role="group" aria-label={t('Profile configuration actions')}>
-        <span className={`profile-edit-status ${profileDirty ? 'is-dirty' : diagnostics.length ? 'has-issues' : ''}`} role="status">{readOnly ? t('Read-only') : profileDirty ? t('Unsaved changes') : diagnostics.length ? t('{count} issues', { count: formatNumber(diagnostics.length) }) : t('Saved')}</span>
-        {diagnostics.length > 0 && vscodeFeatures && <IconButton icon="warning" label={t('Show first issue')} type="button" onClick={() => post({ type: 'profile.openFirstIssue' })} />}
+        <span className={`profile-edit-status ${profileDirty ? 'is-dirty' : diagnostics.length ? 'has-issues' : ''}`} role="status">{readOnly ? t('Read-only') : profileDirty ? t('Unsaved changes') : diagnostics.length ? t(diagnostics.length === 1 ? '{count} issue' : '{count} issues', { count: formatNumber(diagnostics.length) }) : t('Saved')}</span>
+        {/* VS Code places the cursor on the issue in the Profile text; the browser opens the section that fixes it. */}
+        {diagnostics.length > 0 && <IconButton icon="warning" label={t('Show first issue')} type="button" onClick={() => vscodeFeatures ? post({ type: 'profile.openFirstIssue' }) : openSection(issueSection(diagnostics[0]!.path))} />}
         <IconButton icon="save" label={t('Save Profile')} type="button" disabled={readOnly || !profileDirty} onClick={() => post({ type: 'profile.save' })} />
         <IconButton icon="file-code" label={t(vscodeFeatures ? 'Open JSONC' : 'View JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
       </div>
     </header>
 
     <div ref={scrollRef} className="settings-main" id="settings-content" onScroll={(event) => onScrollTopChange?.(event.currentTarget.scrollTop)}>
-      {overview ? <SettingsOverview sections={SETTINGS_SECTIONS} profile={profile} snapshot={snapshot} diagnostics={diagnostics} host={vscodeFeatures ? 'vscode' : 'web'} onOpen={openSection} onShowFirstIssue={vscodeFeatures ? () => post({ type: 'profile.openFirstIssue' }) : undefined} /> : <div className="settings-content-layout">
+      {overview ? <SettingsOverview sections={SETTINGS_SECTIONS} profile={profile} snapshot={snapshot} diagnostics={diagnostics} host={vscodeFeatures ? 'vscode' : 'web'} onOpen={openSection} onShowFirstIssue={vscodeFeatures ? () => post({ type: 'profile.openFirstIssue' }) : () => openSection(issueSection(diagnostics[0]?.path))} /> : <div className="settings-content-layout">
         {!embedded && <nav className="settings-section-nav" aria-label={t('Profile configuration sections')}>
           <div className="settings-section-nav-list">
             {SETTINGS_SECTIONS.map((item) => <button key={item.id} type="button" className={active.id === item.id ? 'is-active' : ''} aria-current={active.id === item.id ? 'page' : undefined} onClick={() => onSectionChange(item.id)}>{t(item.label)}</button>)}
@@ -290,6 +293,7 @@ export function SettingsWorkspace({
             {!embedded && <span className="settings-section-count">{t('Profile')} <code>{profile.id}</code></span>}
           </div>
           {readOnly && <ReadOnlyNotice post={post} />}
+          <SectionIssues issues={diagnostics.filter((issue) => issueSection(issue.path) === active.id)} />
           <fieldset className="settings-editable-region" disabled={readOnly}>
           {active.id === 'general' && <GeneralSection profile={profile} snapshot={snapshot} post={post} patch={patch} vscodeFeatures={vscodeFeatures} environmentIds={environmentIds} />}
           {active.id === 'opening-flow' && <OpeningFlowSection profile={profile} post={post} onOpenSection={openSection} />}
@@ -684,7 +688,7 @@ function HistoryErrorsSection({ profile, snapshot, patch, vscodeFeatures }: { pr
     </section>
 
     <section className="settings-card" aria-labelledby="runtime-errors-heading">
-      <SectionHeading id="runtime-errors-heading" title={t('Current diagnostics')} description={t('The latest snapshot is read-only. Use Validate in the page header for profile diagnostics.')} />
+      <SectionHeading id="runtime-errors-heading" title={t('Current diagnostics')} description={t('Errors and warnings from the latest response. Profile issues are listed at the top of the section they belong to.')} />
       {snapshot?.errors.length ? <div className="settings-error-list" role="status">{snapshot.errors.map((error, index) => <article key={`${error.type}-${index}`}><div><strong>{error.type}</strong>{error.status ? <span>HTTP {formatNumber(error.status)}</span> : null}</div><p>{error.message}</p>{error.suggestion ? <small>{error.suggestion}</small> : null}</article>)}</div> : <p className="settings-empty">{t('No runtime errors in the current session.')}</p>}
     </section>
   </div>;
@@ -1841,6 +1845,16 @@ function uniqueId(values: ReadonlySet<string>, preferred: string): string { if (
 
 function SectionHeading({ id, title, description }: { id: string; title: string; description: string }): React.JSX.Element {
   return <div className="settings-card-heading"><div><h2 id={id}>{title}</h2><p className="sr-only">{description}</p></div></div>;
+}
+
+/** The Profile issues a section can fix, listed where the fix is made. */
+function SectionIssues({ issues }: { issues: readonly LocatedIssue[] }): React.JSX.Element | null {
+  if (!issues.length) return null;
+  const errors = issues.filter((issue) => issue.severity === 'error').length;
+  return <div className={`settings-callout ${errors ? 'settings-callout-error' : 'settings-callout-warning'} settings-section-issues`} role="note">
+    <strong>{errors ? t(errors === 1 ? '{count} error to fix in this section' : '{count} errors to fix in this section', { count: formatNumber(errors) }) : t(issues.length === 1 ? '{count} warning in this section' : '{count} warnings in this section', { count: formatNumber(issues.length) })}</strong>
+    <ProfileIssueList issues={issues} hideSection />
+  </div>;
 }
 
 /** What a setting falls back to when the Profile leaves it out, offered as a reset while the Profile says otherwise. */

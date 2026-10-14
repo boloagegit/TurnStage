@@ -4,6 +4,8 @@ import { ProductIcon } from './Icon';
 import { componentNames, chatComponentVisible } from './configEditors';
 import { formatNumber, t } from './i18n';
 import { resolveMessageActions } from './uiConfig';
+import { ProfileIssueList } from './ProfileIssueList';
+import { issueSection, type LocatedIssue } from './profileIssueLocation';
 
 /** Conversation requests time out after this long when the Profile does not set timeoutMs. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
@@ -112,10 +114,10 @@ export function SettingsOverview<Section extends string>({ sections, profile, sn
   sections: ReadonlyArray<{ id: Section; label: string }>;
   profile: TurnStageProfile;
   snapshot?: SessionSnapshot;
-  diagnostics: ReadonlyArray<{ severity: 'error' | 'warning'; message: string }>;
+  diagnostics: readonly LocatedIssue[];
   host: 'vscode' | 'web';
   onOpen: (section: Section) => void;
-  /** Jump to the first issue in the Profile text; only VS Code can place the cursor there. */
+  /** Jump to the first issue: its place in the Profile text in VS Code, its settings section in the browser. */
   onShowFirstIssue?: () => void;
 }): React.JSX.Element {
   const overview = settingsSectionOverview(profile, snapshot, host);
@@ -128,10 +130,7 @@ export function SettingsOverview<Section extends string>({ sections, profile, sn
         <span>{diagnosticsCount ? t(diagnosticsCount === 1 ? '{count} Profile issue' : '{count} Profile issues', { count: formatNumber(diagnosticsCount) }) : t('No Profile issues')}</span>
         {diagnosticsCount > 0 && onShowFirstIssue && <button type="button" className="settings-inline-action" onClick={onShowFirstIssue}>{t('Show first issue')}</button>}
       </p>
-      {diagnosticsCount > 0 && <ul className="settings-health__issues">
-        {diagnostics.slice(0, 3).map((issue, index) => <li key={`${index}-${issue.message}`}>{issue.message}</li>)}
-        {diagnosticsCount > 3 && <li>{t('{count} more', { count: formatNumber(diagnosticsCount - 3) })}</li>}
-      </ul>}
+      {diagnosticsCount > 0 && <ProfileIssueList className="settings-health__issues" issues={diagnostics} limit={3} onGoTo={(section) => { if (sections.some((item) => item.id === section)) onOpen(section as string as Section); }} />}
       <p className={`settings-health__row is-${health.tone}`}>
         <ProductIcon name={health.tone === 'warning' ? 'warning' : health.tone === 'ok' ? 'check' : 'info'} />
         <span>{health.text}</span>
@@ -141,11 +140,14 @@ export function SettingsOverview<Section extends string>({ sections, profile, sn
       <ul className="settings-overview__list">
         {sections.map((section) => {
           const item = overview[section.id];
+          const issues = diagnostics.filter((issue) => issueSection(issue.path) === section.id);
+          const errors = issues.filter((issue) => issue.severity === 'error').length;
           return <li key={section.id}>
             <button type="button" data-settings-section={section.id} onClick={() => onOpen(section.id)}>
               <span className="settings-overview__text">
                 <strong>{t(section.label)}</strong>
                 <span>{item?.summary}</span>
+                {issues.length > 0 && <span className="settings-overview__attention is-issue"><ProductIcon name="warning" />{errors ? t(errors === 1 ? '{count} error to fix' : '{count} errors to fix', { count: formatNumber(errors) }) : t(issues.length === 1 ? '{count} warning' : '{count} warnings', { count: formatNumber(issues.length) })}</span>}
                 {item?.attention && <span className="settings-overview__attention"><ProductIcon name="warning" />{item.attention}</span>}
               </span>
               <ProductIcon name="chevron-right" />
