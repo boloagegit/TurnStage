@@ -130,7 +130,7 @@ export function SettingsOverview<Section extends string>({ sections, profile, sn
         <span>{diagnosticsCount ? t(diagnosticsCount === 1 ? '{count} Profile issue' : '{count} Profile issues', { count: formatNumber(diagnosticsCount) }) : t('No Profile issues')}</span>
         {diagnosticsCount > 0 && onShowFirstIssue && <button type="button" className="settings-inline-action" onClick={onShowFirstIssue}>{t('Show first issue')}</button>}
       </p>
-      {diagnosticsCount > 0 && <ProfileIssueList className="settings-health__issues" issues={diagnostics} limit={3} onGoTo={(section) => { if (sections.some((item) => item.id === section)) onOpen(section as string as Section); }} />}
+      {diagnosticsCount > 0 && <ProfileIssueList className="settings-health__issues" issues={diagnostics} profile={profile} limit={3} onGoTo={(target) => { if (target.kind === 'settings' && sections.some((item) => item.id === target.section)) onOpen(target.section as string as Section); }} />}
       <p className={`settings-health__row is-${health.tone}`}>
         <ProductIcon name={health.tone === 'warning' ? 'warning' : health.tone === 'ok' ? 'check' : 'info'} />
         <span>{health.text}</span>

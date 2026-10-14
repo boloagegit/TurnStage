@@ -33,6 +33,7 @@ import { errorNotice, OperationNoticeToast, type OperationNotice } from './Opera
 import { useRestoreUnsentDraft } from './unsentDraft';
 import { blocksSession, type ProfileIssueScope } from '../shared/profileIssueScope';
 import { ProfileIssueList } from './ProfileIssueList';
+import type { IssueTarget } from './profileIssueLocation';
 
 declare function acquireVsCodeApi<T = unknown>(): { postMessage(message: unknown): void; getState(): T | undefined; setState(state: T): void };
 export type EventMappingFilter = 'all' | 'matched' | 'unmatched';
@@ -366,8 +367,13 @@ function App(): React.JSX.Element {
     setSelectedMessageId(message?.id);
   };
   const blockingIssues = diagnostics.filter(blocksSession);
-  /** Opens the settings section that edits a Profile value, as the banner's Go to does. */
-  const openSettingsSection = (section: SettingsSectionId) => { setRightPaneMode('configure'); setNarrowView('pane'); setConfigurationSection(section); setConfigurationOverview(false); focusAfterRender(() => document.getElementById(`settings-panel-${section}`)?.focus()); };
+  /** Opens where a Profile issue is fixed, as the banner's Go to does: a settings section or a test pane. */
+  const openIssueTarget = (target: IssueTarget) => {
+    setNarrowView('pane');
+    if (target.kind === 'settings') { setRightPaneMode('configure'); setConfigurationSection(target.section); setConfigurationOverview(false); focusAfterRender(() => document.getElementById(`settings-panel-${target.section}`)?.focus()); }
+    else if (target.pane === 'tests') { setRightPaneMode('tests'); setTestsSection(target.section); focusAfterRender(() => document.getElementById(`automation-${target.section}`)?.focus()); }
+    else { setRightPaneMode('adversarial'); setRedTeamSection(target.section); focusAfterRender(() => document.getElementById(`red-team-${target.section}`)?.focus()); }
+  };
   const testIssues = diagnostics.filter((issue) => issue.severity === 'error' && issue.scope === 'tests');
   if (!profile && diagnostics[0]) return <main className="empty"><h1>TurnStage</h1><p>{diagnostics[0].message}</p><button onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></main>;
   if (!profile) return <AppSkeleton splitPercent={splitPercent} />;
@@ -384,8 +390,8 @@ function App(): React.JSX.Element {
   return <main className="app">
     <a className="skip" href="#main-panel">{t('Skip to content')}</a>
     {snapshot?.trusted === false && <div className="trust-banner" role="status"><strong>{t('Restricted mode.')}</strong> {t('This workspace is not trusted. Network requests are disabled; fixture replay remains available.')}</div>}
-    {blockingIssues.length > 0 ? <div className="validation-banner" role="alert"><p><strong>{t(blockingIssues.length === 1 ? '{count} configuration error.' : '{count} configuration errors.', { count: formatNumber(blockingIssues.length) })}</strong> {t('Requests are blocked until errors are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></p><ProfileIssueList className="validation-banner__issues" issues={blockingIssues} limit={3} disabled={isInteractionLocked(profile, 'configuration.open', active)} onGoTo={openSettingsSection} /></div>
-      : testIssues.length > 0 && <div className="validation-banner validation-banner--tests" role="status"><p><strong>{t(testIssues.length === 1 ? '{count} test case issue.' : '{count} test case issues.', { count: formatNumber(testIssues.length) })}</strong> {t('Chat still works; affected cases cannot run until they are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></p><ProfileIssueList className="validation-banner__issues" issues={testIssues} limit={3} /></div>}
+    {blockingIssues.length > 0 ? <div className="validation-banner" role="alert"><p><strong>{t(blockingIssues.length === 1 ? '{count} configuration error.' : '{count} configuration errors.', { count: formatNumber(blockingIssues.length) })}</strong> {t('Requests are blocked until errors are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></p><ProfileIssueList className="validation-banner__issues" issues={blockingIssues} profile={profile} limit={3} disabled={isInteractionLocked(profile, 'configuration.open', active)} onGoTo={openIssueTarget} canGoTo={() => true} /></div>
+      : testIssues.length > 0 && <div className="validation-banner validation-banner--tests" role="status"><p><strong>{t(testIssues.length === 1 ? '{count} test case issue.' : '{count} test case issues.', { count: formatNumber(testIssues.length) })}</strong> {t('Chat still works; affected cases cannot run until they are fixed.')} <button className="link-button" disabled={isInteractionLocked(profile, 'configuration.open', active)} onClick={() => post({ type: 'profile.openAsText' })}>{t('Open as text')}</button></p><ProfileIssueList className="validation-banner__issues" issues={testIssues} profile={profile} limit={3} disabled={isInteractionLocked(profile, 'configuration.open', active)} onGoTo={openIssueTarget} canGoTo={() => true} /></div>}
     <section id="main-panel" tabIndex={-1} className="panel" aria-label={t('Test')}>
       <OperationNoticeToast notice={notice} onDismiss={dismissNotice} post={post} />
       <TestWorkspace

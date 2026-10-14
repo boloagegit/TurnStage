@@ -12,11 +12,16 @@ export function blocksSession(issue: { severity: 'error' | 'warning'; scope?: Pr
   return issue.severity === 'error' && issue.scope !== 'tests';
 }
 
+/** Paths travel to the Webview, which accepts at most 32 segments of up to 256 characters; longer keys are cut. */
+function boundedPath(path: ReadonlyArray<string | number>): Array<string | number> {
+  return path.slice(0, 32).map((part) => typeof part === 'string' && part.length > 256 ? part.slice(0, 256) : part);
+}
+
 /** The JSON path of the Profile value an issue points at, so the UI can say where it is and open that setting. */
 export function profileIssuePath(root: ReturnType<typeof parseTree>, offset: number): Array<string | number> {
   const node = root ? findNodeAtOffset(root, offset, true) : undefined;
   // A property key resolves to its property node; report the value's path either way.
-  return node ? getNodePath(node.type === 'property' ? node.children?.[1] ?? node : node).slice(0, 32) : [];
+  return node ? getNodePath(node.type === 'property' ? node.children?.[1] ?? node : node) : [];
 }
 
 /**
@@ -27,7 +32,7 @@ export function withIssueScope<T extends { offset: number; path?: Array<string |
   const root = parseTree(text);
   return issues.map((issue) => {
     const scope = profileIssueScope(text, issue.offset);
-    const path = issue.path?.length ? issue.path.slice(0, 32) : profileIssuePath(root, issue.offset);
+    const path = boundedPath(issue.path?.length ? issue.path : profileIssuePath(root, issue.offset));
     return { ...issue, path, ...(scope ? { scope } : {}) };
   });
 }

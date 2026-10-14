@@ -1,17 +1,29 @@
 import React from 'react';
-import { SETTINGS_SECTIONS, type SettingsSectionId } from './SettingsWorkspace';
+import type { TurnStageProfile } from '../shared/types';
+import { SETTINGS_SECTIONS } from './SettingsWorkspace';
 import { formatNumber, t } from './i18n';
-import { issuePathText, issueSection, type LocatedIssue } from './profileIssueLocation';
+import { issuePathText, issueTarget, type IssueTarget, type LocatedIssue } from './profileIssueLocation';
+
+/** The place an issue is fixed, as its tab or section is labelled. */
+export function issueTargetLabel(target: IssueTarget): string {
+  if (target.kind === 'cases') return t(target.pane === 'tests' ? 'General tests' : 'Red Team');
+  return t(SETTINGS_SECTIONS.find((item) => item.id === target.section)!.label);
+}
 
 /**
- * Profile issues as a list that says what is wrong and where: each item names the settings section and the
- * Profile path, with a button that opens that section. `limit` keeps a banner short; the rest are counted.
+ * Profile issues as a list that says what is wrong and where: each item names the settings section or test pane
+ * and the Profile path, with a button that opens it when the caller can. `limit` keeps the list short; the rest
+ * are counted.
  */
-export function ProfileIssueList({ issues, limit = issues.length, onGoTo, hideSection = false, disabled = false, className = '' }: {
+export function ProfileIssueList({ issues, profile, limit = issues.length, onGoTo, canGoTo = (target) => target.kind === 'settings', hideSection = false, disabled = false, className = '' }: {
   issues: readonly LocatedIssue[];
+  /** Tells red-team cases from general test cases. */
+  profile?: TurnStageProfile;
   limit?: number;
-  /** Opens a settings section; leave out where the section cannot fix the issue. */
-  onGoTo?: (section: SettingsSectionId) => void;
+  /** Opens where an issue is fixed. */
+  onGoTo?: (target: IssueTarget) => void;
+  /** Which targets `onGoTo` can open; settings sections by default. Others are named without a button. */
+  canGoTo?: (target: IssueTarget) => boolean;
   /** Inside the section itself, name only the Profile path. */
   hideSection?: boolean;
   disabled?: boolean;
@@ -20,15 +32,15 @@ export function ProfileIssueList({ issues, limit = issues.length, onGoTo, hideSe
   const shown = issues.slice(0, limit);
   return <ul className={`profile-issue-list ${className}`}>
     {shown.map((issue, index) => {
-      const section = issueSection(issue.path);
-      const sectionLabel = t(SETTINGS_SECTIONS.find((item) => item.id === section)!.label);
+      const target = issueTarget(issue.path, profile);
+      const label = issueTargetLabel(target);
       const where = issuePathText(issue.path);
       return <li key={`${index}-${issue.message}`} className={`profile-issue-list__item is-${issue.severity}`}>
         <span className="profile-issue-list__message">{issue.message}</span>
         <span className="profile-issue-list__where">
-          {onGoTo
-            ? <button type="button" className="link-button" disabled={disabled} aria-label={t('Go to {section}: {message}', { section: sectionLabel, message: issue.message })} onClick={() => onGoTo(section)}>{t('Go to {section}', { section: sectionLabel })}</button>
-            : !hideSection && <span>{sectionLabel}</span>}
+          {onGoTo && canGoTo(target)
+            ? <button type="button" className="link-button" disabled={disabled} aria-label={t('Go to {section}: {message}', { section: label, message: issue.message })} onClick={() => onGoTo(target)}>{t('Go to {section}', { section: label })}</button>
+            : !hideSection && <span>{label}</span>}
           {where && <code>{where}</code>}
         </span>
       </li>;

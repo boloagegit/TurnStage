@@ -265,14 +265,14 @@ export function SettingsWorkspace({
       <div className="settings-header-actions" role="group" aria-label={t('Profile configuration actions')}>
         <span className={`profile-edit-status ${profileDirty ? 'is-dirty' : diagnostics.length ? 'has-issues' : ''}`} role="status">{readOnly ? t('Read-only') : profileDirty ? t('Unsaved changes') : diagnostics.length ? t(diagnostics.length === 1 ? '{count} issue' : '{count} issues', { count: formatNumber(diagnostics.length) }) : t('Saved')}</span>
         {/* VS Code places the cursor on the issue in the Profile text; the browser opens the section that fixes it. */}
-        {diagnostics.length > 0 && <IconButton icon="warning" label={t('Show first issue')} type="button" onClick={() => vscodeFeatures ? post({ type: 'profile.openFirstIssue' }) : openSection(issueSection(diagnostics[0]!.path))} />}
+        {diagnostics.length > 0 && <IconButton icon="warning" label={t('Show first issue')} type="button" onClick={() => vscodeFeatures ? post({ type: 'profile.openFirstIssue' }) : openSection(firstIssueSection(diagnostics))} />}
         <IconButton icon="save" label={t('Save Profile')} type="button" disabled={readOnly || !profileDirty} onClick={() => post({ type: 'profile.save' })} />
         <IconButton icon="file-code" label={t(vscodeFeatures ? 'Open JSONC' : 'View JSONC')} type="button" onClick={() => post({ type: 'profile.openAsText' })} />
       </div>
     </header>
 
     <div ref={scrollRef} className="settings-main" id="settings-content" onScroll={(event) => onScrollTopChange?.(event.currentTarget.scrollTop)}>
-      {overview ? <SettingsOverview sections={SETTINGS_SECTIONS} profile={profile} snapshot={snapshot} diagnostics={diagnostics} host={vscodeFeatures ? 'vscode' : 'web'} onOpen={openSection} onShowFirstIssue={vscodeFeatures ? () => post({ type: 'profile.openFirstIssue' }) : () => openSection(issueSection(diagnostics[0]?.path))} /> : <div className="settings-content-layout">
+      {overview ? <SettingsOverview sections={SETTINGS_SECTIONS} profile={profile} snapshot={snapshot} diagnostics={diagnostics} host={vscodeFeatures ? 'vscode' : 'web'} onOpen={openSection} onShowFirstIssue={vscodeFeatures ? () => post({ type: 'profile.openFirstIssue' }) : () => openSection(firstIssueSection(diagnostics))} /> : <div className="settings-content-layout">
         {!embedded && <nav className="settings-section-nav" aria-label={t('Profile configuration sections')}>
           <div className="settings-section-nav-list">
             {SETTINGS_SECTIONS.map((item) => <button key={item.id} type="button" className={active.id === item.id ? 'is-active' : ''} aria-current={active.id === item.id ? 'page' : undefined} onClick={() => onSectionChange(item.id)}>{t(item.label)}</button>)}
@@ -1847,13 +1847,19 @@ function SectionHeading({ id, title, description }: { id: string; title: string;
   return <div className="settings-card-heading"><div><h2 id={id}>{title}</h2><p className="sr-only">{description}</p></div></div>;
 }
 
-/** The Profile issues a section can fix, listed where the fix is made. */
+/** The settings section of the first issue a section can fix; issues fixed in a test pane are skipped. */
+function firstIssueSection(issues: readonly LocatedIssue[]): SettingsSectionId {
+  for (const issue of issues) { const section = issueSection(issue.path); if (section) return section; }
+  return 'general';
+}
+
+/** The Profile issues a section can fix, listed where the fix is made (at most 20, the rest counted). */
 function SectionIssues({ issues }: { issues: readonly LocatedIssue[] }): React.JSX.Element | null {
   if (!issues.length) return null;
   const errors = issues.filter((issue) => issue.severity === 'error').length;
   return <div className={`settings-callout ${errors ? 'settings-callout-error' : 'settings-callout-warning'} settings-section-issues`} role="note">
     <strong>{errors ? t(errors === 1 ? '{count} error to fix in this section' : '{count} errors to fix in this section', { count: formatNumber(errors) }) : t(issues.length === 1 ? '{count} warning in this section' : '{count} warnings in this section', { count: formatNumber(issues.length) })}</strong>
-    <ProfileIssueList issues={issues} hideSection />
+    <ProfileIssueList issues={issues} limit={20} hideSection />
   </div>;
 }
 

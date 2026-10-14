@@ -15,7 +15,7 @@ import { isBlockedLifecycleCommand } from '../../shared/vscodeCommandPolicy';
 import { isControlOptionValue, isControlValue } from '../../shared/controlValue';
 import { isSafeResponseClassStyleProperty, isSafeResponseClassStyleValue, isSafeResponseStyleSelector, MAX_RESPONSE_CLASSES, MAX_RESPONSE_CLASS_PROPERTIES, MAX_RESPONSE_STYLE_RULES, RESPONSE_CLASS_NAME_PATTERN } from '../../shared/responseClassStyles';
 
-export interface ValidationIssue { severity: 'error' | 'warning'; message: string; offset: number; length: number }
+export interface ValidationIssue { severity: 'error' | 'warning'; message: string; offset: number; length: number; /** The Profile value the issue is about, even when it is missing from the text. */ path: Array<string | number> }
 
 const requiredEmitFields: Record<string, string[]> = {
   'conversation.started': ['conversationId'], 'content.text.delta': ['text'], 'content.markdown.delta': ['text'],
@@ -30,7 +30,7 @@ const reportFormats = new Set(['json', 'junit', 'html']);
 
 function issue(tree: Node | undefined, path: (string | number)[], message: string, severity: 'error' | 'warning' = 'error'): ValidationIssue {
   const node = tree ? findNodeAtLocation(tree, path) : undefined;
-  return { severity, message, offset: node?.offset ?? 0, length: node?.length ?? 1 };
+  return { severity, message, offset: node?.offset ?? 0, length: node?.length ?? 1, path };
 }
 
 function duplicates(values: string[]): string[] { return [...new Set(values.filter((value, index) => values.indexOf(value) !== index))]; }
@@ -269,7 +269,7 @@ export class ProfileValidator {
     else if (!/^[a-z0-9][a-z0-9-]*$/.test(profile.id)) out.push(issue(tree, ['id'], localize('Profile id must use lowercase letters, numbers, and hyphens.')));
     if (!profile.name?.trim()) out.push(issue(tree, ['name'], localize('Profile name is required.')));
     if (!profile.conversation?.send) out.push(issue(tree, ['conversation'], localize('Conversation send request is required.')));
-    if (!profile.conversation?.send?.variants?.length) out.push(issue(tree, ['conversation', 'send'], localize('At least one request variant is required.')));
+    if (!profile.conversation?.send?.variants?.length) out.push(issue(tree, ['conversation', 'send', 'variants'], localize('At least one request variant is required.')));
     if (!profile.stream?.mappings?.length) out.push(issue(tree, ['stream'], localize('At least one stream mapping is required.')));
     if (!['sse', 'ndjson', 'json', 'text-stream', 'fixture'].includes(profile.stream.transport)) out.push(issue(tree, ['stream', 'transport'], localize('Unsupported stream transport: {transport}.', { transport: String(profile.stream.transport) })));
     for (const [path, request] of [['conversation.send', profile.conversation.send], ['opening.request', profile.opening?.request], ['conversation.stop.request', profile.conversation.stop?.request], ['conversations.list.request', profile.conversations?.list?.request], ['conversations.history.request', profile.conversations?.history?.request]] as const) {
