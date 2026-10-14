@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.37.1
+
+- In Debug > Network, each request's duration no longer overlaps its bar on the shared time scale. The duration now sits above the bar in both VS Code and Web.
+- No settings, Profile, or data-format changes; no migration is needed.
+
 ## 0.37.0
 
 ### Settings
