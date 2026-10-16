@@ -44,8 +44,8 @@ TurnStage keeps the whole loop in one place:
 | --- | --- |
 | **Describe** | Write one JSONC Profile for the request, controls, and event mapping of an SSE or NDJSON API. |
 | **Explore** | Chat with the backend and inspect each request, header, payload, timing, raw event, normalized event, and error. |
-| **Capture** | Save a conversation as a single- or multi-turn regression case with its evidence. |
-| **Re-run** | Run suites, compare with an accepted baseline, review history, and export a sanitized report. |
+| **Capture** | Save a conversation as a single- or multi-turn regression case, with checks suggested from the reply. |
+| **Re-run** | Run suites, compare with an accepted baseline, review history, and export a report; detailed reports can still hold confidential content. |
 
 ## Highlights
 
@@ -54,9 +54,10 @@ TurnStage keeps the whole loop in one place:
 - **Configuration, not code.** A Profile is a Git-friendly `.turnstage.jsonc` file
   with validation that points at the field to fix. Import an existing call with
   **Create Profile from cURL**; the command is parsed, never executed.
-- **Regression cases that carry their evidence.** Author inline, import JSONC or
-  CSV, or link suite files. Each case shows its latest outcome; open its captured
-  Chat, Network, and Events at any time.
+- **Regression cases with their results.** Author inline, import JSONC or
+  CSV, or link suite files. Each case shows its latest outcome; open a run's
+  retained Chat, Network, and Events from its result for as long as that evidence
+  is kept.
 - **Reproducible red-team checks.** Replay fixed adversarial messages against
   explicit prohibitions on content, URLs, CTAs, tools, or events, with outcomes
   that never turn a timeout or missing evidence into a pass.
@@ -174,8 +175,10 @@ agent testing. People or external tools design the attacks and the cases;
 TurnStage sends them reproducibly, records what happened, evaluates explicit
 observable rules, and keeps the case as a regression test.
 
-It does not call an LLM to judge results, generate attacks on its own, or
-certify that a model is safe. It fails closed: a timeout, an infrastructure
+Pass and fail come from deterministic rules, never from an LLM judge. TurnStage
+does not generate attacks on its own or certify that a model is safe. The
+optional Copilot evidence review can add advisory quality ratings, but they
+cannot change a test outcome. It fails closed: a timeout, an infrastructure
 error, or missing evidence is never reported as a pass.
 
 ## Credentials, trust, and Copilot
@@ -213,11 +216,15 @@ needs none of them. For your own backend you supply its credentials. Copilot is
 optional.
 
 **Is it an LLM evaluation or benchmark framework?** No. It tests observable
-behavior (events, timing, content, links, tools) with deterministic rules. It
-does not score answer quality with a judge model.
+behavior (events, timing, content, links, tools) with deterministic rules, and
+outcomes never come from a judge model. Optional Copilot ratings of answer
+quality are advisory and cannot relabel a result.
 
-**Where does my data go?** To the endpoint in your Profile and nowhere else.
-Evidence stays in VS Code, in the browser origin, or in files you export.
+**Where does my data go?** Requests go to the endpoint in your Profile, and
+TurnStage itself sends no telemetry. Evidence stays in VS Code, in the browser
+origin, or in files you export. If you explicitly invoke the optional Copilot
+features, VS Code and your selected model provider process the bounded prompts
+and data involved; see [Privacy](PRIVACY.md).
 
 **Can I run it in CI or share cases with a team?** Cases are JSONC or CSV files
 that live in Git. The repository-local CLI runs linked cases, can write JUnit
