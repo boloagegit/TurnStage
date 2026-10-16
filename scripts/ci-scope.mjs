@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Decides whether a change needs the full CI run or only documentation housekeeping.
 //
 // CI always reports every required check. When a change touches only the files listed
