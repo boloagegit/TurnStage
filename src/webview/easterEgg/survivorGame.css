@@ -1,0 +1,18 @@
+/* Guardrail Survivor: the arena keeps its 16:10 shape and shrinks to fit the dialog. */
+.case-editor-dialog.survivor-game { width: min(100%, 64em); }
+.survivor-game .case-editor-dialog__body { display: grid; align-content: start; gap: var(--ts-space-2); padding: var(--ts-space-2) var(--ts-space-3) var(--ts-space-3); overflow: auto; }
+.survivor-game__hud { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ts-space-1) var(--ts-space-4); font-size: var(--ts-type-small); font-variant-numeric: tabular-nums; color: var(--vscode-descriptionForeground); }
+.survivor-game__hud strong { color: var(--vscode-editor-foreground); }
+.survivor-game__hud meter { width: 6em; height: 0.8em; vertical-align: middle; }
+.survivor-game__hud button { margin-inline-start: auto; }
+.survivor-game__stage { position: relative; display: grid; min-width: 0; }
+.survivor-game__stage canvas { justify-self: center; width: min(100%, calc((92dvh - 12em) * 1.6)); aspect-ratio: 960 / 600; border: 1px solid var(--vscode-editorWidget-border); touch-action: none; cursor: crosshair; }
+.survivor-game__stage canvas:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.survivor-game__panel { position: absolute; inset: 50% auto auto 50%; display: grid; gap: var(--ts-space-2); width: min(26em, calc(100% - 2 * var(--ts-space-3))); padding: var(--ts-space-3); transform: translate(-50%, -50%); border: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); box-shadow: 0 8px 32px var(--vscode-widget-shadow, rgba(0, 0, 0, .45)); text-align: center; }
+.survivor-game__panel p { margin: 0; }
+.survivor-game__panel > button:not(.primary) { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--ts-space-2); width: 100%; padding: var(--ts-space-2); text-align: start; }
+.survivor-game__panel > button span { display: grid; gap: 2px; }
+.survivor-game__panel > button small { color: var(--vscode-descriptionForeground); }
+.survivor-game__panel kbd { min-width: 1.6em; padding: 1px 4px; border: 1px solid var(--vscode-editorWidget-border); border-radius: 3px; text-align: center; font-family: var(--vscode-editor-font-family); }
+.survivor-game__help { margin: 0; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); }
+@media (forced-colors: active) { .survivor-game__panel, .survivor-game__stage canvas { border-color: CanvasText; } }

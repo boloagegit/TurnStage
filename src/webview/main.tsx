@@ -34,6 +34,8 @@ import { useRestoreUnsentDraft } from './unsentDraft';
 import { blocksSession, type ProfileIssueScope } from '../shared/profileIssueScope';
 import { ProfileIssueList } from './ProfileIssueList';
 import type { IssueTarget } from './profileIssueLocation';
+import { useKonamiCode } from './easterEgg/konami';
+import { SurvivorGame } from './easterEgg/SurvivorGame';
 
 declare function acquireVsCodeApi<T = unknown>(): { postMessage(message: unknown): void; getState(): T | undefined; setState(state: T): void };
 export type EventMappingFilter = 'all' | 'matched' | 'unmatched';
@@ -158,6 +160,10 @@ function App(): React.JSX.Element {
   const [connectionResult, setConnectionResult] = useState<ConnectionDoctorSummary>();
   const [conversations, setConversations] = useState<ConversationDirectory>();
   const [profile, setProfile] = useState<TurnStageProfile>(); const [snapshot, setSnapshot] = useState<SessionSnapshot>(); const [runs, setRuns] = useState<LocalRunSummary[]>([]); const [requestPreview, setRequestPreview] = useState<unknown>(); const [networkEntries, setNetworkEntries] = useState<NetworkExchange[]>([]); const [diagnostics, setDiagnostics] = useState<Array<{ severity: 'error' | 'warning'; message: string; offset: number; length: number ; scope?: ProfileIssueScope; path?: Array<string | number> }>>([]); const [profileDirty, setProfileDirty] = useState(false); const [profileReadOnly, setProfileReadOnly] = useState(false); const [environmentIds, setEnvironmentIds] = useState<string[]>([]); const [hostKind, setHostKind] = useState<'vscode' | 'web'>('vscode'); const [notice, setNotice] = useState<OperationNotice>(''); const [mappingTestResult, setMappingTestResult] = useState<MappingTestResult>(); const [remoteName, setRemoteName] = useState<string>(); const [, setLocaleVersion] = useState(0);
+  const [gameOpen, setGameOpen] = useState(false);
+  const openGame = useCallback(() => setGameOpen(true), []);
+  // Easter egg: ↑↑↓↓←→←→BA outside a text field opens a small game in either host.
+  useKonamiCode(openGame, !gameOpen);
   useEffect(() => { setSelectedTestCases(new Map()); }, [profile?.id]);
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
   const finishCaseEdits = (queue: CaseEditQueue) => {
@@ -437,6 +443,7 @@ function App(): React.JSX.Element {
     </section>
     {addCheckEvent && <AddCheckDialog options={eventCheckOptions(addCheckEvent)} targets={checkTargets(profile, contractCaseCatalog)} readOnly={profileReadOnly} onClose={() => setAddCheckEvent(undefined)} onAdd={addCheck} />}
     <div className="sr-status" role="status" aria-live="polite">{terminalAnnouncement(snapshot?.turnState)}</div>
+    {gameOpen && <SurvivorGame onClose={() => setGameOpen(false)} />}
   </main>;
 }
 
