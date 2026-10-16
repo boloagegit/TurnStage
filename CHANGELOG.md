@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.39.0
+
+- Guardrail Survivor is easier to find. Its guardian robot now peeks out of the empty Network view in Debug: hover it for a hint, or click it five times to open the game, which also works without a keyboard. The first time every case in a test run passes, a one-time notice hints at the secret and offers **Find out**; it never appears again once the game has been opened.
+- No settings, Profile, or data-format changes; no migration is needed.
+
 ## 0.38.0
 
 - A hidden game, Guardrail Survivor, opens when you type ↑↑↓↓←→←→BA anywhere outside a text field, in both VS Code and Web. You play a shield-carrying guardian robot on a circuit-board arena, holding off syringe-wielding prompt-injection ghosts, 429 hornets, clock-shelled timeout snails, and a shimmering hallucination boss every two minutes. Move with the arrow keys, WASD, or by dragging; shots fire on their own, and each level offers a choice of upgrades. P pauses and Esc closes; leaving the window pauses the run.
