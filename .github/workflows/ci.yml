@@ -12,7 +12,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decides whether the jobs below run in full. A documentation-only change lets them
+  # finish immediately while every required check is still reported. See scripts/ci-scope.mjs.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - id: scope
+        env:
+          CI_SCOPE_BASE: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/ci-scope.mjs
+
   verify:
+    needs: changes
+    # Runs even when the scope check fails: only an explicit full=false skips work.
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -20,64 +42,77 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.full != 'false'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: needs.changes.outputs.full != 'false'
         with:
           node-version: 24
           cache: npm
       - run: npm ci
+        if: needs.changes.outputs.full != 'false'
       - run: npm run typecheck
+        if: needs.changes.outputs.full != 'false'
       - run: npm run lint
+        if: needs.changes.outputs.full != 'false'
       - run: npm test
+        if: needs.changes.outputs.full != 'false'
       - run: npm run test:web
+        if: needs.changes.outputs.full != 'false'
       - name: Web profile folder generator tests
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.full != 'false' && runner.os == 'Linux'
         run: python3 -B -m unittest discover -s test -p 'test_*.py'
       - run: npm run compile
+        if: needs.changes.outputs.full != 'false'
       - run: npm run web:build
+        if: needs.changes.outputs.full != 'false'
       - name: Extension Host integration tests
-        if: runner.os != 'Linux'
+        if: needs.changes.outputs.full != 'false' && runner.os != 'Linux'
         run: npm run test:integration
       - name: Extension Host integration tests (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.full != 'false' && runner.os == 'Linux'
         run: xvfb-run -a npm run test:integration
       - name: Minimum VS Code Extension Host integration tests (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.full != 'false' && runner.os == 'Linux'
         env:
           TURNSTAGE_VSCODE_VERSION: 1.106.0
         run: xvfb-run -a npm run test:integration
       - run: npm run package
+        if: needs.changes.outputs.full != 'false'
       - name: Installed VSIX mock integration tests
-        if: runner.os != 'Linux'
+        if: needs.changes.outputs.full != 'false' && runner.os != 'Linux'
         timeout-minutes: 10
         env:
           TURNSTAGE_TEST_VSIX: auto
         run: node test/integration/runTest.mjs
       - name: Installed VSIX mock integration tests (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.full != 'false' && runner.os == 'Linux'
         timeout-minutes: 10
         env:
           TURNSTAGE_TEST_VSIX: auto
         run: xvfb-run -a node test/integration/runTest.mjs
       - run: npm run package:web
+        if: needs.changes.outputs.full != 'false'
       - name: Archive integrity (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.full != 'false' && runner.os == 'Linux'
         run: |
           unzip -t "turnstage-$(node -p "require('./package.json').version").vsix"
           unzip -t "turnstage-web-$(node -p "require('./package.json').version").zip"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.full != 'false' && runner.os == 'Linux'
         with:
           name: turnstage-vsix
           path: '*.vsix'
           retention-days: 14
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.full != 'false' && runner.os == 'Linux'
         with:
           name: turnstage-web
           path: 'turnstage-web-*.zip'
           retention-days: 14
 
   security:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.full != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -102,6 +137,8 @@ jobs:
           done
 
   visual:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.full != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
