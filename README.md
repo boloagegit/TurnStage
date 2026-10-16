@@ -1,13 +1,104 @@
-# TurnStage
+<p align="center">
+  <img src="media/icon.png" alt="TurnStage" width="96" height="96">
+</p>
 
-**Debug the stream. Save the case. Check the next run.**
+<h1 align="center">TurnStage</h1>
 
-TurnStage is a testing workbench for streaming LLM chat and agent APIs.
-A JSONC Profile describes requests, controls, and event mappings. Use the
-same configuration to explore a conversation, inspect its HTTP and stream
-evidence, save a regression case, and compare later runs.
+<p align="center">
+  <strong>Debug the stream. Save the case. Check the next run.</strong>
+</p>
 
-Choose the host that fits your workflow:
+<p align="center">
+  The testing workbench for streaming LLM chat and agent APIs,
+  in VS Code, in the browser, or from the command line.
+</p>
+
+<p align="center">
+  <a href="https://github.com/boloagegit/TurnStage/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/boloagegit/TurnStage/ci.yml?branch=main&label=CI"></a>
+  <a href="https://github.com/boloagegit/TurnStage/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/boloagegit/TurnStage"></a>
+  <img alt="VS Code 1.106 or later" src="https://img.shields.io/badge/VS%20Code-%E2%89%A5%201.106-007acc">
+  <img alt="Public preview" src="https://img.shields.io/badge/status-public%20preview-orange">
+</p>
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=turnstage.turnstage">Install</a> ·
+  <a href="#try-it-in-two-minutes">Try it</a> ·
+  <a href="https://github.com/boloagegit/TurnStage/blob/main/docs/README.md">Docs</a> ·
+  <a href="https://github.com/boloagegit/TurnStage/blob/main/CHANGELOG.md">Changelog</a> ·
+  <a href="https://github.com/boloagegit/TurnStage/blob/main/README.zh-TW.md">繁體中文</a>
+</p>
+
+![A synthetic product demo: chat, Network evidence, a saved regression case, and a red-team result](media/marketplace/turnstage-demo.gif)
+
+## Why TurnStage
+
+A streaming chat or agent backend can look fine in a single `curl` and still
+break in the details users feel: the first token arrives late, an event is
+malformed or missing, a stop request does not stop, a link or tool call shows
+up where it should not. Those details live in the stream, not only in the final
+text, and they are easy to lose between "I saw it once" and "it is fixed".
+
+TurnStage keeps the whole loop in one place:
+
+| Step | What you do |
+| --- | --- |
+| **Describe** | Write one JSONC Profile for the request, controls, and event mapping of an SSE or NDJSON API. |
+| **Explore** | Chat with the backend and inspect each request, header, payload, timing, raw event, normalized event, and error. |
+| **Capture** | Save a conversation as a single- or multi-turn regression case with its evidence. |
+| **Re-run** | Run suites, compare with an accepted baseline, review history, and export a sanitized report. |
+
+## Highlights
+
+- **See every layer.** HTTP request and response, time to first token, total time,
+  raw stream events, normalized events, and errors, side by side with the chat.
+- **Configuration, not code.** A Profile is a Git-friendly `.turnstage.jsonc` file
+  with validation that points at the field to fix. Import an existing call with
+  **Create Profile from cURL**; the command is parsed, never executed.
+- **Regression cases that carry their evidence.** Author inline, import JSONC or
+  CSV, or link suite files. Each case shows its latest outcome; open its captured
+  Chat, Network, and Events at any time.
+- **Reproducible red-team checks.** Replay fixed adversarial messages against
+  explicit prohibitions on content, URLs, CTAs, tools, or events, with outcomes
+  that never turn a timeout or missing evidence into a pass.
+- **Careful with secrets.** No product telemetry and no cloud service. VS Code
+  keeps secrets in SecretStorage, and Restricted Mode blocks network-backed
+  operations.
+- **Three hosts, one workspace.** The VS Code extension, a standalone static Web
+  app, and a repository-local CLI share Profiles and event mappings.
+- **Accessible and localized.** English, Traditional Chinese, Japanese, and Korean;
+  light, dark, and high-contrast themes; keyboard-operable at 200% zoom.
+- **Optional Copilot help.** The `@turnstage` participant can diagnose evidence and
+  propose fixes. Everything else works without it.
+
+## Try it in two minutes
+
+You need Node.js 24 and a browser. No account, API key, or LLM is involved: the
+bundled mock server simulates a streaming backend on your machine.
+
+```sh
+git clone https://github.com/boloagegit/TurnStage.git
+cd TurnStage
+npm ci
+npm run mock-server   # terminal 1: simulated SSE backend on http://127.0.0.1:8787
+npm run web:dev       # terminal 2: TurnStage Web on http://127.0.0.1:18784
+```
+
+Open `http://127.0.0.1:18784`, choose **Basic SSE Chat**, and send a message.
+Then open **Debug** to read the request, the streamed events, and the timing. Use
+the **Mock Scenario** control to try split chunks, a slow stream, malformed
+events, partial errors, HTTP failures, and disconnects, then press **Save as
+test** to keep the conversation as a regression case.
+
+![TurnStage Web showing a chat reply and its Network evidence against the local mock server](media/marketplace/web-quickstart.png)
+
+Prefer VS Code? Install **TurnStage** from the
+[Marketplace](https://marketplace.visualstudio.com/items?itemName=turnstage.turnstage)
+or enter `ext install turnstage.turnstage` in Quick Open, run **TurnStage:
+Initialize Workspace**, and open the starter Profile. The
+[VS Code guide](docs/vscode-user-guide.md) covers trust, secrets, conversation
+history, and the full workflow.
+
+## Choose your host
 
 | Host | Use it for | Start here |
 | --- | --- | --- |
@@ -16,16 +107,22 @@ Choose the host that fits your workflow:
 | Repository-local CLI | Run linked cases against your backend and verify exported provenance | [CLI and test reference](docs/automated-testing.md#running-and-copilot) |
 
 The Web app is a separate static build and does not load the VSIX. Web data
-belongs to the browser origin; extension data belongs to VS Code. The
-extension supports desktop and remote Extension Hosts, not `vscode.dev`.
+belongs to the browser origin; extension data belongs to VS Code. The extension
+supports desktop and remote Extension Hosts, not `vscode.dev`.
+
+To build the Web app as a ZIP for your own server, run `npm run package:web`,
+extract `turnstage-web-<version>.zip`, and serve the directory over HTTP or
+HTTPS. No Node.js or VS Code is needed to serve it. See
+[Web deployment](docs/web-deployment.md) for local preview, the API proxy, CORS,
+and deployment-owned Profiles.
 
 ## Explore and inspect
 
 Chat sits beside **Debug**, **General tests**, **Red Team**, and **Configure**.
 Inspect a response's request, headers, payload, timing, raw events, normalized
 events, and errors. The **Conversations** drawer switches, searches, and deletes
-saved conversations. Profiles can list server conversations, load their
-history, and compare it with the local reply after each turn.
+saved conversations. Profiles can list server conversations, load their history,
+and compare it with the local reply after each turn.
 
 At workspace widths of 1,024px or less, **Chat** becomes the first tab in both
 VS Code and Web. Switching keeps drafts, scroll position, and streaming state.
@@ -67,38 +164,19 @@ does not establish resistance.
 
 ![Synthetic red-team results and evidence](media/marketplace/red-team-evidence.png)
 
-All screenshots above use synthetic local fixtures. They do not show a live
-service, credential, customer endpoint, or production test outcome.
+All screenshots and the demo use synthetic local fixtures. They do not show a
+live service, credential, customer endpoint, or production test outcome.
 
-## Get started
+## What TurnStage is, and is not
 
-### VS Code
+TurnStage is the **execution, observation, and evidence layer** for chat and
+agent testing. People or external tools design the attacks and the cases;
+TurnStage sends them reproducibly, records what happened, evaluates explicit
+observable rules, and keeps the case as a regression test.
 
-1. Install **TurnStage**, or enter `ext install turnstage.turnstage` in Quick Open.
-2. Open a workspace, then run **TurnStage: Initialize Workspace**.
-3. Choose a starter Profile and open it from the TurnStage sidebar.
-4. Send a message, inspect **Debug**, then create a case in **General tests**.
-
-For an existing API, **TurnStage: Create Profile from cURL** creates a
-sanitized draft without executing the pasted command. For a local simulation,
-run `npm run mock-server` from this repository and use **Basic SSE Chat**.
-See the [VS Code guide](docs/vscode-user-guide.md) for trust, secrets,
-conversation history, and the full workflow.
-
-### Web
-
-Use a deployed TurnStage Web site, or build a static ZIP from source:
-
-```sh
-npm ci
-npm run package:web
-```
-
-Extract `turnstage-web-<version>.zip` and serve the extracted directory over
-HTTP or HTTPS. No Node.js or VS Code is needed to serve the static app.
-The ZIP includes `serve.py` and `update_profiles.py` for optional Python-based
-serving and preset management. See [Web deployment](docs/web-deployment.md)
-for local preview, the API proxy, CORS, and deployment-owned Profiles.
+It does not call an LLM to judge results, generate attacks on its own, or
+certify that a model is safe. It fails closed: a timeout, an infrastructure
+error, or missing evidence is never reported as a pass.
 
 ## Credentials, trust, and Copilot
 
@@ -122,7 +200,38 @@ cannot relabel deterministic results.
 TurnStage is a public preview. It executes known tests and records observable
 evidence; it does not certify model safety or generate autonomous attacks.
 
+## FAQ
+
+**Which backends does it work with?** HTTP chat and agent APIs that stream
+Server-Sent Events or NDJSON. A Profile describes the request and maps raw
+events to TurnStage's normalized events, so it is not tied to one model
+provider. Starter Profiles cover a basic SSE chat, an agent flow, and a
+synthetic enterprise contract.
+
+**Do I need an API key, an account, or Copilot?** Not to try it: the mock server
+needs none of them. For your own backend you supply its credentials. Copilot is
+optional.
+
+**Is it an LLM evaluation or benchmark framework?** No. It tests observable
+behavior (events, timing, content, links, tools) with deterministic rules. It
+does not score answer quality with a judge model.
+
+**Where does my data go?** To the endpoint in your Profile and nowhere else.
+Evidence stays in VS Code, in the browser origin, or in files you export.
+
+**Can I run it in CI or share cases with a team?** Cases are JSONC or CSV files
+that live in Git. The repository-local CLI runs linked cases, can write JUnit
+reports, and uses exit codes that distinguish failures from indeterminate runs,
+so a CI job can gate on it. See [Automated testing](docs/automated-testing.md#running-and-copilot).
+
+**Is it free?** Yes. TurnStage is MIT-licensed.
+
 ## Develop and contribute
+
+Contributions are welcome: bug reports with sanitized evidence, Profile
+examples against synthetic backends, documentation fixes, and code. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md), and open an issue first for larger changes.
+If TurnStage saves you time, a star helps other people find it.
 
 Use Node.js 24, npm, and VS Code 1.106 or later for extension development.
 
@@ -136,6 +245,5 @@ The [development guide](docs/development.md) covers checks, TLS fixtures,
 visual validation, packaging, repository layout, and generated output.
 
 See the [documentation index](docs/README.md) for user guides and references,
-[CONTRIBUTING.md](CONTRIBUTING.md) for contribution expectations,
 [CHANGELOG.md](CHANGELOG.md) for releases, and [SUPPORT.md](SUPPORT.md) for help.
 TurnStage is licensed under [MIT](LICENSE).
