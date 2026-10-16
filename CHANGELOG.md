@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.38.0
+
+- A hidden game, Guardrail Survivor, opens when you type ↑↑↓↓←→←→BA anywhere outside a text field, in both VS Code and Web. You play a shield-carrying guardian robot on a circuit-board arena, holding off syringe-wielding prompt-injection ghosts, 429 hornets, clock-shelled timeout snails, and a shimmering hallucination boss every two minutes. Move with the arrow keys, WASD, or by dragging; shots fire on their own, and each level offers a choice of upgrades. P pauses and Esc closes; leaving the window pauses the run.
+- The game runs entirely in the editor view: it sends no requests, does not read or change Profiles, tests, or history, and works in Restricted Mode. Only the best time is kept, in that view's local storage. It is drawn at the screen's pixel density, and with reduced motion it drops screen shake and flashing.
+- No settings, Profile, or data-format changes; no migration is needed.
+
 ## 0.37.1
 
 - In Debug > Network, each request's duration no longer overlaps its bar on the shared time scale. The duration now sits above the bar in both VS Code and Web.
