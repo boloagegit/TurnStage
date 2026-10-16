@@ -16,3 +16,12 @@
 .survivor-game__panel kbd { min-width: 1.6em; padding: 1px 4px; border: 1px solid var(--vscode-editorWidget-border); border-radius: 3px; text-align: center; font-family: var(--vscode-editor-font-family); }
 .survivor-game__help { margin: 0; color: var(--vscode-descriptionForeground); font-size: var(--ts-type-caption); }
 @media (forced-colors: active) { .survivor-game__panel, .survivor-game__stage canvas { border-color: CanvasText; } }
+.survivor-game__stage canvas { background: #0e1324; }
+.survivor-game__intro { width: min(34em, calc(100% - 2 * var(--ts-space-3))); max-height: calc(100% - 2 * var(--ts-space-2)); overflow: auto; }
+.survivor-game__title { font-size: 1.25em; letter-spacing: .02em; }
+.survivor-game__roster { display: grid; gap: var(--ts-space-1); margin: 0; padding: 0; list-style: none; text-align: start; }
+.survivor-game__roster li { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: var(--ts-space-2); padding: 2px var(--ts-space-1); border-radius: 4px; background: color-mix(in srgb, #0e1324 70%, transparent); color: #e8eefc; }
+.survivor-game__roster canvas { width: 48px; height: 48px; }
+.survivor-game__roster span { display: grid; gap: 1px; }
+.survivor-game__roster small { color: #aeb9d6; }
+@container (max-width: 30em) { .survivor-game__roster li { grid-template-columns: 36px minmax(0, 1fr); } .survivor-game__roster canvas { width: 36px; height: 36px; } }
