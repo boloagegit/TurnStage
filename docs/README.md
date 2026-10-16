@@ -11,7 +11,7 @@ depend on that host.
 | --- | --- |
 | Understand TurnStage and choose a host | [Project overview](../README.md) · [繁體中文](../README.zh-TW.md) |
 | Install, configure, and use the extension | [VS Code user guide](vscode-user-guide.md) |
-| Use the browser app, import cases, and back up local data | [Web user guide — 繁體中文](web-user-guide.md) |
+| Use the browser app, import cases, and back up local data | [Web user guide](web-user-guide.en.md) · [繁體中文](web-user-guide.md) |
 | Build or deploy Web, configure the API proxy and default Profiles | [Web deployment](web-deployment.md) |
 | Try a synthetic enterprise chat contract | [Enterprise chat example](enterprise-chat-profile-guide.md) |
 

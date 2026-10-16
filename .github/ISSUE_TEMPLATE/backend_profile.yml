@@ -1,0 +1,47 @@
+name: Backend or Profile help
+description: Ask for help describing a streaming backend in a Profile, or share a synthetic example
+title: "[Profile]: "
+labels:
+  - profile
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when a streaming chat or agent API does not map cleanly, or when you want to share a Profile example that runs against the bundled mock server or another synthetic backend.
+
+        Do not include secrets, private endpoints, real prompts, transcripts, headers, payloads, or customer data. Replace every real value with a synthetic one.
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Stream format
+      options:
+        - Server-Sent Events (SSE)
+        - NDJSON
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: Synthetic example of the stream
+      description: Paste a few invented events with the same structure as the real ones (event names, JSON keys, the end-of-stream marker).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: What should TurnStage show or check
+      description: For example the reply text, tool calls, citations, a stop request, or server-side history.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you tried
+      description: Describe the Profile fields or mappings you already tried, and what happened. Run Connection Doctor first when it applies.
+  - type: input
+    id: turnstage-version
+    attributes:
+      label: TurnStage version and host
+      description: For example 0.39.1 in VS Code, or TurnStage Web.
