@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.39.1
+
+- Guardrail Survivor keeps full speed on slow machines: when frames are slow, the run no longer slows down, so the timer and best time match real time.
+- Attackers now throw sparks every time a shot lands, at any frame rate.
+- ↑↑↓↓←→←→BA, the peeking robot, and the all-pass notice no longer open the game on top of a case editor or confirmation dialog.
+- The intro button now reads "Start game" in every language; in Traditional Chinese it previously showed a word that means "start point".
+- No settings, Profile, or data-format changes; no migration is needed.
+
 ## 0.39.0
 
 - Guardrail Survivor is easier to find. Its guardian robot now peeks out of the empty Network view in Debug: hover it for a hint, or click it five times to open the game, which also works without a keyboard. The first time every case in a test run passes, a one-time notice hints at the secret and offers **Find out**; it never appears again once the game has been opened.
