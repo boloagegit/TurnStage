@@ -4,6 +4,19 @@ Keep changes provider-neutral, bounded, and consistent across the VS Code
 extension and standalone Web app. Use VS Code theme tokens in the extension
 and preserve Web's amber theme.
 
+## Ways to help
+
+You do not need to write code to help TurnStage grow:
+
+- Try the [two-minute walkthrough](README.md#try-it-in-two-minutes) and report
+  anything that was unclear or broken.
+- File bugs and requests with sanitized evidence. Never include secrets, private
+  endpoints, prompts, or transcripts.
+- Improve the documentation, including translations of the README and guides.
+- Share Profile or suite examples that run against the bundled mock server or
+  another synthetic backend.
+- Tell other people who test chat or agent APIs about the project.
+
 ## Development setup
 
 Use Node.js 24, npm, and VS Code 1.106 or later for extension work:
