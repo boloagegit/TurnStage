@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { CaseEditorOverlay } from '../CaseEditorOverlay';
 import { formatNumber, t } from '../i18n';
-import { applyUpgrade, ARENA, createSurvivor, ORBIT_RADIUS, stepSurvivor, type EnemyKind, type SurvivorState, type UpgradeId } from './survivorEngine';
+import { advanceSurvivor, applyUpgrade, ARENA, createSurvivor, ORBIT_RADIUS, type EnemyKind, type SurvivorState, type UpgradeId } from './survivorEngine';
 import { buildBackground, buildEnemyFrames, COLORS, drawBolt, drawGuardian, drawHallucination, drawRosterIcon, drawShield, drawToken, ENEMY_COLOR, FRAMES } from './sprites';
 import './survivorGame.css';
 
@@ -42,7 +42,7 @@ function clock(seconds: number): string {
 interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; ring: boolean }
 
 /** Visual effects that the engine does not need to know about: sparks, pops, and screen shake. */
-interface Effects { particles: Particle[]; seen: Map<number, { x: number; y: number; kind: EnemyKind }>; shake: number; lastHp: number; lastLevel: number; facing: 1 | -1 }
+interface Effects { particles: Particle[]; seen: Map<number, { x: number; y: number; kind: EnemyKind; hits: number }>; shake: number; lastHp: number; lastLevel: number; facing: 1 | -1 }
 
 function burst(effects: Effects, x: number, y: number, color: string, count: number, speed: number, reducedMotion: boolean): void {
   const total = reducedMotion ? Math.ceil(count / 3) : count;
@@ -62,8 +62,9 @@ function collectEffects(effects: Effects, state: SurvivorState, reducedMotion: b
   const alive = new Set<number>();
   for (const enemy of state.enemies) {
     alive.add(enemy.id);
-    effects.seen.set(enemy.id, { x: enemy.x, y: enemy.y, kind: enemy.kind });
-    if (enemy.flash > 0.07) burst(effects, enemy.x, enemy.y, COLORS.white, 3, 90, reducedMotion);
+    // Sparks once per hit the engine counted since the last frame, however long that frame was.
+    if (enemy.hits > (effects.seen.get(enemy.id)?.hits ?? 0)) burst(effects, enemy.x, enemy.y, COLORS.white, 3, 90, reducedMotion);
+    effects.seen.set(enemy.id, { x: enemy.x, y: enemy.y, kind: enemy.kind, hits: enemy.hits });
   }
   for (const [id, last] of effects.seen) {
     if (alive.has(id)) continue;
@@ -205,7 +206,8 @@ export function SurvivorGame({ onClose }: { onClose: () => void }): React.JSX.El
     let frame = 0;
     let time = 0;
     const tick = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000);
+      // Anything beyond a quarter second (a stall, a debugger pause) is dropped rather than replayed at once.
+      const dt = Math.min(0.25, Math.max(0, (now - last) / 1000));
       last = now;
       const state = game.current;
       let moving = false;
@@ -224,8 +226,7 @@ export function SurvivorGame({ onClose }: { onClose: () => void }): React.JSX.El
         moving = (x !== 0 || y !== 0) && state.phase === 'playing';
         if (x !== 0) effects.current.facing = x < 0 ? -1 : 1;
         const before = state.phase;
-        stepSurvivor(state, dt, { x, y });
-        collectEffects(effects.current, state, reducedMotion);
+        advanceSurvivor(state, dt, { x, y }, () => collectEffects(effects.current, state, reducedMotion));
         hudClock += dt;
         if (state.phase !== before || hudClock > 0.1) { hudClock = 0; setHud(hudOf(state)); }
         if (state.phase === 'over' && before !== 'over' && state.time > readBest()) { saveBest(state.time); setBest(Math.floor(state.time)); }
@@ -281,7 +282,7 @@ export function SurvivorGame({ onClose }: { onClose: () => void }): React.JSX.El
         <ul className="survivor-game__roster">
           {ROSTER.map((entry) => <li key={entry.kind}><RosterIcon kind={entry.kind} /><span><strong>{t(entry.name)}</strong><small>{t(entry.detail)}</small></span></li>)}
         </ul>
-        <button type="button" className="primary" onClick={start}>{t('Start')}</button>
+        <button type="button" className="primary" onClick={start}>{t('Start game')}</button>
       </div>}
       {hud.phase === 'levelup' && <div className="survivor-game__panel" role="group" aria-label={t('Choose an upgrade')}>
         <strong>{t('Level {level}', { level: formatNumber(hud.level) })}</strong>
