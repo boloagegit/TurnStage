@@ -98,13 +98,13 @@ jobs:
         run: |
           unzip -t "turnstage-$(node -p "require('./package.json').version").vsix"
           unzip -t "turnstage-web-$(node -p "require('./package.json').version").zip"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: needs.changes.outputs.full != 'false' && runner.os == 'Linux'
         with:
           name: turnstage-vsix
           path: '*.vsix'
           retention-days: 14
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: needs.changes.outputs.full != 'false' && runner.os == 'Linux'
         with:
           name: turnstage-web
@@ -162,7 +162,7 @@ jobs:
           node test/visual/webCaseScale.visual.mjs
           node test/visual/webRunControl.visual.mjs
           node test/visual/testReport.visual.mjs
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: turnstage-visual-regression
