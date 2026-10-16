@@ -169,3 +169,5 @@ artifact is distributed after a previous artifact with different contents,
 the version must increase, even for documentation-only changes. Follow
 [AGENTS.md](../AGENTS.md) before building a replacement release artifact.
 Packaging, committing, tagging, pushing, and publishing are separate actions.
+
+<!-- CI scope probe: documentation-only change, safe to close without merging. -->
