@@ -111,7 +111,7 @@ Web 是獨立的靜態建置，不會載入 VSIX。Web 的資料屬於瀏覽器�
 工作區寬度 ≤ 1,024px 時，「聊天」在 VS Code 與 Web 都會成為第一個分頁，切換時會保留草稿、捲動位置與串流狀態。
 VS Code 使用工作台主題色票；Web 保留琥珀色外觀。
 
-![合成對話與 Network 證據](media/marketplace/stream-debug.png)
+![TurnStage Web：合成對話與其 Network 證據](media/marketplace/stream-debug.png)
 
 ## 讓回歸案例連同結果一起保存
 
@@ -121,13 +121,13 @@ VS Code 使用工作台主題色票；Web 保留琥珀色外觀。
 暫停會停止派送新案例，並讓執行中的案例完成；繼續會接續同一次執行；停止會中止進行中的請求，並保留已完成的結果。
 Web 的執行中斷後，需由你明確選擇要執行哪些剩餘案例，TurnStage 不會默默重送結果未知的請求。
 
-![合成的一般測試案例](media/marketplace/test-case-management.png)
+![TurnStage Web：一般測試案例與最新結果](media/marketplace/test-case-management.png)
 
 可開啟結果當時的聊天、Network 與事件，與已接受的基準比較，或匯出報告。詳細的 HTML 報告包含案例結果、時間、
 保留的證據、搜尋、篩選與列印版面。測試套件沒有固定的案例總數上限；裝置記憶體、瀏覽器儲存空間、API 容量、
 單一案例限制與明確設定的預算仍然適用。
 
-![合成的一般測試結果與歷史](media/marketplace/automated-tests.png)
+![TurnStage Web：一次有一個案例失敗的一般測試執行](media/marketplace/automated-tests.png)
 
 ## 重現紅隊回歸
 
@@ -136,9 +136,9 @@ Web 的執行中斷後，需由你明確選擇要執行哪些剩餘案例，Turn
 對內容、URL、CTA、工具或正規化事件的禁止項目進行檢查；可在全新對話中重複執行，以檢視穩定性。
 逾時或證據不全，不代表抵擋成功。
 
-![合成的紅隊結果與證據](media/marketplace/red-team-evidence.png)
+![TurnStage Web：紅隊結果，抵擋成功與攻擊成功](media/marketplace/red-team-evidence.png)
 
-所有截圖與示範都使用合成的本機資料，不代表任何實際服務、憑證、客戶端點或正式環境的測試結果。
+所有截圖與示範都是 TurnStage Web 對著內建 mock server 執行、使用合成資料的畫面；VS Code 擴充功能顯示的是同一個工作區，配色跟隨你的編輯器主題。它們不代表任何實際服務、憑證、客戶端點或正式環境的測試結果。畫面中失敗的案例與「攻擊成功」的結果是刻意設定的，用來呈現失敗時的樣子。
 
 ## TurnStage 是什麼，不是什麼
 

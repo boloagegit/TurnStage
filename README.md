@@ -129,7 +129,7 @@ At workspace widths of 1,024px or less, **Chat** becomes the first tab in both
 VS Code and Web. Switching keeps drafts, scroll position, and streaming state.
 VS Code uses workbench theme tokens; Web keeps its amber theme.
 
-![Synthetic conversation and Network evidence](media/marketplace/stream-debug.png)
+![TurnStage Web: a synthetic conversation beside its Network evidence](media/marketplace/stream-debug.png)
 
 ## Keep regression cases with their results
 
@@ -144,7 +144,7 @@ results. After an interrupted Web run, explicitly choose which remaining
 cases to run. TurnStage does not silently resend a request with an unknown
 outcome.
 
-![Synthetic general-test cases](media/marketplace/test-case-management.png)
+![TurnStage Web: general-test cases with their latest results](media/marketplace/test-case-management.png)
 
 Open a result's captured Chat, Network, and Events, compare a run with an
 accepted baseline, or export a report. Detailed HTML reports include case
@@ -152,7 +152,7 @@ results, timing, retained evidence, search, filtering, and print layouts.
 Large suites have no fixed total-case ceiling; device memory, browser storage,
 API capacity, per-case limits, and explicitly configured budgets still apply.
 
-![Synthetic general-test results and history](media/marketplace/automated-tests.png)
+![TurnStage Web: a general-test run with one failed case](media/marketplace/automated-tests.png)
 
 ## Reproduce red-team regressions
 
@@ -163,10 +163,13 @@ prohibitions on content, URLs, CTAs, tools, or normalized events. Repeat cases
 in fresh conversations to inspect stability. A timeout or incomplete evidence
 does not establish resistance.
 
-![Synthetic red-team results and evidence](media/marketplace/red-team-evidence.png)
+![TurnStage Web: red-team results, Resisted and Attack succeeded](media/marketplace/red-team-evidence.png)
 
-All screenshots and the demo use synthetic local fixtures. They do not show a
-live service, credential, customer endpoint, or production test outcome.
+All screenshots and the demo show TurnStage Web running against the bundled mock
+server with synthetic data; the VS Code extension shows the same workspace in
+your editor's theme. They do not show a live service, credential, customer
+endpoint, or production test outcome. The failed case and the Attack succeeded
+result are set up on purpose to show what failures look like.
 
 ## What TurnStage is, and is not
 
