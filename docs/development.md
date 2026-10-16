@@ -120,6 +120,17 @@ keyboard-only navigation, reduced motion, and trusted/Restricted Mode.
 Narrow layout uses the workspace width (at most 1,024px), including Web's
 sidebar, rather than the browser window width.
 
+### Continuous integration scope
+
+Pull requests and pushes always report every required check, but a change that
+only adds or edits documentation finishes the heavy jobs immediately.
+`scripts/ci-scope.mjs` makes that call from an explicit list: `docs/`,
+`CHANGELOG.md`, `README.zh-TW.md`, the contributor and policy Markdown files at
+the repository root, issue forms, and release-note settings. `README.md` is not
+on the list because tests read it and it ships in the VSIX. Any other file, and
+any deletion or rename, runs the full suite, as does a scope check that fails.
+Add a path to the list only when no test or build step reads it.
+
 ## Repository map
 
 | Path | Responsibility |
