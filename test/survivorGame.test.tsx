@@ -3,7 +3,7 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { advanceKonami, useKonamiCode } from '../src/webview/easterEgg/konami';
-import { applyUpgrade, ARENA, createSurvivor, rollChoices, stepSurvivor } from '../src/webview/easterEgg/survivorEngine';
+import { advanceSurvivor, applyUpgrade, ARENA, createSurvivor, rollChoices, stepSurvivor } from '../src/webview/easterEgg/survivorEngine';
 
 afterEach(cleanup);
 
@@ -30,6 +30,18 @@ describe('Konami code', () => {
     for (const key of CODE) fireEvent.keyDown(document.body, { key });
     expect(onUnlock).toHaveBeenCalledTimes(1);
   });
+
+  it('does not open on top of another dialog', async () => {
+    const { requestEasterEgg } = await import('../src/webview/easterEgg/konami');
+    const onUnlock = vi.fn();
+    function Page() { useKonamiCode(onUnlock); return <section role="dialog" aria-modal="true" aria-label="Edit case" />; }
+    const view = render(<Page />);
+    for (const key of CODE) fireEvent.keyDown(document.body, { key });
+    requestEasterEgg();
+    expect(onUnlock).not.toHaveBeenCalled();
+    view.unmount();
+    localStorage.clear();
+  });
 });
 
 describe('Guardrail Survivor engine', () => {
@@ -45,7 +57,7 @@ describe('Guardrail Survivor engine', () => {
 
   it('shoots the nearest attacker, collects experience, and stops to offer upgrades', () => {
     const state = createSurvivor(7);
-    state.enemies.push({ id: 999, kind: 'injection', x: state.player.x + 80, y: state.player.y, hp: 1, maxHp: 1, radius: 11, speed: 0, damage: 10, xp: 5, orbitCooldown: 0, flash: 0 });
+    state.enemies.push({ id: 999, kind: 'injection', x: state.player.x + 80, y: state.player.y, hp: 1, maxHp: 1, radius: 11, speed: 0, damage: 10, xp: 5, orbitCooldown: 0, flash: 0, hits: 0 });
     state.spawnBudget = -1e9;
     for (let frame = 0; frame < 120 && state.phase === 'playing'; frame += 1) stepSurvivor(state, 1 / 60, { x: 1, y: 0 });
     expect(state.kills).toBe(1);
@@ -59,10 +71,27 @@ describe('Guardrail Survivor engine', () => {
     expect(state.phase).toBe('playing');
   });
 
+  it('counts a slow frame in full and records every hit for the sparks', () => {
+    const slow = createSurvivor(9);
+    const smooth = createSurvivor(9);
+    for (let frame = 0; frame < 20; frame += 1) advanceSurvivor(slow, 0.2, { x: 1, y: 0 });
+    for (let frame = 0; frame < 240; frame += 1) advanceSurvivor(smooth, 1 / 60, { x: 1, y: 0 });
+    expect(slow.time).toBeCloseTo(4, 5);
+    expect(smooth.time).toBeCloseTo(4, 5);
+    const steps: number[] = [];
+    const hit = createSurvivor(4);
+    hit.spawnBudget = -1e9;
+    hit.enemies.push({ id: 500, kind: 'timeout', x: hit.player.x + 60, y: hit.player.y, hp: 1e6, maxHp: 1e6, radius: 17, speed: 0, damage: 0, xp: 0, orbitCooldown: 0, flash: 0, hits: 0 });
+    for (let frame = 0; frame < 60; frame += 1) advanceSurvivor(hit, 1 / 60, { x: 0, y: 0 }, () => steps.push(hit.enemies[0]!.hits));
+    expect(steps.length).toBe(60);
+    expect(hit.enemies[0]!.hits).toBeGreaterThan(0);
+    expect(hit.enemies[0]!.flash).toBeLessThan(0.08);
+  });
+
   it('ends the run when health runs out and never offers maxed upgrades', () => {
     const state = createSurvivor(3);
     state.spawnBudget = -1e9;
-    state.enemies.push({ id: 1, kind: 'timeout', x: state.player.x, y: state.player.y, hp: 999, maxHp: 999, radius: 17, speed: 0, damage: 200, xp: 0, orbitCooldown: 0, flash: 0 });
+    state.enemies.push({ id: 1, kind: 'timeout', x: state.player.x, y: state.player.y, hp: 999, maxHp: 999, radius: 17, speed: 0, damage: 200, xp: 0, orbitCooldown: 0, flash: 0, hits: 0 });
     stepSurvivor(state, 1 / 60, { x: 0, y: 0 });
     expect(state.phase).toBe('over');
     expect(state.player.hp).toBe(0);

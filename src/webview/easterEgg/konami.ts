@@ -36,6 +36,11 @@ function typingTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
 }
 
+/** True while another modal dialog (a case editor, a confirmation) owns the page; the game must not open on top of it. */
+function modalOpen(): boolean {
+  return Boolean(document.querySelector('[aria-modal="true"]'));
+}
+
 /** Feeds one key into the code; returns the new progress, or SEQUENCE.length when the code is complete. */
 export function advanceKonami(progress: number, key: string): number {
   const next = key.toLowerCase();
@@ -45,7 +50,7 @@ export function advanceKonami(progress: number, key: string): number {
   return 0;
 }
 
-/** Calls `onUnlock` when ↑↑↓↓←→←→BA is typed outside a text field. Keys still do whatever they normally do. */
+/** Calls `onUnlock` when ↑↑↓↓←→←→BA is typed outside a text field and no other dialog is open. Keys still do whatever they normally do. */
 export function useKonamiCode(onUnlock: () => void, enabled = true): void {
   useEffect(() => {
     if (!enabled) return;
@@ -53,9 +58,9 @@ export function useKonamiCode(onUnlock: () => void, enabled = true): void {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.repeat || typingTarget(event.target)) { progress = 0; return; }
       progress = advanceKonami(progress, event.key);
-      if (progress === SEQUENCE.length) { progress = 0; markEasterEggFound(); onUnlock(); }
+      if (progress === SEQUENCE.length) { progress = 0; if (modalOpen()) return; markEasterEggFound(); onUnlock(); }
     };
-    const onRequest = () => { markEasterEggFound(); onUnlock(); };
+    const onRequest = () => { if (modalOpen()) return; markEasterEggFound(); onUnlock(); };
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener(OPEN_EVENT, onRequest);
     return () => { window.removeEventListener('keydown', onKeyDown, true); window.removeEventListener(OPEN_EVENT, onRequest); };

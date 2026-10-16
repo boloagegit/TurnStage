@@ -7,6 +7,7 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Start game': '開始遊戲',
   'Psst… ↑↑↓↓←→←→BA': '噓…… ↑↑↓↓←→←→BA',
   'Or click the robot a few times.': '或是多點這個機器人幾下。',
   'Every case passed. Word is the arrow keys are hiding something…': '全部過關！聽說方向鍵裡藏了點東西……',

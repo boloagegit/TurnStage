@@ -9,7 +9,7 @@ export type EnemyKind = 'injection' | 'ratelimit' | 'timeout' | 'hallucination';
 export type UpgradeId = 'rate' | 'damage' | 'multishot' | 'pierce' | 'speed' | 'regen' | 'vitality' | 'orbit';
 export type Phase = 'playing' | 'levelup' | 'over';
 
-export interface Enemy { id: number; kind: EnemyKind; x: number; y: number; hp: number; maxHp: number; radius: number; speed: number; damage: number; xp: number; orbitCooldown: number; flash: number }
+export interface Enemy { id: number; kind: EnemyKind; x: number; y: number; hp: number; maxHp: number; radius: number; speed: number; damage: number; xp: number; orbitCooldown: number; flash: number; hits: number }
 export interface Bullet { x: number; y: number; vx: number; vy: number; damage: number; pierce: number; life: number; hit: number[] }
 export interface Gem { x: number; y: number; value: number }
 
@@ -90,7 +90,7 @@ function spawnEnemy(state: SurvivorState, kind: EnemyKind, at?: { x: number; y: 
         : edge === 2 ? { x: along * ARENA.width, y: ARENA.height + margin }
           : { x: -margin, y: along * ARENA.height };
   }
-  state.enemies.push({ id: state.nextId++, kind, x: position.x, y: position.y, hp, maxHp: hp, radius: stats.radius, speed: stats.speed, damage: stats.damage, xp: stats.xp, orbitCooldown: 0, flash: 0 });
+  state.enemies.push({ id: state.nextId++, kind, x: position.x, y: position.y, hp, maxHp: hp, radius: stats.radius, speed: stats.speed, damage: stats.damage, xp: stats.xp, orbitCooldown: 0, flash: 0, hits: 0 });
 }
 
 function pickSpawnKind(state: SurvivorState): EnemyKind {
@@ -136,6 +136,7 @@ function kill(state: SurvivorState, enemy: Enemy): void {
 function damageEnemy(state: SurvivorState, enemy: Enemy, amount: number): void {
   enemy.hp -= amount;
   enemy.flash = 0.08;
+  enemy.hits += 1;
   if (enemy.hp <= 0) kill(state, enemy);
 }
 
@@ -172,10 +173,26 @@ function levelUp(state: SurvivorState): void {
   if (state.choices.length) state.phase = 'levelup';
 }
 
-/** Advance the run by `dt` seconds. Nothing moves outside the playing phase. */
+/** The longest single engine step, so fast attackers cannot pass through bullets or the player. */
+const MAX_STEP = 0.05;
+
+/**
+ * Advance the run by a whole frame of `elapsed` seconds in steps of at most MAX_STEP, so a slow
+ * frame still counts in full. Stops early when the phase changes (a level-up or the end of the run).
+ * `afterStep` runs after each step, for callers that turn engine changes into effects.
+ */
+export function advanceSurvivor(state: SurvivorState, elapsed: number, input: Input, afterStep?: () => void): void {
+  const phase = state.phase;
+  for (let remaining = Math.max(0, elapsed); remaining > 1e-9 && state.phase === phase; remaining -= MAX_STEP) {
+    stepSurvivor(state, Math.min(MAX_STEP, remaining), input);
+    afterStep?.();
+  }
+}
+
+/** Advance the run by `dt` seconds (at most MAX_STEP). Nothing moves outside the playing phase. */
 export function stepSurvivor(state: SurvivorState, dt: number, input: Input): void {
   if (state.phase !== 'playing') return;
-  const delta = Math.min(Math.max(dt, 0), 0.05);
+  const delta = Math.min(Math.max(dt, 0), MAX_STEP);
   state.time += delta;
   const { player } = state;
 

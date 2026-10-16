@@ -1,0 +1,1398 @@
+import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { extname, resolve, sep } from 'node:path';
+import { chromium } from 'playwright';
+
+const root = resolve(import.meta.dirname, '../..');
+const artifactDirectory = resolve(root, 'artifacts', 'visual-regression');
+const browserCandidates = [
+  process.env.TURNSTAGE_CHROMIUM_EXECUTABLE,
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+].filter(Boolean);
+const executablePath = browserCandidates.find((candidate) => existsSync(candidate));
+const server = createServer(async (request, response) => {
+  try {
+    const pathname = decodeURIComponent(new URL(request.url ?? '/', 'http://127.0.0.1').pathname);
+    const file = resolve(root, `.${pathname}`);
+    if (file !== root && !file.startsWith(`${root}${sep}`)) throw new Error('Path outside visual-test root');
+    response.setHeader('Content-Type', contentType(file));
+    response.end(await readFile(file));
+  } catch {
+    response.statusCode = 404;
+    response.end('Not found');
+  }
+});
+
+await mkdir(artifactDirectory, { recursive: true });
+await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+const address = server.address();
+assert.ok(address && typeof address === 'object');
+const browser = await chromium.launch(executablePath ? { headless: true, executablePath } : { headless: true });
+
+/** General test result rows sit behind "Show checks", which is per-mount view state; open it when it is closed. */
+async function showResultChecks(page) {
+  const toggle = page.locator('#automation-results').getByRole('button', { name: /^Show checks/ });
+  if (await toggle.isVisible()) await toggle.click();
+}
+
+/** Configure opens on the settings overview; open a section from there, or switch with the picker inside a section. */
+async function openSettingsSection(page, section) {
+  const overviewRow = page.locator(`.settings-overview [data-settings-section="${section}"]`);
+  if (await overviewRow.isVisible()) await overviewRow.click();
+  else await page.getByRole('combobox', { name: 'Profile configuration sections' }).selectOption(section);
+  await page.locator(`#settings-panel-${section}`).waitFor();
+}
+
+async function assertInlineInset(child, container, expected, label) {
+  const [childBounds, containerBounds] = await Promise.all([child.boundingBox(), container.boundingBox()]);
+  assert.ok(childBounds && containerBounds, `${label}: both elements must be rendered`);
+  const inset = childBounds.x - containerBounds.x;
+  assert.ok(Math.abs(inset - expected) <= 1, `${label}: expected ${expected}px inline inset, received ${inset}px`);
+}
+
+async function assertAdversarialResultLayout(table, label) {
+  const rows = await table.locator('tbody > tr').evaluateAll((elements) => elements.map((row) => {
+    const cells = [...row.cells];
+    const repeatabilityCell = cells[2];
+    const actionCell = cells[4];
+    const repeatabilityLayout = repeatabilityCell?.querySelector('.adversarial-result-cell-stack');
+    const actionLayout = actionCell?.querySelector('.adversarial-result-actions');
+    const controls = actionLayout ? [...actionLayout.children].map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom };
+    }) : [];
+    const repeatabilityBounds = repeatabilityCell?.getBoundingClientRect();
+    const actionBounds = actionCell?.getBoundingClientRect();
+    const repeatabilityContent = repeatabilityLayout ? [...repeatabilityLayout.querySelectorAll(':scope > span, :scope > small, :scope > details, :scope > details > summary > span')].map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return { left: bounds.left, right: bounds.right };
+    }) : [];
+    return {
+      firstCellDisplay: cells[0] ? getComputedStyle(cells[0]).display : '',
+      repeatabilityCellDisplay: repeatabilityCell ? getComputedStyle(repeatabilityCell).display : '',
+      repeatabilityRight: repeatabilityBounds?.right ?? 0,
+      repeatabilityOverflow: repeatabilityLayout ? getComputedStyle(repeatabilityLayout).overflow : '',
+      repeatabilityContent,
+      actionLeft: actionBounds?.left ?? 0,
+      actionRight: actionBounds?.right ?? 0,
+      actionFits: actionLayout ? actionLayout.scrollWidth <= actionLayout.clientWidth + 1 : false,
+      controls,
+    };
+  }));
+  assert.ok(rows.length > 0, `${label}: result layout check requires rendered rows`);
+  for (const [index, row] of rows.entries()) {
+    assert.equal(row.firstCellDisplay, 'table-cell', `${label}: row ${index + 1} case cell must preserve native table layout`);
+    assert.equal(row.repeatabilityCellDisplay, 'table-cell', `${label}: row ${index + 1} repeatability cell must preserve native table layout`);
+    assert.ok(row.repeatabilityRight <= row.actionLeft + 1, `${label}: row ${index + 1} repeatability and action columns must not overlap`);
+    assert.equal(row.repeatabilityOverflow, 'hidden', `${label}: row ${index + 1} repeatability content must clip at its own column boundary`);
+    for (const [contentIndex, content] of row.repeatabilityContent.entries()) {
+      assert.ok(content.right <= row.repeatabilityRight + 1, `${label}: row ${index + 1} repeatability item ${contentIndex + 1} must stay inside the Repeatability column`);
+    }
+    assert.equal(row.actionFits, true, `${label}: row ${index + 1} action layout must fit inside its table cell`);
+    for (const [controlIndex, control] of row.controls.entries()) {
+      assert.ok(control.left >= row.actionLeft - 1 && control.right <= row.actionRight + 1, `${label}: row ${index + 1} action ${controlIndex + 1} must stay inside the Actions column`);
+    }
+    const timelineControl = row.controls[1];
+    const moreControl = row.controls[2];
+    assert.ok(timelineControl && moreControl, `${label}: row ${index + 1} must expose timeline and more-actions controls`);
+    assert.ok(Math.abs(timelineControl.top - moreControl.top) <= 1, `${label}: row ${index + 1} secondary actions must share one compact row`);
+    const secondaryGap = moreControl.left - timelineControl.right;
+    assert.ok(secondaryGap >= -1 && secondaryGap <= 8, `${label}: row ${index + 1} secondary actions must remain a compact group; received ${secondaryGap}px`);
+  }
+}
+
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const pageErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(error.stack ?? error.message));
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        write: async (items) => {
+          globalThis.__turnstageClipboardItems = items;
+          await Promise.all(items.flatMap((item) => item.types.map((type) => item.getType(type))));
+        }
+      }
+    });
+  });
+  const url = `http://127.0.0.1:${address.port}/test/visual/profileWorkspaceHarness.html`;
+  const waitForProfile = async () => {
+    // Hydrated once the Chat header exists; narrow layouts may be showing the side pane instead of Chat.
+    try { await page.locator('.mobile-chat-preview__app-header strong').waitFor({ state: 'attached' }); }
+    catch (error) { throw new Error(`Profile Webview did not hydrate. Page errors: ${pageErrors.join(' | ') || 'none'}`, { cause: error }); }
+    assert.equal(await page.getByText('Loading profile…').count(), 0, 'The recreated Webview must not remain on Loading profile…');
+    assert.equal((await page.locator('.mobile-chat-preview__app-header strong').textContent())?.trim(), 'Slow SSE Visual Proof');
+    assert.equal(await page.locator('.profile-identity').count(), 0, 'The duplicated full-width Profile identity row must stay removed');
+  };
+
+  await page.goto(url);
+  await waitForProfile();
+  const viewportToolbar = page.locator('.mobile-chat-preview__viewport-toolbar');
+  const viewportSettings = page.locator('.mobile-chat-preview__viewport-settings');
+  assert.equal(await viewportSettings.getAttribute('open'), null, 'Preview size controls must start collapsed to preserve toolbar space');
+  assert.equal(await viewportToolbar.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'Collapsed preview controls must keep every toolbar action visible without horizontal scrolling');
+  await viewportSettings.locator('summary').click();
+  assert.equal(await viewportSettings.getAttribute('open'), '', 'Preview size settings must expand on demand');
+  assert.equal(await viewportSettings.getByRole('combobox', { name: 'Viewport preset' }).count(), 1, 'Expanded preview settings must retain preset selection');
+  await viewportToolbar.screenshot({ path: resolve(artifactDirectory, 'preview-size-settings-dark.png') });
+  await viewportSettings.locator('summary').click();
+  const iconButtons = page.locator('.icon-button');
+  for (let index = 0; index < await iconButtons.count(); index += 1) {
+    const button = iconButtons.nth(index);
+    const accessibleName = await button.getAttribute('aria-label');
+    assert.ok(accessibleName?.trim(), `Icon button ${index + 1} must have an accessible name`);
+    assert.equal(await button.getAttribute('title'), accessibleName, `Icon button ${index + 1} tooltip must match its accessible name`);
+  }
+  const sessionTools = page.getByRole('group', { name: 'Session status and actions' });
+  assert.ok((await sessionTools.innerText()).includes('Ready'), 'Idle session diagnostics must report Ready instead of the previous turn result');
+  assert.equal(await page.locator('.mobile-chat-preview__app-header').getByRole('button').count(), 0, 'Harness actions must stay outside the simulated Chat header');
+  assert.equal(await sessionTools.getByRole('button', { name: 'Restart session' }).locator('.codicon-debug-restart').count(), 1, 'Restart session must use the specific VS Code restart Codicon');
+  assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Debug is the default right-panel mode');
+  assert.equal(await page.getByRole('tab', { name: 'Network' }).getAttribute('aria-selected'), 'true', 'Network is the default Debug view for a new Webview state');
+  assert.equal(await page.getByRole('tab', { name: 'General tests', exact: true }).getAttribute('aria-selected'), 'false', 'Tests remains directly available beside Debug');
+  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'false', 'Red Team remains directly available beside Tests');
+  assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'false', 'Configure remains directly available beside Debug');
+  await page.getByRole('tab', { name: 'Debug' }).focus();
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('tab', { name: 'General tests', exact: true }).getAttribute('aria-selected'), 'true', 'Right Arrow switches to Tests');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'A second Right Arrow switches to Red Team');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'true', 'A third Right Arrow switches to Configure');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Red Team');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.getByRole('tab', { name: 'General tests', exact: true }).getAttribute('aria-selected'), 'true', 'A second Left Arrow switches back to Tests');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Left Arrow switches back to Debug');
+  await page.screenshot({ path: resolve(artifactDirectory, 'wide-dark.png'), fullPage: true });
+  await page.getByRole('tab', { name: 'Network' }).click();
+  const networkList = page.getByRole('listbox', { name: 'Network requests' });
+  assert.equal(await networkList.getByRole('option').count(), 3, 'Network must list opening and each stream attempt');
+  await assertInlineInset(networkList, page.locator('.right-pane-panel'), 0, 'Network data table');
+  assert.equal(await networkList.getByRole('option', { name: /stream.*Attempt 2/i }).getAttribute('aria-selected'), 'true', 'Latest request must be selected by default');
+  assert.ok((await page.getByRole('region', { name: 'Request details' }).innerText()).includes('IdleTimeoutError'), 'Failed request details must expose the timeout class');
+  await page.getByRole('tab', { name: 'Payload' }).click();
+  assert.ok((await page.getByRole('tabpanel', { name: 'Payload' }).innerText()).includes('Why did this time out?'), 'Payload view must expose the redacted request payload');
+  const payloadColors = await page.getByRole('tabpanel', { name: 'Payload' }).evaluate((panel) => ({
+    key: getComputedStyle(panel.querySelector('.json-token--key')).color,
+    string: getComputedStyle(panel.querySelector('.json-token--string')).color,
+    punctuation: getComputedStyle(panel.querySelector('.json-token--punctuation')).color,
+  }));
+  assert.notEqual(payloadColors.key, payloadColors.string, 'Network Payload JSON keys and strings must use distinct syntax colors');
+  assert.notEqual(payloadColors.key, payloadColors.punctuation, 'Network Payload JSON keys and punctuation must remain visually distinct');
+  await page.getByRole('tabpanel', { name: 'Payload' }).screenshot({ path: resolve(artifactDirectory, 'network-payload-json-dark.png') });
+  await page.getByRole('tab', { name: 'Response' }).click();
+  const responsePanel = page.getByRole('tabpanel', { name: 'Response' });
+  assert.ok((await responsePanel.innerText()).includes('Working'), 'Response view must expose the bounded response preview');
+  const responseCodeSurface = responsePanel.locator('.network-response > pre, .network-response .json-view > pre');
+  await assertInlineInset(responseCodeSurface, responsePanel, 0, 'Response code surface');
+  assert.equal(await responseCodeSurface.evaluate((element) => getComputedStyle(element).paddingInlineStart), '16px', 'Response content must use the shared right-pane inline padding');
+  await page.getByRole('tab', { name: 'Timing' }).click();
+  const timingPanel = page.getByRole('tabpanel', { name: 'Timing' });
+  assert.ok((await timingPanel.innerText()).includes('5,000 ms'), 'Timing view must expose the configured idle timeout');
+  await assertInlineInset(timingPanel.locator('.network-properties--timing dt').first(), timingPanel, 16, 'Timing content');
+  const timingTypography = await timingPanel.locator('.network-properties--timing dd').first().evaluate((element) => ({
+    family: getComputedStyle(element).fontFamily,
+    bodyFamily: getComputedStyle(document.body).fontFamily,
+    size: getComputedStyle(element).fontSize,
+    bodySize: getComputedStyle(document.body).fontSize,
+  }));
+  assert.equal(timingTypography.family, timingTypography.bodyFamily, 'Timing values must use the host interface font');
+  assert.equal(timingTypography.size, timingTypography.bodySize, 'Timing values must use the body type level');
+  await page.getByRole('tab', { name: 'Headers' }).click();
+  const networkHeaders = await page.getByRole('tabpanel', { name: 'Headers' }).innerText();
+  assert.ok(!networkHeaders.includes('local-debug-token') && networkHeaders.includes('••••••••'), 'Header view must mask Authorization and response cookies');
+  assert.ok(networkHeaders.includes('4bf92f3577b34da6a3ce929d0e0e4736') && networkHeaders.includes('visual-request-2'), 'Header view must expose bounded trace and request correlation identifiers');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'network-timeout-dark.png') });
+  const latestUserMessage = page.locator('.mobile-chat-preview__message--user').filter({ hasText: 'Verify themed streaming layout' });
+  await latestUserMessage.getByRole('button', { name: 'Inspect request' }).click();
+  assert.equal(await page.getByRole('tab', { name: 'Network' }).getAttribute('aria-selected'), 'true', 'Inspect request must route a user message to Network');
+  await page.waitForFunction(() => document.getElementById('network-row-stream-1')?.getAttribute('aria-selected') === 'true');
+  assert.equal(await page.locator('#network-row-stream-1').getAttribute('aria-selected'), 'true', 'Inspect request must select the request from the same conversation turn');
+  await page.screenshot({ path: resolve(artifactDirectory, 'inspect-request-network-dark.png'), fullPage: true });
+  await page.getByRole('tab', { name: 'Raw Events' }).click();
+  await assertInlineInset(page.getByRole('tree', { name: 'Raw Events' }), page.locator('.right-pane-panel'), 0, 'Raw Events data tree');
+  const screenshotButton = page.getByRole('button', { name: 'Copy chat screenshot' });
+  await page.keyboard.press('Tab');
+  await screenshotButton.focus();
+  assert.equal(await screenshotButton.evaluate((element) => element.matches(':focus-visible')), true, 'Screenshot button must expose keyboard focus');
+  await screenshotButton.click();
+  await page.waitForFunction(() => Array.isArray(globalThis.__turnstageClipboardItems) && globalThis.__turnstageClipboardItems.length === 1);
+  await page.locator('.mobile-chat-preview__status').filter({ hasText: 'Chat screenshot copied to clipboard.' }).waitFor();
+  assert.equal(await page.locator('.mobile-chat-preview__status').textContent(), 'Chat screenshot copied to clipboard.', 'Screenshot action must confirm the clipboard write');
+  const screenshotDataUrl = await page.evaluate(async () => {
+    const clipboardItem = globalThis.__turnstageClipboardItems[0];
+    const blob = await clipboardItem.getType('image/png');
+    return new Promise((resolveRead, rejectRead) => {
+      const reader = new globalThis.FileReader();
+      reader.onload = () => resolveRead(reader.result);
+      reader.onerror = rejectRead;
+      reader.readAsDataURL(blob);
+    });
+  });
+  assert.ok(screenshotDataUrl.startsWith('data:image/png;base64,iVBOR'), 'Screenshot button must copy a PNG payload');
+  const screenshotBytes = Buffer.from(screenshotDataUrl.slice('data:image/png;base64,'.length), 'base64');
+  assert.ok(screenshotBytes.length > 1_000, 'Generated PNG must contain the rendered Chat viewport');
+  const screenshotComposerMargins = await page.evaluate(async (dataUrl) => {
+    const capturedImage = document.createElement('img');
+    await new Promise((resolveLoad, rejectLoad) => {
+      capturedImage.onload = resolveLoad;
+      capturedImage.onerror = rejectLoad;
+      capturedImage.src = dataUrl;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = capturedImage.naturalWidth;
+    canvas.height = capturedImage.naturalHeight;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('Canvas context is unavailable');
+    context.drawImage(capturedImage, 0, 0);
+    const sampleY = Math.max(0, canvas.height - 30);
+    const background = context.getImageData(0, canvas.height - 1, 1, 1).data;
+    const row = context.getImageData(0, sampleY, canvas.width, 1).data;
+    const differsFromBackground = (offset) => Math.abs(row[offset] - background[0]) + Math.abs(row[offset + 1] - background[1]) + Math.abs(row[offset + 2] - background[2]) > 12;
+    let first = -1;
+    let last = -1;
+    for (let x = 0; x < canvas.width; x += 1) {
+      if (!differsFromBackground(x * 4)) continue;
+      if (first < 0) first = x;
+      last = x;
+    }
+    return { left: first, right: last < 0 ? -1 : canvas.width - 1 - last, width: canvas.width };
+  }, screenshotDataUrl);
+  assert.ok(screenshotComposerMargins.left > 0 && screenshotComposerMargins.right > 0, 'Captured composer must be inset from both Chat viewport edges');
+  assert.ok(Math.abs(screenshotComposerMargins.left - screenshotComposerMargins.right) <= 2, `Captured composer must remain centered; observed margins ${JSON.stringify(screenshotComposerMargins)}`);
+  await writeFile(resolve(artifactDirectory, 'chat-viewport-capture-dark.png'), screenshotBytes);
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Save visual baseline' }).click();
+  await page.locator('.mobile-chat-preview__status').filter({ hasText: 'Visual baseline saved.' }).waitFor();
+  const baselineMessage = await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'visual.baseline.save'));
+  assert.ok(baselineMessage?.dataUrl.startsWith('data:image/png;base64,iVBOR'), 'Visual baseline must send a validated PNG capture to the Host');
+  assert.deepEqual(baselineMessage.viewport, { id: 'responsive', width: baselineMessage.viewport.width, height: baselineMessage.viewport.height }, 'Visual baseline must identify the active logical viewport');
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Compare visual baseline' }).click();
+  await page.locator('.mobile-chat-preview__status').filter({ hasText: 'Visual comparison passed (0%).' }).waitFor();
+  await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'visual-regression-toolbar-dark.png') });
+  const openingRegion = page.getByRole('region', { name: 'Opening' });
+  assert.equal(await openingRegion.getByRole('heading', { name: 'Opening' }).count(), 1, 'Opening content must be explicitly labelled');
+  const openingAlignment = await Promise.all([
+    openingRegion.locator('.mobile-chat-preview__opening-avatar'),
+    openingRegion.locator('.mobile-chat-preview__opening-label'),
+  ].map((locator) => locator.boundingBox()));
+  assert.ok(openingAlignment.every(Boolean), 'Opening avatar and label must be rendered');
+  const openingAvatarCenter = openingAlignment[0].y + openingAlignment[0].height / 2;
+  const openingLabelCenter = openingAlignment[1].y + openingAlignment[1].height / 2;
+  assert.ok(Math.abs(openingAvatarCenter - openingLabelCenter) <= 1, `Opening avatar and label must share a vertical center; observed ${openingAvatarCenter} and ${openingLabelCenter}`);
+  const assistantMessage = page.locator('[data-message-id="assistant-1"]');
+  const assistantAvatar = assistantMessage.locator('.mobile-chat-preview__message-avatar');
+  const assistantHeading = assistantMessage.locator('.mobile-chat-preview__message-heading');
+  const assistantAlignment = await Promise.all([assistantAvatar, assistantHeading].map((locator) => locator.boundingBox()));
+  assert.ok(assistantAlignment.every(Boolean), 'Assistant avatar and heading must be rendered');
+  const avatarCenter = assistantAlignment[0].y + assistantAlignment[0].height / 2;
+  const headingCenter = assistantAlignment[1].y + assistantAlignment[1].height / 2;
+  assert.ok(Math.abs(avatarCenter - headingCenter) <= 1, `Assistant avatar and name must share a vertical center; observed ${avatarCenter} and ${headingCenter}`);
+  assert.equal(await assistantMessage.getByRole('group', { name: 'Message actions' }).evaluate((element) => getComputedStyle(element).opacity), '1', 'Message actions must be visible by default');
+  const messageMetricText = await assistantMessage.getByLabel('Message metrics').innerText();
+  assert.ok(messageMetricText.includes('TTFT') && messageMetricText.includes('1,808 ms'), 'Per-message TTFT must be visible');
+  assert.ok(messageMetricText.includes('Total') && messageMetricText.includes('3,612 ms'), 'Per-message total duration must be visible');
+  assert.ok(!messageMetricText.includes('E2E') && !messageMetricText.includes('Tokens'), 'Backend-reported and token metrics must not appear unless a profile opts in');
+  await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'message-actions-metrics-dark.png') });
+  const ctaPage = await browser.newPage({ viewport: { width: 980, height: 780 } });
+  const ctaPageErrors = [];
+  ctaPage.on('pageerror', (error) => ctaPageErrors.push(error.stack ?? error.message));
+  await ctaPage.goto(`${url}?ctas=true&split=58`);
+  try { await ctaPage.getByRole('button', { name: 'Open docs' }).waitFor(); }
+  catch (error) { throw new Error(`CTA preview did not hydrate. Page errors: ${ctaPageErrors.join(' | ') || 'none'}`, { cause: error }); }
+  const ctaControls = ctaPage.getByRole('region', { name: 'Response actions' });
+  assert.equal(await ctaControls.getByText('Actions', { exact: true }).count(), 1, 'Response actions must have a compact visible section label');
+  assert.equal(await ctaControls.getByRole('button', { name: 'Run probe' }).locator('.codicon-beaker').count(), 1, 'Primary CTA must render its configured Codicon');
+  assert.equal(await ctaControls.getByRole('button', { name: 'Copy result' }).locator('.codicon-copy').count(), 1, 'Secondary CTA must render its configured Codicon');
+  assert.equal(await ctaControls.getByRole('button', { name: 'Open docs' }).locator('.codicon-link').count(), 1, 'Link CTA must render its configured Codicon');
+  await ctaControls.getByRole('button', { name: 'Open docs' }).click();
+  const receipt = ctaControls.locator('.mobile-chat-preview__action-receipt');
+  assert.equal(await receipt.getByRole('status').innerText(), 'CTA triggered: Open docs', 'CTA activation must be announced without reading the entire payload');
+  assert.match(await receipt.innerText(), /CTA triggered: Open docs[\s\S]*uri\.open[\s\S]*https:\/\/example\.test\/docs[\s\S]*Preview only/, 'External CTA must show its action and payload without navigation');
+  assert.equal(await ctaPage.evaluate(() => globalThis.__turnstageMessages.some((message) => message.type === 'action.invoke')), false, 'Preview-only CTA must not invoke the Extension Host action');
+  assert.equal(await ctaPage.locator('[data-message-id="assistant-1"] .mobile-chat-preview__message-body').evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'CTA controls and receipt must fit a narrow Chat pane');
+  await ctaPage.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'chat-cta-preview-dark.png') });
+  await receipt.getByRole('button', { name: 'Close CTA details' }).click();
+  assert.equal(await ctaControls.locator('.mobile-chat-preview__action-receipt').count(), 0, 'CTA receipt must be dismissible');
+  await ctaPage.getByRole('tab', { name: 'Configure' }).click();
+  await openSettingsSection(ctaPage, 'stream-mapping');
+  const iconSelect = ctaPage.getByRole('combobox', { name: 'CTA icon' });
+  await iconSelect.waitFor();
+  await iconSelect.scrollIntoViewIfNeeded();
+  assert.equal(await iconSelect.inputValue(), 'link', 'Mapping GUI must expose the configured CTA icon');
+  assert.equal(await ctaPage.getByRole('combobox', { name: 'CTA style' }).inputValue(), 'link', 'Mapping GUI must expose the configured CTA appearance');
+  await ctaPage.locator('.mapping-card').filter({ has: iconSelect }).screenshot({ path: resolve(artifactDirectory, 'mapping-cta-controls-dark.png') });
+  await ctaPage.close();
+  await page.getByRole('tab', { name: 'Configure' }).click();
+  const inspectMessage = assistantMessage.getByRole('button', { name: 'Inspect message' });
+  await inspectMessage.click();
+  assert.equal(await page.getByRole('tab', { name: 'Debug' }).getAttribute('aria-selected'), 'true', 'Inspect message must switch the right pane from Configure to Debug');
+  assert.equal(await page.getByRole('tab', { name: 'Raw Events' }).getAttribute('aria-selected'), 'true', 'Inspect message must open Raw Events');
+  await page.locator('#inspector-event-6').waitFor();
+  assert.equal(await page.locator('#inspector-event-6').getAttribute('aria-selected'), 'true', 'Inspect message must select the last linked raw event');
+  await page.waitForFunction(() => document.activeElement?.id === 'inspector-event-6');
+  assert.equal(await page.locator('#inspector-event-6').evaluate((element) => element === document.activeElement), true, 'Inspect message must focus the selected raw event');
+  assert.ok((await assistantMessage.getByRole('status').innerText()).includes('Opened raw event #6 in Debug.'), 'Inspect message must show visible action feedback');
+  await page.screenshot({ path: resolve(artifactDirectory, 'inspect-message-debug-dark.png'), fullPage: true });
+  await page.getByRole('tab', { name: 'Raw Events' }).click();
+  await page.getByRole('combobox', { name: 'Conversation turn' }).selectOption('all');
+  const eventTree = page.getByRole('tree', { name: 'Raw Events' });
+  const turnRows = eventTree.locator('[role="treeitem"][aria-level="1"]');
+  const eventRows = eventTree.locator('[role="treeitem"][aria-level="2"]');
+  const firstEventRow = eventRows.first();
+  const secondEventRow = eventRows.nth(1);
+  const fourthEventRow = eventRows.nth(3);
+  assert.ok((await firstEventRow.innerText()).includes('Δ—'), 'The first raw event must show that no previous-event gap exists');
+  assert.ok((await secondEventRow.innerText()).includes('Δ601 ms'), 'Raw event rows must show the interval from the complete source stream');
+  assert.ok((await turnRows.nth(0).innerText()).includes('Turn 1') && (await turnRows.nth(1).innerText()).includes('Turn 2'), 'Conversation-wide events must render as explicit turn groups');
+  assert.ok((await turnRows.nth(0).innerText()).includes('Explain the safety boundary') && (await turnRows.nth(1).innerText()).includes('Verify themed streaming layout'), 'Turn groups must expose a bounded user-message excerpt');
+  assert.ok((await firstEventRow.innerText()).includes('#1') && (await fourthEventRow.innerText()).includes('#1'), 'Event children must expose their per-turn sequence');
+  assert.ok((await fourthEventRow.innerText()).includes('Δ—'), 'The first event in each turn must reset its event gap');
+  assert.deepEqual(await page.getByRole('combobox', { name: 'Conversation turn' }).locator('option').allTextContents(), ['All turns', 'Turn 1 (3)', 'Turn 2 (3)'], 'Turn filter must expose every retained conversation turn');
+  await turnRows.nth(0).click();
+  assert.equal(await turnRows.nth(0).getAttribute('aria-expanded'), 'false', 'Turn groups must collapse without removing other conversation turns');
+  assert.equal(await eventTree.locator('[role="treeitem"][aria-level="2"]').count(), 3, 'Collapsing one group must keep the other turn events visible');
+  await turnRows.nth(0).click();
+  assert.equal(await firstEventRow.getAttribute('data-disclosure-state'), 'collapsed', 'Event rows must expose their collapsed state');
+  await firstEventRow.click();
+  await page.getByRole('region', { name: 'Event payload' }).waitFor();
+  assert.equal(await firstEventRow.getAttribute('aria-selected'), 'true', 'Selecting an event must expose its payload');
+  assert.equal(await firstEventRow.locator('.codicon-chevron-down').count(), 1, 'Selected event must use the expanded VS Code Codicon');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'event-payload-dark.png') });
+  await page.getByRole('button', { name: 'Close event payload' }).click();
+  assert.equal(await page.getByRole('region', { name: 'Event payload' }).count(), 0, 'The Event payload inspector must close without leaving the event list');
+  assert.equal(await firstEventRow.getAttribute('aria-selected'), 'false', 'Closing Event payload must clear the selected event state');
+  assert.equal(await firstEventRow.getAttribute('title'), 'View event payload', 'A closed event row must explain that it can reopen the payload');
+  await page.getByRole('tab', { name: 'Normalized' }).click();
+  const normalizedTree = page.getByRole('tree', { name: 'Normalized' });
+  await normalizedTree.locator('[role="treeitem"]').first().waitFor();
+  assert.equal(await normalizedTree.locator('[role="treeitem"][aria-level="2"]').count(), 6, 'Normalized must render mapped data for every fixture event');
+  await assertInlineInset(normalizedTree, page.locator('.right-pane-panel'), 0, 'Normalized data tree');
+  await page.getByRole('tab', { name: 'Metrics' }).click();
+  assert.ok(await page.locator('.metrics > div').count() >= 5, 'Metrics must render populated measurement cells');
+  await assertInlineInset(page.locator('.metrics'), page.locator('.right-pane-panel'), 16, 'Metrics grid');
+  await page.getByRole('tab', { name: 'Errors' }).click();
+  assert.equal(await page.locator('.error-list details').count(), 1, 'Errors must render the fixture runtime error');
+  await assertInlineInset(page.locator('.error-list details').first(), page.locator('.right-pane-panel'), 16, 'Errors list');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'debug-tabs-populated-dark.png') });
+  await page.getByRole('tab', { name: 'Configure' }).click();
+  // Configure opens on the overview: one row per section, no picker until a section is open.
+  await page.getByRole('heading', { level: 1, name: 'All settings' }).waitFor();
+  assert.equal(await page.locator('.settings-overview [data-settings-section]').count(), 8, 'The settings overview lists every section');
+  assert.equal(await page.getByRole('combobox', { name: 'Profile configuration sections' }).count(), 0, 'The overview replaces the section picker');
+  await openSettingsSection(page, 'general');
+  await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
+  assert.equal(await page.locator('.preview-pane').count(), 1, 'Opening Configure must keep the Chat preview mounted');
+  assert.equal(await page.locator('.settings-workspace--embedded:not(.settings-workspace--evaluation)').count(), 1, 'Configure uses the compact right-pane settings layout');
+  assert.equal(await page.getByRole('navigation', { name: 'Profile configuration sections' }).count(), 0, 'An open section must not add another navigation rail');
+  assert.equal(await page.getByRole('combobox', { name: 'Profile configuration sections' }).inputValue(), 'general', 'An open section uses one compact section picker');
+  await assertInlineInset(page.locator('#settings-panel-general .settings-card-heading').first(), page.locator('.right-pane-panel'), 16, 'Configure heading');
+  assert.equal(await page.locator('[data-message-id="assistant-1"][data-selected="true"]').count(), 0, 'Configure must hide Debug message selection styling');
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-dirty', type: 'profile.editState', dirty: true } })));
+  await page.getByText('Unsaved changes', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Save Profile' }).isEnabled(), true, 'Configure must expose pushed dirty state and an explicit save action without polling');
+  await page.screenshot({ path: resolve(artifactDirectory, 'profile-config-right-pane-dark.png'), fullPage: true });
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-saved', type: 'profile.editState', dirty: false } })));
+  await openSettingsSection(page, 'request');
+  await page.getByRole('heading', { level: 1, name: 'Request' }).waitFor();
+  await page.getByRole('heading', { name: 'Connection Doctor' }).waitFor();
+  assert.equal(await page.getByText('Connection needs attention', { exact: true }).count(), 1, 'Connection Doctor must expose a clear fail-closed status');
+  assert.equal(await page.getByText('Terminal not mapped', { exact: true }).count(), 1, 'Connection Doctor must expose the terminal mapping cause without payload content');
+  assert.equal(await page.getByRole('heading', { name: 'Network path' }).count(), 1, 'Connection Doctor must expose the network path assessment');
+  assert.equal(await page.getByText('Likely using an intermediary', { exact: true }).count(), 1, 'Network path must avoid claiming a proxy route as certain');
+  assert.equal(await page.getByRole('button', { name: 'Open diagnostic output' }).count(), 1, 'Connection Doctor must provide direct access to correlated Output evidence');
+  assert.equal(await page.getByRole('button', { name: 'Ask Copilot to diagnose this configuration' }).count(), 1, 'Connection Doctor must expose an explicit Copilot handoff only when attention is required');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-dark.png') });
+  // Certificates live under a closed Advanced disclosure while every value in it is a default.
+  const requestAdvanced = page.locator('#settings-panel-request details.settings-advanced').filter({ hasText: 'Advanced: retries, redirects, and certificates' });
+  assert.equal(await requestAdvanced.getAttribute('open'), null, 'Advanced request settings start closed while they hold defaults');
+  await requestAdvanced.locator('summary').click();
+  const tlsBypass = page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' });
+  await tlsBypass.scrollIntoViewIfNeeded();
+  assert.equal(await tlsBypass.isChecked(), false, 'Invalid-certificate access must default to off');
+  await tlsBypass.click();
+  await page.waitForFunction(() => (document.getElementById('settings-request-allow-invalid-certificates'))?.checked === true);
+  const tlsWarning = page.getByRole('alert').filter({ hasText: 'Certificate verification is disabled for this Profile.' });
+  await tlsWarning.waitFor();
+  assert.ok((await tlsWarning.innerText()).includes('can be intercepted'), 'Unsafe TLS access must keep its interception warning visible');
+  await page.locator('#request-resilience-heading').locator('xpath=ancestor::details[1]').screenshot({ path: resolve(artifactDirectory, 'request-tls-warning-dark.png') });
+  await tlsBypass.click();
+  await page.waitForFunction(() => (document.getElementById('settings-request-allow-invalid-certificates'))?.checked === false);
+  await openSettingsSection(page, 'scenario-tests');
+  await page.getByRole('heading', { level: 1, name: 'Test settings' }).waitFor();
+  assert.equal(await page.locator('.scenario-editor').count(), 0, 'Configure must keep executable conversation contracts in Tests');
+  assert.equal(await page.getByRole('heading', { name: 'CI reports' }).count(), 1, 'Scenario configuration must expose CI report settings');
+  assert.equal(await page.getByRole('heading', { name: 'Visual regression' }).count(), 1, 'Scenario configuration must expose visual baseline settings');
+  assert.equal(await page.getByLabel('HTML').isChecked(), true, 'Scenario reports must expose HTML output');
+  const advisoryReview = page.getByRole('heading', { name: 'Advisory AI review' });
+  await advisoryReview.scrollIntoViewIfNeeded();
+  assert.equal(await page.getByRole('checkbox', { name: 'Use custom quality rubrics' }).isChecked(), true, 'Advisory review must expose an explicit custom-rubric control');
+  assert.equal(await page.getByLabel('Rubric name').inputValue(), 'Support response quality', 'The rubric editor must keep human-readable quality criteria visible');
+  assert.equal(await page.getByLabel('Evaluation guidance').inputValue(), 'The response directly addresses the requested task without unrelated content.', 'Quality criteria must expose concrete evaluation guidance');
+  await page.locator('.quality-rubric-editor').screenshot({ path: resolve(artifactDirectory, 'advisory-quality-rubric-dark.png') });
+  await page.screenshot({ path: resolve(artifactDirectory, 'scenario-contract-settings-dark.png'), fullPage: true });
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).waitFor();
+  const automationNavigation = page.getByRole('tablist', { name: 'Test sections' });
+  assert.deepEqual(await automationNavigation.getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => (tab.getAttribute('aria-label') ?? tab.textContent ?? '').split(':')[0].trim())), ['Cases', 'Results'], 'Tests must place Cases before Results and keep groups out of the primary tabs');
+  // General tests share one content edge with the rest of the pane and open on Cases; Results is one tab away.
+  await assertInlineInset(automationNavigation, page.locator('.right-pane-panel'), 16, 'Tests section tabs');
+  assert.equal(await automationNavigation.getByRole('tab', { name: 'Cases' }).getAttribute('aria-selected'), 'true', 'General tests open on their cases');
+  await automationNavigation.getByRole('tab', { name: 'Results' }).click();
+  await page.getByRole('heading', { name: 'Evidence from this session' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Run all' }).count(), 0, 'Results must remain an inspection surface, not the main execution surface');
+  // Per-check evidence is collapsed behind one disclosure so the run summary stays first.
+  await page.locator('#automation-results').getByRole('button', { name: /^Show checks/ }).click();
+  assert.equal(await page.locator('.automation-result-table tbody > tr').count(), 2, 'Automation results must remain distinct from adversarial outcomes');
+  assert.equal(await page.getByRole('region', { name: 'Review test result' }).count(), 0, 'Tests must not duplicate the result navigator inside the tab');
+  const exportTestResults = page.locator('#automation-results summary[aria-label="Export test results"]');
+  const exportBounds = await exportTestResults.boundingBox();
+  assert.ok(exportBounds && Math.abs(exportBounds.width - exportBounds.height) <= 1, 'The batch export action must remain one compact square icon button');
+  await exportTestResults.click();
+  const automationExportMenu = page.locator('#automation-results .adversarial-export-actions > div');
+  await automationExportMenu.waitFor();
+  assert.equal(await automationExportMenu.getByRole('button').count(), 4, 'The export menu must expose HTML, evidence, JSON, and JUnit formats');
+  assert.equal(await automationExportMenu.evaluate((menu) => {
+    const bounds = menu.getBoundingClientRect();
+    return bounds.left >= 0 && bounds.right <= document.documentElement.clientWidth && bounds.top >= 0 && bounds.bottom <= document.documentElement.clientHeight;
+  }), true, 'The automation export menu must remain fully visible in the viewport');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-export-dark.png') });
+  await exportTestResults.click();
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-dark.png') });
+  await page.locator('.automation-result-table').getByRole('button', { name: 'Open evidence' }).first().click();
+  const automationReview = page.getByRole('region', { name: 'Review test result' });
+  await automationReview.waitFor();
+  const automationResultSelector = automationReview.getByRole('combobox', { name: 'Review test result' });
+  assert.equal(await automationResultSelector.locator('option').count(), 2, 'Automation evidence must expose every available result in the shared top selector');
+  assert.ok((await automationResultSelector.inputValue()).includes('visual-contract-evidence'), 'The first automation result must be selected initially');
+  await automationReview.getByRole('button', { name: 'Next test result' }).click();
+  await page.waitForFunction(() => document.querySelector('.evidence-review select')?.value === 'visual-contract-evidence-2');
+  assert.equal(await automationResultSelector.inputValue(), 'visual-contract-evidence-2', 'Next result must switch the selected automation evidence without paging the table');
+  assert.equal(await automationReview.getByText(/4 checks passed · 0 failed/).count(), 1, 'The shared top review summary must update with the selected test result');
+  const reviewAlignment = await automationReview.evaluate((element) => {
+    const actions = element.querySelector('.evidence-review__heading-actions');
+    if (!actions) return null;
+    const actionBounds = [...actions.children].map((action) => action.getBoundingClientRect());
+    return {
+      actionBottoms: actionBounds.map((bounds) => bounds.bottom),
+      overflowFree: element.scrollWidth <= element.clientWidth + 1,
+    };
+  });
+  assert.ok(reviewAlignment, 'Automation result alignment check requires the shared top actions');
+  assert.ok(reviewAlignment.actionBottoms.every((bottom) => Math.abs(bottom - reviewAlignment.actionBottoms[0]) <= 1), 'Every shared selected-result action must share the same bottom alignment');
+  assert.equal(reviewAlignment.overflowFree, true, 'The shared automation result review must not overflow at the desktop width');
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-evidence-review-dark.png'), fullPage: true });
+  await page.setViewportSize({ width: 520, height: 720 });
+  await automationReview.scrollIntoViewIfNeeded();
+  const narrowAutomationReview = await automationReview.evaluate((element) => {
+    const controls = [...element.querySelectorAll('button, select, summary')].filter((control) => {
+      const style = getComputedStyle(control);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    }).map((control) => {
+      const bounds = control.getBoundingClientRect();
+      return { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom };
+    });
+    const overlaps = controls.some((control, index) => controls.slice(index + 1).some((other) =>
+      control.left < other.right - 1 && control.right > other.left + 1 && control.top < other.bottom - 1 && control.bottom > other.top + 1));
+    return { overflowFree: element.scrollWidth <= element.clientWidth + 1, overlaps };
+  });
+  assert.equal(narrowAutomationReview.overflowFree, true, 'The automation result navigator must not require horizontal scrolling at a narrow width');
+  assert.equal(narrowAutomationReview.overlaps, false, 'Automation result controls must not overlap at a narrow width');
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-results-narrow-dark.png'), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await automationReview.getByRole('button', { name: 'Close evidence review' }).click();
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).waitFor();
+  await automationNavigation.getByRole('tab', { name: /Cases/ }).click();
+  // Cases run one at a time from their row, or together after selecting them; there is no separate Run all button.
+  assert.equal(await page.getByRole('button', { name: 'Run case Slow stream contract' }).count(), 1, 'Scenario execution must live beside the authored contracts');
+  assert.equal(await page.getByRole('checkbox', { name: /^Select all ready cases/ }).count() + await page.getByRole('button', { name: /^Select all ready cases/ }).count(), 1, 'Cases must offer selecting every ready case to run them together');
+  await page.getByText('Linked multi-turn contract', { exact: true }).waitFor();
+  assert.equal(await page.locator('.automation-scenario-row').count(), 2, 'Inline and linked non-adversarial conversation contracts belong in Tests');
+  assert.equal(await page.getByText(/^Linked regression · /).count(), 1, 'A linked contract must identify its source suite without exposing its prompt');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-cases-list-dark.png') });
+  await page.getByRole('button', { name: 'Delete case Linked multi-turn contract from source file' }).click();
+  const linkedContractConfirmation = page.getByRole('alertdialog', { name: 'Delete case Linked multi-turn contract from source file?' });
+  assert.ok((await linkedContractConfirmation.innerText()).includes('regression.tests.jsonc'), 'Linked-case deletion must name the source file');
+  await page.screenshot({ path: resolve(artifactDirectory, 'confirm-delete-linked-contract-dark.png') });
+  await linkedContractConfirmation.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
+  assert.equal(await page.getByRole('dialog', { name: 'Slow stream contract' }).count(), 1, 'Selecting a contract must open one TurnStage-wide editor');
+  await page.locator('.scenario-step').first().waitFor();
+  assert.equal(await page.locator('.scenario-step').count(), 1, 'The contract editor must keep its configured turn compact');
+  assert.equal(await page.locator('.scenario-step > header').count(), 1, 'The contract step must use the shared editor heading surface');
+  assert.equal(await page.locator('.assertion-row').count(), 3, 'The contract editor must render step and final assertions');
+  assert.equal(await page.locator('.scenario-advanced[open]').count(), 1, 'Configured baseline comparison must remain expanded');
+  assert.equal(await page.locator('.scenario-budget__row').count(), 9, 'Every supported performance metric must be configurable');
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-scenarios-dark.png') });
+  await page.getByRole('button', { name: 'Delete assertion' }).first().click();
+  const assertionConfirmation = page.getByRole('alertdialog', { name: /Delete assertion/ });
+  await assertionConfirmation.waitFor();
+  assert.equal(await assertionConfirmation.getByRole('button', { name: 'Cancel' }).evaluate((element) => element === document.activeElement), true, 'Cancel must receive initial focus');
+  assert.equal(await assertionConfirmation.evaluate((element) => Number(getComputedStyle(element.closest('.confirm-action-overlay')).zIndex) > Number(getComputedStyle(document.querySelector('.case-editor-overlay')).zIndex)), true, 'Confirmation must appear above the case editor');
+  await page.screenshot({ path: resolve(artifactDirectory, 'confirm-delete-assertion-dark.png') });
+  await assertionConfirmation.getByRole('button', { name: 'Cancel' }).click();
+  assert.equal(await page.locator('.assertion-row').count(), 3, 'Cancel must preserve all assertions in the draft');
+  await page.getByRole('button', { name: 'Close editor' }).click();
+  await page.getByRole('button', { name: 'Delete scenario Slow stream contract' }).click();
+  const caseConfirmation = page.getByRole('alertdialog', { name: 'Delete scenario Slow stream contract' });
+  await caseConfirmation.waitFor();
+  await page.screenshot({ path: resolve(artifactDirectory, 'confirm-delete-test-case-dark.png') });
+  await caseConfirmation.getByRole('button', { name: 'Cancel' }).click();
+  assert.equal(await page.getByRole('button', { name: 'Slow stream contract', exact: true }).count(), 1, 'Cancel must retain the test case in the list');
+  await page.getByRole('button', { name: 'Linked multi-turn contract', exact: true }).click();
+  await page.getByText('Linked JSONC test case', { exact: true }).waitFor();
+  await page.locator('.linked-case-editor .scenario-editor').waitFor();
+  assert.equal(await page.locator('.scenario-step').count(), 2, 'A linked multi-turn contract must load only after selection and preserve its turns');
+  assert.equal(await page.getByRole('button', { name: 'Save linked case' }).isDisabled(), true, 'An unchanged linked case must not offer an unnecessary write');
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-linked-scenario-dark.png') });
+  await page.getByRole('button', { name: 'Close editor' }).click();
+  await page.getByRole('tab', { name: 'Red Team' }).click();
+  // Red Team shares the unified Cases/Results tabs with General tests. Campaigns has had no entry in the
+  // right pane since 0.28.0 (navigation to it lands on Cases), so its cards are no longer checked here;
+  // Timeline opens in place from a result's "Review timeline" action and is checked below.
+  await page.getByRole('tablist', { name: 'Test sections' }).waitFor();
+  const redTeamNavigation = page.getByRole('tablist', { name: 'Test sections' });
+  assert.deepEqual(await redTeamNavigation.getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.textContent.trim())), ['Cases', 'Results'], 'Red Team must put Cases before Results');
+  await assertInlineInset(redTeamNavigation, page.locator('.right-pane-panel'), 16, 'Red Team section tabs');
+  await redTeamNavigation.screenshot({ path: resolve(artifactDirectory, 'red-team-section-navigation-dark.png') });
+  await redTeamNavigation.getByRole('tab', { name: 'Results' }).click();
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run', type: 'test.operation', operation: { action: 'runAll', state: 'running', progress: { totalCases: 100, completedCases: 24, totalAttempts: 125, completedAttempts: 31, maxConcurrency: 3, activeCaseNames: ['Prompt boundary', 'Tool policy'] } } } })));
+  const activeTestRun = page.locator('.test-operation-status--running');
+  await activeTestRun.waitFor();
+  assert.ok((await activeTestRun.innerText()).includes('24 / 100 cases · 31 / 125 attempts'), 'Run all feedback must expose measurable case and attempt progress');
+  assert.ok((await activeTestRun.innerText()).includes('Concurrency: 2 active · limit 3 / 8'), 'Run all feedback must expose active workers and the configured concurrency limit');
+  assert.equal(await activeTestRun.getByRole('progressbar').getAttribute('value'), '24', 'Run all feedback must use a determinate progress value after planning');
+  assert.equal(await page.getByRole('button', { name: 'Running all…' }).count(), 0, 'Results must stay focused on review and rerun actions');
+  assert.equal(await page.getByRole('button', { name: 'Stop test run' }).locator('.codicon-debug-stop').count(), 1, 'An active Red Team run must expose a distinct stop action');
+  await activeTestRun.screenshot({ path: resolve(artifactDirectory, 'adversarial-run-active-dark.png') });
+  await redTeamNavigation.getByRole('tab', { name: 'Cases' }).click();
+  // While a run is active, starting another one from Cases is blocked; Pause and Stop stay available.
+  assert.equal(await page.getByRole('button', { name: /^Select all ready cases/ }).isDisabled(), true, 'Cases must not start another selection while a run is active');
+  assert.equal(await page.getByRole('button', { name: 'Run case Known two-turn probe' }).isDisabled(), true, 'Single-case runs must wait for the active run');
+  assert.equal(await page.getByRole('button', { name: 'Stop test run' }).count(), 1, 'An active run must stay stoppable from Cases');
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-test-run-complete', type: 'test.operation', operation: { action: 'runAll', state: 'completed' } } })));
+  // Running every case is select-all followed by Run selected.
+  await page.getByRole('button', { name: /^Select all ready cases/ }).click();
+  await page.getByRole('region', { name: 'Selected cases' }).getByRole('button', { name: /^Run selected \(/ }).click();
+  const runSelection = await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'test.runSelection'));
+  assert.ok(runSelection && runSelection.cases.length > 1, 'Cases must run every selected ready case together');
+  await page.getByRole('region', { name: 'Selected cases' }).getByRole('button', { name: 'Clear selection' }).click();
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-cases-dark.png') });
+  await page.getByRole('button', { name: 'Delete case Linked case 1 from source file' }).click();
+  const linkedRedTeamConfirmation = page.getByRole('alertdialog', { name: 'Delete case Linked case 1 from source file?' });
+  assert.ok((await linkedRedTeamConfirmation.innerText()).includes('security-regression.adversarial.csv'), 'Red-team linked-case deletion must name the source file');
+  await page.screenshot({ path: resolve(artifactDirectory, 'confirm-delete-linked-red-team-dark.png') });
+  await linkedRedTeamConfirmation.getByRole('button', { name: 'Cancel' }).click();
+  const linkedCsv = page.getByText('.vscode/turnstage/tests/security-regression.adversarial.csv', { exact: true });
+  await linkedCsv.scrollIntoViewIfNeeded();
+  assert.equal(await linkedCsv.count(), 1, 'Red Team must show a directly linked CSV source without copying it into Profile JSONC');
+  const openLinkedCsv = page.getByRole('button', { name: 'Open linked suite .vscode/turnstage/tests/security-regression.adversarial.csv' });
+  assert.equal(await openLinkedCsv.locator('.codicon-go-to-file').count(), 1, 'Linked suites must expose a distinct open-file Codicon');
+  await openLinkedCsv.click();
+  assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'adversarial.openLinkedSuite'))).path, '.vscode/turnstage/tests/security-regression.adversarial.csv', 'Open linked suite must send the exact linked path');
+  assert.equal(await page.getByRole('button', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' }).locator('.codicon-remove').count(), 1, 'Unlink must use a remove icon rather than the case-delete trash icon');
+  await page.getByRole('button', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' }).click();
+  const unlinkConfirmation = page.getByRole('alertdialog', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' });
+  await unlinkConfirmation.waitFor();
+  assert.ok((await unlinkConfirmation.innerText()).includes('The source file is not deleted.'), 'Unlink confirmation must distinguish unlinking from file deletion');
+  await page.screenshot({ path: resolve(artifactDirectory, 'confirm-unlink-suite-dark.png') });
+  await unlinkConfirmation.getByRole('button', { name: 'Cancel' }).click();
+  assert.equal(await page.getByRole('button', { name: 'Unlink suite .vscode/turnstage/tests/security-regression.adversarial.csv' }).count(), 1, 'Cancel must keep the suite linked');
+  // Linking a suite is one format-neutral action in the case file menu. General tests stay mounted
+  // beside Red Team, so these lookups are scoped to the Red Team workspace.
+  const redTeamWorkspace = page.locator('.red-team-workspace:not(.automation-workspace)');
+  assert.equal(await redTeamWorkspace.locator('.adversarial-case-file-menu button').filter({ hasText: /^Link suite$/ }).count(), 1, 'Bulk source linking must use one format-neutral action');
+  await redTeamWorkspace.locator('.adversarial-linked-suites').screenshot({ path: resolve(artifactDirectory, 'linked-adversarial-csv-dark.png') });
+  await page.getByText('31 of 31 cases', { exact: true }).waitFor();
+  const adversarialCaseList = page.locator('.adversarial-case-list');
+  assert.equal(await adversarialCaseList.locator('.adversarial-case-item').count(), 25, 'The unified catalog must mount only the first page for a large case list');
+  assert.equal(await page.getByText('Page 1 of 2', { exact: true }).count(), 1, 'Large case catalogs must expose their current page');
+  await page.getByRole('button', { name: 'Next page' }).click();
+  assert.equal(await adversarialCaseList.getByText('Linked case 30', { exact: true }).count(), 1, 'The next page must expose later linked cases');
+  await page.locator('.adversarial-case-collection').screenshot({ path: resolve(artifactDirectory, 'adversarial-case-catalog-page-2-dark.png') });
+  await page.getByRole('button', { name: 'Previous page' }).click();
+  await page.getByRole('searchbox', { name: 'Search cases' }).fill('linked-case-30');
+  await page.getByText('1 of 31 cases', { exact: true }).waitFor();
+  assert.equal(await page.getByText('1 of 31 cases', { exact: true }).count(), 1, 'Case search must narrow the full unified catalog');
+  assert.equal(await adversarialCaseList.locator('.adversarial-case-item').count(), 1, 'A filtered catalog must mount only matching rows');
+  await adversarialCaseList.getByRole('button', { name: 'Run case Linked case 30' }).click();
+  const runCaseMessage = await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'test.runCase'));
+  assert.deepEqual({ scenarioId: runCaseMessage.scenarioId, suiteId: runCaseMessage.suiteId }, { scenarioId: 'linked-case-30', suiteId: 'security-regression' }, 'A case row must run the exact linked suite case');
+  await adversarialCaseList.getByRole('button', { name: 'Linked case 30', exact: true }).click();
+  const linkedCaseEditor = page.locator('.linked-case-editor');
+  await linkedCaseEditor.getByLabel('Scenario name').waitFor();
+  assert.equal(await linkedCaseEditor.getByLabel('Scenario ID').isEditable(), false, 'Linked case identity must remain stable in the bounded UI editor');
+  assert.equal(await linkedCaseEditor.locator('.scenario-step').count(), 1, 'Linked case editor must load only the selected case from disk');
+  await linkedCaseEditor.getByLabel('Scenario name').fill('Linked case 30 edited');
+  await linkedCaseEditor.getByLabel('Scenario name').press('Tab');
+  await page.getByRole('button', { name: 'Save linked case' }).waitFor({ state: 'visible' });
+  assert.equal(await page.getByRole('button', { name: 'Save linked case' }).isEnabled(), true, 'Linked case save must become available after a structured edit');
+  await page.getByRole('button', { name: 'Save linked case' }).click();
+  await linkedCaseEditor.getByText('Linked case saved and verified from disk.').waitFor();
+  assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'adversarial.case.save'))).scenario.name, 'Linked case 30 edited', 'Linked editor must save the structured case with its source revision');
+  await linkedCaseEditor.screenshot({ path: resolve(artifactDirectory, 'linked-case-editor-dark.png') });
+  await linkedCaseEditor.getByRole('button', { name: 'Open source' }).click();
+  assert.equal((await page.evaluate(() => globalThis.__turnstageMessages.findLast((message) => message.type === 'adversarial.openLinkedSuite'))).path, '.vscode/turnstage/tests/security-regression.adversarial.csv', 'Linked catalog rows must open their exact source');
+  await page.getByRole('button', { name: 'Close editor' }).click();
+  await page.locator('.adversarial-case-collection').screenshot({ path: resolve(artifactDirectory, 'adversarial-case-catalog-search-dark.png') });
+  await page.getByRole('searchbox', { name: 'Search cases' }).fill('');
+  assert.equal(await page.locator('.adversarial-case-list').count(), 1, 'Red Team must present cases in a compact list');
+  await page.locator('.adversarial-case-item__main').first().click();
+  await page.locator('.adversarial-case-editor').waitFor();
+  assert.equal(await page.locator('.adversarial-case-editor').count(), 1, 'Adversarial configuration must expose its bounded case editor');
+  assert.equal(await page.locator('.scenario-step').count(), 2, 'The expanded adversarial row must expose both configured turns');
+  assert.equal(await page.getByRole('spinbutton', { name: 'Repetitions', exact: true }).inputValue(), '5', 'Adversarial configuration must expose the case repetition count');
+  assert.equal(await page.getByRole('checkbox', { name: 'Stop remaining turns after an attack succeeds' }).isChecked(), true, 'Turn-level stopping must remain distinct from repetition fail-fast');
+  assert.equal(await page.getByRole('checkbox', { name: 'Stop remaining repetitions after an attack succeeds (incomplete sample)' }).isChecked(), false, 'Repetition fail-fast must remain explicit and off unless configured');
+  await page.getByRole('spinbutton', { name: 'Repetitions', exact: true }).scrollIntoViewIfNeeded();
+  const settingsMainScroll = await page.locator('.red-team-workspace:not(.automation-workspace) .settings-main').evaluate((element) => ({ scrollLeft: element.scrollLeft, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }));
+  assert.equal(settingsMainScroll.scrollLeft, 0, `Focusing the case editor must not horizontally shift the settings pane: ${JSON.stringify(settingsMainScroll)}`);
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-repetitions-dark.png') });
+  await page.getByRole('button', { name: 'Close editor' }).click();
+  await redTeamNavigation.getByRole('tab', { name: 'Results' }).click();
+  assert.equal(await page.locator('#adversarial-results-heading').innerText(), 'Evidence from this session', 'Red Team results must open on the compact latest-result list');
+  const adversarialResults = page.locator('.adversarial-result-table:not(.automation-result-table)');
+  assert.equal(await adversarialResults.getByText('Attack succeeded', { exact: true }).count(), 1, 'Latest results must distinguish an attack from resistance');
+  assert.equal(await adversarialResults.getByText('3/5 resisted · 5 attempts', { exact: true }).count(), 1, 'Latest results must expose the repeated-run sample at a glance');
+  assert.equal(await adversarialResults.getByText('Unstable result', { exact: true }).count(), 1, 'Latest results must expose whether repeated outcomes are stable');
+  assert.equal(await adversarialResults.getByRole('button', { name: 'Open evidence' }).count(), 2, 'Every latest result must expose one clear primary evidence action');
+  assert.equal(await adversarialResults.getByRole('button', { name: /Review timeline|Timeline selected/ }).count(), 2, 'Every latest result must keep timeline review as the single secondary action');
+  await adversarialResults.getByLabel('More actions').first().click();
+  assert.equal(await adversarialResults.getByRole('button', { name: 'Diagnose with Copilot' }).count(), 1, 'The opened overflow menu must retain Copilot diagnosis without crowding the result row');
+  assert.equal(await adversarialResults.getByRole('button', { name: 'Chat' }).count(), 1, 'The overflow menu must retain the Chat evidence location when available');
+  assert.equal(await adversarialResults.getByRole('button', { name: 'Events' }).count(), 1, 'The opened overflow menu must retain its available Events location');
+  assert.equal(await adversarialResults.getByRole('button', { name: 'Advisory quality review' }).count(), 1, 'Quality review must remain visibly advisory and separate from formal diagnosis');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'copilot-result-actions-dark.png') });
+  await adversarialResults.getByLabel('More actions').first().click();
+  await page.getByLabel('Export adversarial results', { exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: 'HTML report' }).count(), 1, 'Latest results must expose HTML export in the compact export menu');
+  assert.equal(await page.getByRole('button', { name: 'Evidence Bundle' }).isEnabled(), true, 'Trusted workspaces must expose the sanitized Evidence Bundle export');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-export-menu-dark.png') });
+  await page.getByLabel('Export adversarial results', { exact: true }).click();
+  assert.equal(await page.locator('.debug-pane').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Red Team configuration must not overflow the right pane horizontally');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'red-team-results-tab-dark.png') });
+  await adversarialResults.scrollIntoViewIfNeeded();
+  assert.equal(await adversarialResults.locator('tbody > tr').count(), 2, 'Latest results must render one compact semantic row per result');
+  assert.equal(await adversarialResults.getByRole('columnheader', { name: 'Case' }).count(), 1, 'The result table must label its case column');
+  assert.equal(await adversarialResults.getByRole('columnheader', { name: 'Outcome' }).count(), 1, 'The result table must label its outcome column');
+  assert.equal(await adversarialResults.getByRole('columnheader', { name: 'Repeatability' }).count(), 1, 'The result table must explain repeated-run samples with a named column');
+  await assertAdversarialResultLayout(adversarialResults, 'Dark theme');
+  await adversarialResults.screenshot({ path: resolve(artifactDirectory, 'adversarial-results-dark.png') });
+  await page.evaluate(() => globalThis.dispatchEvent(new globalThis.MessageEvent('message', { data: { protocolVersion: 1, editorInstanceId: 'visual-harness', requestId: 'visual-export', type: 'test.exported', kind: 'report', path: 'turnstage-report.html', artifactId: 'artifact-1' } })));
+  const exportNotice = page.locator('.operation-status').filter({ hasText: 'Test report exported' });
+  await exportNotice.waitFor();
+  assert.equal(await exportNotice.getByRole('button', { name: 'Open' }).count(), 1, 'Export completion must offer a direct open action');
+  assert.equal(await exportNotice.getByRole('button', { name: 'Reveal in file explorer' }).count(), 1, 'Export completion must offer a reveal action');
+  assert.equal(await exportNotice.getByRole('button', { name: 'Copy path' }).count(), 1, 'Export completion must offer a copy-path action');
+  // Notices float as a toast below the pane tabs; they must never cover the tabs themselves.
+  const noticeTop = await exportNotice.evaluate((element) => element.getBoundingClientRect().top);
+  const paneTabsBottom = await page.locator('.right-pane-heading').evaluate((element) => element.getBoundingClientRect().bottom);
+  assert.ok(noticeTop >= paneTabsBottom - 1, `Operation feedback must not cover the pane tabs: notice top ${noticeTop}, tabs bottom ${paneTabsBottom}`);
+  await page.screenshot({ path: resolve(artifactDirectory, 'export-actions-dark.png'), fullPage: true });
+  await exportNotice.getByRole('button', { name: 'Dismiss notification' }).click();
+  const attackResult = adversarialResults.getByRole('row').filter({ hasText: 'Known two-turn probe' });
+  await attackResult.getByRole('button', { name: /Review timeline|Timeline selected/ }).click();
+  const findingTimelineAction = page.getByRole('button', { name: 'Open Forbidden URL observed evidence at 1,840 ms' });
+  await findingTimelineAction.waitFor();
+  assert.equal(await findingTimelineAction.count(), 1, 'Red Team timeline must make the failure point directly navigable');
+  const adversarialTimeline = page.locator('.adversarial-timeline-card');
+  assert.equal(await adversarialTimeline.getByText('Evidence trail', { exact: true }).count(), 1, 'Timeline must identify itself as a chronological evidence trail');
+  assert.equal(await adversarialTimeline.getByText('Decisive evidence', { exact: true }).count(), 1, 'Timeline must call out the event that determined the result');
+  assert.ok((await adversarialTimeline.innerText()).includes('Request') && (await adversarialTimeline.innerText()).includes('Stream') && (await adversarialTimeline.innerText()).includes('Decision'), 'Timeline must group events into recognizable stages');
+  await adversarialTimeline.screenshot({ path: resolve(artifactDirectory, 'adversarial-timeline-dark.png') });
+  await page.setViewportSize({ width: 720, height: 900 });
+  assert.equal(await adversarialTimeline.evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Timeline must not overflow a narrow Red Team pane');
+  const narrowTimelineEntryHeights = await adversarialTimeline.locator('.causal-timeline__entry').evaluateAll((entries) => entries.map((entry) => entry.getBoundingClientRect().height));
+  assert.ok(narrowTimelineEntryHeights.every((height) => height >= 42 && height < 100), `Narrow timeline entries must remain compact and scannable: ${JSON.stringify(narrowTimelineEntryHeights)}`);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await redTeamNavigation.getByRole('tab', { name: 'Results' }).click();
+  await adversarialResults.getByRole('button', { name: 'Open evidence' }).first().click();
+  await page.getByRole('tab', { name: 'Debug' }).waitFor();
+  await page.waitForFunction(() => document.querySelector('#right-pane-debug-tab')?.getAttribute('aria-selected') === 'true');
+  await page.getByRole('heading', { name: 'Attack succeeded: Known two-turn probe' }).waitFor();
+  assert.equal(await page.getByText('3/5 resisted · 5 attempts · Unstable result', { exact: true }).count(), 1, 'Evidence summary must preserve the repeated-run stability context');
+  assert.equal(await page.getByText('Reliability: 60% · Does not meet target · p95 3,612 ms', { exact: true }).count(), 1, 'Evidence summary must expose bounded reliability and p95 context');
+  assert.equal(await page.locator('.profile-identity').count(), 0, 'Evidence arrival must not restore the duplicated Profile row');
+  assert.equal(await page.getByRole('button', { name: 'Open Chat' }).count(), 1, 'Evidence summary must promote the most relevant location');
+  assert.equal(await page.getByRole('heading', { name: 'Causal timeline' }).count(), 0, 'Evidence summary must not duplicate the Red Team causal timeline');
+  assert.equal(await page.getByRole('combobox', { name: 'Test case' }).locator('option').count(), 2, 'Evidence review must keep every latest result directly switchable');
+  assert.equal(await page.getByRole('combobox', { name: 'Test attempt' }).locator('option').count(), 4, 'Evidence review must expose aggregate and bounded repeated attempts');
+  assert.equal(await page.getByRole('combobox', { name: 'Test attempt' }).locator('option').nth(3).getAttribute('disabled'), '', 'Evicted attempt evidence must fail closed as unavailable');
+  await page.locator('.operation-status').waitFor({ state: 'hidden' });
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-summary-dark.png'), fullPage: true });
+  await page.getByRole('combobox', { name: 'Test attempt' }).selectOption('attempt:1');
+  await page.getByRole('heading', { name: 'Resisted: Known two-turn probe' }).waitFor();
+  await page.getByRole('combobox', { name: 'Test case' }).selectOption('visual-evidence-safe');
+  await page.getByRole('heading', { name: 'Resisted: Safe tool boundary' }).waitFor();
+  await page.getByRole('combobox', { name: 'Test case' }).selectOption('visual-evidence');
+  await page.getByRole('heading', { name: 'Attack succeeded: Known two-turn probe' }).waitFor();
+  await page.locator('.operation-status').waitFor({ state: 'hidden' });
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-navigation-dark.png'), fullPage: true });
+  await page.setViewportSize({ width: 720, height: 900 });
+  const compactEvidenceSelects = page.locator('.evidence-review__navigator select');
+  assert.equal(await compactEvidenceSelects.count(), 2, 'Compact Evidence Review must preserve both selectors');
+  for (let index = 0; index < await compactEvidenceSelects.count(); index += 1) {
+    const bounds = await compactEvidenceSelects.nth(index).boundingBox();
+    assert.ok(bounds && bounds.height >= 30, 'Compact Evidence Review selectors must keep an unclipped control height');
+  }
+  assert.equal(await page.locator('.evidence-review').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Compact Evidence Review must not overflow horizontally');
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-navigation-narrow-dark.png'), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: 'Close evidence review' }).click();
+  await page.locator('.evidence-review').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#right-pane-debug-tab').getAttribute('aria-selected'), 'true', 'Closing Evidence Review must preserve the current Debug context');
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-closed-dark.png'), fullPage: true });
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
+  await page.getByRole('tab', { name: /Cases/ }).click();
+  if ((await page.getByRole('button', { name: 'Slow stream contract', exact: true }).getAttribute('aria-expanded')) !== 'true') await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
+  await page.locator('.scenario-advanced').filter({ hasText: 'Compare & performance' }).scrollIntoViewIfNeeded();
+  assert.equal(await page.locator('.scenario-target-grid fieldset').count(), 2, 'Baseline and candidate targets must both render in the GUI');
+  assert.equal(await page.locator('.scenario-budget').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'Performance budgets must not overflow the embedded settings pane');
+  await page.screenshot({ path: resolve(artifactDirectory, 'scenario-comparison-performance-dark.png') });
+  await page.getByRole('button', { name: 'Close editor' }).click();
+  await page.getByRole('tab', { name: 'Configure' }).click();
+  await openSettingsSection(page, 'general');
+  await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
+  const displayName = page.getByLabel('Display name');
+  await displayName.fill('GUI Edited Profile');
+  await displayName.blur();
+  await page.locator('.mobile-chat-preview__app-header strong').filter({ hasText: 'GUI Edited Profile' }).waitFor();
+  assert.deepEqual(await latestProfilePatch(page, 'name'), { path: ['name'], value: 'GUI Edited Profile' }, 'General settings must emit a structured name patch and rehydrate the live Chat surface');
+  await displayName.fill('Slow SSE Visual Proof');
+  await displayName.blur();
+  await page.getByRole('button', { name: 'Open JSONC' }).click();
+  assert.equal(await page.evaluate(() => globalThis.__turnstageMessages.at(-1)?.type), 'profile.openAsText', 'Configuration toolbar must retain the JSONC source action');
+  assert.equal(await page.getByRole('button', { name: 'Validate', exact: true }).count(), 0, 'Automatic Profile validation does not need a duplicate manual action');
+  await page.getByRole('tab', { name: 'Debug' }).click();
+  await page.getByRole('tab', { name: 'Raw Events' }).waitFor();
+  assert.equal(await page.locator('[data-message-id="assistant-1"][data-selected="true"]').count(), 1, 'Returning to Debug restores the linked message selection');
+
+  await page.goto(`${url}?preset=chat-only&section=general`);
+  await page.getByRole('heading', { level: 1, name: 'General' }).waitFor();
+  assert.equal(await page.locator('.preview-pane').count(), 1, 'Configure must open beside Chat even when the profile preview preset is chat-only');
+  assert.equal(await page.locator('.debug-pane').count(), 1, 'Configure temporarily exposes the right pane for chat-only profiles');
+
+  await page.goto(`${url}?split=72`);
+  await waitForProfile();
+  const wideChatWidth = await page.locator('.preview-pane').evaluate((element) => element.getBoundingClientRect().width);
+  assert.ok(wideChatWidth > 700, 'Wide Chat must use the available pane width');
+  assert.equal(await page.locator('.mobile-chat-preview__device').evaluate((element) => getComputedStyle(element).transform), 'none', 'Responsive Chat must never scale the rendered UI');
+  assert.equal(await page.locator('[aria-label="Viewport preset"]').inputValue(), 'responsive', 'Device toolbar defaults to Responsive');
+  assert.equal(await page.locator('[data-viewport-mode="responsive"]').count(), 1, 'Responsive mode must fill the Chat pane');
+  assert.ok((await page.getByRole('group', { name: 'Session status and actions' }).innerText()).includes('Ready'), 'Wide Chat keeps session context in the preview toolbar');
+  await page.screenshot({ path: resolve(artifactDirectory, 'responsive-wide-chat-dark.png'), fullPage: true });
+
+  await page.goto(`${url}?split=25`);
+  await waitForProfile();
+  const narrowChatWidth = await page.locator('.preview-pane').evaluate((element) => element.getBoundingClientRect().width);
+  assert.ok(narrowChatWidth <= 430, 'Narrow Chat must be driven by pane width');
+  assert.ok((await page.getByRole('group', { name: 'Session status and actions' }).innerText()).includes('Ready'), 'Narrow Chat keeps session context available beside the collapsed preview settings');
+  assert.equal(await page.locator('.mobile-chat-preview__viewport-toolbar').evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'Narrow Chat toolbar must not require horizontal scrolling');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, 'Narrow Chat and Debug split must not overflow horizontally');
+  await page.screenshot({ path: resolve(artifactDirectory, 'responsive-narrow-chat-dark.png'), fullPage: true });
+
+  await page.goto(`${url}?device=mobile-m`);
+  await waitForProfile();
+  assert.equal(await page.locator('[aria-label="Viewport preset"]').inputValue(), 'mobile-m');
+  assert.equal(await page.locator('[aria-label="Viewport width"]').inputValue(), '375');
+  assert.equal(await page.locator('[aria-label="Viewport height"]').inputValue(), '667');
+  assert.equal(await page.locator('[data-viewport-mode="fixed"]').count(), 1, 'A device preset uses a fixed logical viewport');
+  assert.equal(await page.locator('[data-viewport-width="375"]').count(), 1, 'The Chat container receives the preset CSS width');
+  assert.equal(await page.locator('.mobile-chat-preview__safe-area').count(), 0, 'Device emulation does not add fake phone chrome');
+  await page.locator('.mobile-chat-preview__viewport-settings > summary').click();
+  await page.getByRole('button', { name: 'Rotate viewport' }).click();
+  assert.equal(await page.locator('[aria-label="Viewport preset"]').inputValue(), 'custom');
+  assert.equal(await page.locator('[aria-label="Viewport width"]').inputValue(), '667');
+  assert.equal(await page.locator('[aria-label="Viewport height"]').inputValue(), '375');
+  await page.screenshot({ path: resolve(artifactDirectory, 'device-toolbar-mobile-landscape-dark.png'), fullPage: true });
+
+  await page.selectOption('[aria-label="Viewport preset"]', 'laptop-l');
+  assert.equal(await page.locator('[data-viewport-width="1440"]').count(), 1, 'Laptop L switches the logical viewport to 1440px');
+  assert.notEqual(await page.getByLabel('Preview scale').innerText(), '100%', 'Fit reports scaling when the viewport exceeds the pane');
+  await page.screenshot({ path: resolve(artifactDirectory, 'device-toolbar-laptop-fit-dark.png'), fullPage: true });
+
+  await page.goto(`${url}?active=true&indicator=shimmer&reveal=adaptive&pace=balanced&maxVisualLag=1200&largeChunk=true&speed=1400&intensity=85&draft=First%20line%0ASecond%20line%20wraps%20inside%20the%20composer%0AThird%20line`);
+  await waitForProfile();
+  const composer = page.getByRole('textbox', { name: 'Message' });
+  const composerSizing = await composer.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { height: element.getBoundingClientRect().height, minimum: Number.parseFloat(style.minHeight), overflowY: style.overflowY };
+  });
+  assert.ok(composerSizing.height > composerSizing.minimum, 'Multiline composer must grow beyond its single-line minimum');
+  assert.equal(await page.locator('.mobile-chat-preview__stream-indicator[data-effect="shimmer"]').count(), 1, 'Streaming Assistant must render the configured shimmer indicator');
+  const adaptiveText = page.locator('[data-reveal-mode="adaptive"]').last();
+  assert.equal((await adaptiveText.innerText()).includes('END_OF_LARGE_EVENT'), false, 'A large single event must begin with a progressive visual reveal');
+  await page.screenshot({ path: resolve(artifactDirectory, 'streaming-shimmer-multiline-dark.png'), fullPage: true });
+  await page.waitForTimeout(1350);
+  assert.equal((await adaptiveText.innerText()).includes('END_OF_LARGE_EVENT'), true, 'Adaptive reveal must catch up within the configured visual lag');
+  await page.screenshot({ path: resolve(artifactDirectory, 'streaming-adaptive-complete-dark.png'), fullPage: true });
+
+  await page.goto(`${url}?active=true&responseActivity=sending`);
+  await waitForProfile();
+  assert.equal(await page.getByText('Sending message…').count(), 1, 'Submitting must show one compact sending state');
+  assert.equal(await page.locator('.mobile-chat-preview__response-activity .codicon-loading').count(), 1, 'Submitting uses the loading product icon');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').getAttribute('data-beam-state'), 'active', 'The composer border beam starts as soon as the request is submitted');
+
+  await page.goto(`${url}?active=true&responseActivity=waiting`);
+  await waitForProfile();
+  assert.equal(await page.getByText('Waiting for response…').count(), 1, 'Waiting for the first response event must remain explicit');
+  assert.equal(await page.locator('.mobile-chat-preview__response-dots > span').count(), 3, 'Waiting uses three bounded activity dots');
+  assert.equal(await page.locator('.mobile-chat-preview__part--progress').count(), 0, 'Waiting feedback must not invent server progress');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').getAttribute('data-beam-state'), 'active', 'Waiting uses the composer border beam as activity feedback');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').evaluate((element) => getComputedStyle(element, '::after').animationName), 'mobile-chat-preview-border-beam', 'The composer border beam must use the lightweight CSS motion path');
+  assert.equal(await page.locator('.mobile-chat-preview__response-dots > span').first().evaluate((element) => getComputedStyle(element).animationName), 'none', 'The border beam must remain the only active waiting animation');
+  assert.equal(await page.locator('.mobile-chat-preview__response-activity > div').evaluate((element) => getComputedStyle(element).borderStyle), 'none', 'The Assistant waiting status must remain unframed');
+  const initialBeamDistance = await page.locator('.mobile-chat-preview__composer-control').evaluate((element) => getComputedStyle(element, '::after').offsetDistance);
+  await page.waitForTimeout(120);
+  const advancedBeamDistance = await page.locator('.mobile-chat-preview__composer-control').evaluate((element) => getComputedStyle(element, '::after').offsetDistance);
+  assert.notEqual(advancedBeamDistance, initialBeamDistance, 'The composer border beam must advance around the input instead of remaining a static accent');
+  await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'response-waiting-dark.png') });
+
+  await page.goto(`${url}?active=true&responseActivity=delayed`);
+  await waitForProfile();
+  assert.match(await page.locator('.mobile-chat-preview__response-activity').innerText(), /Still waiting · [4-9] s/, 'A long wait must expose elapsed seconds without fake completion');
+  assert.equal(await page.locator('.mobile-chat-preview__response-activity .codicon-watch').count(), 1, 'A delayed response has a distinct, recognizable state');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').getAttribute('data-beam-state'), 'active', 'The composer border beam remains active throughout a delayed request');
+  await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'response-delayed-dark.png') });
+
+  await page.goto(`${url}?active=true&responseActivity=receiving`);
+  await waitForProfile();
+  assert.equal(await page.getByText('Receiving response…').count(), 1, 'An empty Assistant stream must show receiving feedback');
+  assert.equal(await page.locator('.mobile-chat-preview__part--progress').count(), 0, 'Receiving feedback must remain distinct from real progress events');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').getAttribute('data-beam-state'), 'active', 'The composer border beam remains active while Assistant content is streaming');
+  await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'response-receiving-dark.png') });
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto(`${url}?active=true&responseActivity=waiting`);
+  await waitForProfile();
+  assert.equal(await page.locator('.mobile-chat-preview__response-dots > span').first().evaluate((element) => getComputedStyle(element).animationName), 'none', 'Reduced motion must disable response activity animation');
+  assert.equal(await page.locator('.mobile-chat-preview__composer-control').evaluate((element) => getComputedStyle(element, '::after').display), 'none', 'Reduced motion must replace the composer border beam with a static themed border');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+  await page.goto(`${url}?draft=First%20line%0ASecond%20line%20wraps%20inside%20the%20composer%0AThird%20line`);
+  await waitForProfile();
+  const idleComposer = page.getByRole('textbox', { name: 'Message' });
+  const composerControl = page.locator('.mobile-chat-preview__composer-control');
+  const idleComposerBorder = await composerControl.evaluate((element) => getComputedStyle(element).borderColor);
+  await idleComposer.hover();
+  assert.equal(await composerControl.evaluate((element) => getComputedStyle(element).borderColor), idleComposerBorder, 'Composer hover must not invent a text-input hover highlight');
+  await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'input-hover-vscode-dark.png') });
+  await idleComposer.focus();
+  assert.notEqual(await composerControl.evaluate((element) => getComputedStyle(element).borderColor), idleComposerBorder, 'Composer focus must use the VS Code focus border');
+  assert.equal(await idleComposer.evaluate((element) => getComputedStyle(element).outlineStyle), 'none', 'Composer focus must not draw a second outline inside the focus border');
+  await page.locator('.preview-pane').screenshot({ path: resolve(artifactDirectory, 'input-focus-vscode-dark.png') });
+
+  await page.goto(`${url}?section=chat-ui&indicator=dots&reveal=adaptive&pace=fast&maxVisualLag=500&speed=1200&intensity=80`);
+  await page.getByRole('heading', { level: 1, name: 'Chat UI' }).waitFor();
+  assert.equal(await page.getByText('Loading profile…').count(), 0, 'Chat UI settings must not remain on Loading profile…');
+  assert.equal(await page.getByRole('tab', { name: 'Configure' }).getAttribute('aria-selected'), 'true', 'A configuration command opens Configure in the right pane');
+  assert.equal(await page.locator('.preview-pane').count(), 1, 'A configuration command must not replace the Chat preview');
+  assert.equal(await page.getByLabel('Assistant content reveal', { exact: true }).inputValue(), 'adaptive');
+  assert.equal(await page.getByLabel('Assistant content reveal pace').inputValue(), 'fast');
+  assert.equal(await page.getByLabel('Assistant maximum visual lag').inputValue(), '500');
+  assert.equal(await page.getByLabel('Assistant streaming indicator').inputValue(), 'dots');
+  assert.equal(await page.getByLabel('Assistant streaming animation speed').inputValue(), '1200');
+  assert.equal(await page.getByLabel('Assistant streaming intensity').inputValue(), '80');
+  await page.getByLabel('Message action toolbar visibility').selectOption('interaction');
+  await page.locator('.mobile-chat-preview__message-toolbar--interaction').first().waitFor();
+  assert.deepEqual(await latestProfilePatch(page, 'ui.messageActionVisibility'), { path: ['ui', 'messageActionVisibility'], value: 'interaction' }, 'Chat UI settings must patch the profile and update the live message toolbar');
+  await page.getByLabel('Assistant streaming indicator').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: resolve(artifactDirectory, 'chat-ui-streaming-settings-dark.png'), fullPage: true });
+
+  await page.goto(`${url}?openingBlocks=true&section=opening-flow`);
+  await waitForProfile();
+  await assertInlineInset(page.locator('.settings-editor-frame .config-section').first(), page.locator('.right-pane-panel'), 16, 'Opening and Flow nested editor');
+  const openingTypeScale = await page.evaluate(() => ({
+    family: getComputedStyle(document.querySelector('.settings-workspace')).fontFamily,
+    // Embedded sections keep their h1 for screen readers only; the nested editor heading is the first visible level.
+    sectionHeading: document.querySelector('#settings-panel-opening-flow h1')?.textContent ?? '',
+    nested: Number.parseFloat(getComputedStyle(document.querySelector('.settings-editor-frame .page-heading h2')).fontSize),
+    body: Number.parseFloat(getComputedStyle(document.querySelector('.settings-editor-frame .config-section')).fontSize),
+  }));
+  assert.ok(openingTypeScale.family.length > 0, 'Settings must inherit the host font family');
+  assert.equal(openingTypeScale.sectionHeading, 'Opening & Flow', 'Each embedded section keeps one named h1 for assistive technology');
+  assert.ok(openingTypeScale.nested > openingTypeScale.body, `Settings type levels must descend from the nested editor heading to body; received ${JSON.stringify(openingTypeScale)}`);
+  const openingBlocks = page.locator('.mobile-chat-preview__opening-block');
+  assert.equal(await openingBlocks.count(), 4, 'Opening must render choices, fields, meter, and status from one canonical block list');
+  assert.equal(await page.getByRole('progressbar', { name: 'Usage' }).getAttribute('value'), '48', 'Opening meter must expose the provider quota value');
+  assert.equal(await page.getByRole('button', { name: 'Review current usage' }).count(), 1, 'Opening choices must remain directly interactive');
+  await page.locator('.mobile-chat-preview__opening').screenshot({ path: resolve(artifactDirectory, 'opening-response-blocks-dark.png') });
+  assert.equal(await page.locator('.opening-response-block').count(), 3, 'Opening configuration must expose each response block through structured controls');
+  assert.equal(await page.getByRole('combobox', { name: 'Block type', exact: true }).count(), 1, 'Only the initially expanded response block should mount its detailed controls');
+  await page.locator('.opening-response-block').first().locator('.opening-response-block__toggle').click();
+  assert.equal(await page.getByRole('combobox', { name: 'Block type', exact: true }).count(), 0, 'An expanded response block must collapse back to a compact row');
+  await page.locator('.opening-response-block').filter({ hasText: 'Usage' }).locator('.opening-response-block__toggle').click();
+  assert.equal(await page.getByRole('combobox', { name: 'Block type', exact: true }).count(), 1, 'A compact response block row must expand its detailed controls on demand');
+  await page.locator('.opening-response-blocks__toolbar').scrollIntoViewIfNeeded();
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'opening-response-block-settings-dark.png') });
+
+  await page.goto(url);
+  await waitForProfile();
+
+  await page.getByRole('tab', { name: 'Runs' }).click();
+  await page.getByRole('heading', { name: 'Recorded runs' }).waitFor();
+  await assertInlineInset(page.locator('.replay-page > .page-heading'), page.locator('.right-pane-panel'), 16, 'Recorded Runs content');
+  assert.equal(await page.getByRole('button', { name: 'Import run' }).count(), 1, 'Recorded Runs must expose Import run');
+  await page.screenshot({ path: resolve(artifactDirectory, 'recorded-runs-dark.png'), fullPage: true });
+
+  await page.goto(`${url}?tab=Runs&replay=playing&active=true`);
+  await waitForProfile();
+  const replayOperation = page.locator('.runtime-operation--playing');
+  await replayOperation.waitFor();
+  assert.ok((await replayOperation.innerText()).includes('3 / 6 events'), 'Active replay progress must remain visible above every right-panel view');
+  assert.equal(await replayOperation.getByRole('button', { name: 'Stop replay' }).count(), 1, 'Active replay feedback must expose an immediate stop action');
+  await page.screenshot({ path: resolve(artifactDirectory, 'replay-active-dark.png'), fullPage: true });
+
+  await page.reload();
+  await waitForProfile();
+  await page.screenshot({ path: resolve(artifactDirectory, 'rehydrated-after-reload.png'), fullPage: true });
+
+  await page.goto(`${url}?rightPane=adversarial&section=test`);
+  await waitForProfile();
+  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'Saved Webview state must restore the last right-panel tab');
+  const restoredRedTeamSections = page.getByRole('tablist', { name: 'Test sections' });
+  assert.equal(await restoredRedTeamSections.getByRole('tab', { name: 'Cases' }).getAttribute('aria-selected'), 'true', 'Restored Red Team state must render its workspace, opening on Cases, without a host section override');
+  await page.screenshot({ path: resolve(artifactDirectory, 'rehydrated-red-team-tab.png'), fullPage: true });
+
+  await page.goto(`${url}?persistState=1&preset=chat-with-metrics`);
+  await waitForProfile();
+  await page.evaluate(() => globalThis.sessionStorage.removeItem('turnstage.visual.webviewState'));
+  await page.reload();
+  await waitForProfile();
+  await page.getByRole('tab', { name: 'Runs' }).click();
+  await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').inspectorTab === 'Runs');
+  await page.reload();
+  await waitForProfile();
+  assert.equal(await page.getByRole('tab', { name: 'Runs' }).getAttribute('aria-selected'), 'true', 'A saved inspector tab must win over the Profile initial Metrics tab after Webview recreation');
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
+  // Result rows sit on Results behind the "Show checks" disclosure.
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Results' }).click();
+  await page.locator('#automation-results').getByRole('button', { name: /^Show checks/ }).click();
+  await page.getByRole('button', { name: 'Select test result Steady response contract' }).click();
+  await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').selectedAutomationResultKey === 'visual-contract-evidence-2');
+  await page.getByRole('tab', { name: 'Debug' }).click();
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
+  await showResultChecks(page);
+  assert.equal(await page.getByRole('button', { name: 'Select test result Steady response contract' }).getAttribute('aria-pressed'), 'true', 'The selected test result must survive switching away from Tests');
+  await page.reload();
+  await waitForProfile();
+  assert.equal(await page.getByRole('tab', { name: 'General tests', exact: true }).getAttribute('aria-selected'), 'true', 'The saved Tests workspace must survive Webview recreation');
+  await showResultChecks(page);
+  assert.equal(await page.getByRole('button', { name: 'Select test result Steady response contract' }).getAttribute('aria-pressed'), 'true', 'The selected test result must survive Webview recreation');
+  await page.setViewportSize({ width: 1000, height: 600 });
+  await page.getByRole('tab', { name: 'Red Team' }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Cases' }).click();
+  const adversarialList = page.locator('.adversarial-case-list');
+  await adversarialList.locator('.adversarial-case-item__main').first().click();
+  await page.getByRole('button', { name: 'Close editor', exact: true }).waitFor();
+  const appliedRedTeamScroll = await page.locator('.unified-test-workspace__body:visible').evaluate((element) => { element.scrollTop = Math.min(560, element.scrollHeight - element.clientHeight); element.dispatchEvent(new globalThis.Event('scroll', { bubbles: true })); return element.scrollTop; });
+  assert.ok(appliedRedTeamScroll > 0, 'The representative Red Team viewport must have a real reading position to restore');
+  await page.waitForFunction(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').rightPaneMode === 'adversarial');
+  await page.waitForFunction(() => Boolean(JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').expandedAdversarialCaseId));
+  await page.waitForFunction((expectedScrollTop) => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').scrollPositions?.['adversarial.cases'] === expectedScrollTop, appliedRedTeamScroll);
+  const savedRedTeamScroll = await page.evaluate(() => JSON.parse(globalThis.sessionStorage.getItem('turnstage.visual.webviewState') ?? '{}').scrollPositions['adversarial.cases']);
+  await page.reload();
+  await waitForProfile();
+  assert.equal(await page.getByRole('tab', { name: 'Red Team' }).getAttribute('aria-selected'), 'true', 'The saved right-panel mode must survive recreation');
+  assert.equal(await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Cases' }).getAttribute('aria-selected'), 'true', 'The saved Red Team sub-tab must survive recreation');
+  assert.equal(await page.getByRole('dialog').count(), 1, 'The selected adversarial case editor must survive recreation');
+  const restoredRedTeamScroll = await page.locator('.unified-test-workspace__body:visible').evaluate((element) => element.scrollTop);
+  assert.ok(restoredRedTeamScroll > 0 && restoredRedTeamScroll <= savedRedTeamScroll, 'The Red Team reading position must remain in the case list after its responsive reflow');
+
+  await page.goto(url);
+  await waitForProfile();
+
+  await page.setViewportSize({ width: 760, height: 900 });
+  await page.reload();
+  await waitForProfile();
+  assert.equal(await page.locator('.profile-identity').count(), 0);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, 'Narrow layout must not overflow horizontally');
+  await page.screenshot({ path: resolve(artifactDirectory, 'narrow-dark.png'), fullPage: true });
+  await page.setViewportSize({ width: 1292, height: 900 });
+  await page.goto(`${url}?split=72`);
+  await waitForProfile();
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: /Cases/ }).click();
+  await page.getByRole('button', { name: 'Slow stream contract', exact: true }).click();
+  const narrowAssertions = await page.locator('.scenario-editor').evaluate((editor) => ({
+    editorWidth: editor.clientWidth,
+    assertionWidths: [...editor.querySelectorAll('.assertion-list')].map((list) => ({ client: list.clientWidth, scroll: list.scrollWidth })),
+    rowColumns: getComputedStyle(editor.querySelector('.assertion-row')).gridTemplateColumns,
+  }));
+  assert.ok(narrowAssertions.assertionWidths.every((item) => item.scroll <= item.client + 1), 'Narrow test assertions must fit inside the case editor');
+  assert.ok(narrowAssertions.editorWidth > 608, 'The case popup must use the full TurnStage viewport instead of the narrow right pane');
+  assert.ok(narrowAssertions.rowColumns.trim().split(/\s+/).length >= 1, 'Test assertions must retain a usable editor layout');
+  await page.locator('.scenario-step > header').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: resolve(artifactDirectory, 'narrow-test-case-dark.png') });
+  await page.getByRole('button', { name: 'Close editor' }).click();
+  await page.getByRole('tab', { name: 'Red Team' }).click();
+  const narrowRedTeamNavigation = page.getByRole('tablist', { name: 'Test sections' });
+  const narrowRedTeamTabs = await narrowRedTeamNavigation.evaluate((navigation) => {
+    const pane = navigation.closest('.debug-pane').getBoundingClientRect();
+    return [...navigation.querySelectorAll('[role="tab"]')].map((tab) => { const bounds = tab.getBoundingClientRect(); return bounds.left >= pane.left - 1 && bounds.right <= pane.right + 1 && bounds.width > 0; });
+  });
+  assert.deepEqual(narrowRedTeamTabs, [true, true], 'Narrow Red Team section tabs must both stay fully visible');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'narrow-red-team-tabs-dark.png') });
+
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto(url);
+  await waitForProfile();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, 'Extra-narrow layout must not overflow horizontally');
+  assert.equal(await page.getByRole('region', { name: 'Responsive chat preview' }).count(), 1, 'Extra-narrow workspace keeps the Chat surface available');
+  await page.getByRole('tab', { name: 'Red Team' }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Cases' }).click();
+  await page.locator('.adversarial-case-item__main').first().click();
+  await page.getByRole('dialog').waitFor();
+  await page.locator('.case-editor-dialog .scenario-editor').waitFor();
+  assert.equal(await page.locator('.case-editor-dialog').evaluate((dialog) => Math.round(dialog.getBoundingClientRect().width)), 320, 'At 320px the case editor must use the TurnStage viewport without clipping');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, 'The extra-narrow case popup must not overflow horizontally');
+  await page.screenshot({ path: resolve(artifactDirectory, 'extra-narrow-case-editor-dark.png') });
+  await page.getByRole('button', { name: 'Close editor' }).click();
+  await page.screenshot({ path: resolve(artifactDirectory, 'extra-narrow-dark.png'), fullPage: true });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await waitForProfile();
+  await page.evaluate(() => {
+    const style = document.documentElement.style;
+    const lightTheme = {
+      '--vscode-editor-background': '#ffffff',
+      '--vscode-editor-foreground': '#1f1f1f',
+      '--vscode-editorGroup-border': '#d4d4d4',
+      '--vscode-editorGroup-emptyBackground': '#f3f3f3',
+      '--vscode-editorWidget-background': '#f3f3f3',
+      '--vscode-editorWidget-border': '#c8c8c8',
+      '--vscode-sideBar-background': '#f8f8f8',
+      '--vscode-descriptionForeground': '#616161',
+      '--vscode-input-background': '#ffffff',
+      '--vscode-input-foreground': '#1f1f1f',
+      '--vscode-input-border': '#cecece',
+      '--vscode-input-placeholderForeground': '#767676',
+      '--vscode-icon-foreground': '#424242',
+      '--vscode-toolbar-hoverBackground': '#e8e8e8',
+      '--vscode-list-hoverBackground': '#e8e8e8',
+      '--vscode-list-hoverForeground': '#1f1f1f',
+      '--vscode-list-activeSelectionBackground': '#0060c0',
+      '--vscode-list-activeSelectionForeground': '#ffffff',
+      '--vscode-list-inactiveSelectionBackground': '#e4e6f1',
+      '--vscode-chat-requestBubbleBackground': '#f3f3f3',
+      '--vscode-chat-requestBubbleHoverBackground': '#ededed',
+      '--vscode-chat-requestBorder': '#cecece',
+      '--vscode-chat-avatarBackground': '#d6d6d6',
+      '--vscode-chat-avatarForeground': '#1f1f1f',
+      '--vscode-textCodeBlock-background': '#f3f3f3',
+      '--vscode-symbolIcon-propertyForeground': '#0451a5',
+      '--vscode-symbolIcon-stringForeground': '#a31515',
+      '--vscode-symbolIcon-numberForeground': '#098658',
+      '--vscode-symbolIcon-booleanForeground': '#0000ff',
+      '--vscode-badge-background': '#c4c4c4',
+      '--vscode-badge-foreground': '#1f1f1f'
+    };
+    for (const [token, value] of Object.entries(lightTheme)) style.setProperty(token, value);
+    document.body.className = 'vscode-light';
+  });
+  const lightContrast = await page.evaluate(() => {
+    const ratio = (foreground, background) => {
+      const rgb = (value) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+      const luminance = (value) => rgb(value).map((channel) => channel / 255).map((channel) => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [.2126, .7152, .0722][index], 0);
+      const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+      return (values[0] + .05) / (values[1] + .05);
+    };
+    const header = document.querySelector('.mobile-chat-preview__app-header');
+    const title = header?.querySelector('strong');
+    const composer = document.querySelector('.mobile-chat-preview__composer textarea');
+    const composerControl = document.querySelector('.mobile-chat-preview__composer-control');
+    return {
+      header: ratio(getComputedStyle(title).color, getComputedStyle(header).backgroundColor),
+      composer: ratio(getComputedStyle(composer).color, getComputedStyle(composerControl).backgroundColor)
+    };
+  });
+  assert.ok(lightContrast.header >= 4.5, `Light-theme chat header contrast must be at least 4.5:1, received ${lightContrast.header}`);
+  assert.ok(lightContrast.composer >= 4.5, `Light-theme composer contrast must be at least 4.5:1, received ${lightContrast.composer}`);
+  await page.screenshot({ path: resolve(artifactDirectory, 'wide-light.png'), fullPage: true });
+  await page.getByRole('tab', { name: 'Payload' }).click();
+  const lightPayloadColors = await page.getByRole('tabpanel', { name: 'Payload' }).evaluate((panel) => ({
+    key: getComputedStyle(panel.querySelector('.json-token--key')).color,
+    string: getComputedStyle(panel.querySelector('.json-token--string')).color,
+    punctuation: getComputedStyle(panel.querySelector('.json-token--punctuation')).color,
+  }));
+  assert.notEqual(lightPayloadColors.key, lightPayloadColors.string, 'Light-theme Payload keys and strings must use distinct syntax colors');
+  assert.notEqual(lightPayloadColors.key, lightPayloadColors.punctuation, 'Light-theme Payload keys and punctuation must remain visually distinct');
+  await page.getByRole('tabpanel', { name: 'Payload' }).screenshot({ path: resolve(artifactDirectory, 'network-payload-json-light.png') });
+
+  await page.getByRole('tab', { name: 'Configure' }).click();
+  await openSettingsSection(page, 'request');
+  await page.getByRole('heading', { name: 'Connection Doctor' }).waitFor();
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-light.png') });
+  const lightRequestAdvanced = page.locator('#settings-panel-request details.settings-advanced').filter({ hasText: 'Advanced: retries, redirects, and certificates' });
+  if (await lightRequestAdvanced.getAttribute('open') === null) await lightRequestAdvanced.locator('summary').click();
+  await page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' }).click();
+  await page.getByRole('alert').filter({ hasText: 'Certificate verification is disabled for this Profile.' }).waitFor();
+  const lightTlsCard = page.locator('#request-resilience-heading').locator('xpath=ancestor::details[1]');
+  await lightTlsCard.screenshot({ path: resolve(artifactDirectory, 'request-tls-warning-light.png') });
+
+  await page.emulateMedia({ forcedColors: 'active' });
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'connection-doctor-high-contrast.png') });
+  await lightTlsCard.screenshot({ path: resolve(artifactDirectory, 'request-tls-warning-high-contrast.png') });
+  await page.emulateMedia({ forcedColors: 'none' });
+  await page.getByRole('checkbox', { name: 'Allow invalid server certificates for this request' }).click();
+
+  await page.getByRole('tab', { name: 'General tests', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Results' }).click();
+  await page.getByRole('heading', { name: 'Evidence from this session' }).waitFor();
+  await showResultChecks(page);
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'automation-results-light.png') });
+  await page.locator('.automation-result-table').getByRole('button', { name: 'Open evidence' }).first().click();
+  await page.getByRole('region', { name: 'Review test result' }).waitFor();
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-evidence-review-light.png'), fullPage: true });
+  await page.emulateMedia({ forcedColors: 'active' });
+  await page.screenshot({ path: resolve(artifactDirectory, 'automation-evidence-review-high-contrast.png'), fullPage: true });
+  await page.emulateMedia({ forcedColors: 'none' });
+  await page.getByRole('region', { name: 'Review test result' }).getByRole('button', { name: 'Close evidence review' }).click();
+
+  await page.getByRole('tab', { name: 'Red Team' }).click();
+  await page.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: 'Results' }).click();
+  await page.locator('#adversarial-results-heading', { hasText: 'Evidence from this session' }).waitFor();
+  const lightAdversarialResults = page.locator('.adversarial-result-table:not(.automation-result-table)');
+  await lightAdversarialResults.scrollIntoViewIfNeeded();
+  await assertAdversarialResultLayout(lightAdversarialResults, 'Light theme');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-results-light.png') });
+  await page.emulateMedia({ forcedColors: 'active' });
+  await assertAdversarialResultLayout(lightAdversarialResults, 'High contrast theme');
+  await page.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'adversarial-results-high-contrast.png') });
+  await page.emulateMedia({ forcedColors: 'none' });
+  await lightAdversarialResults.getByRole('button', { name: 'Open evidence' }).first().click();
+  await page.getByRole('heading', { name: 'Attack succeeded: Known two-turn probe' }).waitFor();
+  await page.locator('.operation-status').waitFor({ state: 'hidden' });
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-summary-light.png'), fullPage: true });
+  await page.emulateMedia({ forcedColors: 'active' });
+  await page.screenshot({ path: resolve(artifactDirectory, 'adversarial-evidence-summary-high-contrast.png'), fullPage: true });
+  await page.emulateMedia({ forcedColors: 'none' });
+
+  const deltaPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await deltaPage.goto(url);
+  await deltaPage.locator('.mobile-chat-preview__app-header strong').waitFor();
+  await deltaPage.evaluate(() => {
+    const { snapshot, dispatch } = globalThis.__turnstageHarness;
+    const { messages, rawEvents, normalizedEvents, ...core } = snapshot;
+    void rawEvents;
+    void normalizedEvents;
+    dispatch(JSON.parse(JSON.stringify({
+      type: 'session.delta',
+      delta: {
+        baseSessionId: snapshot.sessionId,
+        core: { ...core, turnState: 'streaming', metrics: { ...core.metrics, eventCount: 7 } },
+        rawEvents: { retainFromSequence: 1, append: [{ sequence: 7, turnId: 'visual-turn-2', turnIndex: 1, turnSequence: 4, receivedAt: 5_000, elapsedMs: 4_000, protocol: 'sse', sse: { event: 'message' }, raw: 'event: message', data: { text: 'Incremental stream update.' } }] },
+        normalizedEvents: { retainFromSequence: 1, append: [{ version: 1, type: 'content.text.delta', sequence: 7, rawSequence: 7, turnId: 'visual-turn-2', turnIndex: 1, turnSequence: 4, receivedAt: 5_000, text: 'Incremental stream update.' }] },
+        messages: { removeIds: [], upsert: [{ ...messages.at(-1), status: 'streaming', completedAt: undefined, parts: [{ type: 'text', text: 'Incremental stream update.' }] }] },
+      },
+    })));
+  });
+  await deltaPage.getByText('Incremental stream update.', { exact: true }).waitFor();
+  assert.equal(await deltaPage.locator('[data-message-id="assistant-1"][data-status="streaming"]').count(), 1, 'A session delta must update the existing streamed message without remounting the full session');
+  await deltaPage.close();
+
+  const zoomViewport = { width: 720, height: 450 };
+  const zoomPage = await browser.newPage({ viewport: zoomViewport, deviceScaleFactor: 2 });
+  const zoomScreenshotPath = resolve(artifactDirectory, '200-percent-equivalent.png');
+  await zoomPage.goto(url);
+  await zoomPage.locator('.mobile-chat-preview__app-header strong').waitFor();
+  assert.equal(await zoomPage.evaluate(() => globalThis.devicePixelRatio), 2, '200% evidence must render at a 2x device scale factor');
+  assert.deepEqual(await zoomPage.evaluate(() => ({ width: globalThis.innerWidth, height: globalThis.innerHeight })), zoomViewport, '200% evidence must preserve the bounded CSS viewport');
+  assert.equal(await zoomPage.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false, '200% layout must not overflow horizontally');
+  await zoomPage.screenshot({ path: zoomScreenshotPath });
+  await zoomPage.close();
+  const zoomScreenshot = await readFile(zoomScreenshotPath);
+  assert.equal(zoomScreenshot.readUInt32BE(16), zoomViewport.width * 2, '200% evidence PNG must retain the doubled physical width');
+  assert.equal(zoomScreenshot.readUInt32BE(20), zoomViewport.height * 2, '200% evidence PNG must retain the doubled physical height');
+
+  const emptyPage = await browser.newPage({ viewport: { width: 1100, height: 640 } }) // wider than the 1024px narrow layout, so Debug sits beside Chat;
+  await emptyPage.goto(url);
+  await emptyPage.locator('.mobile-chat-preview__app-header strong').waitFor();
+  assert.equal(await emptyPage.getByRole('tab', { name: 'Network' }).getAttribute('aria-selected'), 'true', 'A fresh Webview must open Debug on Network');
+  await emptyPage.evaluate(() => {
+    const harness = globalThis.__turnstageHarness;
+    harness.dispatch({
+      type: 'session.snapshot',
+      snapshot: { ...harness.snapshot, sessionState: 'notStarted', turnState: 'idle', messages: [], rawEvents: [], normalizedEvents: [], metrics: { eventCount: 0, byteCount: 0, parseErrorCount: 0, mappingErrorCount: 0, unmatchedEventCount: 0 }, errors: [] },
+      runs: [],
+      networkEntries: []
+    });
+  });
+  await emptyPage.getByRole('tab', { name: 'Raw Events' }).click();
+  const rawEmpty = emptyPage.locator('.event-empty');
+  await rawEmpty.getByText('No raw events yet').waitFor();
+  assert.equal(await emptyPage.locator('.event-filters').count(), 0, 'Empty event views must not reserve space for inactive filters');
+  const startBounds = await rawEmpty.getByRole('button', { name: 'Start session' }).evaluate((button) => {
+    const bounds = button.getBoundingClientRect();
+    return { width: bounds.width, height: bounds.height };
+  });
+  assert.ok(startBounds.width < 120 && startBounds.height <= 28, `Empty-state Start session must stay compact; received ${startBounds.width}x${startBounds.height}`);
+  await emptyPage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'raw-events-empty-compact-dark.png') });
+  await emptyPage.getByRole('tab', { name: 'Normalized' }).click();
+  await emptyPage.getByText('No normalized events yet').waitFor();
+  assert.ok(await emptyPage.locator('.event-empty').getByText('Normalized events appear when raw data matches a stream mapping.').count(), 'Normalized empty state must explain when data appears');
+  await emptyPage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'events-empty-compact-dark.png') });
+  await emptyPage.close();
+
+  const startPage = await browser.newPage({ viewport: { width: 1100, height: 640 } }) // wider than the 1024px narrow layout, so Debug sits beside Chat;
+  await startPage.goto(`${url}?openingBlocks=true`);
+  await startPage.locator('.mobile-chat-preview__app-header strong').waitFor();
+  await startPage.evaluate(() => {
+    const harness = globalThis.__turnstageHarness;
+    const snapshot = { ...harness.snapshot };
+    delete snapshot.opening;
+    harness.dispatch({
+      type: 'session.snapshot',
+      snapshot: { ...snapshot, sessionState: 'notStarted', turnState: 'idle', messages: [], rawEvents: [], normalizedEvents: [], errors: [] },
+      runs: [],
+      networkEntries: []
+    });
+  });
+  const sessionStart = startPage.locator('.mobile-chat-preview__session-start');
+  await sessionStart.getByRole('heading', { name: 'Not started' }).waitFor();
+  const sessionStartBounds = await sessionStart.evaluate((section) => {
+    const button = section.querySelector('button');
+    const sectionBounds = section.getBoundingClientRect();
+    const buttonBounds = button.getBoundingClientRect();
+    return { sectionHeight: sectionBounds.height, buttonWidth: buttonBounds.width, buttonHeight: buttonBounds.height };
+  });
+  assert.ok(sessionStartBounds.sectionHeight < 100, `Session startup row must remain compact; received ${sessionStartBounds.sectionHeight}px`);
+  assert.ok(sessionStartBounds.buttonWidth < 120 && sessionStartBounds.buttonHeight <= 32, `Session startup action must retain normal control dimensions; received ${sessionStartBounds.buttonWidth}x${sessionStartBounds.buttonHeight}`);
+  await startPage.locator('.mobile-chat-preview__device').screenshot({ path: resolve(artifactDirectory, 'session-start-compact-dark.png') });
+  await startPage.setViewportSize({ width: 320, height: 640 });
+  const narrowSessionStartFits = await sessionStart.evaluate((section) => section.scrollWidth <= section.clientWidth + 1);
+  assert.equal(narrowSessionStartFits, true, 'Narrow session startup row must not overflow horizontally');
+  await startPage.locator('.mobile-chat-preview__device').screenshot({ path: resolve(artifactDirectory, 'session-start-compact-narrow-dark.png') });
+  await startPage.setViewportSize({ width: 1100, height: 640 });
+  await startPage.evaluate(() => {
+    const harness = globalThis.__turnstageHarness;
+    const snapshot = { ...harness.snapshot };
+    delete snapshot.opening;
+    harness.dispatch({
+      type: 'session.snapshot',
+      snapshot: { ...snapshot, sessionState: 'loadingOpening', turnState: 'idle', messages: [], rawEvents: [], normalizedEvents: [], errors: [] },
+      runs: [],
+      networkEntries: []
+    });
+  });
+  const openingLoading = startPage.locator('.mobile-chat-preview__session-start--loading');
+  await openingLoading.getByRole('heading', { name: 'Loading opening…' }).waitFor();
+  assert.equal(await openingLoading.getByRole('button').count(), 0, 'Automatic opening state must not show a redundant Start session action');
+  assert.equal(await startPage.getByRole('textbox', { name: 'Message' }).isDisabled(), true, 'Composer must remain disabled until the automatic opening finishes');
+  assert.equal(await startPage.getByRole('button', { name: 'Restart session' }).isDisabled(), true, 'Restart must remain disabled while the opening request is active');
+  await startPage.locator('.mobile-chat-preview__device').screenshot({ path: resolve(artifactDirectory, 'session-auto-start-loading-dark.png') });
+  await startPage.close();
+
+  const capturePage = await browser.newPage({ viewport: { width: 960, height: 720 } });
+  await capturePage.goto(`${url}?capturedDraft=true`);
+  await capturePage.getByRole('tab', { name: 'General tests', exact: true }).click();
+  await capturePage.getByRole('tab', { name: /Cases/ }).click();
+  const capturedDraft = capturePage.getByRole('button', { name: /^Captured release probe\. Review this case before selecting it/ });
+  await capturedDraft.waitFor();
+  // A draft stays out of batch selection until it is reviewed, but can be tried once on its own.
+  assert.equal(await capturePage.getByRole('button', { name: 'Select all ready cases (3 of 4)' }).count(), 1, 'Captured drafts must stay out of batch runs before review');
+  assert.equal(await capturePage.getByRole('button', { name: 'Try draft Captured release probe once' }).isEnabled(), true, 'A captured draft can be tried once before review');
+  await capturedDraft.click();
+  await capturePage.getByRole('button', { name: 'Mark ready' }).waitFor();
+  assert.equal(await capturePage.getByText('Review required', { exact: true }).count(), 1, 'Captured drafts must have a visible review status');
+  await capturePage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'captured-test-review-dark.png') });
+  await capturePage.setViewportSize({ width: 520, height: 720 });
+  const capturedReviewCallout = capturePage.locator('.capture-review-callout');
+  await capturedReviewCallout.scrollIntoViewIfNeeded();
+  assert.equal(await capturedReviewCallout.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, 'Captured-draft review controls must not overflow at narrow widths');
+  await capturePage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'captured-test-review-narrow-dark.png') });
+  await capturePage.close();
+
+  const capturedListPage = await browser.newPage({ viewport: { width: 1292, height: 720 } });
+  await capturedListPage.goto(`${url}?capturedDraft=true&split=72`);
+  await capturedListPage.getByRole('tab', { name: 'General tests', exact: true }).click();
+  await capturedListPage.getByRole('tablist', { name: 'Test sections' }).getByRole('tab', { name: /Cases/ }).click();
+  const longCapturedRow = capturedListPage.locator('.automation-scenario-row').filter({ has: capturedListPage.getByRole('button', { name: 'Please search for relevant material and cite it', exact: true }) });
+  await longCapturedRow.waitFor();
+  const capturedListLayout = await longCapturedRow.evaluate((row) => {
+    const main = row.querySelector('.automation-scenario-row__main').getBoundingClientRect();
+    const title = row.querySelector('.automation-scenario-row__main strong').getBoundingClientRect();
+    const id = row.querySelector('.automation-scenario-row__main code').getBoundingClientRect();
+    // The source suite now leads the one-line meta ("Suite · 1 step · 1 assertion").
+    const meta = row.querySelector('.case-row-meta').getBoundingClientRect();
+    return { width: main.width, titleBottom: title.bottom, idBottom: id.bottom, sourceTop: meta.top, sourceLeft: meta.left, sourceRight: meta.right, mainLeft: main.left, mainRight: main.right };
+  });
+  assert.ok(capturedListLayout.width < 250, `The regression must exercise a narrow right pane: ${JSON.stringify(capturedListLayout)}`);
+  assert.ok(capturedListLayout.sourceTop >= capturedListLayout.idBottom - 1, `A long captured-case source must follow the title and ID without overlap: ${JSON.stringify(capturedListLayout)}`);
+  assert.ok(capturedListLayout.sourceLeft >= capturedListLayout.mainLeft - 1 && capturedListLayout.sourceRight <= capturedListLayout.mainRight + 1, `A long source label must stay inside the case button: ${JSON.stringify(capturedListLayout)}`);
+  await capturedListPage.locator('.debug-pane').screenshot({ path: resolve(artifactDirectory, 'captured-test-list-narrow-dark.png') });
+  await capturedListPage.close();
+
+  for (const localeCase of [
+    { locale: 'zh-TW', tabs: ['除錯', '一般測試', '紅隊測試', '設定'], resultsTab: '測試結果', showChecks: '顯示檢查明細', results: '本次工作階段的證據', review: '檢視測試結果', openEvidence: '開啟證據', cases: '測試案例', contracts: '測試案例', removedGroup: '測試組合', artifact: 'automation-results-zh-tw-dark.png' },
+    { locale: 'ja-JP', tabs: ['デバッグ', '通常テスト', 'レッドチーム', '設定'], resultsTab: '結果', showChecks: 'チェックを表示', results: 'このセッションの証拠', review: 'テスト結果を確認', openEvidence: '証拠を開く', cases: 'ケース', contracts: 'テストケース', removedGroup: 'テストグループ', artifact: 'automation-results-ja-dark.png' },
+    { locale: 'ko-KR', tabs: ['디버그', '일반 테스트', '레드 팀', '설정'], resultsTab: '결과', showChecks: '검사 표시', results: '이 세션의 증거', review: '테스트 결과 검토', openEvidence: '증거 열기', cases: '케이스', contracts: '테스트 케이스', removedGroup: '테스트 그룹', artifact: 'automation-results-ko-dark.png' },
+  ]) {
+    const localePage = await browser.newPage({ viewport: { width: 720, height: 900 } });
+    await localePage.goto(`${url}?locale=${encodeURIComponent(localeCase.locale)}`);
+    const localeTabs = localePage.locator('.right-pane-tabs:visible').first();
+    await localeTabs.getByRole('tab', { name: localeCase.tabs[0], exact: true }).waitFor();
+    for (const label of localeCase.tabs) assert.equal(await localeTabs.getByRole('tab', { name: label, exact: true }).count(), 1, `${localeCase.locale}: expected translated primary tab ${label}`);
+    assert.equal(await localeTabs.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, `${localeCase.locale}: primary right-pane tabs must fit without horizontal scrolling at 720px`);
+    await localeTabs.getByRole('tab', { name: localeCase.tabs[1], exact: true }).click();
+    const localizedSections = localePage.getByRole('tablist', { name: localeCase.locale === 'zh-TW' ? '測試區段' : localeCase.locale === 'ja-JP' ? 'テストセクション' : '테스트 섹션' });
+    await localizedSections.getByRole('tab', { name: localeCase.resultsTab, exact: true }).click();
+    await localePage.getByRole('heading', { name: localeCase.results }).waitFor();
+    await localePage.locator('#automation-results').getByRole('button', { name: new RegExp(`^${localeCase.showChecks}`) }).click();
+    await localePage.locator('.automation-result-table').getByRole('button', { name: localeCase.openEvidence }).first().click();
+    await localePage.getByRole('combobox', { name: localeCase.review }).waitFor();
+    assert.equal(await localePage.getByRole('combobox', { name: localeCase.review }).count(), 1, `${localeCase.locale}: the top result selector must be translated`);
+    assert.equal(await localePage.getByText('Evidence from this session', { exact: true }).count(), 0, `${localeCase.locale}: the Results heading must not fall back to English`);
+    await localePage.screenshot({ path: resolve(artifactDirectory, localeCase.artifact), fullPage: true });
+    await localePage.locator('.evidence-review__heading-actions .codicon-close').locator('xpath=..').click();
+    await localeTabs.getByRole('tab', { name: localeCase.tabs[1], exact: true }).click();
+    const localizedTestNavigation = localePage.getByRole('tablist', { name: localeCase.locale === 'zh-TW' ? '測試區段' : localeCase.locale === 'ja-JP' ? 'テストセクション' : '테스트 섹션' });
+    await localizedTestNavigation.getByRole('tab', { name: new RegExp(localeCase.cases) }).click();
+    await localePage.getByRole('heading', { name: localeCase.contracts }).waitFor();
+    assert.equal(await localePage.getByText('Test cases', { exact: true }).count(), 0, `${localeCase.locale}: the Cases heading must not fall back to English`);
+    assert.equal(await localizedTestNavigation.getByRole('tab').count(), 2, `${localeCase.locale}: only Cases and Results belong in primary navigation`);
+    assert.equal(await localePage.getByText(localeCase.removedGroup, { exact: true }).count(), 0, `${localeCase.locale}: test groups must not appear in Tests`);
+    assert.equal(await localePage.getByText('Test groups', { exact: true }).count(), 0, `${localeCase.locale}: test groups must not fall back to English`);
+    await localePage.close();
+  }
+
+  await page.keyboard.press('Tab');
+  const focus = await page.evaluate(() => {
+    const activeElement = document.activeElement;
+    return { tag: activeElement?.tagName, outline: activeElement ? getComputedStyle(activeElement).outlineStyle : 'none' };
+  });
+  assert.notEqual(focus.tag, 'BODY', 'Keyboard focus must enter the Webview');
+  assert.notEqual(focus.outline, 'none', 'Keyboard focus must remain visibly outlined');
+
+  console.log(JSON.stringify({ wide: true, networkTimeoutInspector: true, networkPayloadJsonHighlighting: true, defaultDebugNetwork: true, compactEventEmptyStates: true, sessionAutoStartLoading: true, rightPaneConfiguration: true, connectionDoctor: true, connectionDoctorLight: true, connectionDoctorHighContrast: true, requestScopedTlsWarning: true, scenarioSettings: true, adversarialSettings: true, adversarialExports: true, adversarialEvidenceLinks: true, adversarialEvidenceSummary: true, adversarialEvidenceNavigation: true, eventTurnGroups: true, sessionDelta: true, adversarialResultsLight: true, adversarialResultsHighContrast: true, adversarialEvidenceSummaryLight: true, adversarialEvidenceSummaryHighContrast: true, chatOnlyConfiguration: true, messageActions: true, messageMetrics: true, eventPayload: true, chatScreenshot: true, cjkLocales: ['zh-TW', 'ja-JP', 'ko-KR'], screenshotComposerMargins, responsiveWideChat: wideChatWidth, responsiveNarrowChat: narrowChatWidth, deviceToolbar: true, rotation: true, laptopFit: true, streamingComposer: composerSizing, streamingSettings: true, recordedRuns: true, rehydrated: true, narrow: true, extraNarrow: true, light: true, highContrast: true, zoom200Equivalent: { cssViewport: zoomViewport, deviceScaleFactor: 2, physicalPixels: { width: zoomViewport.width * 2, height: zoomViewport.height * 2 } }, keyboardFocus: focus, artifacts: artifactDirectory }, null, 2));
+} finally {
+  await browser.close();
+  await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose(undefined)));
+}
+
+function contentType(file) {
+  switch (extname(file)) {
+    case '.html': return 'text/html; charset=utf-8';
+    case '.css': return 'text/css; charset=utf-8';
+    case '.js': return 'text/javascript; charset=utf-8';
+    case '.ttf': return 'font/ttf';
+    default: return 'application/octet-stream';
+  }
+}
+
+async function latestProfilePatch(page, path) {
+  return page.evaluate((expectedPath) => {
+    const message = [...globalThis.__turnstageMessages].reverse().find((candidate) => candidate.type === 'profile.patch' && candidate.path.join('.') === expectedPath);
+    return message ? { path: message.path, value: message.value } : undefined;
+  }, path);
+}

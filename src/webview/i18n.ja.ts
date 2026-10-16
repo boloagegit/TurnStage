@@ -1,5 +1,6 @@
 /** Japanese translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ja: Record<string, string> = {
+  'Start game': 'ゲームスタート',
   'Psst… ↑↑↓↓←→←→BA': 'しーっ… ↑↑↓↓←→←→BA',
   'Or click the robot a few times.': 'またはロボットを何回かクリックしてください。',
   'Every case passed. Word is the arrow keys are hiding something…': 'すべて合格！矢印キーに何か隠れているらしい…',
