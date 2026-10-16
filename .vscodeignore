@@ -20,6 +20,7 @@ node_modules/**
 .github/**
 .impeccable/**
 PRODUCT.md
+README.*.md
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
 media/icon.svg
