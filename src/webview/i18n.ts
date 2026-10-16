@@ -7,6 +7,10 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Psst… ↑↑↓↓←→←→BA': '噓…… ↑↑↓↓←→←→BA',
+  'Or click the robot a few times.': '或是多點這個機器人幾下。',
+  'Every case passed. Word is the arrow keys are hiding something…': '全部過關！聽說方向鍵裡藏了點東西……',
+  'Find out': '看看是什麼',
   'Self-healing': '自我修復',
   'Recover 1 health every second.': '每秒回復 1 點生命。',
   'You: the Guardian': '你：守護機器人',

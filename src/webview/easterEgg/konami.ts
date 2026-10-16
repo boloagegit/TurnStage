@@ -1,4 +1,32 @@
 import { useEffect } from 'react';
+import type { TestOperationSnapshot } from '../../shared/protocol';
+
+/** Other ways in (the peeking robot, the first all-pass hint) ask for the game through this window event. */
+const OPEN_EVENT = 'turnstage:easter-egg';
+const HINT_KEY = 'turnstage.easterEgg.hinted';
+
+export function requestEasterEgg(): void {
+  window.dispatchEvent(new Event(OPEN_EVENT));
+}
+
+/** True the first time only: the all-pass hint is shown once per view storage, and never after the game was found. */
+export function takeEasterEggHint(): boolean {
+  try {
+    if (localStorage.getItem(HINT_KEY)) return false;
+    localStorage.setItem(HINT_KEY, '1');
+    return true;
+  } catch { return false; }
+}
+
+/** A finished run in which every case passed. */
+export function allCasesPassed(operation: TestOperationSnapshot): boolean {
+  const progress = operation.progress;
+  return operation.state === 'completed' && Boolean(progress) && progress!.totalCases > 0 && progress!.passedCases === progress!.totalCases && !progress!.failedCases;
+}
+
+function markEasterEggFound(): void {
+  try { localStorage.setItem(HINT_KEY, '1'); } catch { /* The hint may show once more; nothing else depends on it. */ }
+}
 
 const SEQUENCE = ['arrowup', 'arrowup', 'arrowdown', 'arrowdown', 'arrowleft', 'arrowright', 'arrowleft', 'arrowright', 'b', 'a'];
 
@@ -25,9 +53,11 @@ export function useKonamiCode(onUnlock: () => void, enabled = true): void {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.repeat || typingTarget(event.target)) { progress = 0; return; }
       progress = advanceKonami(progress, event.key);
-      if (progress === SEQUENCE.length) { progress = 0; onUnlock(); }
+      if (progress === SEQUENCE.length) { progress = 0; markEasterEggFound(); onUnlock(); }
     };
+    const onRequest = () => { markEasterEggFound(); onUnlock(); };
     window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
+    window.addEventListener(OPEN_EVENT, onRequest);
+    return () => { window.removeEventListener('keydown', onKeyDown, true); window.removeEventListener(OPEN_EVENT, onRequest); };
   }, [enabled, onUnlock]);
 }

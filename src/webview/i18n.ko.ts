@@ -1,5 +1,9 @@
 /** Korean translations for the primary TurnStage workflows. Unlisted diagnostics fall back to English. */
 export const ko: Record<string, string> = {
+  'Psst… ↑↑↓↓←→←→BA': '쉿… ↑↑↓↓←→←→BA',
+  'Or click the robot a few times.': '또는 로봇을 몇 번 클릭해 보세요.',
+  'Every case passed. Word is the arrow keys are hiding something…': '모두 통과! 방향키에 뭔가 숨어 있다는 소문이…',
+  'Find out': '확인하기',
   'Self-healing': '자가 치유',
   'Recover 1 health every second.': '매초 체력을 1 회복합니다.',
   'You: the Guardian': '당신: 가디언',
