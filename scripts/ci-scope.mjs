@@ -43,12 +43,17 @@ function changedEntries(base) {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   let full = true;
   let reason = 'the changed files could not be determined';
-  try {
-    const entries = changedEntries(process.env.CI_SCOPE_BASE);
-    full = !isDocumentationOnly(entries);
-    reason = entries.length === 0 ? 'no changed files were found' : full ? `${entries.length} changed file(s) include code or tested files` : `${entries.length} changed file(s) are documentation only`;
-  } catch (error) {
-    reason = `${reason}: ${error instanceof Error ? error.message : String(error)}`;
+  if (process.env.CI_SCOPE_ALWAYS_FULL === 'true') {
+    // The default branch is the last line of defence after a merge, so it always runs everything.
+    reason = 'a push to the default branch always runs the full suite';
+  } else {
+    try {
+      const entries = changedEntries(process.env.CI_SCOPE_BASE);
+      full = !isDocumentationOnly(entries);
+      reason = entries.length === 0 ? 'no changed files were found' : full ? `${entries.length} changed file(s) include code or tested files` : `${entries.length} changed file(s) are documentation only`;
+    } catch (error) {
+      reason = `${reason}: ${error instanceof Error ? error.message : String(error)}`;
+    }
   }
   console.log(`full=${full} (${reason})`);
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `full=${full}\n`);
