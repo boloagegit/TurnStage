@@ -88,3 +88,41 @@ describe('Guardrail Survivor engine', () => {
     expect(ARENA.width / ARENA.height).toBeCloseTo(1.6);
   });
 });
+
+describe('Finding the game', () => {
+  afterEach(() => localStorage.clear());
+
+  it('opens from other entry points and marks the egg as found', async () => {
+    const { requestEasterEgg, takeEasterEggHint } = await import('../src/webview/easterEgg/konami');
+    const onUnlock = vi.fn();
+    function Listener() { useKonamiCode(onUnlock); return null; }
+    render(<Listener />);
+    requestEasterEgg();
+    expect(onUnlock).toHaveBeenCalledTimes(1);
+    expect(takeEasterEggHint()).toBe(false);
+  });
+
+  it('hints once, only after a run in which every case passed', async () => {
+    const { allCasesPassed, takeEasterEggHint } = await import('../src/webview/easterEgg/konami');
+    const progress = { totalCases: 3, completedCases: 3, totalAttempts: 3, completedAttempts: 3, maxConcurrency: 1 };
+    expect(allCasesPassed({ action: 'runAll', state: 'completed', progress: { ...progress, passedCases: 3, failedCases: 0 } })).toBe(true);
+    expect(allCasesPassed({ action: 'runAll', state: 'completed', progress: { ...progress, passedCases: 2, failedCases: 1 } })).toBe(false);
+    expect(allCasesPassed({ action: 'runAll', state: 'cancelled', progress: { ...progress, passedCases: 3, failedCases: 0 } })).toBe(false);
+    expect(allCasesPassed({ action: 'runAll', state: 'completed' })).toBe(false);
+    expect(takeEasterEggHint()).toBe(true);
+    expect(takeEasterEggHint()).toBe(false);
+  });
+
+  it('opens after the peeking robot is poked five times', async () => {
+    const { PeekingGuardian } = await import('../src/webview/easterEgg/PeekingGuardian');
+    const onUnlock = vi.fn();
+    function Page() { useKonamiCode(onUnlock); return <PeekingGuardian />; }
+    render(<Page />);
+    const robot = screen.getByRole('button', { name: /↑↑↓↓←→←→BA/u });
+    for (let poke = 0; poke < 4; poke += 1) fireEvent.click(robot);
+    expect(onUnlock).not.toHaveBeenCalled();
+    fireEvent.click(robot);
+    expect(onUnlock).toHaveBeenCalledTimes(1);
+    expect(document.activeElement === robot || document.activeElement === document.body).toBe(true);
+  });
+});

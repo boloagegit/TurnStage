@@ -25,3 +25,13 @@
 .survivor-game__roster span { display: grid; gap: 1px; }
 .survivor-game__roster small { color: #aeb9d6; }
 @container (max-width: 30em) { .survivor-game__roster li { grid-template-columns: 36px minmax(0, 1fr); } .survivor-game__roster canvas { width: 36px; height: 36px; } }
+/* The guardian peeking out of an empty view: quiet until hovered, wiggles when poked. */
+.peeking-guardian { position: absolute; inset-inline-end: var(--ts-space-3); bottom: var(--ts-space-2); display: grid; place-items: center; width: 36px; height: 36px; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; opacity: .45; cursor: pointer; transition: opacity .2s, transform .2s; }
+.peeking-guardian canvas { width: 32px; height: 32px; }
+.peeking-guardian:hover, .peeking-guardian:focus-visible { opacity: 1; transform: translateY(-3px); }
+.peeking-guardian.is-poked-a { animation: peeking-guardian-wiggle-a .35s ease-in-out; }
+.peeking-guardian.is-poked-b { animation: peeking-guardian-wiggle-b .35s ease-in-out; }
+@keyframes peeking-guardian-wiggle-a { 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
+@keyframes peeking-guardian-wiggle-b { 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
+.network-empty { position: relative; min-height: 8em; }
+@media (prefers-reduced-motion: reduce) { .peeking-guardian, .peeking-guardian.is-poked-a, .peeking-guardian.is-poked-b { transition: none; animation: none; } }

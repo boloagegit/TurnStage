@@ -34,7 +34,8 @@ import { useRestoreUnsentDraft } from './unsentDraft';
 import { blocksSession, type ProfileIssueScope } from '../shared/profileIssueScope';
 import { ProfileIssueList } from './ProfileIssueList';
 import type { IssueTarget } from './profileIssueLocation';
-import { useKonamiCode } from './easterEgg/konami';
+import { allCasesPassed, takeEasterEggHint, useKonamiCode } from './easterEgg/konami';
+import { PeekingGuardian } from './easterEgg/PeekingGuardian';
 import { SurvivorGame } from './easterEgg/SurvivorGame';
 
 declare function acquireVsCodeApi<T = unknown>(): { postMessage(message: unknown): void; getState(): T | undefined; setState(state: T): void };
@@ -164,6 +165,15 @@ function App(): React.JSX.Element {
   const openGame = useCallback(() => setGameOpen(true), []);
   // Easter egg: ↑↑↓↓←→←→BA outside a text field opens a small game in either host.
   useKonamiCode(openGame, !gameOpen);
+  // The first time every case in a run passes, hint once that something is hidden.
+  useEffect(() => {
+    const listener = (event: MessageEvent<HostMessage>) => {
+      if (!isHostMessage(event.data, instanceId) || event.data.type !== 'test.operation') return;
+      if (allCasesPassed(event.data.operation) && takeEasterEggHint()) setNotice({ message: t('Every case passed. Word is the arrow keys are hiding something…'), action: { label: t('Find out'), run: openGame } });
+    };
+    window.addEventListener('message', listener);
+    return () => window.removeEventListener('message', listener);
+  }, [openGame]);
   useEffect(() => { setSelectedTestCases(new Map()); }, [profile?.id]);
   const snapshotRef = useRef<SessionSnapshot | undefined>(undefined);
   const finishCaseEdits = (queue: CaseEditQueue) => {
@@ -1282,7 +1292,7 @@ export function NetworkInspector({ entries, legacyRequestPreview, selectedEntryI
     updateState({ detailTab: tab });
     requestAnimationFrame(() => document.getElementById(networkDetailTabId(tab))?.focus());
   };
-  if (!entries.length) return <div className="network-empty"><div className="empty-state compact"><strong>{t('No network requests')}</strong><p>{t('Start a session or send a message to capture requests.')}</p></div>{legacyRequestPreview !== undefined && <details><summary>{t('Last redacted request preview')}</summary><JsonBlock value={legacyRequestPreview} /></details>}</div>;
+  if (!entries.length) return <div className="network-empty"><div className="empty-state compact"><strong>{t('No network requests')}</strong><p>{t('Start a session or send a message to capture requests.')}</p></div>{legacyRequestPreview !== undefined && <details><summary>{t('Last redacted request preview')}</summary><JsonBlock value={legacyRequestPreview} /></details>}<PeekingGuardian /></div>;
   return <div className={`network-inspector ${selected ? 'network-inspector--detail' : ''}`}>
     <div className="network-toolbar">
       <label><span className="sr-only">{t('Filter network requests')}</span><input type="search" value={query} placeholder={t('Filter')} aria-label={t('Filter network requests')} onChange={(event) => updateState({ query: event.target.value })} /></label>
