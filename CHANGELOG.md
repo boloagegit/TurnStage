@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.39.2
+
+- Updated the bundled runtime libraries: React 19.3, the CodeMirror language, state, and view packages, the Codicons icon font, and the HTTP client `undici` 8. Behavior, settings, Profiles, and stored data are unchanged.
+- `undici` 8 needs Node.js 22.19 or later. VS Code 1.106 and later, including the minimum supported version, ship Node.js 22.20, so no supported VS Code needs anything new. The Web app is unaffected because browsers do not run `undici`.
+- Rewrote the Marketplace overview: why TurnStage exists, a two-minute walkthrough against the bundled mock server, an FAQ, and a clearer statement of what it does not do. The demo animation and the four screenshots now show the current interface (they were taken from 0.23.5 and 0.28.1); they are synthetic and show TurnStage Web. Added a Traditional Chinese README and an English translation of the Web user guide.
+- No settings, Profile, or data-format changes; no migration is needed.
+
 ## 0.39.1
 
 - Guardrail Survivor keeps full speed on slow machines: when frames are slow, the run no longer slows down, so the timer and best time match real time.
