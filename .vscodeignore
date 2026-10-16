@@ -12,6 +12,7 @@ vite.config.ts
 web/**
 web-dist/**
 scripts/package-web.mjs
+scripts/ci-scope.mjs
 scripts/update_profiles.py
 scripts/generate-profile-validator.mjs
 vitest.config.ts
