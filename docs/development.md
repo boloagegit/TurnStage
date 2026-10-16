@@ -122,8 +122,9 @@ sidebar, rather than the browser window width.
 
 ### Continuous integration scope
 
-Pull requests and pushes always report every required check, but a change that
-only adds or edits documentation finishes the heavy jobs immediately.
+Pull requests and pushes always report every required check, but a pull request
+or a branch push that only adds or edits documentation finishes the heavy jobs
+immediately. A push to `main` always runs the full suite, as a check after the merge.
 `scripts/ci-scope.mjs` makes that call from an explicit list: `docs/`,
 `CHANGELOG.md`, `README.zh-TW.md`, the contributor and policy Markdown files at
 the repository root, issue forms, and release-note settings. `README.md` is not
