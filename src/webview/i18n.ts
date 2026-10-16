@@ -7,6 +7,19 @@ export type WebviewLocale = 'en' | 'zh-TW' | 'ja' | 'ko';
 let locale: WebviewLocale = normalizeLocale(typeof document === 'undefined' ? 'en' : document.documentElement.lang || 'en');
 
 const zhTw: Record<string, string> = {
+  'Self-healing': '自我修復',
+  'Recover 1 health every second.': '每秒回復 1 點生命。',
+  'You: the Guardian': '你：守護機器人',
+  'Fires at the nearest attacker on its own.': '會自動朝最近的攻擊射擊。',
+  'Prompt injection': '提示注入',
+  'Sneaks in with a syringe of instructions.': '拿著一針筒的指令偷溜進來。',
+  '429 hornet': '429 大黃蜂',
+  'Fast, fragile, and always in a swarm.': '很快、很脆，而且總是成群結隊。',
+  'Timeout snail': '逾時蝸牛',
+  'Slow, tough, and hits hard.': '很慢、很硬，打人很痛。',
+  'Hallucination': '幻覺',
+  'A boss every two minutes. It splits when it falls.': '每兩分鐘出現一次的魔王，被打倒時會分裂。',
+  'Attacks pour in from every side. Hold the line as long as you can.': '攻擊會從四面八方湧進來，撐得越久越好。',
   'Attacks blocked': '擋下攻擊',
   'Guardrail Survivor': '防護罩生存戰',
   'Close game': '關閉遊戲',
@@ -34,8 +47,6 @@ const zhTw: Record<string, string> = {
   'Shots pass through one more attacker.': '子彈多穿透一個攻擊。',
   'Lower latency': '降低延遲',
   'Move 12% faster.': '移動速度提高 12%。',
-  'Wider capture': '擴大收集範圍',
-  'Collect experience from farther away.': '能從更遠的地方吸取經驗值。',
   'More headroom': '更多餘裕',
   'Raise maximum health by 20 and heal 40.': '生命上限加 20，並回復 40。',
   'Guardrail': '防護罩',
