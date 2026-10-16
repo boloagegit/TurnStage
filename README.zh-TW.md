@@ -29,7 +29,7 @@
   <a href="README.md">English</a>
 </p>
 
-![合成示範：聊天、Network 證據、儲存的回歸案例與紅隊結果](media/marketplace/turnstage-demo.gif)
+![合成的 TurnStage Web 示範：聊天、串流事件、儲存的回歸案例、重跑與紅隊結果](media/marketplace/turnstage-demo.gif)
 
 ## 為什麼需要 TurnStage
 

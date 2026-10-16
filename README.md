@@ -28,7 +28,7 @@
   <a href="https://github.com/boloagegit/TurnStage/blob/main/README.zh-TW.md">繁體中文</a>
 </p>
 
-![A synthetic product demo: chat, Network evidence, a saved regression case, and a red-team result](media/marketplace/turnstage-demo.gif)
+![A synthetic TurnStage Web demo: chat, stream events, a saved regression case, its re-run, and red-team outcomes](media/marketplace/turnstage-demo.gif)
 
 ## Why TurnStage
 
@@ -104,7 +104,7 @@ history, and the full workflow.
 | Host | Use it for | Start here |
 | --- | --- | --- |
 | VS Code extension | Git-managed Profiles and suites, Test Explorer, local evidence, and optional Copilot assistance | [Install from the Marketplace](https://marketplace.visualstudio.com/items?itemName=turnstage.turnstage) · [User guide](docs/vscode-user-guide.md) |
-| Standalone Web app | Browser chat and testing, deployment-owned presets, local Profile copies, and portable exports | [User guide — 繁體中文](docs/web-user-guide.md) · [Deploy Web](docs/web-deployment.md) |
+| Standalone Web app | Browser chat and testing, deployment-owned presets, local Profile copies, and portable exports | [User guide](docs/web-user-guide.en.md) · [繁體中文](docs/web-user-guide.md) · [Deploy Web](docs/web-deployment.md) |
 | Repository-local CLI | Run linked cases against your backend and verify exported provenance | [CLI and test reference](docs/automated-testing.md#running-and-copilot) |
 
 The Web app is a separate static build and does not load the VSIX. Web data
