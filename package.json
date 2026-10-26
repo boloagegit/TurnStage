@@ -1686,6 +1686,6 @@
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.41.0",
     "vite": "^7.1.7",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }
