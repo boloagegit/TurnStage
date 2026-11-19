@@ -31,6 +31,8 @@ export interface TurnStageProfile {
 /** Declarative, profile-owned conversation tests. No field is executable code. */
 export interface ProfileTestsDefinition {
   scenarios: ScenarioDefinition[];
+  /** Standalone Web case dispatch policy. */
+  runPolicy?: { maxConcurrency?: number };
   /** Workspace-relative sources or opaque, locally authorized external functional test suites. */
   contractSuites?: string[];
   /** Workspace-relative, Git-friendly adversarial JSONC or CSV source files. */
@@ -172,6 +174,7 @@ export interface CampaignDashboardEntryV1 {
   definition: TestCampaignDefinition;
   latest?: CampaignRunRecordV1;
   baseline?: CampaignBaselineV1;
+  activeCaseCount?: number;
 }
 
 export interface CampaignDashboardV1 {

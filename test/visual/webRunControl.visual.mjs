@@ -9,6 +9,7 @@ import { clearInterval, setInterval, setTimeout } from 'node:timers';
 import { chromium } from 'playwright';
 
 const root = resolve(import.meta.dirname, '../..');
+const distribution = resolve(process.env.TURNSTAGE_WEB_DIST ?? resolve(root, 'web-dist'));
 const output = resolve(root, 'artifacts', 'test-run-control');
 await mkdir(output, { recursive: true });
 const probe = { hold: true, requests: [], pending: new Set() };
@@ -31,8 +32,8 @@ const server = createServer(async (request, response) => {
   }
   try {
     const pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
-    const file = resolve(root, 'web-dist', `.${pathname === '/' ? '/index.html' : pathname}`);
-    if (!file.startsWith(`${resolve(root, 'web-dist')}${sep}`)) throw new Error('outside dist');
+    const file = resolve(distribution, `.${pathname === '/' ? '/index.html' : pathname}`);
+    if (!file.startsWith(`${distribution}${sep}`)) throw new Error('outside dist');
     response.setHeader('content-type', { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.ttf': 'font/ttf' }[extname(file)] ?? 'application/octet-stream');
     response.end(await readFile(file));
   } catch { response.writeHead(404).end(); }
@@ -45,13 +46,14 @@ const profile = {
   stream: { transport: 'sse', dataFormat: 'json', unexpectedEndPolicy: 'fail', mappings: [
     { id: 'message', match: { event: 'message' }, emit: { type: 'content.text.delta', text: { path: '$.text' } } },
     { id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } },
-  ] }, tests: { scenarios: [] },
+  ] }, tests: { scenarios: [], runPolicy: { maxConcurrency: 4 } },
 };
 const executablePath = process.env.TURNSTAGE_CHROMIUM_EXECUTABLE === 'bundled' ? undefined : [process.env.TURNSTAGE_CHROMIUM_EXECUTABLE, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'].filter(Boolean).find(existsSync);
 const browser = await chromium.launch(executablePath ? { headless: true, executablePath } : { headless: true });
 const results = [];
 const pageErrors = [];
 try {
+  const settings = await checkConcurrencySettings();
   for (const [kind, tab] of [['contract', 'General tests'], ['adversarial', 'Red Team']]) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-US', acceptDownloads: true });
     const page = await context.newPage();
@@ -202,12 +204,103 @@ try {
     await context.close();
   }
   assert.deepEqual(pageErrors, []);
-  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, results, pageErrors }, null, 2));
-  console.log(JSON.stringify({ passed: true, output, results }, null, 2));
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, settings, results, pageErrors }, null, 2));
+  console.log(JSON.stringify({ passed: true, output, settings, results }, null, 2));
 } finally {
   for (const finish of [...probe.pending]) finish();
   await browser.close();
   await new Promise((done) => server.close(done));
+}
+
+async function checkConcurrencySettings() {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+  const page = await context.newPage();
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  const localProfile = {
+    ...profile, id: 'concurrency-qa', name: 'Concurrency QA', environment: 'local',
+    tests: {
+      scenarios: ['first', 'second', 'third', 'fourth'].map((id) => ({ id, name: id, steps: [{ id: 'turn', input: id }] })),
+      campaigns: [{ id: 'smoke', name: 'Smoke' }],
+    },
+  };
+  try {
+    await page.goto(url);
+    await page.evaluate((value) => {
+      localStorage.setItem('turnstage.web.profiles.v1', JSON.stringify([{ id: value.id, name: value.name, raw: JSON.stringify(value), updatedAt: Date.now() }]));
+      localStorage.setItem('turnstage.web.preferences.v1', JSON.stringify({ version: 1, locale: 'en', theme: 'dark', activeProfileId: value.id }));
+    }, localProfile);
+    await page.goto(new URL('?profile=concurrency-qa', url).href);
+    const setting = page.getByRole('combobox', { name: 'Concurrent test cases', exact: true });
+    const openSettings = async () => {
+      await page.getByRole('tab', { name: 'Configure', exact: true }).click();
+      const picker = page.getByRole('combobox', { name: 'Profile configuration sections' });
+      if (!await picker.isVisible()) {
+        await page.getByRole('navigation', { name: 'Profile configuration sections' }).getByRole('button', { name: /^General/u }).click();
+      }
+      await picker.selectOption('scenario-tests');
+      await page.locator('#settings-test-concurrency').waitFor();
+    };
+    await openSettings();
+    assert.equal(await setting.isEnabled(), true);
+    assert.equal(await setting.inputValue(), '1');
+    assert.deepEqual(await setting.locator('option').evaluateAll((items) => items.map((option) => option.value)), ['1', '2', '3', '4', '5', '6', '7', '8']);
+    await setting.focus();
+    await page.keyboard.press('2');
+    assert.equal(await setting.inputValue(), '2', 'The native field is keyboard operable');
+    await setting.selectOption('4');
+    await page.reload();
+    await openSettings();
+    assert.equal(await setting.inputValue(), '4', 'Profile value persisted after reload');
+    await page.screenshot({ path: resolve(output, 'profile-test-concurrency.png') });
+
+    await page.getByRole('button', { name: 'Profile actions: Concurrency QA' }).click();
+    const download = page.waitForEvent('download');
+    await page.getByRole('menuitem', { name: 'Export profile and cases' }).click();
+    const bundleFile = resolve(output, 'concurrency-profile.bundle.json');
+    await (await download).saveAs(bundleFile);
+    assert.equal(JSON.parse(await readFile(bundleFile, 'utf8')).profile.tests.runPolicy.maxConcurrency, 4);
+    await page.locator('input[type="file"][accept*=".jsonc"]').setInputFiles(bundleFile);
+    await page.waitForURL((location) => location.searchParams.get('profile') !== 'concurrency-qa');
+    await openSettings();
+    assert.equal(await setting.inputValue(), '4', 'Reimport retained the policy');
+
+    await page.getByRole('tab', { name: 'Red Team', exact: true }).click();
+    const tabs = page.getByRole('tablist', { name: 'Test sections' });
+    await tabs.getByRole('tab', { name: 'Cases', exact: true }).focus();
+    await page.keyboard.press('End');
+    assert.equal(await tabs.getByRole('tab', { name: 'Campaigns' }).getAttribute('aria-selected'), 'true');
+    const campaign = page.locator('#red-team-campaigns');
+    const campaignLimit = campaign.getByRole('combobox', { name: 'Concurrent test cases' });
+    assert.equal(await campaignLimit.locator('option:checked').innerText(), 'Use Profile setting (4)');
+    await campaign.getByRole('button', { name: 'Preview plan' }).click();
+    await page.getByText(/Up to 4 cases at once · limit 4 \/ 8/u).waitFor();
+    await campaignLimit.selectOption('3');
+    await campaign.getByRole('button', { name: 'Preview plan' }).click();
+    await page.getByText(/Up to 3 cases at once · limit 3 \/ 8/u).waitFor();
+    probe.hold = true;
+    probe.requests.length = 0;
+    await campaign.getByRole('button', { name: 'Run', exact: true }).click();
+    await waitUntil(() => probe.pending.size === 3);
+    await campaign.getByText('Concurrency: 3 active · limit 3 / 8', { exact: true }).waitFor();
+    await page.screenshot({ path: resolve(output, 'campaign-concurrency-running.png') });
+    for (const finish of [...probe.pending]) finish();
+    await waitUntil(() => probe.requests.length === 4 && probe.pending.size === 1);
+    for (const finish of [...probe.pending]) finish();
+    await campaign.getByText('4/4 cases complete', { exact: true }).waitFor();
+    await campaignLimit.selectOption('');
+    await campaign.getByRole('button', { name: 'Preview plan' }).click();
+    await page.getByText(/Up to 4 cases at once · limit 4 \/ 8/u).waitFor();
+
+    await page.getByRole('button', { name: /^Basic SSE Chat, /u }).click();
+    await openSettings();
+    assert.equal(await setting.inputValue(), '1');
+    assert.equal(await setting.isDisabled(), true);
+    await page.getByRole('button', { name: 'Duplicate to edit', exact: true }).filter({ visible: true }).first().waitFor();
+    return { default: 1, persisted: 4, reimported: 4, catalogReadOnly: true, campaignInherited: 4, campaignOverridePeak: 3, campaignCompleted: 4, keyboard: true };
+  } finally {
+    for (const finish of [...probe.pending]) finish();
+    await context.close();
+  }
 }
 
 function csvRow(values) { return values.map((value) => /[",\r\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value).join(','); }

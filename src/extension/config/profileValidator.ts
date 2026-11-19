@@ -13,6 +13,7 @@ import { isSafeRegexPattern } from '../../shared/regexSafety';
 import { isSafeOpeningResponsePath, MAX_OPENING_BLOCK_ITEMS, MAX_OPENING_RESPONSE_BLOCKS } from '../opening/responseBlockNormalizer';
 import { isBlockedLifecycleCommand } from '../../shared/vscodeCommandPolicy';
 import { isControlOptionValue, isControlValue } from '../../shared/controlValue';
+import { isTestCaseConcurrency } from '../../shared/testConcurrency';
 import { isSafeResponseClassStyleProperty, isSafeResponseClassStyleValue, isSafeResponseStyleSelector, MAX_RESPONSE_CLASSES, MAX_RESPONSE_CLASS_PROPERTIES, MAX_RESPONSE_STYLE_RULES, RESPONSE_CLASS_NAME_PATTERN } from '../../shared/responseClassStyles';
 
 export interface ValidationIssue { severity: 'error' | 'warning'; message: string; offset: number; length: number; /** The Profile value the issue is about, even when it is missing from the text. */ path: Array<string | number> }
@@ -321,6 +322,15 @@ export class ProfileValidator {
       }
     }
     for (const duplicate of duplicates((profile.stream?.mappings ?? []).map((mapping) => mapping.id))) out.push(issue(tree, ['stream', 'mappings'], localize('Duplicate mapping id: {id}.', { id: duplicate })));
+    const runPolicy = profile.tests?.runPolicy;
+    if (runPolicy !== undefined) {
+      const path = ['tests', 'runPolicy'];
+      if (!runPolicy || typeof runPolicy !== 'object' || Array.isArray(runPolicy)) {
+        out.push(issue(tree, path, localize('{field} must be an object.', { field: 'tests.runPolicy' })));
+      } else if (runPolicy.maxConcurrency !== undefined && !isTestCaseConcurrency(runPolicy.maxConcurrency)) {
+        out.push(issue(tree, [...path, 'maxConcurrency'], localize('{field} must be an integer from {minimum} to {maximum}.', { field: 'tests.runPolicy.maxConcurrency', minimum: '1', maximum: '8' })));
+      }
+    }
     const scenarios = profile.tests?.scenarios ?? [];
     const contractSuites = profile.tests?.contractSuites;
     if (contractSuites !== undefined) {

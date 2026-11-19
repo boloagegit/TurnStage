@@ -22,9 +22,9 @@ import { webUnsupportedTestFeature } from '../../src/shared/webTestCapabilities'
 import { evaluatePerformance } from '../../src/extension/testing/performanceEvaluator';
 import { parseWebSuiteInWorker, type WebSuite } from './suiteParser';
 import { TestRunControl } from '../../src/shared/testRunControl';
+import { resolveWebTestConcurrency } from '../../src/shared/testConcurrency';
 import { t } from '../../src/webview/i18n';
 
-const WEB_TEST_CONCURRENCY = 4;
 const RUN_LEASE_MS = 120_000;
 const RUN_LEASE_REFRESH_MS = 10_000;
 
@@ -92,7 +92,7 @@ export class WebTestController {
 
   async run(action: TestOperationAction, scenarioId?: string, kind?: 'contract' | 'adversarial', suiteId?: string): Promise<void> {
     if (action !== 'runAll' && action !== 'runContracts' && action !== 'runCase') return;
-    const context = this.runContext();
+    const context = this.captureRunContext();
     const all = await this.scenarioEntries(context.profile);
     if (this.profile().id !== context.profile.id) throw new Error('The active profile changed before this test run. No request was sent.');
     const entries = all.map((item) => ({ ...item, profileId: context.profile.id, scenarioId: item.scenario.id, kind: item.scenario.adversarial ? 'adversarial' as const : 'contract' as const, ready: isScenarioReady(item.scenario) }));
@@ -103,7 +103,7 @@ export class WebTestController {
   }
 
   async runCases(cases: readonly TestCaseIdentity[], sourceRunId?: string): Promise<void> {
-    const context = this.runContext();
+    const context = this.captureRunContext();
     const all = await this.scenarioEntries(context.profile);
     if (this.profile().id !== context.profile.id) throw new Error('The active profile changed before this test run. No request was sent.');
     const entries = all.map((item) => ({ ...item, profileId: context.profile.id, scenarioId: item.scenario.id, kind: item.scenario.adversarial ? 'adversarial' as const : 'contract' as const, ready: isScenarioReady(item.scenario) }));
@@ -119,7 +119,7 @@ export class WebTestController {
     await this.runCases(cases, runId);
   }
 
-  private runContext(): WebRunContext { return { profile: structuredClone(this.profile()), environment: structuredClone(this.environment()), secrets: new Map(this.secrets) }; }
+  captureRunContext(): WebRunContext { return { profile: structuredClone(this.profile()), environment: structuredClone(this.environment()), secrets: new Map(this.secrets) }; }
 
   private async runResolved(action: TestOperationAction, selected: readonly WebScenarioEntry[], context: WebRunContext, sourceRunId?: string): Promise<void> {
     if (this.activeRun) throw new Error('A TurnStage test run is already active.');
@@ -134,8 +134,8 @@ export class WebTestController {
     const completedCases: CompletedTestRunCase[] = [];
     const checkpointIds: string[] = [];
     const plannedCases = cases.map((item) => ({ profileId: profile.id, suiteId: item.suiteId, scenarioId: item.scenario.id, kind: item.scenario.adversarial ? 'adversarial' as const : 'contract' as const, name: item.scenario.name, scenario: item.scenario }));
-    const pending: WebPendingRun = { ...createTestRunHistoryRecord({ id: runId, profileId: profile.id, startedAt, finishedAt: startedAt, status: 'cancelled', runner: 'web', profile, environment, sourceRunId, secretValues: [...secrets.values()], cases: plannedCases, completed: [] }), checkpointState: 'running' };
-    const maxConcurrency = Math.max(1, Math.min(WEB_TEST_CONCURRENCY, cases.length));
+    const maxConcurrency = Math.min(resolveWebTestConcurrency(profile.tests?.runPolicy), cases.length);
+    const pending: WebPendingRun = { ...createTestRunHistoryRecord({ id: runId, profileId: profile.id, startedAt, finishedAt: startedAt, status: 'cancelled', runner: 'web', profile, environment, sourceRunId, maxConcurrency, secretValues: [...secrets.values()], cases: plannedCases, completed: [] }), checkpointState: 'running' };
     const control = new TestRunControl();
     this.runControl = control;
     let completed = 0;
@@ -331,7 +331,7 @@ export class WebTestController {
   cancel(): void { this.cancelled = true; this.runControl?.cancel(); for (const listener of this.cancellationListeners) listener(); }
 
   async rerun(status: 'failed' | 'unstable' | 'incomplete'): Promise<void> {
-    const context = this.runContext();
+    const context = this.captureRunContext();
     const profileId = context.profile.id;
     const identities: TestCaseIdentity[] = [
       ...this.adversarialResults.filter((item) => item.profileId === profileId && (status === 'failed' ? item.outcome !== 'resisted' : status === 'unstable' ? item.repetitions?.stability === 'unstable' : item.repetitions?.sampleComplete === false)).map((item) => ({ profileId, suiteId: item.suiteId, scenarioId: item.scenarioId, kind: 'adversarial' as const })),
@@ -728,7 +728,7 @@ function runScopedReport(run: TestRunHistoryRecord, artifacts: Array<StoredArtif
   const runError = run.status !== 'completed' && cases.every(({ state }) => state !== 'incomplete' && state !== 'error');
   if (format === 'json') return JSON.stringify({
     format: 'turnstage-web-run-report', version: 1, generatedAt: new Date().toISOString(), runId: run.id,
-    profileId: run.profileId, status: run.status, runner: run.runner, startedAt: run.startedAt, finishedAt: run.finishedAt,
+    profileId: run.profileId, status: run.status, runner: run.runner, startedAt: run.startedAt, finishedAt: run.finishedAt, maxConcurrency: run.maxConcurrency,
     totalCases: cases.length, evidenceCases: cases.filter(({ evidence }) => evidence).length,
     summary: { passed: cases.filter(({ state }) => state === 'passed').length, failed: cases.filter(({ state }) => state === 'failed').length, errors: cases.filter(({ state }) => state === 'error' || state === 'incomplete').length + Number(runError) },
     cases: cases.map(({ item, state, evidence }) => ({ key: item.key, kind: item.kind, suiteId: item.suiteId, scenarioId: item.scenarioId, name: item.name, outcome: item.outcome ?? null, state, requestedAttempts: item.requestedAttempts, completedAttempts: item.completedAttempts, durationMs: item.durationMs ?? null, ...(evidence ? { result: evidence.result } : {}) })),

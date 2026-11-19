@@ -619,6 +619,7 @@
   "This campaign has {count} regression(s). Accept it as the new baseline?": "このキャンペーンには {count} 件の回帰があります。新しいベースラインとして採用しますか？",
   "The current accepted baseline will be replaced. Formal test outcomes are not changed.": "現在採用されているベースラインは置き換えられます。正式なテスト結果は変更されません。",
   "{field} must be an integer from {minimum} to {maximum}.": "{field} は {minimum}～{maximum} の整数である必要があります。",
+  "{field} must be an object.": "{field} はオブジェクトである必要があります。",
   "Open TurnStage Output": "TurnStage 出力を開く",
   "TurnStage Campaign Progress": "TurnStage キャンペーンの進行状況",
   "TurnStage campaign progress: {completed} of {total} cases": "TurnStage キャンペーンの進行状況：{total} 件中 {completed} 件のケース",

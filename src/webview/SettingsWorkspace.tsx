@@ -23,6 +23,7 @@ import { TokenListInput } from './TokenListInput';
 import { ProfileIssueList } from './ProfileIssueList';
 import { issueSection, type LocatedIssue } from './profileIssueLocation';
 import { remoteSessionScope } from '../shared/remoteSessionScope';
+import { DEFAULT_WEB_TEST_CONCURRENCY, isTestCaseConcurrency, MAX_TEST_CASE_CONCURRENCY } from '../shared/testConcurrency';
 
 /** Statuses both hosts retry when the Profile lists none. */
 const DEFAULT_RETRY_STATUSES = [429, 502, 503, 504] as const;
@@ -866,11 +867,15 @@ function ScenarioTestsSection({ view, hasConversation = false, unifiedSections =
     post({ type: 'test.timeline.open', evidenceId });
     onAdversarialSectionChange?.('timeline');
   };
-  const saveCampaigns = (value: TestCampaignDefinition[] | undefined) => profile.tests ? patch(['tests', 'campaigns'], value) : patch(['tests'], { scenarios: [], ...(value ? { campaigns: value } : {}) });
+  const saveCampaigns = (value: TestCampaignDefinition[] | undefined) => {
+    if (readOnly) return;
+    if (profile.tests) patch(['tests', 'campaigns'], value);
+    else patch(['tests'], { scenarios: [], ...(value ? { campaigns: value } : {}) });
+  };
   const addCampaign = () => {
     const ordinal = campaigns.length + 1;
     const id = uniqueId(new Set(campaigns.map((campaign) => campaign.id)), `campaign-${ordinal}`);
-    saveCampaigns([...campaigns, { id, name: t('Campaign {number}', { number: formatNumber(ordinal) }), selectors: { tagMode: 'all' }, runPolicy: { repetitions: 1, maxConcurrency: 3, maxRequests: 1000, maxDurationMs: 3_600_000 } }]);
+    saveCampaigns([...campaigns, { id, name: t('Campaign {number}', { number: formatNumber(ordinal) }), selectors: { tagMode: 'all' }, runPolicy: { repetitions: 1, ...(vscodeFeatures ? { maxConcurrency: 3 } : {}), maxRequests: 1000, maxDurationMs: 3_600_000 } }]);
     setSelectedCampaignId(id);
   };
   return <div className="settings-section-stack">
@@ -915,31 +920,36 @@ function ScenarioTestsSection({ view, hasConversation = false, unifiedSections =
       </>}
     </section>}
     {view === 'adversarial' && adversarialSection === 'campaigns' && <section id="red-team-campaigns" className="settings-card red-team-section" {...sectionPanelProps('red-team-campaigns-tab', 'test-campaigns-heading')} tabIndex={-1}>
-      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="test-campaigns-heading">{t('Test campaigns')}</h2></div><button type="button" disabled={campaigns.length >= 50} onClick={addCampaign}>{t('Add campaign')}</button></div>
-      {!campaigns.length ? <div className="settings-empty settings-empty--action"><span>{t('No test campaigns configured.')}</span><button type="button" onClick={addCampaign}>{t('Add campaign')}</button></div> : <div className="campaign-master-detail">
+      {readOnly && <ReadOnlyNotice post={post} />}
+      <div className="settings-card-heading settings-card-heading--actions"><div><h2 id="test-campaigns-heading">{t('Test campaigns')}</h2></div><button type="button" disabled={readOnly || campaigns.length >= 50} onClick={addCampaign}>{t('Add campaign')}</button></div>
+      {!campaigns.length ? <div className="settings-empty settings-empty--action"><span>{t('No test campaigns configured.')}</span><button type="button" disabled={readOnly} onClick={addCampaign}>{t('Add campaign')}</button></div> : <div className="campaign-master-detail">
         <div className="campaign-selector" role="listbox" aria-label={t('Test campaigns')}>{campaigns.map((campaign) => {
-          const latest = campaignDashboard?.campaigns.find((item) => item.definition.id === campaign.id)?.latest;
+          const latest = (campaignDashboard?.profileId === profile.id ? campaignDashboard : undefined)?.campaigns.find((item) => item.definition.id === campaign.id)?.latest;
           const selected = campaign.id === selectedCampaign?.id;
           return <button key={campaign.id} type="button" role="option" aria-selected={selected} className={selected ? 'is-selected' : undefined} onClick={() => setSelectedCampaignId(campaign.id)}><span><strong>{campaign.name || campaign.id}</strong><code>{campaign.id}</code></span>{latest ? <small className={`campaign-status campaign-status--${latest.status}`}>{t(localizeHumanized(latest.status))}</small> : <small className="campaign-status">{t('Not run')}</small>}</button>;
         })}</div>
         <div className="campaign-list">{selectedCampaign ? (() => {
           const campaign = selectedCampaign;
           const index = selectedCampaignIndex;
-          const dashboard = campaignDashboard?.campaigns.find((item) => item.definition.id === campaign.id);
+          const dashboard = (campaignDashboard?.profileId === profile.id ? campaignDashboard : undefined)?.campaigns.find((item) => item.definition.id === campaign.id);
           const latest = dashboard?.latest;
           const update = (value: TestCampaignDefinition) => saveCampaigns(replaceAt(campaigns, index, value));
           return <article className="campaign-card" key={`${campaign.id}-${index}`}>
             <div className="campaign-card__heading"><div><strong>{campaign.name || campaign.id}</strong><code>{campaign.id}</code></div>{latest ? <span className={`campaign-status campaign-status--${latest.status}`}>{t(localizeHumanized(latest.status))}</span> : <span className="campaign-status">{t('Not run')}</span>}</div>
+            <fieldset className="settings-editable-region" disabled={readOnly}>
             <div className="settings-form-grid">
               <SettingField label={t('Name')} id={`campaign-${index}-name`}><PatchInput id={`campaign-${index}-name`} value={campaign.name} onCommit={(name) => update({ ...campaign, name })} /></SettingField>
               <NumberSettingField label={t('Repetitions per adversarial case')} id={`campaign-${index}-repetitions`} value={campaign.runPolicy?.repetitions} placeholder="1" min={1} max={100} hint={t('Standard test cases run once; red-team cases use this repetition count.')} onCommit={(repetitions) => update({ ...campaign, runPolicy: { ...(campaign.runPolicy ?? {}), repetitions } })} />
-              <NumberSettingField label={t('Concurrent cases')} id={`campaign-${index}-concurrency`} value={campaign.runPolicy?.maxConcurrency} placeholder="3" min={1} max={8} hint={t('Cases may run in parallel. Turns and repeated attempts within one case remain sequential.')} onCommit={(value) => update({ ...campaign, runPolicy: { ...(campaign.runPolicy ?? {}), maxConcurrency: value === undefined ? undefined : Math.round(value) } })} />
+              {vscodeFeatures
+                ? <NumberSettingField label={t('Concurrent cases')} id={`campaign-${index}-concurrency`} value={campaign.runPolicy?.maxConcurrency} placeholder="3" min={1} max={8} hint={t('Cases may run in parallel. Turns and repeated attempts within one case remain sequential.')} onCommit={(value) => update({ ...campaign, runPolicy: { ...(campaign.runPolicy ?? {}), maxConcurrency: value === undefined ? undefined : Math.round(value) } })} />
+                : <TestConcurrencyField id={`campaign-${index}-concurrency`} value={campaign.runPolicy?.maxConcurrency} inherited={profile.tests?.runPolicy?.maxConcurrency ?? DEFAULT_WEB_TEST_CONCURRENCY} onChange={(maxConcurrency) => update({ ...campaign, runPolicy: { ...campaign.runPolicy, maxConcurrency } })} />}
               <ListPatchField label={t('Case IDs')} id={`campaign-${index}-cases`} value={campaign.selectors?.caseIds ?? []} placeholder="jailbreak-basic, leakage-check" hint={t('Leave empty to select by suite or tags.')} onCommit={(caseIds) => update({ ...campaign, selectors: { ...(campaign.selectors ?? {}), caseIds: caseIds.length ? caseIds : undefined } })} />
               <ListPatchField label={t('Suite IDs')} id={`campaign-${index}-suites`} value={campaign.selectors?.suiteIds ?? []} placeholder="security-regression" hint={t('Optional exact suite IDs.')} onCommit={(suiteIds) => update({ ...campaign, selectors: { ...(campaign.selectors ?? {}), suiteIds: suiteIds.length ? suiteIds : undefined } })} />
               <ListPatchField label={t('Selector tags')} id={`campaign-${index}-tags`} value={campaign.selectors?.tags ?? []} placeholder="security, release" hint={t('All tags must match unless tag mode is changed in JSONC.')} onCommit={(tags) => update({ ...campaign, selectors: { ...(campaign.selectors ?? {}), tags: tags.length ? tags : undefined } })} />
               <ListPatchField label={t('Coverage tags')} id={`campaign-${index}-coverage`} value={campaign.coverageTags ?? []} placeholder="prompt-boundary, privacy" hint={t('Missing required tags are reported before and after execution.')} onCommit={(coverageTags) => update({ ...campaign, coverageTags: coverageTags.length ? coverageTags : undefined })} />
             </div>
-            {latest && <div className={`campaign-summary${latest.diff?.regressions ? ' has-regressions' : ''}`} role="status"><span>{t('{completed}/{planned} cases complete', { completed: formatNumber(latest.cases.filter((item) => item.sampleComplete).length), planned: formatNumber(latest.plan.selectedCases) })}</span><span>{t('Concurrency {limit} / 8', { limit: formatNumber(latest.plan.maxConcurrency) })}</span><span>{t('{percent}% coverage', { percent: formatNumber(latest.coverage.percent) })}</span>{latest.diff ? <span className={latest.diff.regressions ? 'is-regression' : ''}>{t(latest.diff.regressions === 1 ? '{count} regression' : '{count} regressions', { count: formatNumber(latest.diff.regressions) })}</span> : null}</div>}
+            </fieldset>
+            {latest && <div className={`campaign-summary${latest.diff?.regressions ? ' has-regressions' : ''}`} role="status"><span>{t('{completed}/{planned} cases complete', { completed: formatNumber(latest.cases.filter((item) => item.sampleComplete).length), planned: formatNumber(latest.plan.selectedCases) })}</span><span>{latest.status === 'running' && dashboard?.activeCaseCount !== undefined ? t('Concurrency: {active} active · limit {limit} / 8', { active: formatNumber(dashboard.activeCaseCount), limit: formatNumber(latest.plan.maxConcurrency) }) : t(vscodeFeatures ? 'Concurrency {limit} / 8' : 'Concurrency limit: {limit} / 8', { limit: formatNumber(latest.plan.maxConcurrency) })}</span><span>{t('{percent}% coverage', { percent: formatNumber(latest.coverage.percent) })}</span>{latest.diff ? <span className={latest.diff.regressions ? 'is-regression' : ''}>{t(latest.diff.regressions === 1 ? '{count} regression' : '{count} regressions', { count: formatNumber(latest.diff.regressions) })}</span> : null}</div>}
             {latest?.diff?.entries.some((item) => item.transition === 'regressed') ? <ul className="campaign-regressions">{latest.diff.entries.filter((item) => item.transition === 'regressed').slice(0, 20).map((item) => <li key={item.key}><code>{item.scenarioId}</code><span>{t(campaignOutcomeText(item.baselineOutcome))} → {t(campaignOutcomeText(item.currentOutcome))}</span></li>)}</ul> : null}
             <div className="campaign-actions" role="group" aria-label={t('Campaign actions for {name}', { name: campaign.name })}>
               <button type="button" onClick={() => post({ type: 'campaign.preview', campaignId: campaign.id })}>{t('Preview plan')}</button>
@@ -947,7 +957,7 @@ function ScenarioTestsSection({ view, hasConversation = false, unifiedSections =
               {latest?.status === 'running' ? <button type="button" className="danger" onClick={() => post({ type: 'campaign.cancel', campaignId: campaign.id })}>{t('Cancel run')}</button> : null}
               {latest?.status === 'cancelled' ? <button type="button" onClick={() => post({ type: 'campaign.resume', campaignId: campaign.id, runId: latest.id })}>{t('Resume')}</button> : null}
               {latest?.status === 'completed' && latest.cases.every((item) => item.sampleComplete) ? <button type="button" disabled={dashboard?.baseline?.runId === latest.id} onClick={() => post({ type: 'campaign.acceptBaseline', campaignId: campaign.id, runId: latest.id })}>{dashboard?.baseline?.runId === latest.id ? t('Accepted baseline') : t('Accept as baseline')}</button> : null}
-              {latest ? <details><summary>{t('More')}</summary><div><button type="button" onClick={() => post({ type: 'campaign.exportResults', campaignId: campaign.id, runId: latest.id })}>{t('Export results JSONL')}</button><button type="button" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'campaign.copilotSummary', campaignId: campaign.id, runId: latest.id })}>{t('Summarize with Copilot')}</button><button type="button" className="danger" onClick={() => requestConfirm({ title: t('Delete campaign {name}', { name: campaign.name || campaign.id }), actionLabel: t('Delete'), onConfirm: () => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index)) })}>{t('Delete campaign')}</button></div></details> : <button type="button" className="danger" onClick={() => requestConfirm({ title: t('Delete campaign {name}', { name: campaign.name || campaign.id }), actionLabel: t('Delete'), onConfirm: () => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index)) })}>{t('Delete campaign')}</button>}
+              {latest ? <details><summary>{t('More')}</summary><div><button type="button" onClick={() => post({ type: 'campaign.exportResults', campaignId: campaign.id, runId: latest.id })}>{t('Export results JSONL')}</button><button type="button" disabled={!vscodeFeatures} title={!vscodeFeatures ? t('Available only in the VS Code extension') : undefined} onClick={() => post({ type: 'campaign.copilotSummary', campaignId: campaign.id, runId: latest.id })}>{t('Summarize with Copilot')}</button><button type="button" className="danger" disabled={readOnly} onClick={() => requestConfirm({ title: t('Delete campaign {name}', { name: campaign.name || campaign.id }), actionLabel: t('Delete'), onConfirm: () => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index)) })}>{t('Delete campaign')}</button></div></details> : <button type="button" className="danger" disabled={readOnly} onClick={() => requestConfirm({ title: t('Delete campaign {name}', { name: campaign.name || campaign.id }), actionLabel: t('Delete'), onConfirm: () => saveCampaigns(campaigns.length === 1 ? undefined : campaigns.filter((_, itemIndex) => itemIndex !== index)) })}>{t('Delete campaign')}</button>}
             </div>
           </article>;
         })() : null}</div>
@@ -999,6 +1009,15 @@ function ScenarioTestsSection({ view, hasConversation = false, unifiedSections =
       {timeline ?? <p className="settings-empty">{activeEvidenceId ? t('Causal evidence is unavailable for the selected result.') : t('Select a result to review its causal timeline.')}</p>}
     </section>}
     {view === 'contracts' && automationSection === 'settings' && <>
+    {!vscodeFeatures && <section className="settings-card" aria-labelledby="test-execution-heading">
+      <div className="settings-card-heading"><h2 id="test-execution-heading">{t('Test execution')}</h2></div>
+      <div className="settings-form-grid">
+        <TestConcurrencyField id="settings-test-concurrency" value={profile.tests?.runPolicy?.maxConcurrency} onChange={(maxConcurrency) => {
+          if (profile.tests) patch(['tests', 'runPolicy', 'maxConcurrency'], maxConcurrency);
+          else patch(['tests'], { scenarios: [], runPolicy: { maxConcurrency } });
+        }} />
+      </div>
+    </section>}
     <section className="settings-card" aria-labelledby="scenario-reporting-heading">
       <SectionHeading id="scenario-reporting-heading" title={t('CI reports')} description={t('Write sanitized contract summaries after Test Explorer runs.')} />
       <SettingCheckbox id="settings-test-reporting-enabled" label={t('Write reports to the workspace')} checked={Boolean(profile.tests?.reporting)} onChange={(enabled) => patch(['tests', 'reporting'], enabled ? { formats: ['json'], outputDirectory: '.turnstage/reports' } : undefined)} />
@@ -1877,6 +1896,26 @@ function SettingField({ label, id, hint, error, wide, reset, children }: { label
   const descriptionId = useId();
   const describedBy = hint || error ? descriptionId : undefined;
   return <div className={`settings-field ${wide ? 'settings-field-wide' : ''}`}><label htmlFor={id}>{label}</label>{React.isValidElement(children) ? React.cloneElement(children, { 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined } as Record<string, unknown>) : children}<ResetToDefault id={id} label={label} reset={reset} />{(hint || error) && <p id={descriptionId} className={error ? 'settings-field-error' : 'settings-field-hint'}>{error || hint}</p>}</div>;
+}
+
+function TestConcurrencyField({ id, value, inherited, onChange }: { id: string; value?: number; inherited?: number; onChange: (value: number | undefined) => void }): React.JSX.Element {
+  const invalid = value !== undefined && !isTestCaseConcurrency(value);
+  const label = t('Concurrent test cases');
+  const hint = inherited === undefined
+    ? t('Choose 1 to run one case at a time. Changes apply to new runs.')
+    : t('Use the Profile limit or set a limit for this campaign. Choose 1 to run one case at a time.');
+  const inheritedLabel = inherited === undefined ? undefined : isTestCaseConcurrency(inherited) ? t('Use Profile setting ({count})', { count: formatNumber(inherited) }) : t('Use Profile setting');
+  return <SettingField label={label} id={id} hint={hint} error={invalid ? t('Choose a whole number from 1 to 8.') : undefined}>
+    <select id={id} value={invalid ? 'invalid' : value ?? (inheritedLabel ? '' : DEFAULT_WEB_TEST_CONCURRENCY)} onChange={(event) => {
+      const selected = event.currentTarget.value;
+      if (!selected && inheritedLabel) onChange(undefined);
+      else if (isTestCaseConcurrency(Number(selected))) onChange(Number(selected));
+    }}>
+      {invalid && <option value="invalid" disabled>—</option>}
+      {inheritedLabel && <option value="">{inheritedLabel}</option>}
+      {Array.from({ length: MAX_TEST_CASE_CONCURRENCY }, (_, index) => <option key={index + 1} value={index + 1}>{formatNumber(index + 1)}</option>)}
+    </select>
+  </SettingField>;
 }
 
 /**

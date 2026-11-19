@@ -619,6 +619,7 @@
   "This campaign has {count} regression(s). Accept it as the new baseline?": "이 캠페인에 회귀가 {count}개 있습니다. 새 기준선으로 채택할까요?",
   "The current accepted baseline will be replaced. Formal test outcomes are not changed.": "현재 채택된 기준선이 대체됩니다. 공식 테스트 결과는 변경되지 않습니다.",
   "{field} must be an integer from {minimum} to {maximum}.": "{field}은(는) {minimum}~{maximum} 사이의 정수여야 합니다.",
+  "{field} must be an object.": "{field} 값은 객체여야 합니다.",
   "Open TurnStage Output": "TurnStage 출력 열기",
   "TurnStage Campaign Progress": "TurnStage 캠페인 진행률",
   "TurnStage campaign progress: {completed} of {total} cases": "TurnStage 캠페인 진행 상황: 전체 {total}개 중 {completed}개 케이스",

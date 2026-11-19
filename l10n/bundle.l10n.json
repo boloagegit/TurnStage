@@ -615,6 +615,7 @@
   "This campaign has {count} regression(s). Accept it as the new baseline?": "This campaign has {count} regression(s). Accept it as the new baseline?",
   "The current accepted baseline will be replaced. Formal test outcomes are not changed.": "The current accepted baseline will be replaced. Formal test outcomes are not changed.",
   "{field} must be an integer from {minimum} to {maximum}.": "{field} must be an integer from {minimum} to {maximum}.",
+  "{field} must be an object.": "{field} must be an object.",
   "Open TurnStage Output": "Open TurnStage Output",
   "TurnStage Campaign Progress": "TurnStage Campaign Progress",
   "TurnStage campaign progress: {completed} of {total} cases": "TurnStage campaign progress: {completed} of {total} cases",

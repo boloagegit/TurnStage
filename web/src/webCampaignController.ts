@@ -1,15 +1,18 @@
 import type { HostPayload } from '../../src/shared/protocol';
-import type { AdversarialOutcome, CampaignBaselineV1, CampaignCaseOutcome, CampaignCaseResultV1, CampaignDashboardV1, CampaignRunRecordV1, TestCampaignDefinition, TurnStageProfile } from '../../src/shared/types';
+import type { AdversarialOutcome, CampaignBaselineV1, CampaignCaseOutcome, CampaignCaseResultV1, CampaignDashboardV1, CampaignRunRecordV1, TurnStageProfile } from '../../src/shared/types';
 import { attachCampaignBaseline, createCampaignPlan, createCampaignRunRecord, type CampaignCaseInput } from '../../src/extension/testing/campaign';
 import { serializeCampaignResultsJsonl } from '../../src/extension/testing/adversarialJsonl';
 import { isScenarioReady } from '../../src/extension/testing/scenarioCapture';
 import { ArtifactStore } from './artifactStore';
 import { WebTestController, webCaseUnsupportedReason, type WebScenarioEntry } from './webTestController';
 import { browserUuid } from './browserCrypto';
+import { resolveWebTestConcurrency } from '../../src/shared/testConcurrency';
 
 export class WebCampaignController {
   private readonly store = new ArtifactStore();
   private readonly cancelled = new Set<string>();
+  private readonly activeCases = new Map<string, number>();
+  private readonly runningCampaigns = new Set<string>();
 
   constructor(private readonly profile: () => TurnStageProfile, private readonly tests: WebTestController, private readonly post: (payload: HostPayload, requestId?: string) => void) {}
 
@@ -21,7 +24,8 @@ export class WebCampaignController {
       const baseline = stored.find((item) => item.kind === `campaign-baseline:${definition.id}`)?.value as CampaignBaselineV1 | undefined;
       const baselineRun = baseline ? runs.find((run) => run.id === baseline.runId) : undefined;
       const latest = runs[0];
-      return { definition: structuredClone(definition), ...(latest ? { latest: baselineRun && latest.id !== baselineRun.id ? attachCampaignBaseline(latest, baselineRun) : latest } : {}), ...(baseline ? { baseline } : {}) };
+      const activeCaseCount = latest ? this.activeCases.get(latest.id) : undefined;
+      return { definition: structuredClone(definition), ...(latest ? { latest: baselineRun && latest.id !== baselineRun.id ? attachCampaignBaseline(latest, baselineRun) : latest } : {}), ...(baseline ? { baseline } : {}), ...(activeCaseCount === undefined ? {} : { activeCaseCount }) };
     });
     this.post({ type: 'campaign.dashboard', dashboard: { profileId: profile.id, campaigns } });
   }
@@ -32,8 +36,21 @@ export class WebCampaignController {
   }
 
   async run(campaignId: string, resumeRunId?: string): Promise<void> {
-    const profile = this.profile();
-    const { plan, entries } = await this.prepare(campaignId);
+    if (this.runningCampaigns.has(campaignId)) throw new Error('This campaign is already running.');
+    this.runningCampaigns.add(campaignId);
+    this.cancelled.delete(campaignId);
+    try { await this.executeRun(campaignId, resumeRunId); }
+    finally {
+      this.runningCampaigns.delete(campaignId);
+      this.cancelled.delete(campaignId);
+    }
+  }
+
+  private async executeRun(campaignId: string, resumeRunId?: string): Promise<void> {
+    const context = this.tests.captureRunContext();
+    const { profile } = context;
+    const { plan, entries } = await this.prepare(campaignId, profile);
+    if (this.profile().id !== profile.id) throw new Error('The active profile changed before this campaign. No request was sent.');
     if (!plan.batch.valid || !plan.batch.withinBudget) throw new Error(plan.batch.issues.map((item) => item.message).join('\n'));
     for (const selected of plan.selected) {
       const scenario = entries.find((entry) => entry.itemId === selected.itemId)?.scenario;
@@ -44,12 +61,13 @@ export class WebCampaignController {
     if (resumeRunId && !record) throw new Error('The browser-local campaign run to resume was not found.');
     if (record && (record.campaignId !== campaignId || record.sourceDigest !== plan.sourceDigest)) throw new Error('The saved campaign no longer matches the current profile or selectors.');
     record ??= createCampaignRunRecord(plan, profile.id, { id: browserUuid() });
-    record = { ...record, status: 'running', updatedAt: Date.now() };
+    record = { ...record, plan: { ...record.plan, maxConcurrency: plan.batch.maxConcurrency }, status: 'running', updatedAt: Date.now() };
     await this.saveRun(record);
     await this.postDashboard();
-    this.cancelled.delete(campaignId);
     const byItemId = new Map(entries.map((item) => [item.itemId, item]));
     const pending = [...plan.batch.cases].filter((item) => !record!.cases.find((candidate) => candidate.key === item.key)?.sampleComplete);
+    const runId = record.id;
+    let activeCaseCount = 0;
     const workers = Array.from({ length: Math.min(plan.batch.maxConcurrency, pending.length) }, async () => {
       while (pending.length && !this.cancelled.has(campaignId)) {
         const item = pending.shift();
@@ -58,20 +76,29 @@ export class WebCampaignController {
         if (!entry) continue;
         const attempts = [];
         const attemptEntry = entry.scenario.adversarial ? { ...entry, scenario: { ...entry.scenario, adversarial: { ...entry.scenario.adversarial, repetitions: 1 } } } : entry;
-        for (let index = 0; index < item.requestedAttempts && !this.cancelled.has(campaignId); index += 1) attempts.push(await this.tests.executeScenario(attemptEntry));
-        const current = summarize(entry, item.requestedAttempts, attempts.map((attempt) => attempt.result));
-        record = { ...record!, updatedAt: Date.now(), cases: record!.cases.map((candidate) => candidate.key === current.key ? current : candidate) };
-        await this.saveRun(record);
+        this.activeCases.set(runId, ++activeCaseCount);
+        try {
+          await this.postDashboard();
+          for (let index = 0; index < item.requestedAttempts && !this.cancelled.has(campaignId); index += 1) attempts.push(await this.tests.executeScenario(attemptEntry, false, context));
+          const current = summarize(entry, item.requestedAttempts, attempts.map((attempt) => attempt.result));
+          record = { ...record!, updatedAt: Date.now(), cases: record!.cases.map((candidate) => candidate.key === current.key ? current : candidate) };
+          await this.saveRun(record);
+        } finally {
+          this.activeCases.set(runId, --activeCaseCount);
+        }
         await this.postDashboard();
       }
     });
-    await Promise.all(workers);
-    record = { ...record, status: this.cancelled.has(campaignId) || record.cases.some((item) => !item.sampleComplete) ? 'cancelled' : 'completed', updatedAt: Date.now() };
+    const settled = await Promise.allSettled(workers);
+    this.activeCases.delete(runId);
+    const failure = settled.find((result) => result.status === 'rejected');
+    record = { ...record, status: failure || this.cancelled.has(campaignId) || record.cases.some((item) => !item.sampleComplete) ? 'cancelled' : 'completed', updatedAt: Date.now() };
     const baseline = await this.getBaseline(campaignId);
     const baselineRun = baseline ? await this.getRun(baseline.runId) : undefined;
     if (baselineRun && baselineRun.id !== record.id) record = attachCampaignBaseline(record, baselineRun);
     await this.saveRun(record);
     await this.postDashboard();
+    if (failure) throw failure.reason;
   }
 
   cancel(campaignId: string): void { this.cancelled.add(campaignId); }
@@ -92,13 +119,13 @@ export class WebCampaignController {
     this.post({ type: 'campaign.exported', path: name, artifactId: runId });
   }
 
-  private async prepare(campaignId: string): Promise<{ definition: TestCampaignDefinition; plan: ReturnType<typeof createCampaignPlan>; entries: WebScenarioEntry[] }> {
-    const profile = this.profile();
+  private async prepare(campaignId: string, profile = structuredClone(this.profile())): Promise<{ plan: ReturnType<typeof createCampaignPlan>; entries: WebScenarioEntry[] }> {
     const definition = profile.tests?.campaigns?.find((item) => item.id === campaignId);
     if (!definition) throw new Error(`Campaign ${campaignId} is not defined in this profile.`);
-    const entries = (await this.tests.scenarioEntries()).filter((item) => isScenarioReady(item.scenario));
+    const limit = resolveWebTestConcurrency(profile.tests?.runPolicy, definition.runPolicy?.maxConcurrency);
+    const entries = (await this.tests.scenarioEntries(profile)).filter((item) => isScenarioReady(item.scenario));
     const cases: CampaignCaseInput[] = entries.map((item) => ({ key: item.key, itemId: item.itemId, profileId: profile.id, suiteId: item.suiteId, scenarioId: item.scenario.id, scenarioName: item.scenario.name, tags: item.scenario.tags, adversarial: Boolean(item.scenario.adversarial), repetitions: item.scenario.adversarial?.repetitions, plannedTurns: item.scenario.steps.length, requestsPerAttempt: item.scenario.steps.length, timeoutMs: item.scenario.adversarial?.timeoutMs }));
-    return { definition, plan: createCampaignPlan(definition, cases), entries };
+    return { plan: createCampaignPlan(definition, cases, undefined, limit), entries };
   }
 
   private async saveRun(run: CampaignRunRecordV1): Promise<void> { await this.store.put('campaigns', { id: `run:${run.profileId}:${run.id}`, profileId: run.profileId, kind: `campaign-run:${run.campaignId}`, name: run.campaignName, updatedAt: run.updatedAt, value: run }); }

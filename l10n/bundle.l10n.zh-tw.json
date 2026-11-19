@@ -615,6 +615,7 @@
   "This campaign has {count} regression(s). Accept it as the new baseline?": "此 Campaign 有 {count} 個退步結果。要將它接受為新的 Baseline 嗎？",
   "The current accepted baseline will be replaced. Formal test outcomes are not changed.": "目前已接受的 Baseline 將被取代；此操作不會變更正式測試結果。",
   "{field} must be an integer from {minimum} to {maximum}.": "{field} 必須是 {minimum} 到 {maximum} 之間的整數。",
+  "{field} must be an object.": "{field} 必須是物件。",
   "Open TurnStage Output": "開啟 TurnStage Output",
   "TurnStage Campaign Progress": "TurnStage Campaign 進度",
   "TurnStage campaign progress: {completed} of {total} cases": "TurnStage Campaign 進度：已完成 {completed}／{total} 個案例",

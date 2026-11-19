@@ -19,9 +19,80 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('WebTestController', () => {
-  it.each(['contract', 'adversarial'] as const)('pauses %s dispatch, drains active cases, and resumes without duplicates', async (kind) => {
+  it.each([0, 9, 1.5, '4', null, true])('rejects invalid case concurrency %j before dispatch', async (maxConcurrency) => {
+    const profile: TurnStageProfile = {
+      version: 1, id: `bad-policy-${crypto.randomUUID()}`, name: 'Invalid concurrency',
+      conversation: { send: { method: 'POST', url: 'https://example.test/stream' } },
+      stream: { transport: 'sse', mappings: [] },
+      tests: { runPolicy: { maxConcurrency: maxConcurrency as number }, scenarios: [{ id: 'one', name: 'One', steps: [{ id: 'turn', input: 'mock input' }] }] },
+    };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const controller = new WebTestController(() => profile, () => environment, new Map(), vi.fn());
+    await expect(controller.run('runContracts')).rejects.toThrow('tests.runPolicy.maxConcurrency must be an integer from 1 to 8.');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['contract', 'adversarial'] as const)('runs %s cases in order by default and applies new concurrency only on the next run', async (kind) => {
+    const scenarios = ['first', 'second', 'third', 'fourth'].map((id) => ({
+      id, name: id,
+      steps: [1, 2].map((turn) => ({ id: `turn-${turn}`, input: `${id}:${turn}` })),
+      ...(kind === 'adversarial' ? { adversarial: { mode: 'multiTurn' as const, maxTurns: 2, repetitions: 2, forbid: { content: ['mock-marker'] } } } : {}),
+    }));
+    const profile: TurnStageProfile = {
+      version: 1, id: `sequential-${crypto.randomUUID()}`, name: 'Sequential',
+      conversation: { send: { method: 'POST', url: 'https://example.test/stream', body: { message: { $value: 'input.text' } } } },
+      stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] },
+      tests: { scenarios },
+    };
+    const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
+    const controller = new WebTestController(() => profile, () => environment, new Map(), vi.fn());
+    const store = new ArtifactStore();
+    const prompts: string[] = [];
+    const checkpointCounts: number[] = [];
+    const releases: Array<() => void> = [];
+    const response = () => new Response('event: done\ndata: {}\n\n', { status: 200 });
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      const prompt = JSON.parse(String(init?.body)).message as string;
+      prompts.push(prompt);
+      checkpointCounts.push((await store.listByKind('runs', profile.id, 'test-checkpoint')).length);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return response();
+    }));
+    const action = kind === 'contract' ? 'runContracts' : 'runAll';
+    const running = controller.run(action);
+    const perCase = kind === 'contract' ? 2 : 4;
+    const expected = scenarios.flatMap(({ id }) => Array.from({ length: perCase }, (_, index) => `${id}:${index % 2 + 1}`));
+    for (const [index, prompt] of expected.entries()) {
+      await vi.waitFor(() => expect(releases).toHaveLength(1));
+      expect(prompts).toEqual(expected.slice(0, index + 1));
+      expect(prompts.at(-1)).toBe(prompt);
+      expect(checkpointCounts.at(-1)).toBe(Math.floor(index / perCase));
+      if (index === 0) profile.tests!.runPolicy = { maxConcurrency: 4 };
+      releases.shift()!();
+    }
+    await running;
+    const histories = await store.listByKind<TestRunHistoryRecord>('runs', profile.id, 'test-batch');
+    expect(histories[0]?.value).toMatchObject({ status: 'completed', maxConcurrency: 1 });
+    expect(histories[0]?.value.cases.every((item) => item.evidenceId && item.completedAttempts === (kind === 'contract' ? 1 : 2))).toBe(true);
+
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return response();
+    }));
+    const nextRun = controller.run(action);
+    for (let turn = 0; turn < perCase; turn++) {
+      await vi.waitFor(() => expect(releases).toHaveLength(4));
+      for (const release of releases.splice(0)) release();
+    }
+    await nextRun;
+    expect((await store.listByKind<TestRunHistoryRecord>('runs', profile.id, 'test-batch')).map(({ value }) => value.maxConcurrency).sort()).toEqual([1, 4]);
+  });
+
+  it.each([['contract', 1], ['contract', 4], ['adversarial', 1], ['adversarial', 4]] as const)('pauses %s dispatch at concurrency %i and resumes without duplicates', async (kind, limit) => {
     const scenarios = Array.from({ length: 12 }, (_, index) => ({ id: `case-${index}`, name: `Case ${index}`, steps: [{ id: 'turn', input: `Prompt ${index}`, assertions: [{ path: 'turn.state', operator: 'equals' as const, value: 'completed' }] }], ...(kind === 'adversarial' ? { adversarial: { mode: 'singleTurn' as const, maxTurns: 1, forbid: { content: ['forbidden'] } } } : {}) }));
-    const profile: TurnStageProfile = { version: 1, id: `pause-${crypto.randomUUID()}`, name: 'Pause', conversation: { send: { method: 'POST', url: 'https://example.test/stream', body: { message: { $value: 'input.text' } } } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios } };
+    const profile: TurnStageProfile = { version: 1, id: `pause-${crypto.randomUUID()}`, name: 'Pause', conversation: { send: { method: 'POST', url: 'https://example.test/stream', body: { message: { $value: 'input.text' } } } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios, runPolicy: { maxConcurrency: limit } } };
     const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
     const releases: Array<() => void> = [];
     const fetch = vi.fn(async () => { await new Promise<void>((resolve) => releases.push(resolve)); return new Response('event: done\ndata: {}\n\n', { status: 200 }); });
@@ -29,15 +100,15 @@ describe('WebTestController', () => {
     const messages: HostPayload[] = [];
     const controller = new WebTestController(() => profile, () => environment, new Map(), (payload) => messages.push(payload));
     const running = controller.run(kind === 'contract' ? 'runContracts' : 'runAll');
-    await vi.waitFor(() => expect(releases).toHaveLength(4));
+    await vi.waitFor(() => expect(releases).toHaveLength(limit));
     expect(controller.pause()).toBe(true);
     expect(messages.filter((item) => item.type === 'test.operation').at(-1)).toMatchObject({ operation: { state: 'pausing' } });
     for (const release of releases.splice(0)) release();
-    await vi.waitFor(() => expect(messages.filter((item) => item.type === 'test.operation').at(-1)).toMatchObject({ operation: { state: 'paused', progress: { completedCases: 4 } } }));
-    expect(fetch).toHaveBeenCalledTimes(4);
+    await vi.waitFor(() => expect(messages.filter((item) => item.type === 'test.operation').at(-1)).toMatchObject({ operation: { state: 'paused', progress: { completedCases: limit, maxConcurrency: limit } } }));
+    expect(fetch).toHaveBeenCalledTimes(limit);
     expect(controller.resume()).toBe(true);
-    for (let batch = 0; batch < 2; batch++) {
-      await vi.waitFor(() => expect(releases).toHaveLength(4));
+    for (let dispatched = limit; dispatched < 12; dispatched += limit) {
+      await vi.waitFor(() => expect(releases).toHaveLength(limit));
       for (const release of releases.splice(0)) release();
     }
     await running;
@@ -50,9 +121,9 @@ describe('WebTestController', () => {
     expect(controller.pause()).toBe(false);
   });
 
-  it('cancels a paused run and preserves completed and unfinished cases', async () => {
+  it.each([1, 4])('cancels a paused run at concurrency %i and preserves completed and unfinished cases', async (limit) => {
     const scenarios = Array.from({ length: 8 }, (_, index) => ({ id: `case-${index}`, name: `Case ${index}`, steps: [{ id: 'turn', input: 'Hello' }] }));
-    const profile: TurnStageProfile = { version: 1, id: `pause-cancel-${crypto.randomUUID()}`, name: 'Pause cancel', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios } };
+    const profile: TurnStageProfile = { version: 1, id: `pause-cancel-${crypto.randomUUID()}`, name: 'Pause cancel', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios, runPolicy: { maxConcurrency: limit } } };
     const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
     const releases: Array<() => void> = [];
     const fetch = vi.fn(async () => { await new Promise<void>((resolve) => releases.push(resolve)); return new Response('event: done\ndata: {}\n\n', { status: 200 }); });
@@ -60,22 +131,22 @@ describe('WebTestController', () => {
     const messages: HostPayload[] = [];
     const controller = new WebTestController(() => profile, () => environment, new Map(), (payload) => messages.push(payload));
     const running = controller.run('runContracts');
-    await vi.waitFor(() => expect(releases).toHaveLength(4));
+    await vi.waitFor(() => expect(releases).toHaveLength(limit));
     controller.pause();
     for (const release of releases) release();
     await vi.waitFor(() => expect(messages.filter((item) => item.type === 'test.operation').at(-1)).toMatchObject({ operation: { state: 'paused' } }));
     controller.cancel();
     await running;
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(limit);
     const history = messages.filter((item): item is Extract<HostPayload, { type: 'test.history' }> => item.type === 'test.history').at(-1)!.runs[0]!;
     expect(history.status).toBe('cancelled');
-    expect(history.cases.filter((item) => item.completedAttempts === 1)).toHaveLength(4);
-    expect(history.cases.filter((item) => item.completedAttempts === 0)).toHaveLength(4);
+    expect(history.cases.filter((item) => item.completedAttempts === 1)).toHaveLength(limit);
+    expect(history.cases.filter((item) => item.completedAttempts === 0)).toHaveLength(8 - limit);
   });
 
   it('leaves General cases stopped mid-turn unfinished instead of failed', async () => {
     const scenarios = Array.from({ length: 2 }, (_, index) => ({ id: `case-${index}`, name: `Case ${index}`, steps: [{ id: 'turn', input: 'Hello', assertions: [{ path: 'turn.state', operator: 'equals' as const, value: 'completed' }] }] }));
-    const profile: TurnStageProfile = { version: 1, id: `stop-active-${crypto.randomUUID()}`, name: 'Stop active', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios } };
+    const profile: TurnStageProfile = { version: 1, id: `stop-active-${crypto.randomUUID()}`, name: 'Stop active', conversation: { send: { method: 'POST', url: 'https://example.test/stream' } }, stream: { transport: 'sse', mappings: [{ id: 'done', match: { event: 'done' }, emit: { type: 'stream.completed' } }] }, tests: { scenarios, runPolicy: { maxConcurrency: 4 } } };
     const environment: TurnStageEnvironment = { version: 1, id: 'local', name: 'Local', variables: {} };
     let started = 0;
     vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {

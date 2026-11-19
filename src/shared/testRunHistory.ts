@@ -37,6 +37,8 @@ export interface TestRunHistoryRecord {
   profileDigest: string;
   environmentDigest: string;
   sourceRunId?: string;
+  /** Effective worker limit for runs that recorded it. */
+  maxConcurrency?: number;
   cases: TestRunCaseRecord[];
 }
 
@@ -65,6 +67,7 @@ export function createTestRunHistoryRecord(input: {
   cases: readonly PlannedTestRunCase[];
   completed: readonly CompletedTestRunCase[];
   sourceRunId?: string;
+  maxConcurrency?: number;
   secretValues?: readonly unknown[];
 }): TestRunHistoryRecord {
   if (!input.cases.length) throw new Error('A recorded test run must contain at least one case.');
@@ -102,6 +105,7 @@ export function createTestRunHistoryRecord(input: {
     profileDigest: digestValue(comparisonConfiguration(input.profile), { secretValues: input.secretValues, redactPayloads: true }),
     environmentDigest: digestValue(input.environment, { secretValues: input.secretValues, redactPayloads: true }),
     ...(input.sourceRunId ? { sourceRunId: input.sourceRunId } : {}),
+    ...(input.maxConcurrency === undefined ? {} : { maxConcurrency: input.maxConcurrency }),
     cases,
   };
 }
@@ -189,7 +193,7 @@ function comparisonConfiguration(profile: unknown): unknown {
   const value = Object.fromEntries(Object.entries(profile as Record<string, unknown>).filter(([key]) => !PRESENTATION_ONLY_PROFILE_FIELDS.has(key)));
   const tests = value.tests;
   if (!tests || typeof tests !== 'object' || Array.isArray(tests)) return value;
-  const settings = Object.fromEntries(Object.entries(tests as Record<string, unknown>).filter(([key]) => !['scenarios', 'contractSuites', 'adversarialSuites', 'campaigns'].includes(key)));
+  const settings = Object.fromEntries(Object.entries(tests as Record<string, unknown>).filter(([key]) => !['scenarios', 'contractSuites', 'adversarialSuites', 'campaigns', 'runPolicy'].includes(key)));
   return { ...value, tests: settings };
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ScenarioAssertionDefinition, TurnStageEnvironment, TurnStageProfile } from '../src/shared/types';
 import { ProfileCodec } from '../src/extension/config/profileCodec';
 import { ProfileValidator, validateAdversarialScenariosAgainstProfile, validateContractScenariosAgainstProfile } from '../src/extension/config/profileValidator';
+import { schemaDiagnostics } from '../web/src/profileSourceDiagnostics';
 
 function validProfile(): TurnStageProfile {
   return {
@@ -50,6 +51,18 @@ describe('ProfileCodec', () => {
 });
 
 describe('ProfileValidator', () => {
+  it.each([0, 9, 1.5, '4', null, true])('points invalid Web case concurrency %j at the precise JSONC value', (maxConcurrency) => {
+    const raw = JSON.stringify({ ...validProfile(), tests: { scenarios: [], runPolicy: { maxConcurrency } } }, null, 2);
+    const { profile, tree } = new ProfileCodec().parse(raw);
+    const path = ['tests', 'runPolicy', 'maxConcurrency'];
+    const issues = [schemaDiagnostics(profile!, tree), new ProfileValidator().validate(profile, tree)];
+    for (const errors of issues) {
+      const error = errors.find((item) => item.path.join('.') === path.join('.'));
+      expect(error).toMatchObject({ path, severity: 'error', message: expect.stringContaining('1 to 8') });
+      expect(raw.slice(error!.offset, error!.offset + error!.length)).toBe(JSON.stringify(maxConcurrency));
+    }
+  });
+
   it('accepts more than 100 inline scenarios without an arbitrary total-case ceiling', () => {
     const profile = validProfile();
     profile.tests = {
