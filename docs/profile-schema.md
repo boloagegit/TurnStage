@@ -48,6 +48,14 @@ JSON Schema error even where a nested object deliberately permits extensions.
 
 ## Conversation contract scenarios
 
+Standalone Web accepts optional `tests.runPolicy.maxConcurrency`, an integer
+from 1 to 8. Include `tests.scenarios` when creating the `tests` object
+(`[]` for an empty list). Web general and red-team batches, including reruns,
+default to 1. At 1, each case completes its turns, repetitions, and result
+bookkeeping before the next case starts. A Web campaign resolves its explicit
+`runPolicy.maxConcurrency` first, then the Profile limit, then 1. The value is
+captured at run start. VS Code and CLI keep their own existing policies.
+
 `tests.scenarios` defines repeatable multi-turn tests without embedding or
 executing JavaScript:
 

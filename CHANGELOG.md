@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.40.0
+
+- Web Profiles can set how many test cases run at once, from 1 to 8. Without a setting, general tests, red-team tests, and campaigns without an override now run one case at a time. A campaign-specific limit takes precedence. The limit is fixed when a run starts and shown in its progress and recorded history.
+- Existing Profiles and run history need no migration. Set the Web limit to 4 to restore the old batch default, or set a campaign override of 3 to restore the old campaign default. VS Code and CLI keep their existing execution policies.
+
 ## 0.39.2
 
 - Updated the bundled runtime libraries: React 19.3, the CodeMirror language, state, and view packages, the Codicons icon font, and the HTTP client `undici` 8. Behavior, settings, Profiles, and stored data are unchanged.

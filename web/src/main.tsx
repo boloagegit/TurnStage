@@ -337,7 +337,7 @@ function diagnostics(raw: string): ProfileSourceDiagnostic[] {
   return withIssueScope(raw, [...schemaDiagnostics(parsed.profile, parsed.tree, preferences.locale), ...semantic, ...webCompatibilityDiagnostics(parsed.profile, parsed.tree, availableEnvironments, preferences.locale)]);
 }
 
-function selectProfile(id: string): void {
+function selectProfile(id: string, preserveTestRun = false): void {
   const selected = profiles.find((item) => item.id === id);
   if (!selected) return;
   session?.dispose();
@@ -350,7 +350,8 @@ function selectProfile(id: string): void {
   runSummaries = [];
   session = createSession(active);
   postProfile();
-  tests.onProfileChanged();
+  if (preserveTestRun) tests.postResults();
+  else tests.onProfileChanged();
   void tests.postHistory();
   const current = session.current;
   post({ type: 'session.snapshot', snapshot: current.snapshot, runs: runSummaries, networkEntries: [] });
@@ -649,7 +650,7 @@ function saveProfileSource(id: string, raw: string): ProfileSourceSaveResult {
   try { saveProfiles(next.filter((item) => !item.builtIn)); }
   catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
   profiles = next;
-  if (active.id === id) selectProfile(updated.id);
+  if (active.id === id) selectProfile(updated.id, updated.id === id);
   else onLibraryChanged?.();
   return { ok: true, id: updated.id, raw };
 }

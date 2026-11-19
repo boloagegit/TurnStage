@@ -232,6 +232,10 @@ definitions, see
 
 ## Tests, red-team cases, and run history
 
+In **Configure → Test settings**, set **Concurrent test cases** from 1 to 8. The Web default is 1, which finishes each case, including its turns, repetitions, and saved result, before starting the next. The value is stored in the Profile JSONC and travels with a Profile export. Duplicate a server-managed Profile to edit its setting.
+
+The limit applies to general tests, red-team tests, and reruns. In **Red Team → Campaigns**, a campaign can use its own limit or inherit the Profile limit. Each run keeps the limit it started with. To retain the previous Web defaults, set the Profile to 4 for batches and the campaign override to 3 for campaigns. VS Code and CLI retain their own execution settings.
+
 ### Case list and latest results
 
 Each case shows its latest result and duration; one that has never run shows **Not run**,

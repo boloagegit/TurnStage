@@ -63,6 +63,9 @@ function pointerPath(pointer: string): Array<string | number> {
 
 function schemaMessage(error: SchemaValidationError, path: Array<string | number>, locale: DiagnosticLocale): string {
   const location = path.length ? path.join('.') : 'Profile';
+  if (location === 'tests.runPolicy.maxConcurrency' && ['type', 'minimum', 'maximum'].includes(error.keyword)) {
+    return `${location}: ${concurrencyDiagnostic[locale]}`;
+  }
   const messages = schemaMessages[locale];
   if (error.keyword === 'required') return messages.required(location);
   if (error.keyword === 'additionalProperties') return messages.unsupported(location);
@@ -73,6 +76,13 @@ function schemaMessage(error: SchemaValidationError, path: Array<string | number
 }
 
 function normalizedLocale(locale: string): DiagnosticLocale { return locale === 'zh-TW' || locale === 'ja' || locale === 'ko' ? locale : 'en'; }
+
+const concurrencyDiagnostic = {
+  en: 'Enter a whole number from 1 to 8.',
+  'zh-TW': '請輸入 1 到 8 的整數。',
+  ja: '1 から 8 までの整数を入力してください。',
+  ko: '1에서 8 사이의 정수를 입력하세요.',
+} satisfies Record<DiagnosticLocale, string>;
 
 const schemaMessages = {
   en: { required: (p: string) => `${p} is required.`, unsupported: (p: string) => `${p} is not a supported setting.`, type: (p: string, v: string) => `${p} must be ${v}.`, enum: (p: string) => `${p} must use one of the supported values.`, const: (p: string, v: string) => `${p} must use ${v}.`, invalid: (p: string, v: string) => `${p} ${v}.` },

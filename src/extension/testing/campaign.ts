@@ -43,6 +43,7 @@ export function createCampaignPlan(
   campaign: TestCampaignDefinition,
   cases: readonly CampaignCaseInput[],
   progress?: BatchProgressV1,
+  inheritedMaxConcurrency?: number,
 ): CampaignPlanV1 {
   const selected = selectCampaignCases(campaign, cases);
   const repetitions = campaign.runPolicy?.repetitions;
@@ -59,7 +60,7 @@ export function createCampaignPlan(
   })), {
     planKey: `campaign:${campaign.id}`,
     progress,
-    maxConcurrency: campaign.runPolicy?.maxConcurrency,
+    maxConcurrency: campaign.runPolicy?.maxConcurrency ?? inheritedMaxConcurrency,
     maxRequests: campaign.runPolicy?.maxRequests,
     maxDurationMs: campaign.runPolicy?.maxDurationMs,
   });

@@ -1,4 +1,5 @@
 import type { AdversarialResultSummary, AutomationResultSummary, CampaignDashboardV1, ConnectionDoctorSummary, ConversationDirectory, EvidenceTimelineSummary, InteractionContext, LocalRunSummary, NetworkExchange, RawStreamEvent, ScenarioCaptureDefinition, ScenarioDefinition, ScenarioEvidenceLocation, SessionDelta, SessionSnapshot, TurnStageProfile } from './types';
+import { isTestCaseConcurrency } from './testConcurrency';
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -569,7 +570,8 @@ function isTestRunHistoryRecord(value: unknown): boolean {
     || !['web', 'vscode', 'cli'].includes(String(value.runner))
     || !Number.isSafeInteger(value.evaluatorVersion)
     || !isBoundedString(value.profileDigest, 256) || !isBoundedString(value.environmentDigest, 256)
-    || !optionalBoundedString(value.sourceRunId) || !Array.isArray(value.cases)) return false;
+    || !optionalBoundedString(value.sourceRunId) || !Array.isArray(value.cases)
+    || (value.maxConcurrency !== undefined && !isTestCaseConcurrency(value.maxConcurrency))) return false;
   return value.cases.every((item) => isRecord(item)
     && isBoundedId(item.profileId) && optionalBoundedString(item.suiteId)
     && isBoundedId(item.scenarioId) && ['contract', 'adversarial'].includes(String(item.kind))

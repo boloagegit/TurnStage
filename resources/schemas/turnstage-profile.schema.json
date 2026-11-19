@@ -342,6 +342,14 @@
       "additionalProperties": false,
       "properties": {
         "scenarios": { "type": "array", "items": { "$ref": "#/$defs/scenario" } },
+        "runPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Standalone Web test case dispatch policy.",
+          "properties": {
+            "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 8, "default": 1, "description": "Maximum simultaneously executing cases in Web. An explicit Campaign limit takes precedence." }
+          }
+        },
         "contractSuites": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "oneOf": [
           { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!external:)(?!/)(?![A-Za-z]:/)(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*\\\\)(?!.*://)(?:.+\\.tests\\.(?:jsonc|json)|.+\\.csv)$" },
           { "type": "string", "minLength": 48, "maxLength": 256, "pattern": "^external:[0-9a-fA-F-]{36}:[^/\\\\]{1,180}$" }
